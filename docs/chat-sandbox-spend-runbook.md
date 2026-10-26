@@ -1,12 +1,12 @@
 # Chat sandbox spend circuit
 
-This runbook covers the application circuit. The current Starter policy uses the sole owner's personal token in the dedicated `pwc-chat-staging` Environment and a provider-enforced `$250` Workspace budget; it has no Environment-specific provider cap or credential isolation. Modal budget changes must be made by the sole Workspace operator and recorded in the private operations audit trail. Never place a provider budget-write credential in the web application.
+This runbook covers the application circuit for Modal chat sandboxes. Research turns are MCP-only and create no sandbox; sandboxes serve poster and paper authoring turns. Policy values live in `/etc/paperswithcode/<environment>.env` (`PWC_CHAT_SANDBOX_*`). Modal budget changes must be made by the sole Workspace operator and recorded in the private operations audit trail. Never place a provider budget-write credential in the web application.
 
 ## Required provider policy
 
 - Workspace: `$250` enforced monthly budget and native account-email notifications.
-- Current Starter staging: dedicated `pwc-chat-staging` namespace with the sole owner's personal token, no Environment cap, and application warning/trip `$75`/`$100`, or the explicitly reviewed `$75`/`$105` staging policy.
-- Production uses a `$200` warning and `$225` application trip inside the provider's `$250` Environment and Workspace budgets, preserving `$25` of provider headroom for reporting delay and termination. The local ledger prices resource requests; hourly provider reconciliation raises the effective value when actual burst usage is higher.
+- Staging (`PWC_CHAT_SANDBOX_PROVIDER_MODE=starter_workspace`): the `pwc-chat-staging` Environment in the `nielsrogge` Starter Workspace, using the sole owner's personal token, no Environment cap or credential isolation, and the reviewed `$120` warning / `$150` application trip (attestation `...-starter-app150-v3`; the previous `$75`/`$105` `...-starter-app105-v2` policy remains valid).
+- Production (`team_environments`): the `pwc-chat-production` Environment in the `paperswithcode` Workspace, with a `$200` warning and `$225` application trip inside the provider's `$250` Environment and Workspace budgets, preserving `$25` of provider headroom for reporting delay and termination. The local ledger prices resource requests; hourly provider reconciliation raises the effective value when actual burst usage is higher.
 - In Team mode, Environment-scoped service credentials must not list or terminate the other chat Environment's sandboxes.
 
 ## Incident response
@@ -14,7 +14,7 @@ This runbook covers the application circuit. The current Starter policy uses the
 1. Confirm the read-only Chat Compute dashboard state and event ID.
 2. Verify the `$250` Modal Workspace budget and native notification recipients. In Team mode, also verify the active Environment budget.
 3. Enumerate provider sandboxes tagged `service=pwc-chat`; compare them with live compute intervals.
-4. Run the watchdog from the active immutable staging release or wait for its next 15-second pass. It terminates tracked workers and tagged orphans.
+4. Run the watchdog from the affected environment's active immutable release or wait for its next 15-second pass. It terminates tracked workers and tagged orphans.
 5. Confirm zero provider sandboxes and zero unresolved reservations/termination states. Keep the circuit tripped on uncertainty.
 6. Compare the conservative ledger with Modal's month-to-date report. Provider spend is a floor and may only raise effective spend.
 7. Investigate non-chat Workspace spend before changing any cap.
@@ -26,18 +26,12 @@ full sandbox lifetime indefinitely.
 
 ## Staging qualification
 
-Keep `PWC_CHAT_BLANK_POOL_ENABLED=false` for the initial deployment. Exercise the synthetic `$74.99`/`$75`/`$99.99`/`$100` states, alert transitions, restart persistence, public rejection and interruption UX, and the audited re-arm path before creating real compute:
-
-The first code deployment may leave both application alert webhooks unset while the blank pool remains disabled; transition events stay pending without consuming retries. Configure and test distinct primary and fallback destinations before synthetic qualification or blank-pool activation.
-
-Install the two destinations from the local ignored secret file without changing
-production or enabling the pool:
-
-```bash
-sudo python deploy/configure_host_env.py \
-  --legacy-env backend/keys.env \
-  --staging-chat-alerts-only
-```
+`PWC_CHAT_BLANK_POOL_ENABLED` is `false` in both environments. Requalify staging
+before re-enabling a blank pool. Primary and fallback alert webhooks are already
+installed (`deploy/configure_host_env.py --staging-chat-alerts-only` reinstalls
+them). First exercise the synthetic warning/trip states, alert transitions,
+restart persistence, public rejection and interruption UX, and the audited re-arm
+path without creating real compute:
 
 ```bash
 sudo uv run --env-file /etc/paperswithcode/staging.env \
@@ -106,28 +100,22 @@ sudo /usr/bin/python3 deploy/configure_host_env.py \
 
 ## Recovery
 
-Normal recovery occurs only at a confirmed provider billing-cycle boundary with fresh reconciliation, matching policy attestation, zero live/orphan sandboxes, and no unresolved intervals or reservations. Operator-disable and accounting-integrity trips never auto-rearm. The root-only `backend.scripts.manage_chat_sandbox_circuit disable` command records an allowlisted operator, reviewed evidence, reason, and typed environment/cycle confirmation. Exceptional early rearm uses its `rearm` subcommand with the same controls, an explicit `accounting-correction`, `reviewed-higher-caps`, `reviewed-provider-cap`, or `reviewed-policy-transition` basis, and the post-trip `kill_sweep_complete` event ID; it is never available from the dashboard. `reviewed-higher-caps` requires strictly higher warning and application caps below unchanged provider caps, except for the exact reviewed nielsrogge staging Starter transition from `$75`/`$100` to `$75`/`$105`, `reviewed-provider-cap` changes only the provider Environment cap and its attestation, and `reviewed-policy-transition` is limited to the same-cap starter-to-environment guardrail migration. Run either command without `--confirm` first to review the old/new policy, spend, provider floor, headroom, and live count, then rerun with the exact confirmation string it prints.
+Normal recovery occurs only at a confirmed provider billing-cycle boundary with fresh reconciliation, matching policy attestation, zero live/orphan sandboxes, and no unresolved intervals or reservations. Operator-disable and accounting-integrity trips never auto-rearm. The root-only `backend.scripts.manage_chat_sandbox_circuit disable` command records an allowlisted operator, reviewed evidence, reason, and typed environment/cycle confirmation. Exceptional early rearm uses its `rearm` subcommand with the same controls, an explicit `accounting-correction`, `reviewed-higher-caps`, `reviewed-provider-cap`, or `reviewed-policy-transition` basis, and the post-trip `kill_sweep_complete` event ID (`--orphan-sweep-event-id`); it is never available from the dashboard. `reviewed-higher-caps` requires strictly higher warning and application caps below unchanged provider caps, except for the exact reviewed nielsrogge staging Starter transition from `$75`/`$100` to `$75`/`$105`, `reviewed-provider-cap` changes only the provider Environment cap and its attestation, and `reviewed-policy-transition` is limited to the same-cap starter-to-environment guardrail migration. Run either command without `--confirm` first to review the old/new policy, spend, provider floor, headroom, and live count, then rerun with the exact confirmation string it prints.
 
 After any provider policy change, record the Workspace setting, optional Team Environment settings, native notification recipients, operator identity, timestamp, and matching deployment attestation in the private operations audit trail. The sole owner must maintain MFA, verified recovery and billing email, and the current Modal support recovery path outside source control.
 
+## Changing an application cap
 
-## Reviewed staging application cap of $105
-
-`deploy/configure_staging_chat_application_cap.py --confirm
-RAISE_STAGING_CHAT_APPLICATION_CAP_105` changes only the protected staging
-application cap and its attestation (`starter-v1` to `starter-app105-v2`).
-It requires the exact old nielsrogge Starter policy. The warning remains $75,
-the provider Workspace cap remains $250, and the Environment cap remains absent.
-The per-sandbox reservation allowance, ordinary capacity, and the separately
-approved $25 cold experiment allocation do not change.
-
-Deploy the merged policy validation first, then apply the protected configuration
-and refresh that exact active staging release with `pwc-deploy staging <sha>
---refresh-environment`. The policy mismatch trips the existing spend circuit;
+Both current caps are already applied by one-shot transition scripts that accept
+only the previous policy: `deploy/configure_staging_chat_application_cap.py`
+(now `starter-app105-v2` to `starter-app150-v3`, `--confirm RAISE_STAGING_CHAT_APPLICATION_CAP_150`; the earlier `starter-v1` to `starter-app105-v2` step is done) and
+`deploy/configure_production_chat_application_cap.py` (`250-v2` to
+`250-warn200-app225-v3`). A further change needs a new reviewed transition. After
+applying a cap change to the protected configuration, refresh the exact active release with
+`pwc-deploy <environment> <sha> --refresh-environment`. The policy mismatch trips the existing spend circuit;
 wait for the watchdog's completed post-trip orphan sweep, zero live intervals
 and reservations, and fresh provider reconciliation. Review and execute the
 root-only `manage_chat_sandbox_circuit rearm --basis reviewed-higher-caps`
 workflow above with the completed sweep ID. Do not edit the ledger directly or
-relax the re-arm prerequisites. Recheck the full 32-sandbox reservation headroom
-before starting the burst. Reverting the protected file alone is not a ledger
+relax the re-arm prerequisites. Reverting the protected file alone is not a ledger
 rollback; leave admissions fail-closed until policy and ledger agree.

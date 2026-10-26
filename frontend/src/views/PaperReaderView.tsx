@@ -154,6 +154,8 @@ function PaperReaderExperience() {
   const paperPaneRef = useRef<HTMLElement>(null);
   const assistantPaneRef = useRef<HTMLElement>(null);
   const resizeHandleRef = useRef<HTMLDivElement>(null);
+  const chatToggleRef = useRef<HTMLButtonElement>(null);
+  const focusAfterToggle = useRef(false);
   const dragging = useRef(false);
   const chatTransitionTimer = useRef(0);
   const resizeFrame = useRef(0);
@@ -305,6 +307,16 @@ function PaperReaderExperience() {
       CHAT_TRANSITION_MS + 40,
     );
   };
+  // Keyboard users keep their place: closing focuses the floating toggle, opening focuses the pane.
+  const toggleAssistant = (next: boolean) => {
+    focusAfterToggle.current = true;
+    setAssistantCollapsed(next);
+  };
+  useEffect(() => {
+    if (!focusAfterToggle.current) return;
+    focusAfterToggle.current = false;
+    (collapsed ? chatToggleRef.current : assistantPaneRef.current)?.focus();
+  }, [collapsed]);
   const selectSession = (id: string) => {
     setActiveSessionId(id);
     sessionStorage.setItem(sessionKey(routeId), id);
@@ -347,9 +359,10 @@ function PaperReaderExperience() {
 
   const assistantEnabled = isPaperReaderChatEnabled()
     && availabilityQuery.data?.paper_reader_chat_enabled !== false;
-  const assistant = paper && assistantEnabled && webPage && !webPageReady
+  const chatReady = Boolean(paper && assistantEnabled && !(webPage && !webPageReady));
+  const assistant = paper && assistantEnabled && !chatReady
     ? <div className="reader-chat-unavailable" role="status">Chat opens once the paper is ready.</div>
-    : paper && assistantEnabled ? <ChatExperience
+    : paper && chatReady ? <ChatExperience
     mode="paper"
     routeSessionId={activeSessionId}
     primaryPaper={{ id: paper.id, routeId: canonicalRoute, title: paper.title }}
@@ -359,6 +372,7 @@ function PaperReaderExperience() {
     onSessionId={selectSession}
     onReaderSubmit={() => setMobileTab("assistant")}
     onReaderNewChat={newChat}
+    onReaderClose={desktopSplit ? () => toggleAssistant(true) : undefined}
   /> : <div className="reader-chat-unavailable">Chat is not enabled for this preview.</div>;
 
   if (query.isLoading) return <div className="reader-status" role="status">Loading paper…</div>;
@@ -461,14 +475,17 @@ function PaperReaderExperience() {
         role="tabpanel"
         aria-label="Chat"
         aria-hidden={(!desktopSplit && mobileTab !== "assistant") || collapsed}
+        tabIndex={-1}
       ><PdfCitationContext.Provider value={citationTarget}>{assistant}</PdfCitationContext.Provider></aside>
       <div className="sr-only" aria-live="polite">{selectionStatus}</div>
-      {desktopSplit && <button
+      {/* A ready chat closes from its own topbar; other panes keep the floating toggle. */}
+      {desktopSplit && (collapsed || !chatReady) && <button
+        ref={chatToggleRef}
         type="button"
         className="reader-collapse-assistant"
         aria-controls="reader-chat-panel"
         aria-expanded={!collapsed}
-        onClick={() => setAssistantCollapsed(!collapsed)}
+        onClick={() => toggleAssistant(!collapsed)}
       >{collapsed ? "Open chat" : "Hide chat"}</button>}
     </div>
     </ArtifactWorkspace>

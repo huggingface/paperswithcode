@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.curation import ResolveModelPaperMutation
 from backend.models.database import (
+    Author,
     Evaluation,
     HfArtifact,
     ModelProviderAlias,
@@ -60,6 +61,74 @@ def model_family_key(value: str) -> str:
         if token and not re.fullmatch(r"a?\d+(?:\.\d+)?[bmk]", token)
     ]
     return re.sub(r"[^a-z0-9]+", "", "".join(tokens))
+
+
+_JOINED_SEPARATOR = re.compile(r"(?<=[a-z])[\s_-]+(?=[a-z0-9])")
+# A version number, not a parameter count ("4.2" in "Nanbeige4.2-3B", but
+# nothing in "gpt-oss-120b").
+_VERSION = r"(\d+(?:\.\d+)*)(?![\d.]*[bmk](?![a-z]))"
+_NAME_VERSION = re.compile(rf"^([a-z]{{3,}}){_VERSION}")
+
+
+def _joined(value: str) -> str:
+    """Lowercase and join a name to its version: "Kimi K3.1 Pro" -> "kimik3.1pro"."""
+    return _JOINED_SEPARATOR.sub("", value.rsplit("/", 1)[-1].casefold())
+
+
+def _version_key(version: str) -> str:
+    return re.sub(r"(?:\.0)+$", "", version)
+
+
+def _family_versions(family: str, text: str) -> set[str]:
+    """Versions ``text`` gives the family: "kimik" finds "3" in "kimi k3"."""
+    spelled = r"[\s_-]?".join(re.escape(char) for char in family)
+    return {
+        _version_key(found.group(1))
+        for found in re.finditer(rf"(?<![a-z0-9]){spelled}[\s_-]?{_VERSION}", text)
+    }
+
+
+def release_version_conflict(
+    release_names: list[str], title: str, abstract: str = ""
+) -> str | None:
+    """Why a paper titled ``title`` documents a different version of the release.
+
+    A release named "Nanbeige4.3-33B" must not resolve to "Nanbeige4.2-3B:
+    ...": the title names the same family with another version. Titles that
+    do not name the family with a version (a family report, a method name)
+    are left to the evidence checks, and an abstract that names the release's
+    own version (a report covering a point release) is accepted.
+    """
+    # Judge each family by its most specific version: a coarse alias
+    # ("Nanbeige4") must not cancel the release's own version ("4.3").
+    specific: dict[str, str] = {}
+    for name in release_names:
+        match = _NAME_VERSION.match(_joined(name))
+        if match is None:
+            continue
+        family, version = match.group(1), _version_key(match.group(2))
+        current = specific.get(family)
+        if current is None or (version.count("."), len(version)) > (
+            current.count("."),
+            len(current),
+        ):
+            specific[family] = version
+    title_key, abstract_key = title.casefold(), abstract.casefold()
+    mentioned = [
+        (family, version, versions)
+        for family, version in specific.items()
+        if (versions := _family_versions(family, title_key))
+        and version not in versions
+        and version not in _family_versions(family, abstract_key)
+    ]
+    if not mentioned:
+        return None
+    family, version, versions = mentioned[0]
+    return (
+        f"Paper {title!r} documents {family} {', '.join(sorted(versions))}, "
+        f"not this release's {family} {version}; resolve a distinct release to "
+        "its own paper or reject it"
+    )
 
 
 class TrendingModelResolutionService:
@@ -230,6 +299,7 @@ class TrendingModelResolutionService:
                 raise ValueError(
                     "Existing paper resolution requires canonical source evidence"
                 )
+            self._check_release_version(mutation, candidate, paper)
             return paper
         if mutation.arxiv_id is not None:
             if not any(
@@ -242,6 +312,7 @@ class TrendingModelResolutionService:
                     mutation.arxiv_id, commit=False
                 )
             )
+            self._check_release_version(mutation, candidate, paper)
             return paper
         external = mutation.external_paper
         assert external is not None
@@ -271,6 +342,22 @@ class TrendingModelResolutionService:
         if paper is None:
             raise RuntimeError("External paper ingestion returned no database row")
         return paper
+
+    @staticmethod
+    def _check_release_version(
+        mutation: ResolveModelPaperMutation,
+        candidate: TrendingModelCandidate,
+        paper: Paper,
+    ) -> None:
+        proposal = mutation.model_release
+        names = [candidate.repo_id]
+        if proposal is not None:
+            names += [proposal.canonical_name, *proposal.aliases]
+        conflict = release_version_conflict(
+            names, paper.title or "", paper.abstract or ""
+        )
+        if conflict:
+            raise ValueError(conflict)
 
     @staticmethod
     def _paper_supported_by_evidence(paper: Paper, evidence_urls: list[str]) -> bool:
@@ -309,12 +396,11 @@ class TrendingModelResolutionService:
             "www.arxiv.org",
         }:
             return False
-        path = parsed.path.rstrip("/")
-        return path in {
-            f"/abs/{arxiv_id}",
-            f"/pdf/{arxiv_id}",
-            f"/pdf/{arxiv_id}.pdf",
-        }
+        # The abstract, PDF, and HTML pages of any version name the same paper.
+        match = re.fullmatch(
+            r"/(?:abs|pdf|html)/(.+?)(?:v\d+)?(?:\.pdf)?", parsed.path.rstrip("/")
+        )
+        return bool(match) and match.group(1) == re.sub(r"v\d+$", "", arxiv_id)
 
     def _find_release(self, candidate, paper, proposal) -> ModelRelease | None:
         if candidate.model_release_id is not None:
@@ -418,7 +504,36 @@ class TrendingModelResolutionService:
             PaperOrganization,
             PaperHfArtifact,
         )
+        # paper_method_evidence references its (paper_id, method_id) parent
+        # without ON UPDATE CASCADE, so give the target its method links
+        # before the evidence moves, and drop the source links afterwards.
+        source_methods = (
+            self.db.query(PaperMethod).filter(PaperMethod.paper_id == source.id).all()
+        )
+        for row in source_methods:
+            existing = self.db.get(PaperMethod, (target.id, row.method_id))
+            if existing is None:
+                self.db.add(
+                    PaperMethod(
+                        **{
+                            column.name: getattr(row, column.name)
+                            for column in PaperMethod.__table__.columns
+                            if column.name != "paper_id"
+                        },
+                        paper_id=target.id,
+                    )
+                )
+        self.db.flush()
+        # The two rows often list the same people as different author records.
+        target_author_names = {
+            name.casefold()
+            for (name,) in self.db.query(Author.name)
+            .join(PaperAuthor, PaperAuthor.author_id == Author.id)
+            .filter(PaperAuthor.paper_id == target.id)
+        }
         for model in junctions:
+            if model is PaperMethod:
+                continue
             for row in self.db.query(model).filter(model.paper_id == source.id).all():
                 key = tuple(
                     target.id
@@ -427,6 +542,13 @@ class TrendingModelResolutionService:
                     for column in model.__table__.primary_key.columns
                 )
                 existing = self.db.get(model, key)
+                if existing is None and isinstance(row, PaperAuthor):
+                    author = self.db.get(Author, row.author_id)
+                    if author is not None and author.name.casefold() in (
+                        target_author_names
+                    ):
+                        self.db.delete(row)
+                        continue
                 if existing is not None:
                     if isinstance(row, PaperTask) and row.source == "manual":
                         existing.source = "manual"
@@ -441,6 +563,9 @@ class TrendingModelResolutionService:
                     self.db.delete(row)
                 else:
                     row.paper_id = target.id
+        self.db.flush()
+        for row in source_methods:
+            self.db.delete(row)
 
         self.db.query(Evaluation).filter(Evaluation.paper_id == source.id).update(
             {Evaluation.paper_id: target.id}, synchronize_session=False

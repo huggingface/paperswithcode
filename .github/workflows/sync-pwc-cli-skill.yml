@@ -14,8 +14,11 @@ permissions: {}
 
 jobs:
   sync:
+    # The upstream skill becomes part of the chat system prompt, so a sync is
+    # proposed as a pull request for review instead of being pushed to main.
     permissions:
       contents: write
+      pull-requests: write
     runs-on: ubuntu-24.04
     env:
       UPSTREAM_REPOSITORY: huggingface/pwc-cli
@@ -61,18 +64,31 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
           echo "upstream_commit=$upstream_commit" >> "$GITHUB_OUTPUT"
 
-      - name: Commit skill sync
+      - name: Propose skill sync for review
         if: steps.sync.outputs.changed == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           UPSTREAM_COMMIT: ${{ steps.sync.outputs.upstream_commit }}
         shell: bash
         run: |
           set -euo pipefail
+          branch="automation/sync-pwc-cli-skill-${UPSTREAM_COMMIT:0:12}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "A review branch for ${UPSTREAM_COMMIT} already exists: ${branch}"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch --create "$branch"
           git add "$DESTINATION"
           git commit \
             -m "Sync chat CLI skill" \
             -m "Upstream skill: ${UPSTREAM_REPOSITORY}@${UPSTREAM_COMMIT}"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          git push origin "$branch"
+          gh pr create \
+            --base main \
+            --head "$branch" \
+            --title "Sync chat CLI skill from ${UPSTREAM_REPOSITORY}@${UPSTREAM_COMMIT:0:12}" \
+            --body "Automated sync of \`${UPSTREAM_PATH}\` from ${UPSTREAM_REPOSITORY}@${UPSTREAM_COMMIT}.
+
+          This text is appended verbatim to the chat system prompt (\`${DESTINATION}\`). Review the diff before merging; it reaches production with the next \`pwc-deploy\`."

@@ -212,6 +212,31 @@ def check_benchmark_gap_fields(proposal: dict, candidates: dict | None) -> None:
         )
 
 
+def check_benchmark_source_evidence(proposal: dict) -> None:
+    """Mirror the server's rule that evidence_urls cite the new source paper."""
+    benchmark = proposal.get("add_benchmark") or {}
+    source = benchmark.get("source_paper") or {}
+    evidence = {str(url).rstrip("/") for url in benchmark.get("evidence_urls") or []}
+    required = None
+    if source.get("arxiv_id"):
+        arxiv_id = re.sub(r"v\d+$", "", source["arxiv_id"])
+        pattern = re.compile(
+            rf"https?://(?:www\.)?arxiv\.org/(?:abs|pdf|html)/"
+            rf"{re.escape(arxiv_id)}(?:v\d+)?(?:\.pdf)?"
+        )
+        if not any(pattern.fullmatch(url) for url in evidence):
+            required = f"https://arxiv.org/abs/{arxiv_id}"
+    elif source.get("external_paper"):
+        source_url = str(source["external_paper"].get("source_url") or "").rstrip("/")
+        if source_url not in evidence:
+            required = source_url
+    if required:
+        raise ValueError(
+            "Proposal preflight failed (no apply attempted): evidence_urls must "
+            f"include the source paper's canonical URL; add {required}"
+        )
+
+
 def check_evaluation_leaderboards(proposal: dict) -> None:
     """Refuse evaluations on boards the leaderboards command never returned.
 
@@ -337,6 +362,7 @@ def main() -> None:
         proposal = make_scheduled_enrichment_additive(proposal, context)
         trace = _trace_payload(proposal)
         check_benchmark_gap_fields(proposal, trace["url_candidates"])
+        check_benchmark_source_evidence(proposal)
         check_evaluation_leaderboards(proposal)
         store_trace_with_retry("trace/preapply", trace)
         request("apply", "POST", proposal, timeout=300)

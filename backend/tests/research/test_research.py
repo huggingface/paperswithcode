@@ -717,3 +717,32 @@ def test_preview_and_test_send_never_touch_the_outbox(db, now, monkeypatch):
     assert calls[0]["json"]["to"] == ["a@example.com"]
     assert calls[0]["json"]["subject"].startswith("[Test] ")
     assert db.scalar(text("SELECT count(*) FROM research_digests")) == 0
+
+
+def test_webhook_body_limit_refuses_declared_and_streamed_oversize():
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from backend.routers.research import _bounded_body
+
+    class Request:
+        def __init__(self, chunks, declared=None):
+            self.headers = {"content-length": declared} if declared else {}
+            self._chunks = chunks
+
+        async def stream(self):
+            for chunk in self._chunks:
+                yield chunk
+
+    def read(request):
+        return asyncio.run(_bounded_body(request, 10))
+
+    assert read(Request([b"12345", b"678"])) == b"12345678"
+    for request in (
+        Request([b"x" * 4] * 5),  # chunked, no Content-Length
+        Request([pytest.fail], declared="11"),  # refused before reading
+    ):
+        with pytest.raises(HTTPException) as error:
+            read(request)
+        assert error.value.status_code == 413

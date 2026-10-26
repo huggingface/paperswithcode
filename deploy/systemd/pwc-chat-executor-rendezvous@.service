@@ -10,7 +10,8 @@ StartLimitBurst=5
 Type=exec
 User=pwc-chat-executor
 Group=www-data
-SupplementaryGroups=pwc-production pwc-staging
+# No pwc-production/pwc-staging membership: those groups can read the
+# environments' env files. Socket ownership changes run as root ("+") instead.
 WorkingDirectory=/srv/paperswithcode
 RuntimeDirectory=paperswithcode/%I
 RuntimeDirectoryMode=0750

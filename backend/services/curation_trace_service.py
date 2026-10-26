@@ -257,12 +257,20 @@ class CurationTraceService:
         manifest_bytes = json.dumps(manifest, sort_keys=True, indent=2).encode()
         object_values["manifest.json"] = manifest_bytes
         result = self._upload(row, object_values)
+        # Apply may commit while the upload runs; re-read the row under a lock
+        # so the check below sees any result the server recorded meanwhile.
+        self.db.refresh(row, with_for_update=True)
         row.trace_status = (
             "complete" if result["status"] == "stored" else result["status"]
         )
         row.trace_uri = result.get("uri") or row.trace_uri
         row.trace_sha256 = sha256(manifest_bytes)
-        row.mutation_result = payload.get("result")
+        # The worker's own account of the outcome is kept in result.json. A
+        # result the server recorded while applying (including the resolved
+        # paper the thumbnail queue targets) must not be replaceable by the
+        # job's bearer, so the worker only fills in an empty result.
+        if row.mutation_result is None:
+            row.mutation_result = payload.get("result")
         usage = payload.get("usage") or {}
         row.input_tokens = usage.get("input_tokens")
         row.output_tokens = usage.get("output_tokens")

@@ -27,6 +27,29 @@ the relevant body, experiment tables, and captions yourself before curating.
 If no substantive source can be read, report the failure rather than marking
 the source inspected or URL extraction complete.
 
+An external paper (`paper.source == "external"`) is a release page, model
+card, or report with no arXiv text, so its manifest usually has no
+`paper_markdown` or `paper_pdf`. Then the `paper_source` document is the paper:
+read it in full, together with the `model_card`, `github_readme`, and
+`project_page` documents, and curate from them exactly as you would from paper
+text. The missing Markdown or PDF is not missing evidence. For `enrich-paper`:
+
+- Tag the tasks and methods the release page states. Examples: a speech-only
+  conversation model is speech-to-speech or spoken dialogue, and an action
+  model for robots is robotics or robot manipulation. Use only existing
+  taxonomy entries and the same high-confidence bar as for paper text.
+- Add the official Hugging Face repositories the page links or is itself, to
+  `hf_models`, `hf_datasets`, or `hf_spaces`. A `paper.source_url` on
+  `huggingface.co/<org>/<repo>` is the release's own model card. Include the
+  publisher's official quantized or size variants of this release, never
+  community mirrors or fine-tunes.
+- Link the publisher as an organization when the page names it.
+- Set `urls_extracted=true` after this complete check, including a clean
+  no-result.
+
+Report a release page that cannot be read (blocked, empty, or a script shell
+with no text) as a source failure; do not tag from the title alone.
+
 For enrichment, search the existing task taxonomy for the actual contribution,
 including when the paper starts with no tasks. Accept an official artifact only
 when it belongs to this exact paper. Shared navigation links to sibling products,
@@ -314,12 +337,30 @@ Example:
 ### Organizations
 
 For `enrich-paper`, also tag the organizations behind the paper. Read the
-author affiliations on the first page of the PDF (or the Markdown header),
-including footnote markers. Tag the labs, companies, and universities that the
-authors list as their affiliations, at most 10. Skip departments and
-sub-groups when the parent organization is what the catalog lists (for example,
-FAIR is Meta), funding agencies, compute sponsors, and organizations named only
-in acknowledgements.
+author affiliations, including footnote markers, from the `paper_front_matter`
+source document: preflight saves page 1 of the arXiv PDF, with its text and
+hyperlinks, at its `local_path` (verify its `sha256`). The Markdown is often an
+arXiv HTML copy that starts at the Abstract or keeps only author names, so an
+empty Markdown header is not evidence that the paper lists no affiliations. If
+the front matter is missing, read the affiliations from the arXiv HTML at
+`https://arxiv.org/html/<arxiv_id>` (`ltx_role_affiliation` and `ltx_personname`
+elements) or from page 1 of `https://arxiv.org/pdf/<arxiv_id>`. Conclude that
+there are no affiliations only after checking one of them. Tag the labs,
+companies, and universities that the authors list as their affiliations, at
+most 10. Skip departments and sub-groups when the parent organization is what
+the catalog lists (for example, FAIR is Meta), funding agencies, compute
+sponsors, and organizations named only in acknowledgements.
+
+Also tag the Hugging Face organization that officially hosts this paper's own
+release: its weights, Space, dataset, or collection, linked from the paper's
+first page (including the front matter's hyperlinks) or from its official
+repository README. This covers labs whose affiliation line uses a different name
+from their Hub organization; for example, MOSS-Image lists "MOSI Intelligence"
+and links `huggingface.co/collections/OpenMOSS-Team/moss-image`, so tag
+OpenMOSS (`OpenMOSS-Team`). Do not tag the organization of a model the paper
+only uses or compares against, a community re-upload, or a hub link found
+anywhere other than the paper and its official repository. The evidence is the
+link itself.
 
 The context lists the paper's current `organizations`. Find catalog entries
 with the taxonomy search, whose `organizations` results give the ID, name, slug,
@@ -337,13 +378,18 @@ missing one by its Hugging Face organization handle, found with
 handles are common, so choose the verified one (`isVerified`) or the one with
 by far the most followers. Leave out an organization that has no catalog entry
 and no Hugging Face organization. Each entry needs `name` as the paper writes it
-and `evidence` quoting the affiliation line:
+and `evidence` quoting the affiliation line, or the release link for a hosting
+organization. When you submit a hosting organization by `hf_slug`, use its
+Hugging Face display name as `name`; the VPS skips a name that does not match
+the profile.
 
 ```json
 "organizations": [
   {"organization_id": 11, "name": "Meta", "evidence": "1 FAIR at Meta"},
   {"hf_slug": "StanfordUniversity", "name": "Stanford University",
-   "evidence": "2 Stanford University"}
+   "evidence": "2 Stanford University"},
+  {"organization_id": 461, "name": "OpenMOSS",
+   "evidence": "Page 1 link https://huggingface.co/collections/OpenMOSS-Team/moss-image"}
 ]
 ```
 
@@ -384,7 +430,7 @@ summaries in the context; do not research candidates one by one (the
 
 You are the quality gate, not a rubber stamp: three papers mentioning a name
 does not make it a benchmark worth a leaderboard. Every approval queues
-catalog writes (at most 20 a day), and a wrong one lands a leaderboard on the
+catalog writes (at most 40 a day), and a wrong one lands a leaderboard on the
 wrong task or metric. Read each candidate's `reported_tasks` and
 `reported_metrics` (distinct reporting papers per task and metric),
 `reported_splits`, `recommendations`, `evidence_papers`, and catalog matches
@@ -477,8 +523,10 @@ Decide:
   evaluates on it; follow the reporting papers' citations. Prefer
   `existing_paper_id`, then `arxiv_id`, then `external_paper` (a homepage or
   technical report with a credible publication date) for a benchmark with no
-  paper. Include that paper's canonical URL (arXiv abs URL or `source_url`) in
-  `evidence_urls`.
+  paper. Always put that paper's own canonical URL in `evidence_urls`
+  (`https://arxiv.org/abs/<arxiv_id>`, or `external_paper.source_url` exactly);
+  the reporting papers' URLs alone do not count, and the server rejects the
+  create without it.
 - `reject` a candidate that is not a reusable benchmark after all, or `defer`
   when primary sources cannot be read.
 

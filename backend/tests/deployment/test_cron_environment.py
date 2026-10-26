@@ -231,7 +231,6 @@ def test_cron_jobs_declare_bounded_execution_contracts():
         "alert_submission_review_failure",
         "export_enrichment_dashboard",
         "monitor_chat_operational_alerts",
-        "scan_model_releases",
     }
     for name, spec in cron_launcher.COMMANDS.items():
         assert spec.command
@@ -356,6 +355,7 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_physics_iq_verified"]["timeout"] == "30m"
     assert status["jobs"]["sync_vals_finance_agent"]["timeout"] == "30m"
     assert status["jobs"]["sync_surge_chartography"]["timeout"] == "30m"
+    assert status["jobs"]["sync_frontiercs_2"]["timeout"] == "30m"
     assert status["jobs"]["sync_coarena"]["timeout"] == "30m"
     assert status["jobs"]["sync_arc_prize"]["timeout"] == "30m"
 
@@ -471,3 +471,105 @@ def test_lock_name_ignores_lanes_for_jobs_without_lane_arg():
     assert cron_launcher.lock_name("sync_tabarena", other, ["--priority", "a"]) == (
         "sync_tabarena"
     )
+
+
+def test_paper_markdown_fresh_lane_has_its_own_lock():
+    spec = cron_launcher.COMMANDS["paper_markdown_backfill"]
+    hourly = ["--execute", "--confirm"]
+    assert cron_launcher.lock_name("paper_markdown_backfill", spec, hourly) == (
+        "paper_markdown_backfill"
+    )
+    assert cron_launcher.lock_name(
+        "paper_markdown_backfill", spec, ["--full", *hourly]
+    ) == ("paper_markdown_backfill")
+    assert cron_launcher.lock_name(
+        "paper_markdown_backfill", spec, ["--lane", "fresh", *hourly]
+    ) == ("paper_markdown_backfill.fresh")
+
+
+def test_general_cron_environment_withholds_app_only_secrets():
+    source = {
+        "PATH": "/usr/bin",
+        "PWC_DB_PASSWORD": "jobs-need-this",
+        "PWC_RESEND_API_KEY": "research-digests-need-this",
+        "PWC_CHAT_SANDBOX_SLACK_WEBHOOK_URL": "chat-monitor-needs-this",
+        "LANGFUSE_SECRET_KEY": "chat-monitor-needs-this",
+        "PWC_OPENAI_API_KEY": "tldr-import-needs-this",
+        **{key: "must-not-leak" for key in cron_launcher.APP_ONLY_SECRET_KEYS},
+    }
+
+    environment = cron_launcher.general_environment(source, "update_github_stars")
+
+    assert not cron_launcher.APP_ONLY_SECRET_KEYS & environment.keys()
+    assert "must-not-leak" not in environment.values()
+    assert environment["PWC_DB_PASSWORD"] == "jobs-need-this"
+    assert environment["PWC_RESEND_API_KEY"] == "research-digests-need-this"
+    assert environment["LANGFUSE_SECRET_KEY"] == "chat-monitor-needs-this"
+
+
+def test_general_cron_environment_covers_session_and_oauth_signing():
+    assert {
+        "PWC_SESSION_SIGNING_PRIVATE_KEY",
+        "PWC_JWT_SECRET",
+        "PWC_HF_OAUTH_CLIENT_SECRET",
+        "PWC_HF_OAUTH_CREDENTIAL_SECRET",
+        "PWC_ADMIN_API_TOKEN",
+    } <= cron_launcher.APP_ONLY_SECRET_KEYS
+
+
+def test_legacy_url_extractor_keeps_only_its_modal_credentials():
+    source = {key: "secret" for key in cron_launcher.APP_ONLY_SECRET_KEYS}
+
+    environment = cron_launcher.general_environment(source, "extract_urls")
+
+    assert environment.keys() == {"MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"}
+
+
+def test_cron_user_is_not_added_to_the_production_group():
+    source = Path(configure_host_env.__file__).read_text(encoding="utf-8")
+
+    assert "usermod" not in source
+
+
+def test_host_layout_grants_cron_traversal_and_drops_production_group(monkeypatch):
+    import deploy.install_host_layout as host_layout
+
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        host_layout.subprocess, "run", lambda command, check: calls.append(command)
+    )
+    monkeypatch.setattr(
+        host_layout.grp,
+        "getgrnam",
+        lambda name: type("Group", (), {"gr_mem": ["pwc-cron"]})(),
+    )
+
+    host_layout.restrict_cron_access()
+
+    assert calls == [
+        [
+            "setfacl",
+            "--modify",
+            "user:pwc-cron:--x,user:pwc-cron-trending:--x",
+            "/var/lib/paperswithcode/production",
+        ],
+        ["gpasswd", "--delete", "pwc-cron", "pwc-production"],
+    ]
+
+
+def test_launcher_hides_its_environment_from_same_user_jobs(tmp_path: Path):
+    # Run in a child so the test process itself stays dumpable.
+    script = tmp_path / "probe.py"
+    script.write_text(
+        "import ctypes, sys\n"
+        f"sys.path.insert(0, {str(Path(cron_launcher.__file__).parent)!r})\n"
+        "import cron_launcher\n"
+        "cron_launcher.hide_launcher_environment()\n"
+        "libc = ctypes.CDLL(None)\n"
+        "print(libc.prctl(3, 0, 0, 0, 0))\n",  # PR_GET_DUMPABLE
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["python3", "-I", str(script)], check=True, capture_output=True, text=True
+    )
+    assert result.stdout.strip() == "0"

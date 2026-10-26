@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
+import { useToast } from "@/hooks/use-toast";
 import { PendingEditNotice } from "./PendingEditNotice";
 import { SuggestOrganizationForm } from "./SuggestOrganizationForm";
 
@@ -39,6 +41,7 @@ export const EditOrganizationsDialog = ({
   const [selected, setSelected] = useState<number[]>(initialOrganizationIds);
   const [searchQuery, setSearchQuery] = useState("");
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   useEffect(() => {
     if (open) {
       setSelected(initialOrganizationIds);
@@ -78,10 +81,16 @@ export const EditOrganizationsDialog = ({
         return;
       }
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: Number(paperId),
           edit_type: "organizations",
           proposed_payload: { organization_ids: selected },
+        });
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId],
+          queuedDescription: "Thanks! An admin will review your proposed organization changes shortly.",
         });
         return null;
       } else {

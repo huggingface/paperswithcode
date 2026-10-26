@@ -188,6 +188,8 @@ Adapt the middle paragraph to the facts:
 
 Avoid vague phrases such as "fixed everything". Do not mention an evaluation ID as prose unless it helps disambiguate the result; normally it should appear only inside the direct URL.
 
+Never write a rank or other number as `#N` in prose (for example "currently #1" or "from #33 to #14"): GitHub autolinks it to issue N of that repository. Write ranks in words, such as "currently ranked first" or "from rank 33 to rank 14". Before posting, check the body for `#` followed by a digit outside URLs and badge Markdown.
+
 ## 6. Post safely
 
 Before mutating GitHub, state the exact `owner/repository#issue` target in a concise progress update.

@@ -129,11 +129,21 @@ def test_parse_and_fetch_public_leaderboard_contract():
             assert url == SPACE_APP_URL
             assert verbose is False
 
-        def predict(self, query, proprietary, llm, columns, *, api_name):
-            assert (query, proprietary, llm) == ("", True, False)
-            # The current English default averages all ten datasets. Keeping
-            # the old Earnings22 name fails; omitting Monsoon changes scores.
-            assert columns == [
+        def predict(
+            self,
+            *,
+            version_id,
+            search_query,
+            show_proprietary,
+            show_llm,
+            selected_columns,
+            api_name,
+        ):
+            assert version_id == "latest"
+            assert (search_query, show_proprietary, show_llm) == ("", True, False)
+            # The current English default averages all eleven datasets. Keeping
+            # the old Earnings22 name fails; omitting a dataset changes scores.
+            assert selected_columns == [
                 "RTFx ⬆️️",
                 "License",
                 "AMI-Cleaned",
@@ -142,6 +152,7 @@ def test_parse_and_fetch_public_leaderboard_contract():
                 "LS Clean",
                 "LS Other",
                 "SPGISpeech",
+                "URGENT24",
                 "Voice Arena Monsoon",
                 "Voxpopuli-AA-Cleaned",
                 "Private (scripted)",

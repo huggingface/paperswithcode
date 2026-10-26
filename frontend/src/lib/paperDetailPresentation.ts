@@ -50,6 +50,11 @@ function artifactCount(
   return Math.max(uniqueUrls.size, discoveredCount ?? 0);
 }
 
+function knownCount(live: number | undefined, stored: number | undefined): number | undefined {
+  if (live == null && stored == null) return undefined;
+  return Math.max(live ?? 0, stored ?? 0);
+}
+
 function artifactGroupHref(urls: string[]): string {
   return urls[0] ?? "https://huggingface.co";
 }
@@ -93,10 +98,24 @@ export function buildPaperDetailPresentation(
     datasets: paper.hf_datasets ?? [],
     spaces: paper.hf_spaces ?? [],
   };
+  // The live Hub lookup can fail (rate limits, outages), so the links and
+  // counts stored by the HF sync keep the card populated without it.
+  const stored = paper.linked_hf_artifacts;
+  const summary = paper.hf_artifact_summary;
+  const discoveredHfArtifacts = {
+    models: [...(hfRepos?.modelUrls ?? []), ...(stored?.models ?? [])],
+    datasets: [...(hfRepos?.datasetUrls ?? []), ...(stored?.datasets ?? [])],
+    spaces: [...(hfRepos?.spaceUrls ?? []), ...(stored?.spaces ?? [])],
+  };
+  const discoveredCounts = {
+    models: knownCount(hfRepos?.models, summary?.model_count),
+    datasets: knownCount(hfRepos?.datasets, summary?.dataset_count),
+    spaces: knownCount(hfRepos?.spaces, summary?.space_count),
+  };
   const links = {
-    models: artifactLinks(explicitHfArtifacts.models, hfRepos?.modelUrls, "Model"),
-    datasets: artifactLinks(explicitHfArtifacts.datasets, hfRepos?.datasetUrls, "Dataset"),
-    spaces: artifactLinks(explicitHfArtifacts.spaces, hfRepos?.spaceUrls, "Space"),
+    models: artifactLinks(explicitHfArtifacts.models, discoveredHfArtifacts.models, "Model"),
+    datasets: artifactLinks(explicitHfArtifacts.datasets, discoveredHfArtifacts.datasets, "Dataset"),
+    spaces: artifactLinks(explicitHfArtifacts.spaces, discoveredHfArtifacts.spaces, "Space"),
   };
   const allHfArtifactUrls = {
     models: links.models.map(({ href }) => href),
@@ -112,21 +131,21 @@ export function buildPaperDetailPresentation(
           {
             label: "Models",
             href: artifactRowHref(`https://huggingface.co/models?other=arxiv:${paper.arxiv_id}`, explicitHfArtifacts.models),
-            count: artifactCount(explicitHfArtifacts.models, hfRepos?.modelUrls, hfRepos?.models),
+            count: artifactCount(explicitHfArtifacts.models, discoveredHfArtifacts.models, discoveredCounts.models),
             isLimited: hfRepos?.isLimited,
             links: links.models,
           },
           {
             label: "Datasets",
             href: artifactRowHref(`https://huggingface.co/datasets?other=arxiv:${paper.arxiv_id}`, explicitHfArtifacts.datasets),
-            count: artifactCount(explicitHfArtifacts.datasets, hfRepos?.datasetUrls, hfRepos?.datasets),
+            count: artifactCount(explicitHfArtifacts.datasets, discoveredHfArtifacts.datasets, discoveredCounts.datasets),
             isLimited: hfRepos?.isLimited,
             links: links.datasets,
           },
           {
             label: "Spaces",
             href: artifactRowHref(`https://huggingface.co/papers/${canonicalArxivId}`, explicitHfArtifacts.spaces),
-            count: artifactCount(explicitHfArtifacts.spaces, hfRepos?.spaceUrls, hfRepos?.spaces),
+            count: artifactCount(explicitHfArtifacts.spaces, discoveredHfArtifacts.spaces, discoveredCounts.spaces),
             isLimited: hfRepos?.isLimited,
             links: links.spaces,
           },
@@ -182,7 +201,6 @@ export function buildPaperDetailPresentation(
     safeAbstractUrl: safeExternalHref(paper.url_abs),
     safeConferenceUrl: safeExternalHref(paper.conference_url_abs),
     safePdfUrl: safeExternalHref(paper.url_pdf),
-    sourceActionLabel: paper.source === "external" ? "Source page" : "arXiv page",
     successorPapers: paper.successor_papers ?? [],
   };
 }

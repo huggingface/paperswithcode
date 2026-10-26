@@ -13,7 +13,7 @@ except ModuleNotFoundError:
     from configure_host_env import assign, decoded_value, read_lines, write_env
 
 CONFIG_PATH = Path("/etc/paperswithcode/staging.env")
-CONFIRMATION = "RAISE_STAGING_CHAT_APPLICATION_CAP_105"
+CONFIRMATION = "RAISE_STAGING_CHAT_APPLICATION_CAP_150"
 
 
 def raised_values(current: dict[str, str]) -> dict[str, str]:
@@ -26,25 +26,26 @@ def raised_values(current: dict[str, str]) -> dict[str, str]:
         "PWC_ENVIRONMENT": "staging",
         "PWC_CHAT_SANDBOX_MODAL_WORKSPACE": workspace,
         "PWC_CHAT_SANDBOX_WARNING_MICROUSD": "75000000",
-        "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "100000000",
+        "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "105000000",
         "PWC_CHAT_SANDBOX_ENVIRONMENT_CAP_MICROUSD": "0",
         "PWC_CHAT_SANDBOX_WORKSPACE_CAP_MICROUSD": "250000000",
         "PWC_CHAT_SANDBOX_PROVIDER_MODE": "starter_workspace",
         "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION": (
-            f"modal-workspace-{workspace}-250-staging-starter-v1"
+            f"modal-workspace-{workspace}-250-staging-starter-app105-v2"
         ),
     }
     actual = {key: decoded_value(current.get(key, "")).strip() for key in expected}
     if actual != expected:
         raise ValueError(
-            "staging chat budget does not match reviewed starter policy v1"
+            "staging chat budget does not match reviewed starter policy app105-v2"
         )
     return assign(
         current,
         {
-            "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "105000000",
+            "PWC_CHAT_SANDBOX_WARNING_MICROUSD": "120000000",
+            "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "150000000",
             "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION": (
-                f"modal-workspace-{workspace}-250-staging-starter-app105-v2"
+                f"modal-workspace-{workspace}-250-staging-starter-app150-v3"
             ),
         },
     )
@@ -63,7 +64,7 @@ def main() -> int:
     except ValueError as error:
         parser.error(str(error))
     write_env(CONFIG_PATH, updated, "pwc-staging")
-    print("raised staging chat application cap to $105; warning remains $75")
+    print("raised staging chat warning to $120 and application cap to $150")
     return 0
 
 

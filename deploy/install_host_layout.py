@@ -9,6 +9,7 @@ import pwd
 import secrets
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 APP_ROOT = Path("/srv/paperswithcode")
@@ -153,15 +154,39 @@ def ensure_mcp_config(
         "PWC_MCP_CURSOR_KEY_PREVIOUS",
     ]
     order.extend(sorted(set(values) - set(order)))
-    temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
-    temporary.write_text(
-        "".join(f"{key}={values[key]}\n" for key in order), encoding="utf-8"
-    )
-    temporary.chmod(0o600)
+    # mkstemp creates the file 0600 before any secret is written to it.
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("".join(f"{key}={values[key]}\n" for key in order))
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def restrict_cron_access() -> None:
+    """Let CRON users reach their production state without the app's group.
+
+    Membership in pwc-production would let any CRON job read production.env
+    and its backups. The jobs only need to traverse the production state
+    directory to reach cron-logs, cron-locks, backups and hf-cache, which they
+    own themselves, so grant traversal by ACL and drop the membership.
+    """
+
+    subprocess.run(
+        [
+            "setfacl",
+            "--modify",
+            "user:pwc-cron:--x,user:pwc-cron-trending:--x",
+            str(STATE_ROOT / "production"),
+        ],
+        check=True,
+    )
+    if "pwc-cron" in grp.getgrnam("pwc-production").gr_mem:
+        subprocess.run(
+            ["gpasswd", "--delete", "pwc-cron", "pwc-production"], check=True
+        )
 
 
 def main() -> int:
@@ -174,8 +199,10 @@ def main() -> int:
         "pwc-cron",
         "pwc-cron-trending",
         "pwc-external-pi",
+        "pwc-external-pi-staging",
         "pwc-chat-executor",
         "pwc-mcp",
+        "pwc-build",
     ):
         ensure_user(user)
     subprocess.run(
@@ -214,13 +241,13 @@ def main() -> int:
         )
         os.chown(mcp_config, 0, grp.getgrnam("pwc-mcp").gr_gid)
         mcp_config.chmod(0o640)
-    for worker_environment in (
-        CONFIG_ROOT / "external-pi-worker.env",
-        CONFIG_ROOT / "external-pi-worker-production.env",
+    for worker_environment, worker_user in (
+        (CONFIG_ROOT / "external-pi-worker.env", "pwc-external-pi-staging"),
+        (CONFIG_ROOT / "external-pi-worker-production.env", "pwc-external-pi"),
     ):
         if not worker_environment.exists():
             worker_environment.write_text("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=\n")
-        os.chown(worker_environment, 0, grp.getgrnam("pwc-external-pi").gr_gid)
+        os.chown(worker_environment, 0, grp.getgrnam(worker_user).gr_gid)
         worker_environment.chmod(0o640)
     install_external_pi_hosts(CONFIG_ROOT / "external-pi-hosts")
     for path in (
@@ -287,6 +314,7 @@ def main() -> int:
         STATE_ROOT / "production" / "cron-locks",
     ):
         ensure_dir(path, "pwc-cron", "pwc-production", 0o750)
+    restrict_cron_access()
     for path in (
         STATE_ROOT / "production" / "trending-cron-logs",
         STATE_ROOT / "production" / "trending-cron-locks",

@@ -85,6 +85,11 @@ class ChatTurnAdmissionService:
                 )
             )
             db.flush()
+        elif self.spend_limit_microusd > row.spend_limit_microusd:
+            # A reviewed application-cap raise lifts the turn ledger with it.
+            row.spend_limit_microusd = self.spend_limit_microusd
+            row.updated_at = now
+            db.flush()
         elif row.spend_limit_microusd != self.spend_limit_microusd:
             raise ValueError("Turn reservation spend limit changed")
 

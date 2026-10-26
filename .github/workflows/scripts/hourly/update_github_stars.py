@@ -39,6 +39,9 @@ MAX_RETRY_DELAY_SECONDS = 60.0
 WEEKLY_CREDENTIAL = "PWC_GITHUB_TOKEN_WEEKLY"
 # Older deployments still name the weekly-queue token after its account.
 LEGACY_WEEKLY_CREDENTIAL = "GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE"
+# Some organizations (for example huggingface) reject classic personal access
+# tokens with a 403 even for public repositories.
+CLASSIC_PAT_FORBIDDEN = "forbids access via a personal access token (classic)"
 
 
 def queue_credentials() -> dict[str, str]:
@@ -350,6 +353,10 @@ def fetch_github_stars(
             sleep(_retry_delay(attempt, rate.retry_after))
             continue
 
+        if response.status_code == 403 and CLASSIC_PAT_FORBIDDEN in response.text:
+            return GitHubFetchResult(
+                None, response.status_code, rate, attempt, "classic_pat_forbidden"
+            )
         failure = "rate_limit" if throttled else f"http_{response.status_code}"
         return GitHubFetchResult(None, response.status_code, rate, attempt, failure)
 
@@ -436,6 +443,7 @@ def run_queue(
     rate_limit_reserve: int = 0,
     hot_threshold_minutes: int = 15,
     selection_only: bool = False,
+    fallback_token: Optional[str] = None,
 ) -> Dict:
     """Process one queue and return structured stage statistics."""
     started = time.monotonic()
@@ -450,6 +458,7 @@ def run_queue(
         "successes": 0,
         "failures": 0,
         "credential_failures": 0,
+        "classic_pat_fallbacks": 0,
         "terminal_unavailable": 0,
         "not_found": 0,
         "legal_blocked": 0,
@@ -507,6 +516,17 @@ def run_queue(
                 stats["rate_limit_limit"] = result.rate_limit.limit
                 stats["rate_limit_remaining"] = result.rate_limit.remaining
                 stats["rate_limit_reset"] = result.rate_limit.reset
+                used_fallback = result.failure == "classic_pat_forbidden" and bool(
+                    fallback_token
+                )
+                if used_fallback:
+                    # Rate stats and stops stay on the queue's own token.
+                    stats["classic_pat_fallbacks"] += 1
+                    result = fetch_github_stars(
+                        group["owner"], group["name"], fallback_token, http=http
+                    )
+                    stats["api_calls"] += result.http_attempts
+                    stats["retries"] += result.retries
 
                 if result.status_code in {404, 451}:
                     write_session, _ = get_repository_service()
@@ -528,7 +548,7 @@ def run_queue(
                     stats["failures"] += 1
                     if result.failure in {"http_401", "http_403"}:
                         stats["credential_failures"] += 1
-                    if result.failure == "rate_limit":
+                    if result.failure == "rate_limit" and not used_fallback:
                         stats["rate_limit_stops"] += 1
                         break
                 else:
@@ -568,6 +588,7 @@ def summarize_queues(results: list[Dict]) -> Dict:
         "successes",
         "failures",
         "credential_failures",
+        "classic_pat_fallbacks",
         "terminal_unavailable",
         "not_found",
         "legal_blocked",
@@ -639,6 +660,7 @@ def main():
                 token_config["weekly"],
                 1_000,
                 40 * 60,
+                fallback_token=token_config["fresh"],
             ),
         ]
         results = [future.result() for future in futures]

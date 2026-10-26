@@ -255,15 +255,26 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     CronJobDefinition(
         id="paper_markdown_backfill",
         scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=17),),
+        schedule_policies=(
+            SchedulePolicy.fixed(60, offset_minutes=17),
+            SchedulePolicy.fixed(5),
+        ),
         schedule_grace_minutes=20,
         systemd_timer="pwc-cron-paper-markdown-backfill.timer",
         systemd_service="pwc-cron-paper-markdown-backfill.service",
-        systemd_extra_units=(),
+        systemd_extra_units=(
+            (
+                "pwc-cron-paper-markdown-fresh.timer",
+                "pwc-cron-paper-markdown-fresh.service",
+            ),
+        ),
         output_evaluator="paper_markdown",
         display_name="Paper Markdown Backfill",
         category="hourly",
-        schedule="17 * * * * (live and full backfill reconciliation)",
+        schedule=(
+            "17 * * * * (live and full backfill reconciliation); "
+            "*/5 * * * * (fresh lane, papers indexed in the last day)"
+        ),
         script_path="hourly/backfill_paper_markdown.py",
         log_name="paper_markdown_backfill",
         process_patterns=("backfill_paper_markdown",),
@@ -1311,6 +1322,44 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_frontiercs_2",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=43),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-frontiercs-2.timer",
+        systemd_service="pwc-cron-sync-frontiercs-2.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync FrontierCS 2 Leaderboard",
+        category="hourly",
+        schedule="43 * * * * (hourly)",
+        script_path="hourly/sync_frontiercs_2.py",
+        log_name="sync_frontiercs_2",
+        process_patterns=("scripts.hourly.sync_frontiercs_2",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_frontiercs_2.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'frontiercs-2'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code FrontierCS 2 live sync.%'
+        """,
+        workflow_file="cron-sync-frontiercs-2.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_frontiercode",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=45),),
@@ -1633,8 +1682,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-scan-model-releases.timer",
         systemd_service="pwc-cron-scan-model-releases.service",
         systemd_extra_units=(),
-        # Report-only: the radar JSON goes to the journal, and the job exits 1
-        # only when every source failed, so a clean exit proves the scan.
+        # The radar JSON goes to the journal and unindexed releases become
+        # queued resolution jobs. The job exits 1 only when every source
+        # failed, so a clean exit proves the scan.
         output_evaluator="report_only",
         display_name="Model Release Radar",
         category="hourly",
@@ -1793,6 +1843,64 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                    ) AS recent_writes
             FROM x_insight_posts
         """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
+        id="link_abstract_mentions",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=51),),
+        schedule_grace_minutes=30,
+        systemd_timer="pwc-cron-link-abstract-mentions.timer",
+        systemd_service="pwc-cron-link-abstract-mentions.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Link Abstract Mentions",
+        category="hourly",
+        schedule="51 * * * * (hourly)",
+        script_path="backend/scripts/link_abstract_mentions.py",
+        log_name="link_abstract_mentions",
+        process_patterns=("backend.scripts.link_abstract_mentions",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/link_abstract_mentions.lock"
+        ),
+        expected_runtime_minutes=10,
+        stale_after_minutes=180,
+        critical=False,
+        # Hours without new or edited abstracts write nothing.
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(created_at) AS last_write,
+                   count(*) FILTER (WHERE created_at > now() - interval '3 hours')
+                       AS recent_writes
+            FROM paper_abstract_mentions
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
+        id="rescan_abstract_mentions",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(3, 21),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-rescan-abstract-mentions.timer",
+        systemd_service="pwc-cron-rescan-abstract-mentions.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Rescan Abstract Mentions",
+        category="daily",
+        schedule="21 3 * * * (daily)",
+        script_path="backend/scripts/link_abstract_mentions.py",
+        log_name="rescan_abstract_mentions",
+        process_patterns=("backend.scripts.link_abstract_mentions --rescan",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "rescan_abstract_mentions.lock"
+        ),
+        expected_runtime_minutes=60,
+        stale_after_minutes=1560,
+        critical=False,
+        # A night without catalog changes rewrites nothing.
+        healthy_no_work_allowed=True,
+        db_freshness_query=None,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(

@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,7 @@ from backend.models.database import (
     ModelProviderAlias,
     Organization,
     ModelRelease,
+    ModelReleaseSignal,
     Paper,
     PaperCurationJob,
     PaperCurationWorkflow,
@@ -60,6 +62,10 @@ from backend.services.codex_add_evals_service import (
     BENCHMARK_GAP_KINDS,
     CodexPaperJobService,
     codex_paper_job_service,
+)
+from backend.services.model_release_signal_service import (
+    ReleaseSignalResolutionService,
+    signal_paper_candidates,
 )
 from backend.services.curation_organization_service import (
     CurationOrganizationService,
@@ -258,6 +264,8 @@ class CodexCurationCallbackService:
             or (
                 previous.paper_id != row.paper_id
                 or previous.candidate_id != getattr(row, "candidate_id", None)
+                or getattr(previous, "release_signal_id", None)
+                != getattr(row, "release_signal_id", None)
             )
         ):
             return None
@@ -268,6 +276,45 @@ class CodexCurationCallbackService:
             "validation_error": validation.get("error"),
             "benchmark_gaps_rejected": validation.get("benchmark_gaps_rejected", []),
             "instruction": "Correct this rejection using fresh context and primary sources; do not repeat the rejected proposal or bypass validation.",
+        }
+
+    def _release_signal_context(self, row, settings: Settings) -> dict[str, Any]:
+        signal = self.db.get(ModelReleaseSignal, row.release_signal_id)
+        if signal is None:
+            raise CodexCurationPaperNotFoundError("Release signal not found")
+        return {
+            "job": self.job_service.serialize(row, settings).model_dump(mode="json"),
+            "retry_feedback": self._retry_feedback(row),
+            # The pinned runner reads these candidate fields for every
+            # resolution job; a radar lead is a page about the release, not
+            # a model card.
+            "candidate": {
+                "id": str(signal.id),
+                "repo_id": f"{signal.lab}: {signal.model_name}",
+                "readme_sha": None,
+                "model_card_url": signal.lead_url,
+            },
+            "release_signal": {
+                "id": str(signal.id),
+                "lab": signal.lab,
+                "model_name": signal.model_name,
+                "title": signal.title,
+                "lead_url": signal.lead_url,
+                "lead_is_first_party": signal.lead_is_official,
+                "published": (
+                    signal.published.isoformat() if signal.published else None
+                ),
+                "sightings": signal.sightings,
+            },
+            "paper_candidates": [
+                {
+                    "id": paper.id,
+                    "title": paper.title,
+                    "arxiv_id": paper.arxiv_id,
+                    "source_url": paper.source_url,
+                }
+                for paper in signal_paper_candidates(self.db, signal)
+            ],
         }
 
     def context(self, row, settings: Settings) -> dict[str, Any]:
@@ -290,6 +337,11 @@ class CodexCurationCallbackService:
                 "paper": {"id": None},
                 **scope,
             }
+        if (
+            getattr(row, "kind", None) == "resolve-model-paper"
+            and getattr(row, "release_signal_id", None) is not None
+        ):
+            return self._release_signal_context(row, settings)
         if getattr(row, "kind", None) == "resolve-model-paper":
             candidate = self.db.get(TrendingModelCandidate, row.candidate_id)
             if candidate is None:
@@ -656,27 +708,40 @@ class CodexCurationCallbackService:
                     self.db.refresh(row, with_for_update=True)
                 self._validate_mutation(row, body)
                 assert body.resolve_model_paper is not None
-                allowed_paper_ids = None
-                if body.resolve_model_paper.decision == "accept":
-                    candidate = self.db.get(TrendingModelCandidate, row.candidate_id)
-                    if candidate is None:
-                        raise CodexCurationPaperNotFoundError(
-                            "Trending model candidate not found"
+                if getattr(row, "release_signal_id", None) is not None:
+                    validator_version = "release-radar-policy-v1"
+                    result = ReleaseSignalResolutionService(self.db).apply(
+                        row.release_signal_id,
+                        body.resolve_model_paper,
+                        commit=False,
+                    )
+                else:
+                    validator_version = "trending-model-policy-v1"
+                    allowed_paper_ids = None
+                    if body.resolve_model_paper.decision == "accept":
+                        candidate = self.db.get(
+                            TrendingModelCandidate, row.candidate_id
                         )
-                    allowed_paper_ids = self._allowed_resolution_paper_ids(candidate)
-                result = TrendingModelResolutionService(self.db).apply(
-                    row.candidate_id,
-                    body.resolve_model_paper,
-                    allowed_paper_ids=allowed_paper_ids,
-                    commit=False,
-                )
+                        if candidate is None:
+                            raise CodexCurationPaperNotFoundError(
+                                "Trending model candidate not found"
+                            )
+                        allowed_paper_ids = self._allowed_resolution_paper_ids(
+                            candidate
+                        )
+                    result = TrendingModelResolutionService(self.db).apply(
+                        row.candidate_id,
+                        body.resolve_model_paper,
+                        allowed_paper_ids=allowed_paper_ids,
+                        commit=False,
+                    )
                 now = datetime.now(UTC)
                 row.submitted_at = now
                 row.applied_at = now
                 row.proposal = body.model_dump(mode="json")
                 row.validation_summary = {
                     "status": "accepted",
-                    "validator_version": "trending-model-policy-v1",
+                    "validator_version": validator_version,
                     "post_write_verification": "passed",
                 }
                 row.mutation_result = result
@@ -1434,6 +1499,14 @@ class CodexCurationCallbackService:
             )
         return skipped
 
+    @staticmethod
+    def _preapply_proposal(row) -> dict[str, Any] | None:
+        try:
+            proposal = ApplyMutationRequest.model_validate(row.proposal or {})
+        except ValidationError:
+            return None
+        return proposal.model_dump(mode="json")
+
     def _validate_scheduled_policy(
         self, row, body: ApplyMutationRequest
     ) -> dict[str, Any]:
@@ -1443,6 +1516,12 @@ class CodexCurationCallbackService:
         if row.trace_status not in {"preapply_stored", "disabled"}:
             raise CodexCurationMutationClosedError(
                 "Scheduled mutation requires a durable pre-apply trace"
+            )
+        # The pre-apply trace is the reviewable record of what a scheduled job
+        # intends to change, so the apply must be exactly that proposal.
+        if self._preapply_proposal(row) != body.model_dump(mode="json"):
+            raise CodexCurationMutationClosedError(
+                "Scheduled mutation does not match its pre-apply proposal"
             )
         if row.kind in BENCHMARK_GAP_KINDS:
             return {"policy": "benchmark-gap-v1"}
@@ -1746,6 +1825,19 @@ class CodexCurationCallbackService:
         """Resolve the callback's closed mutation surface from catalog state."""
         capability, primary_resource = curation_primary_authorization(self.db, row)
         if row.kind == "review-benchmark-gaps" and body.review_benchmark_gaps:
+            # A mistyped id is a fixable proposal error, not a capability denial.
+            scope = set(self._review_scope(row))
+            outside = [
+                str(decision.candidate_id)
+                for decision in body.review_benchmark_gaps.decisions
+                if str(decision.candidate_id) not in scope
+            ]
+            if outside:
+                raise ValueError(
+                    "Candidates outside this review's batch: "
+                    f"{', '.join(outside[:20])}. Copy each candidate_id exactly "
+                    "from context.review.candidates"
+                )
             return tuple(
                 (
                     capability,

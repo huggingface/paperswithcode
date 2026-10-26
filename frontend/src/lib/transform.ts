@@ -221,12 +221,14 @@ export function displayTaskName(name?: string, slug?: string): string {
     return normalizedLabel;
   }
 
-  return label
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .replace(/\b[A-Za-z0-9]+\b/g, (token) =>
-      TASK_ACRONYMS.has(token.toUpperCase()) ? token.toUpperCase() : token,
-    );
+  // Title-case each word, but keep words the name already writes in capitals
+  // (PII, LLM, VQA) as well as the known acronyms.
+  return label.replace(/\b[A-Za-z0-9]+\b/g, (token) => {
+    if (/^[A-Z0-9]{2,}$/.test(token) || TASK_ACRONYMS.has(token.toUpperCase())) {
+      return token.toUpperCase();
+    }
+    return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+  });
 }
 
 function taskKey(value: string): string {

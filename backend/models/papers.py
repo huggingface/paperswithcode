@@ -194,6 +194,21 @@ class Paper(BaseModel):
             "cards leave it null."
         ),
     )
+    evaluated_benchmarks: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Names of the benchmarks this paper reports leaderboard results "
+            "on, most-populated leaderboard first. Detail responses only."
+        ),
+    )
+    page_title: Optional[str] = Field(
+        None,
+        description=(
+            "Search-facing HTML title of the paper page, e.g. "
+            "'Kimi K3.1 Pro benchmarks: … | Papers with Code'. Detail "
+            "responses only."
+        ),
+    )
 
     # Hugging Face artifact URLs explicitly linked to this paper. Populated
     # for `source='external'` rows because external rows have no reliable
@@ -227,6 +242,14 @@ class Paper(BaseModel):
             "most popular category link) used by paper feed cards."
         ),
     )
+    linked_hf_artifacts: Optional["LinkedHfArtifacts"] = Field(
+        None,
+        description=(
+            "Hugging Face artifacts stored for this paper by the HF sync, up to "
+            "100 per kind ordered by popularity. Populated only on paper detail "
+            "responses with include_resources=true."
+        ),
+    )
     has_official_implementation: bool = Field(
         default=False,
         description=(
@@ -250,6 +273,13 @@ class Paper(BaseModel):
     )
     x_threads: Optional[List["XThread"]] = Field(
         None, description="X (formerly Twitter) posts introducing this paper"
+    )
+    abstract_mentions: Optional[List["AbstractMention"]] = Field(
+        None,
+        description=(
+            "Catalog methods, benchmarks, and frameworks named in the abstract, "
+            "as character spans of `abstract` (paper detail only)."
+        ),
     )
     tasks: Optional[List["TaskSummary"]] = Field(
         None, description="AI/ML tasks associated with this paper"
@@ -735,6 +765,14 @@ class HfArtifactSummary(BaseModel):
     )
 
 
+class LinkedHfArtifacts(BaseModel):
+    """Stored Hugging Face artifact URLs for one paper, most popular first."""
+
+    models: List[str] = Field(default_factory=list)
+    datasets: List[str] = Field(default_factory=list)
+    spaces: List[str] = Field(default_factory=list)
+
+
 class RepositoryStarHistory(BaseModel):
     """
     Repository star history snapshot.
@@ -1044,6 +1082,28 @@ class MethodSummary(BaseModel):
         return str(v)
 
 
+class AbstractMentionPreview(BaseModel):
+    """Hover-card content, sent with the paper so cards open without a fetch."""
+
+    name: str
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    count: Optional[int] = None
+    detail: Optional[str] = None
+
+
+class AbstractMention(BaseModel):
+    """One linked catalog name in a paper abstract."""
+
+    start: int = Field(..., description="Character offset into the abstract")
+    end: int = Field(..., description="Exclusive end offset")
+    surface: str = Field(..., description="The abstract text at this span")
+    entity_type: Literal["method", "benchmark", "framework"]
+    slug: str
+    name: str
+    preview: Optional[AbstractMentionPreview] = None
+
+
 class FrameworkSummary(BaseModel):
     """Lightweight framework summary embedded in paper responses."""
 
@@ -1151,6 +1211,7 @@ __all__ = [
     "RepositoryTrendingScore",
     "RepositoryTrendingPaper",
     "HfArtifactSummary",
+    "LinkedHfArtifacts",
     "RepositoryStarHistory",
     "RepositoryStarHistoryList",
     "PaperRepository",

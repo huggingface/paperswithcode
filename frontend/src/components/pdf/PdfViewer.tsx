@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { CSSProperties, FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Document, Page } from "react-pdf";
-import type { PDFDocumentProxy, TextItem } from "pdfjs-dist/types/src/display/api";
+import type { PDFDocumentProxy } from "pdfjs-dist/types/src/display/api";
 import "react-pdf/dist/Page/TextLayer.css";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 
@@ -19,6 +19,7 @@ import { PdfOutline } from "./PdfOutline";
 import { clampZoom, stepZoom } from "./pdfZoom";
 import { activeSectionIndex, loadPdfOutline, pdfSectionFromHash, type PdfOutlineEntry } from "./pdfOutline";
 import type { PdfHighlight } from "./pdfCitations";
+import { countMatches, createPdfTextIndex, type PdfTextIndex } from "./pdfTextIndex";
 
 interface PdfViewerProps {
   url: string;
@@ -146,6 +147,13 @@ function LazyPdfPage({
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
   const { paperLinks, onAnnotations } = usePdfPaperLinks(ref, visible, resolveCitation, warmPreviews);
+  // A new renderer makes react-pdf rebuild the text layer, so it changes only
+  // with the highlighted query, not on every reader re-render.
+  const activeSearch = page === activeSearchPage;
+  const renderSearchText = useMemo(
+    () => searchQuery ? ({ str }: { str: string }) => highlightPdfText(str, searchQuery, activeSearch) : undefined,
+    [activeSearch, searchQuery],
+  );
   // Double-buffer zoom changes: the last rendered canvas stays on screen,
   // scaled to the new width, while a hidden canvas renders at full resolution.
   // It replaces the old one only once painted, so zooming never blanks a page.
@@ -224,9 +232,7 @@ function LazyPdfPage({
           onRenderSuccess={rendered}
           onRenderError={shown ? undefined : () => setShownWidth(layerWidth)}
           loading={null}
-          customTextRenderer={searchQuery
-            ? ({ str }) => highlightPdfText(str, searchQuery, page === activeSearchPage)
-            : undefined}
+          customTextRenderer={renderSearchText}
         />
       </div>;
     })}
@@ -302,6 +308,7 @@ export function PdfViewer({
   const scrollRef = useRef<HTMLDivElement>(null);
   const pagesRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<PDFDocumentProxy | null>(null);
+  const textIndex = useRef<PdfTextIndex>();
   const [resolveCitation, setResolveCitation] = useState<PdfCitationResolver>();
   const queryClient = useQueryClient();
   const previewCache = useMemo(() => createPaperPreviewCache(queryClient), [queryClient]);
@@ -331,6 +338,9 @@ export function PdfViewer({
   const [error, setError] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  // The query whose matches are shown, so highlights follow the results rather
+  // than redrawing every page's text layer on each keystroke.
+  const [highlightQuery, setHighlightQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [matches, setMatches] = useState<number[]>([]);
   const [activeMatch, setActiveMatch] = useState(0);
@@ -381,7 +391,9 @@ export function PdfViewer({
     retainLiveResizeScale.current = false;
     pagesRef.current?.style.setProperty("--pdf-live-scale", "1");
     setError("");
+    textIndex.current = undefined;
     setSearchQuery("");
+    setHighlightQuery("");
     setMatches([]);
   }, [initialPage, paperKey, retry]);
 
@@ -477,6 +489,7 @@ export function PdfViewer({
     searchGeneration.current += 1;
     setSearchOpen(false);
     setSearchQuery("");
+    setHighlightQuery("");
     setMatches([]);
     setActiveMatch(0);
     setSearching(false);
@@ -558,11 +571,23 @@ export function PdfViewer({
     return () => window.removeEventListener("keydown", keydown);
   }, [closeSearch, onClose, searchOpen]);
 
+  // Extract the document's text as soon as search opens, so the first query
+  // does not wait for every page to be fetched and parsed.
   useEffect(() => {
-    const pdf = documentRef.current;
+    const index = textIndex.current;
+    if (!searchOpen || !index) return;
+    const pages = index.pages();
+    void (async () => {
+      while (textIndex.current === index && !(await pages.next()).done);
+    })().catch(() => undefined);
+  }, [pages, searchOpen]);
+
+  useEffect(() => {
+    const index = textIndex.current;
     const query = searchQuery.trim().toLocaleLowerCase();
     const generation = ++searchGeneration.current;
-    if (!pdf || !query) {
+    if (!index || !query) {
+      setHighlightQuery("");
       setMatches([]);
       setActiveMatch(0);
       setSearching(false);
@@ -570,27 +595,24 @@ export function PdfViewer({
     }
     setSearching(true);
     const timer = window.setTimeout(() => void (async () => {
+      setHighlightQuery(searchQuery.trim());
+      setMatches([]);
+      setActiveMatch(0);
+      // Publish matches page by page, so the first hit is shown while later
+      // pages are still being read.
       const found: number[] = [];
-      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      for await (const [pageNumber, text] of index.pages()) {
         if (searchGeneration.current !== generation) return;
-        const pdfPage = await pdf.getPage(pageNumber);
-        const content = await pdfPage.getTextContent();
-        const text = content.items.map((item) => "str" in item ? (item as TextItem).str : "").join(" ").toLocaleLowerCase();
-        let offset = 0;
-        while ((offset = text.indexOf(query, offset)) >= 0) {
-          found.push(pageNumber);
-          offset += Math.max(1, query.length);
-        }
+        const count = countMatches(text, query);
+        if (!count) continue;
+        if (!found.length) jumpToPage(pageNumber);
+        for (let match = 0; match < count; match += 1) found.push(pageNumber);
+        setMatches([...found]);
       }
-      if (searchGeneration.current === generation) {
-        setMatches(found);
-        setActiveMatch(0);
-        setSearching(false);
-        if (found[0]) jumpToPage(found[0]);
-      }
+      if (searchGeneration.current === generation) setSearching(false);
     })().catch(() => {
       if (searchGeneration.current === generation) setSearching(false);
-    }), 180);
+    }), 120);
     return () => window.clearTimeout(timer);
     // jumpToPage deliberately reads the current mounted scroll surface.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -694,6 +716,7 @@ export function PdfViewer({
         loading={<div className="pdf-loading" role="status">{chrome === "canvas" ? "Loading paper preview…" : "Loading paper…"}</div>}
         onLoadSuccess={(pdf) => {
           documentRef.current = pdf;
+          textIndex.current = createPdfTextIndex(pdf);
           if (chrome === "reader") setResolveCitation(() => createPdfCitationResolver(pdf, previewCache.lookup));
           setPages(pdf.numPages);
           setError("");
@@ -746,7 +769,7 @@ export function PdfViewer({
             page={pageNumber}
             width={pageWidth}
             aspect={pageAspect}
-            searchQuery={searchQuery.trim()}
+            searchQuery={highlightQuery}
             activeSearchPage={matches[activeMatch]}
             resolveCitation={resolveCitation}
             warmPreviews={previewCache.warm}

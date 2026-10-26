@@ -79,3 +79,26 @@ test("smaller models still fit escaped evidence below their smaller gateway limi
   const fitted = fitPaperContext(original, { ...budget, model: { contextWindow: 200_000, maxTokens: 8000 } });
   assert.ok(Buffer.byteLength(JSON.stringify({ systemPrompt: budget.systemPrompt, tools: [], prompt: fitted })) <= 192 * 1024);
 });
+
+test("trimmed papers report the Markdown bytes kept for offset continuation", () => {
+  const markdown = "word ".repeat(20_000);
+  const original = prompt(`<paper route_id="2609.13356" title="Paper" included_bytes="${Buffer.byteLength(markdown)}" truncated="true"><paper_info>\n{"title":"Paper"}\n</paper_info>\n<paper_markdown_prefix>\n${markdown}\n</paper_markdown_prefix></paper>`);
+  const fitted = fitPaperContext(original, budget);
+  const reported = Number(fitted.match(/included_bytes="(\d+)"/u)![1]);
+  const kept = fitted.match(/<paper_markdown_prefix>\n([\s\S]*?)\n<\/paper_markdown_prefix>/u)![1]!;
+  assert.ok(reported < Buffer.byteLength(markdown));
+  assert.equal(reported, Buffer.byteLength(kept));
+  assert.ok(fitted.includes('truncated="true"'));
+});
+
+test("escaped Markdown counts the raw bytes that offset continuation seeks through", () => {
+  const markdown = "a & b < c > d ".repeat(8000);
+  const original = prompt(`<paper route_id="2609.13356" title="Paper" included_bytes="${Buffer.byteLength(markdown)}" truncated="true"><paper_info>\n{"title":"Paper"}\n</paper_info>\n<paper_markdown_prefix>\n${markdown.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;")}\n</paper_markdown_prefix></paper>`);
+  const fitted = fitPaperContext(original, budget);
+  const reported = Number(fitted.match(/included_bytes="(\d+)"/u)![1]);
+  const kept = fitted.match(/<paper_markdown_prefix>\n([\s\S]*?)\n<\/paper_markdown_prefix>/u)![1]!;
+  const raw = kept.replace(/&(amp|lt|gt);/gu, m => ({ "&amp;": "&", "&lt;": "<", "&gt;": ">" } as Record<string, string>)[m]!);
+  assert.ok(reported < Buffer.byteLength(markdown));
+  assert.equal(reported, Buffer.byteLength(raw));
+  assert.equal(markdown.startsWith(raw), true);
+});

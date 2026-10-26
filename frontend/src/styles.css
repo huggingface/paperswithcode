@@ -313,6 +313,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   transition: border-color 0.15s;
 }
 .icon-btn:hover { border-color: var(--hairline-strong); }
+.header-github-btn { flex: none; }
 
 .hf-signin-btn {
   display: inline-flex;
@@ -431,6 +432,15 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 .breadcrumb a { color: var(--ink-soft); }
 .breadcrumb a:hover { color: var(--ink); }
 .breadcrumb .sep { color: var(--hairline-strong); }
+.breadcrumb a.breadcrumb-external {
+  display: inline-flex;
+  gap: 3px;
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent-text) 40%, transparent);
+  text-underline-offset: 3px;
+}
+.breadcrumb a.breadcrumb-external:hover { text-decoration-color: currentColor; }
 .detail-title {
   font-family: var(--serif);
   font-size: 38px;
@@ -603,7 +613,8 @@ html { scroll-behavior: smooth; }
   .brand-name {
     font-size: 18px;
   }
-  .header-bookmark-btn {
+  .header-bookmark-btn,
+  .header-github-btn {
     display: none;
   }
   .app-header .hf-signin-btn {

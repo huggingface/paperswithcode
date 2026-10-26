@@ -431,3 +431,156 @@ def test_ocr_bucket_redirect_strips_authorization_for_scheme_downgrade():
 
     assert redirected is not None
     assert redirected.get_header("Authorization") is None
+
+
+def _front_matter_pdf() -> bytes:
+    stream = b"BT /F1 12 Tf 72 720 Td (1 MOSI Intelligence 3 Fudan University) Tj ET"
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R "
+        b"/Resources << /Font << /F1 5 0 R >> >> /Annots [6 0 R] >>",
+        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Annot /Subtype /Link /Rect [72 700 300 720] "
+        b"/A << /S /URI /URI (https://huggingface.co/collections/OpenMOSS-Team/moss-image) >> >>",
+    ]
+    body = b"%PDF-1.4\n"
+    offsets = []
+    for number, content in enumerate(objects, start=1):
+        offsets.append(len(body))
+        body += b"%d 0 obj\n%s\nendobj\n" % (number, content)
+    xref = len(body)
+    body += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    body += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    body += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+    )
+    return body
+
+
+def _enrich_context() -> dict:
+    context = _context(project_page=False)
+    context["job"] = {"kind": "enrich-paper"}
+    return context
+
+
+def test_enrich_preflight_supplies_pdf_front_matter_alongside_markdown(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+    fetched = []
+
+    def fetch(url: str, limit: int):
+        fetched.append((url, limit))
+        if "/api/papers/" in url:
+            return b"{}", url
+        if url.endswith(".md"):
+            return PAPER_TEXT, url
+        return _front_matter_pdf(), url
+
+    result = url_preflight.extract_candidates(
+        _enrich_context(), fetch=fetch, source_cache_dir=tmp_path
+    )
+
+    assert result["complete"] is True
+    assert (
+        "https://arxiv.org/pdf/2608.00042",
+        url_preflight.MAX_FRONT_MATTER_PDF_BYTES,
+    ) in fetched
+    front_matter = [
+        item
+        for item in result["source_documents"]
+        if item["kind"] == "paper_front_matter"
+    ]
+    assert len(front_matter) == 1
+    body = Path(front_matter[0]["local_path"]).read_bytes()
+    assert hashlib.sha256(body).hexdigest() == front_matter[0]["sha256"]
+    assert b"Fudan University" in body
+    assert b"https://huggingface.co/collections/OpenMOSS-Team/moss-image" in body
+    # Page-1 PDF text is supplementary; Markdown stays the paper text source.
+    assert result["markdown_available"] is True
+    assert not any(item["kind"] == "paper_pdf" for item in result["source_documents"])
+
+
+def test_enrich_preflight_front_matter_failure_does_not_block(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+
+    def fetch(url: str, _limit: int):
+        if "/api/papers/" in url:
+            return b"{}", url
+        if url.endswith(".md"):
+            return PAPER_TEXT, url
+        raise ValueError("response exceeds limit")
+
+    result = url_preflight.extract_candidates(
+        _enrich_context(), fetch=fetch, source_cache_dir=tmp_path
+    )
+
+    assert result["complete"] is True
+    assert result["errors"] == [{"source": "paper_front_matter", "error": "ValueError"}]
+    assert not any(
+        item["kind"] == "paper_front_matter" for item in result["source_documents"]
+    )
+
+
+def test_enrich_preflight_reuses_fetched_paper_pdf_for_front_matter(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+    monkeypatch.setattr(url_preflight, "validate_paper_text", lambda _body: None)
+    fetched = []
+
+    def fetch(url: str, _limit: int):
+        fetched.append(url)
+        if "/api/papers/" in url:
+            return b"{}", url
+        if url.endswith(".md"):
+            raise urllib.error.HTTPError(url, 404, "not found", {}, None)
+        return _front_matter_pdf(), url
+
+    result = url_preflight.extract_candidates(
+        _enrich_context(), fetch=fetch, source_cache_dir=tmp_path
+    )
+
+    assert fetched.count("https://arxiv.org/pdf/2608.00042") == 1
+    assert {item["kind"] for item in result["source_documents"]} >= {
+        "paper_pdf",
+        "paper_front_matter",
+    }
+
+
+def test_add_evals_preflight_skips_front_matter(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+    context = _context(project_page=False)
+    context["job"] = {"kind": "add-evals"}
+
+    def fetch(url: str, _limit: int):
+        if "/api/papers/" in url:
+            return b"{}", url
+        if url.endswith(".md"):
+            return PAPER_TEXT, url
+        raise AssertionError("add-evals does not read PDF front matter")
+
+    result = url_preflight.extract_candidates(
+        context, fetch=fetch, source_cache_dir=tmp_path
+    )
+
+    assert result["complete"] is True

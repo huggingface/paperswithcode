@@ -76,7 +76,7 @@ the integration test at the application database:
 ```bash
 TEST_PGVECTOR_DATABASE_URL=postgresql://.../pwc_vector_disposable \
 uv run --env-file backend/keys.env pytest \
-  backend/tests/test_paper_embeddings_migration.py
+  backend/tests/paper/test_embeddings_migration.py
 ```
 
 Apply `backend/database/migrations/add_paper_embeddings.sql` only in that
@@ -117,12 +117,16 @@ uv run --env-file backend/keys.env pwc embeddings activate GENERATION_ID --confi
 
 ## Incremental refresh and retention
 
-The hourly `cron-refresh-paper-embeddings.yml` workflow runs at minute 15, after
-the HF daily-paper import at minute 0. It SSHes to the VPS and invokes
-`run_refresh_paper_embeddings.sh`, whose `flock` and 20-minute timeout prevent
-overlapping runs. The job sends at most 500 missing or content-changed latest
-papers to the protected TEI endpoint in batches of 16 and upserts validated,
-normalized 256-dimensional vectors into the active generation.
+The hourly `pwc-cron-refresh-paper-embeddings.timer` runs at minute 15, ordered
+after the HF daily-paper import at minute 0, through `pwc-cron
+refresh_paper_embeddings` (launcher lock and timeout in
+`deploy/cron_launcher.py`; the GitHub workflow of the same name is manual
+dispatch only). The job
+(`.github/workflows/scripts/hourly/refresh_paper_embeddings.py`) sends at most
+500 missing or content-changed latest papers to the protected TEI endpoint in
+batches of 16 (`--limit`/`--batch-size`, or `PWC_EMBEDDING_CRON_LIMIT` and
+`PWC_EMBEDDING_CRON_BATCH_SIZE`) and upserts validated, normalized vectors at
+the active generation's dimension.
 
 The document call uses `prompt_name=document`, matching the full-corpus
 `SentenceTransformer.encode_document` contract. Before each upsert the source

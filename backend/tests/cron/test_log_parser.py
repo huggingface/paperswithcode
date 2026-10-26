@@ -344,3 +344,23 @@ def test_eval_outreach_entrypoint_emits_dashboard_compatible_logs(
     finally:
         for handler in root.handlers:
             handler.close()
+
+
+def test_evaluate_job_health_measures_running_age_from_newest_systemd_start():
+    job = get_cron_job("refresh_paper_embeddings")
+    assert job is not None
+    now = datetime(2026, 10, 20, 14, 17, tzinfo=timezone.utc)
+    evaluated = evaluate_job_health(
+        job,
+        {
+            "status": "success_no_work",
+            "last_run": "2026-10-20 13:20:38",
+            "work_metrics": {},
+        },
+        db_metrics={"last_write": now, "recent_writes": 1},
+        lock_state={"exists": True, "held": False, "stale": False},
+        systemd_status={"last_started_at": "Tue 2026-10-20 14:16:10 UTC"},
+        process_running=True,
+        now=now,
+    )
+    assert evaluated["output_health"]["status"] == "running"

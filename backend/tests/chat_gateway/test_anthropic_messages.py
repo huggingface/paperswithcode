@@ -14,6 +14,7 @@ from backend.services.chat_provider_gateway.anthropic_messages import (
     apply_openrouter_reasoning_policy as _apply_openrouter_reasoning_policy,
     byok_provider_error_code as _byok_provider_error_code,
     huggingface_provider_error_code as _huggingface_provider_error_code,
+    keep_anthropic_request_fields as _keep_anthropic_request_fields,
     optimize_initial_deepseek_payload as _optimize_initial_deepseek_payload,
     payload_contains_tool_use as _payload_contains_tool_use,
     prefer_fastest_openrouter_provider as _prefer_fastest_openrouter_provider,
@@ -392,3 +393,24 @@ def test_gateway_reports_exhausted_sponsorship_not_user_billing():
     assert mapped("hf_org_funded", 402) == "hf_sponsored_unavailable"
     assert mapped("hf_org_funded", 429) is None
     assert mapped("huggingface", 402) == "hf_inference_billing_exhausted"
+
+
+def test_openrouter_extensions_are_dropped_from_caller_payloads():
+    payload = {
+        "model": "deepseek/deepseek-v4",
+        "messages": [{"role": "user", "content": "hi"}],
+        "max_tokens": 1024,
+        "thinking": {"type": "enabled", "budget_tokens": 512},
+        "tools": [],
+        # OpenRouter extensions a funded turn must not choose for itself.
+        "models": ["openai/o9-pro"],
+        "route": "fallback",
+        "plugins": [{"id": "web"}],
+        "transforms": ["middle-out"],
+        "provider": {"only": ["expensive"]},
+    }
+
+    dropped = _keep_anthropic_request_fields(payload)
+
+    assert dropped == ["models", "plugins", "provider", "route", "transforms"]
+    assert set(payload) == {"model", "messages", "max_tokens", "thinking", "tools"}

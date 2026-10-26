@@ -31,9 +31,19 @@ Object.defineProperty(window, "matchMedia", {
 });
 
 if (!window.PointerEvent) {
+  // jsdom has no PointerEvent; keep the pointer fields tests dispatch with.
+  class PointerEventPolyfill extends MouseEvent {
+    readonly pointerId: number;
+    readonly pointerType: string;
+    constructor(type: string, init: PointerEventInit = {}) {
+      super(type, init);
+      this.pointerId = init.pointerId ?? 0;
+      this.pointerType = init.pointerType ?? "";
+    }
+  }
   Object.defineProperty(window, "PointerEvent", {
     configurable: true,
-    value: MouseEvent,
+    value: PointerEventPolyfill,
   });
 }
 

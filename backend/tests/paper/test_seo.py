@@ -125,6 +125,45 @@ def test_search_description_prefers_tldr_and_title_has_arxiv_id():
     )
 
 
+def test_papers_with_results_get_a_benchmark_title():
+    paper = _paper(
+        id="124110",
+        arxiv_id=None,
+        source="external",
+        title="Introducing Kimi K3.1 Pro: Advancing Open Intelligence",
+        evaluated_benchmarks=[
+            "GPQA Diamond",
+            "Humanity's Last Exam (HLE)",
+            "LIBERO",
+            "LIBERO-Long",
+            "MMMU-Pro",
+            "BrowseComp",
+        ],
+    )
+    document = build_paper_seo_document(paper, "124110")
+    assert document.search_title == (
+        "Kimi K3.1 Pro benchmarks: GPQA Diamond, Humanity's Last Exam, LIBERO"
+        " | Papers with Code"
+    )
+
+
+def test_benchmark_title_keeps_curated_type_and_skips_long_names():
+    with_type = build_paper_seo_document(
+        _paper(evaluated_benchmarks=["GPQA Diamond"]), "2607.24653"
+    )
+    assert with_type.search_title.startswith("Kimi K3 Technical Report (arXiv:")
+
+    long_name = build_paper_seo_document(
+        _paper(
+            arxiv_id="2610.22471",
+            title="Has GPT-6-Astra Achieved Embodied Intelligence in the Real World?",
+            evaluated_benchmarks=["RoboMME"],
+        ),
+        "2610.22471",
+    )
+    assert long_name.search_title.endswith("(arXiv:2610.22471) | Papers with Code")
+
+
 def test_unknown_bibliographic_fields_are_omitted():
     document = build_paper_seo_document(
         _paper(arxiv_id=None, source="external", published=None, conference=None),

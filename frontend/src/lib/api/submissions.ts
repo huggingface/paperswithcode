@@ -26,6 +26,7 @@ export class SubmissionsApi {
     status?: PendingEditStatus;
     edit_type?: PendingEditType;
     paper_id?: number;
+    reviewed_by_kind?: "human" | "codex" | "auto";
     limit?: number;
     offset?: number;
   }): Promise<PendingPaperEditsResponse> {
@@ -36,6 +37,16 @@ export class SubmissionsApi {
     const query = searchParams.toString();
     return this.request<unknown>(`/admin/paper-edits${query ? `?${query}` : ""}`)
       .then(parsePendingPaperEditsResponse);
+  }
+
+  revertAutoApproved(
+    hfSubject: string,
+    body: { since_hours?: number; suspend?: boolean; reason?: string } = {},
+  ): Promise<{ reverted: number; skipped: Array<{ event_id: string; reason: string }> }> {
+    return this.request(`/admin/submitters/${encodeURIComponent(hfSubject)}/revert-auto-approved`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
 
   async get(id: number): Promise<PendingPaperEdit> {

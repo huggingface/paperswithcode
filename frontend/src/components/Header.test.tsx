@@ -197,4 +197,24 @@ describe("Header navigation", () => {
     );
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
+
+  it("links the GitHub repository from the header and mobile menu", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Header onOpenSearch={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "GitHub repository" })).toHaveAttribute(
+      "href",
+      "https://github.com/huggingface/paperswithcode",
+    );
+    await user.click(screen.getByRole("button", { name: "Open menu" }));
+    const mobilePanel = document.querySelector(".mobile-nav-panel") as HTMLElement;
+    expect(within(mobilePanel).getByRole("link", { name: "GitHub" })).toHaveAttribute(
+      "href",
+      "https://github.com/huggingface/paperswithcode",
+    );
+  });
 });

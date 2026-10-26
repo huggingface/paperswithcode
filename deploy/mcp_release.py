@@ -19,8 +19,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 try:
+    from deploy import build_sandbox
     from deploy.smoke_test import run_mcp_smoke
 except ModuleNotFoundError:
+    import build_sandbox  # type: ignore[no-redef]
     from smoke_test import run_mcp_smoke  # type: ignore[no-redef]
 
 MCP_ROOT = Path(os.environ.get("PWC_MCP_ROOT", "/srv/paperswithcode/mcp"))
@@ -258,22 +260,42 @@ def prepare_release(sha: str) -> Path:
         release.chmod(0o755)
         return release
     temporary = Path(tempfile.mkdtemp(prefix=f".{sha[:16]}-", dir=MCP_RELEASES))
+    # Installing the MCP project runs its build backend and any sdist builds,
+    # so uv runs as the unprivileged build user with a throwaway cache.
+    cache = Path(tempfile.mkdtemp(prefix=f".{sha[:16]}-cache-", dir=MCP_RELEASES))
     try:
         _extract(sha, temporary)
-        _run(
-            [
-                "uv",
-                "sync",
-                "--locked",
-                "--no-dev",
-                "--no-editable",
-                "--python",
-                "/usr/bin/python3",
-                "--no-managed-python",
-                "--project",
-                str(temporary / "mcp_server"),
-            ]
-        )
+        build_sandbox.lend(temporary)
+        build_sandbox.lend(cache)
+        try:
+            subprocess.run(
+                build_sandbox.command(
+                    [
+                        "/usr/local/bin/uv",
+                        "sync",
+                        "--locked",
+                        "--no-dev",
+                        "--no-editable",
+                        "--python",
+                        "/usr/bin/python3",
+                        "--no-managed-python",
+                        "--project",
+                        str(temporary / "mcp_server"),
+                    ]
+                ),
+                check=True,
+                cwd=temporary,
+                env={
+                    "PATH": "/usr/local/bin:/usr/bin:/bin",
+                    "HOME": str(cache),
+                    "LANG": "C.UTF-8",
+                    "UV_CACHE_DIR": str(cache),
+                },
+            )
+        finally:
+            build_sandbox.reclaim(
+                temporary, allow=build_sandbox.is_venv_python_launcher
+            )
         manifest = _descriptor(temporary, sha)
         (temporary / "manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n"
@@ -283,6 +305,8 @@ def prepare_release(sha: str) -> Path:
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
+    finally:
+        shutil.rmtree(cache, ignore_errors=True)
     validate_release(release)
     return release
 

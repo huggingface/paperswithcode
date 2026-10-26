@@ -21,6 +21,7 @@ from typing import Protocol
 import httpx
 from huggingface_hub.errors import SandboxError
 
+from backend.operator_profile import OPERATOR
 from backend.config import Settings, get_settings
 from backend.services.latex_compiler_qualification_service import (
     QualificationCase,
@@ -270,6 +271,7 @@ def validate_settings(settings: Settings) -> None:
         validate_staging_sandbox_compiler_identity(
             settings.chat_latex_compiler_hf_sandbox_image,
             settings.chat_latex_compiler_hf_sandbox_namespace,
+            OPERATOR.hf_namespace,
         )
     except EnvelopeError as error:
         raise RuntimeError(
@@ -330,7 +332,9 @@ def _validate_qualification_evidence_payload(payload: dict[str, object]) -> None
     ):
         raise ValueError("Qualification evidence does not satisfy its contract")
     try:
-        validate_staging_sandbox_compiler_identity(payload["compiler_image"], "nielsr")
+        validate_staging_sandbox_compiler_identity(
+            payload["compiler_image"], OPERATOR.hf_namespace, OPERATOR.hf_namespace
+        )
     except EnvelopeError as error:
         raise ValueError("Qualification evidence compiler image is invalid") from error
 

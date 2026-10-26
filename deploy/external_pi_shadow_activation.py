@@ -8,7 +8,9 @@ import contextlib
 import importlib
 import json
 import os
+import pwd
 import secrets
+import stat
 import signal
 import subprocess
 import tempfile
@@ -19,8 +21,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
+    from deploy import build_sandbox
     from deploy.external_pi_slot_topology import replica_specs
 except ModuleNotFoundError:
+    import build_sandbox  # type: ignore[no-redef]
     from external_pi_slot_topology import replica_specs  # type: ignore[no-redef]
 
 APP_ROOT = Path("/srv/paperswithcode")
@@ -210,6 +214,20 @@ def temporary_worker_token_file(token: str, directory: Path):
         yield path
     finally:
         path.unlink(missing_ok=True)
+
+
+MAX_REPORT_BYTES = 1024 * 1024
+
+
+def _read_untrusted_report(path: Path) -> bytes:
+    """Read a report written by an unprivileged process without following links."""
+
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_REPORT_BYTES:
+            raise ShadowActivationError("qualification report is not a bounded file")
+        return handle.read(MAX_REPORT_BYTES + 1)[:MAX_REPORT_BYTES]
 
 
 def run_temporary_shadow_qualification(
@@ -663,42 +681,58 @@ def main() -> int:
             return True
 
         def command(evidence: QualificationEvidence, destination: Path) -> None:
-            with temporary_worker_token_file(replica.token, CONFIG_ROOT) as token_file:
+            # The qualifier is release code: run it as pwc-staging (like the
+            # stale probe above), never as root. It gets only its token file
+            # and a private directory for its report.
+            account = pwd.getpwnam("pwc-staging")
+            with (
+                temporary_worker_token_file(replica.token, CONFIG_ROOT) as token_file,
+                tempfile.TemporaryDirectory(prefix="pwc-shadow-report-") as scratch,
+            ):
+                os.chown(token_file, account.pw_uid, account.pw_gid)
+                os.chown(scratch, account.pw_uid, account.pw_gid)
+                report = Path(scratch) / "report.json"
                 subprocess.run(
-                    [
-                        str(python),
-                        "-m",
-                        "backend.scripts.qualify_external_pi_shadow",
-                        "--environment",
-                        "staging",
-                        "--app-root",
-                        str(APP_ROOT),
-                        "--release-dir",
-                        str(release),
-                        "--worker-url",
-                        f"http://127.0.0.1:{resolved.port}",
-                        "--worker-id",
-                        resolved.worker_id,
-                        "--expected-generation",
-                        str(evidence.recovery_generation),
-                        "--initial-generation",
-                        str(evidence.initial_generation),
-                        "--restarted-generation",
-                        str(evidence.restarted_generation),
-                        "--stale-fenced",
-                        "--drain-recovered",
-                        "--qualification-nonce",
-                        evidence.nonce,
-                        "--token-file",
-                        str(token_file),
-                        "--prompt-file",
-                        str(resolved.prompt),
-                        "--report",
-                        str(destination),
-                    ],
+                    build_sandbox.command_as(
+                        "pwc-staging",
+                        [
+                            str(python),
+                            "-m",
+                            "backend.scripts.qualify_external_pi_shadow",
+                            "--environment",
+                            "staging",
+                            "--app-root",
+                            str(APP_ROOT),
+                            "--release-dir",
+                            str(release),
+                            "--worker-url",
+                            f"http://127.0.0.1:{resolved.port}",
+                            "--worker-id",
+                            resolved.worker_id,
+                            "--expected-generation",
+                            str(evidence.recovery_generation),
+                            "--initial-generation",
+                            str(evidence.initial_generation),
+                            "--restarted-generation",
+                            str(evidence.restarted_generation),
+                            "--stale-fenced",
+                            "--drain-recovered",
+                            "--qualification-nonce",
+                            evidence.nonce,
+                            "--token-file",
+                            str(token_file),
+                            "--prompt-file",
+                            str(resolved.prompt),
+                            "--report",
+                            str(report),
+                        ],
+                    ),
                     cwd=release,
+                    env={"PATH": os.defpath, "LANG": "C.UTF-8", "HOME": "/nonexistent"},
                     check=True,
                 )
+                with open(destination, "wb") as handle:
+                    handle.write(_read_untrusted_report(report))
 
         return run_temporary_shadow_qualification(
             environment="staging",

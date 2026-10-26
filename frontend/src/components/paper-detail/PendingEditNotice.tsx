@@ -3,17 +3,17 @@
  * cannot directly mutate the paper. Submissions land in the pending edit
  * queue for admin review.
  *
- * If the signed-in HF username matches a linked author of the paper, the
- * banner adds a short note acknowledging that — the row will still go through
- * review for now, but the API records `is_author = true` for future
- * auto-approval.
+ * Most edits apply immediately and are reviewed afterwards; this notice only
+ * shows where a mode still queues them. Whether an individual edit is held
+ * (an unfamiliar link domain, mass removals, the daily budget) is decided by
+ * the API, which reports the outcome in the submit response.
  */
 
 interface PendingEditNoticeProps {
   isAuthor?: boolean;
 }
 
-export function PendingEditNotice({ isAuthor = false }: PendingEditNoticeProps) {
+export function PendingEditNotice(_props: PendingEditNoticeProps) {
   const staging =
     typeof window !== "undefined" &&
     window.location.hostname === "staging.paperswithcode.co";
@@ -22,14 +22,12 @@ export function PendingEditNotice({ isAuthor = false }: PendingEditNoticeProps) 
       <p className="font-medium">
         {staging
           ? "Test-only: this change stays on staging."
-          : "Your changes will be reviewed by an admin."}
+          : "Your changes go live right away."}
       </p>
       <p className="mt-1 leading-snug">
         {staging
           ? "This exercises staging-local pending behavior and is not queued for production review."
-          : isAuthor
-          ? "We can see this paper is yours. While we're in early access an admin still reviews each edit; this will become automatic for authors soon."
-          : "Submissions are queued for review and don't change the paper page until an admin approves them."}
+          : "Edits are applied immediately and reviewed afterwards. A few, such as links to unfamiliar sites, are held for an admin first."}
       </p>
     </div>
   );

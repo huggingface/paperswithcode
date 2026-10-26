@@ -15,6 +15,7 @@ import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from huggingface_hub.errors import SandboxError
 
+from backend.operator_profile import OPERATOR
 from backend.config import Settings
 from latex_compiler_contract import (
     CompileLimits,
@@ -126,7 +127,9 @@ class HuggingFaceSandboxLatexCompilerTransport:
 
             sandbox_create = sandbox_create or Sandbox.create
             sandbox_connect = sandbox_connect or Sandbox.connect
-        self.image = validate_staging_sandbox_compiler_identity(image, namespace)
+        self.image = validate_staging_sandbox_compiler_identity(
+            image, namespace, OPERATOR.hf_namespace
+        )
         self.namespace = namespace
         self.token = token
         self.private_key = private_key
@@ -441,6 +444,7 @@ def compiler_transport_from_settings(settings: Settings) -> LatexCompilerTranspo
         image = validate_staging_sandbox_compiler_identity(
             settings.chat_latex_compiler_hf_sandbox_image,
             settings.chat_latex_compiler_hf_sandbox_namespace,
+            OPERATOR.hf_namespace,
         )
     except EnvelopeError as error:
         raise RuntimeError(

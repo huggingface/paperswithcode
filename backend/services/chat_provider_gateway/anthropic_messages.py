@@ -240,6 +240,38 @@ def payload_contains_tool_use(payload: bytes) -> bool:
     return b'"type":"tool_use"' in payload or b'"type": "tool_use"' in payload
 
 
+# The Anthropic Messages fields a worker may send. Everything else, notably
+# OpenRouter's own extensions (models/route fallbacks, plugins, transforms,
+# provider), would let a turn pick routes or paid features the funded ledger
+# never priced, so it is dropped; the server sets user, provider and reasoning.
+ANTHROPIC_REQUEST_FIELDS = frozenset(
+    {
+        "model",
+        "messages",
+        "system",
+        "max_tokens",
+        "metadata",
+        "stop_sequences",
+        "stream",
+        "temperature",
+        "top_p",
+        "top_k",
+        "tools",
+        "tool_choice",
+        "thinking",
+    }
+)
+
+
+def keep_anthropic_request_fields(payload: dict[str, Any]) -> list[str]:
+    """Remove caller fields outside the Anthropic Messages schema; return them."""
+
+    dropped = sorted(set(payload) - ANTHROPIC_REQUEST_FIELDS)
+    for key in dropped:
+        del payload[key]
+    return dropped
+
+
 def apply_openrouter_reasoning_policy(
     payload: dict[str, Any], effort: str, *, show_reasoning: bool
 ) -> None:
@@ -353,6 +385,13 @@ class AnthropicMessagesProtocol:
         owner_id = owner()
         effort = getattr(row, "reasoning_effort", None) or "high"
         if provider == "openrouter":
+            dropped = keep_anthropic_request_fields(payload)
+            if dropped:
+                logger.warning(
+                    "chat provider request fields dropped turn=%s fields=%s",
+                    opaque_turn(turn_id),
+                    ",".join(dropped),
+                )
             # Supplemental reconciliation metadata is opaque and cannot identify
             # the HF subject at OpenRouter.
             payload["user"] = opaque_owner(owner_id, settings)

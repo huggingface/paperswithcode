@@ -13,8 +13,11 @@ from backend.models.evaluations import (
     LeaderboardRankSummary,
 )
 from backend.models.papers import (
+    AbstractMention,
+    AbstractMentionPreview,
     AuthorLink,
     FrameworkSummary,
+    LinkedHfArtifacts,
     MethodSummary,
     OrganizationSummary,
     ProjectPage,
@@ -41,6 +44,7 @@ from backend.models.database import (
     PaperProjectPage as DBPaperProjectPage,
     PaperRelation as DBPaperRelation,
     PaperRepository as DBPaperRepository,
+    PaperAbstractMention as DBPaperAbstractMention,
     PaperSuggestedQuestions as DBPaperSuggestedQuestions,
     PaperTask,
     PaperXThread as DBPaperXThread,
@@ -48,11 +52,16 @@ from backend.models.database import (
     Repository as DBRepository,
     Task as DBTask,
 )
+from backend.services.abstract_link_service import abstract_sha, catalog_previews
 from backend.utils.organization_logos import organization_logo_path
 from backend.utils.urls import get_method_source_url, get_paper_route_identifier
 
 # Paper cards show the first three author names (frontend PaperCard).
 CARD_AUTHOR_LINKS = 3
+
+
+# Per-kind cap on stored Hub links returned with detail resources.
+LINKED_HF_ARTIFACT_LIMIT = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,10 +99,14 @@ class PaperRelations:
     repositories: dict[int, list[Repository]] = field(default_factory=dict)
     repository_coverage: dict[int, tuple[bool, int]] = field(default_factory=dict)
     project_pages: dict[int, list[ProjectPage]] = field(default_factory=dict)
+    linked_hf_artifacts: dict[int, LinkedHfArtifacts] = field(default_factory=dict)
     x_threads: dict[int, list[XThread]] = field(default_factory=dict)
     suggested_questions: dict[int, list[str]] = field(default_factory=dict)
+    evaluated_benchmarks: dict[int, list[str]] = field(default_factory=dict)
+    abstract_mentions: dict[int, list[AbstractMention]] = field(default_factory=dict)
 
 
+_MENTION_KIND = {"method": "method", "dataset": "benchmark", "framework": "framework"}
 _RelationValue = TypeVar("_RelationValue")
 _AuthorRow = tuple[int, int, str, str | None, str | None]
 
@@ -166,8 +179,58 @@ class PaperRelationLoader:
         self._load_card_relations(unique_ids, relations, author_link_limit=None)
         self._load_detail_relations(unique_ids, relations)
         self._load_suggested_questions(unique_ids, relations)
+        self._load_evaluated_benchmarks(unique_ids, relations)
+        self._load_abstract_mentions(unique_ids, relations)
         self._load_repository_coverage(unique_ids, relations)
         return relations
+
+    def _load_abstract_mentions(
+        self,
+        paper_ids: list[int],
+        relations: PaperRelations,
+    ) -> None:
+        """Linked abstract spans, only while they match the current abstract."""
+        rows = (
+            self.db.query(DBPaperAbstractMention, DBPaper.abstract)
+            .join(DBPaper, DBPaper.id == DBPaperAbstractMention.paper_id)
+            .filter(
+                DBPaperAbstractMention.paper_id.in_(paper_ids),
+                DBPaperAbstractMention.linked.is_(True),
+            )
+            .order_by(
+                DBPaperAbstractMention.paper_id, DBPaperAbstractMention.start_offset
+            )
+            .all()
+        )
+        current = [
+            mention
+            for mention, abstract in rows
+            if mention.abstract_sha == abstract_sha(abstract or "")
+        ]
+        previews = catalog_previews(
+            self.db, {(m.entity_type, m.entity_id) for m in current}
+        )
+        for mention in current:
+            preview = previews.get((mention.entity_type, mention.entity_id))
+            if preview is None:
+                continue  # entity deleted since it was judged
+            relations.abstract_mentions.setdefault(mention.paper_id, []).append(
+                AbstractMention(
+                    start=mention.start_offset,
+                    end=mention.end_offset,
+                    surface=mention.surface,
+                    entity_type=_MENTION_KIND[mention.entity_type],
+                    slug=preview.slug,
+                    name=preview.name,
+                    preview=AbstractMentionPreview(
+                        name=preview.card_name,
+                        description=preview.description,
+                        image_url=preview.image_url,
+                        count=preview.count,
+                        detail=preview.detail,
+                    ),
+                )
+            )
 
     def _load_suggested_questions(
         self,
@@ -184,6 +247,33 @@ class PaperRelationLoader:
         )
         for paper_id, questions in rows:
             relations.suggested_questions[paper_id] = questions
+
+    def _load_evaluated_benchmarks(
+        self,
+        paper_ids: list[int],
+        relations: PaperRelations,
+    ) -> None:
+        """Benchmarks each paper has results on, most-populated leaderboard first."""
+        relations.evaluated_benchmarks = {paper_id: [] for paper_id in paper_ids}
+        rows = (
+            self.db.query(DBEvaluation.paper_id, DBDataset.id, DBDataset.name)
+            .join(DBDataset, DBEvaluation.dataset_id == DBDataset.id)
+            .filter(DBEvaluation.paper_id.in_(paper_ids))
+            .group_by(DBEvaluation.paper_id, DBDataset.id, DBDataset.name)
+            .all()
+        )
+        if not rows:
+            return
+        leaderboard_sizes = dict(
+            self.db.query(DBEvaluation.dataset_id, func.count(DBEvaluation.id))
+            .filter(DBEvaluation.dataset_id.in_({row[1] for row in rows}))
+            .group_by(DBEvaluation.dataset_id)
+            .all()
+        )
+        for paper_id, dataset_id, name in sorted(
+            rows, key=lambda row: (-leaderboard_sizes.get(row[1], 0), row[2])
+        ):
+            relations.evaluated_benchmarks[paper_id].append(name)
 
     @staticmethod
     def _family_join(requested, family):
@@ -339,6 +429,60 @@ class PaperRelationLoader:
                 XThread.model_validate(row, from_attributes=True),
             )
 
+        return relations
+
+    def load_linked_hf_artifacts(
+        self,
+        paper_ids: Sequence[int],
+        relations: PaperRelations,
+    ) -> PaperRelations:
+        """Add each paper's most popular stored Hub links for detail pages."""
+        unique_ids = self._unique_ids(paper_ids)
+        if not unique_ids:
+            return relations
+
+        popularity_rank = (
+            func.row_number()
+            .over(
+                partition_by=(DBPaperHfArtifact.paper_id, DBHfArtifact.kind),
+                order_by=(
+                    DBHfArtifact.trending_score.desc().nullslast(),
+                    DBHfArtifact.downloads.desc().nullslast(),
+                    DBHfArtifact.likes.desc().nullslast(),
+                    DBHfArtifact.repo_id,
+                ),
+            )
+            .label("popularity_rank")
+        )
+        ranked_hf_artifacts = (
+            self.db.query(
+                DBPaperHfArtifact.paper_id,
+                DBHfArtifact.kind,
+                DBHfArtifact.url,
+                popularity_rank,
+            )
+            .join(
+                DBHfArtifact,
+                DBPaperHfArtifact.hf_artifact_id == DBHfArtifact.id,
+            )
+            .filter(DBPaperHfArtifact.paper_id.in_(unique_ids))
+            .subquery()
+        )
+        hf_artifact_rows = (
+            self.db.query(
+                ranked_hf_artifacts.c.paper_id,
+                ranked_hf_artifacts.c.kind,
+                ranked_hf_artifacts.c.url,
+            )
+            .filter(ranked_hf_artifacts.c.popularity_rank <= LINKED_HF_ARTIFACT_LIMIT)
+            .order_by(ranked_hf_artifacts.c.popularity_rank)
+            .all()
+        )
+        for paper_id, kind, url in hf_artifact_rows:
+            linked = relations.linked_hf_artifacts.setdefault(
+                int(paper_id), LinkedHfArtifacts()
+            )
+            getattr(linked, f"{kind}s").append(url)
         return relations
 
     def _load_card_relations(

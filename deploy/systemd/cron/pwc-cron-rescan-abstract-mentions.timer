@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Re-link every abstract after catalog changes
+
+[Timer]
+OnCalendar=*-*-* 03:21:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-rescan-abstract-mentions.service
+
+[Install]
+WantedBy=timers.target

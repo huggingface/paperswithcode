@@ -10,9 +10,17 @@
 .method-hero-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(360px, 560px);
-  gap: 56px;
+  gap: 48px;
   align-items: start;
 }
+/* Tighter than the generic tag hero: the breadcrumb already separates it from the nav. */
+.tag-hero.method-hero-grid {
+  padding: 8px 0 28px;
+  margin-bottom: 24px;
+}
+.method-hero-grid .tag-hero-eyebrow { margin-bottom: 8px; }
+.method-hero-grid .research-follow { margin: 12px 0 10px; }
+.method-hero-grid .tag-hero-meta { margin-top: 20px; }
 .method-hero-grid--wide-figure {
   grid-template-columns: minmax(0, 1fr) minmax(480px, 640px);
 }
@@ -23,7 +31,7 @@
   padding: 16px 16px 12px;
   margin: 0;
   box-shadow: 0 1px 0 rgba(0,0,0,0.02);
-  align-self: center;
+  align-self: start;
 }
 .method-figure-svg {
   width: 100%;
@@ -78,7 +86,7 @@
   color: var(--ink-soft);
   max-width: 720px;
   line-height: 1.6;
-  margin-top: 16px;
+  margin-top: 12px;
   text-wrap: pretty;
 }
 .method-description p {
@@ -131,7 +139,7 @@
   font-size: 1em;
 }
 .method-source {
-  margin-top: 22px;
+  margin-top: 18px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -187,7 +195,8 @@
 }
 .method-hero-title {
   font-family: var(--mono);
-  font-size: 48px;
+  font-size: 40px;
+  margin-bottom: 0;
   letter-spacing: -0.01em;
 }
 .method-trending-icon {
@@ -322,7 +331,7 @@
 }
 .side-method-row .method-chip { font-size: 10.5px; padding: 3px 8px; }
 @media (max-width: 880px) {
-  .method-hero-title { font-size: 40px; }
+  .method-hero-title { font-size: 34px; }
 }
 @media (max-width: 640px) {
   .method-hero-title { font-size: 30px; }

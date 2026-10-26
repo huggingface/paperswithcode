@@ -415,6 +415,67 @@ describe("PdfViewer resize rendering", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it("swells ticks under a dragged finger and jumps to the section where it lifts", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: scrollTo });
+    window.history.replaceState(null, "", "/paper/2609.18063/read");
+    render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load outlined PDF" }));
+    const rail = await screen.findByRole("button", { name: "Table of contents" });
+    const ticks = [...rail.querySelectorAll<HTMLElement>(".pdf-outline-tick")];
+    ticks.forEach((tick, position) => vi.spyOn(tick, "getBoundingClientRect").mockReturnValue({ top: position * 10, height: 2 } as DOMRect));
+
+    rail.focus();
+    fireEvent.pointerDown(rail, { pointerType: "touch", pointerId: 1, clientY: 0 });
+    expect(ticks[0]).toHaveClass("is-scrubbed");
+    expect(document.querySelector(".pdf-outline-scrub-label")).toBeNull();
+    fireEvent.pointerMove(rail, { pointerType: "touch", pointerId: 1, clientY: 25 });
+    expect(ticks[2]).toHaveClass("is-scrubbed");
+    expect(ticks[2].style.getPropertyValue("--pop")).toBe("1");
+    expect(Number(ticks[1].style.getPropertyValue("--pop"))).toBeCloseTo(2 / 3);
+    expect(document.querySelector(".pdf-outline-scrub-label")).toHaveTextContent("SSD Streaming Expert Layers");
+
+    fireEvent.pointerUp(rail, { pointerType: "touch", pointerId: 1, clientY: 25 });
+    fireEvent.click(rail);
+    expect(window.location.hash).toBe("#pdf-section-2");
+    expect(scrollTo).toHaveBeenCalled();
+    expect(rail).toHaveAttribute("aria-expanded", "false");
+    expect(rail).not.toHaveFocus();
+    expect(document.querySelector(".pdf-outline-scrub-label")).toBeNull();
+    expect(ticks[2]).not.toHaveClass("is-scrubbed");
+
+    // A plain tap still toggles the list open.
+    fireEvent.pointerDown(rail, { pointerType: "touch", pointerId: 2, clientY: 0 });
+    fireEvent.pointerUp(rail, { pointerType: "touch", pointerId: 2, clientY: 0 });
+    fireEvent.click(rail);
+    expect(rail).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("highlights the section list entry for the tick under the mouse", async () => {
+    render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load outlined PDF" }));
+    const rail = await screen.findByRole("button", { name: "Table of contents" });
+    rail.querySelectorAll<HTMLElement>(".pdf-outline-tick").forEach((tick, position) => {
+      vi.spyOn(tick, "getBoundingClientRect").mockReturnValue({ top: position * 10, height: 2 } as DOMRect);
+    });
+    const panel = rail.closest("nav")!.querySelector<HTMLElement>(".pdf-outline-panel")!;
+    Object.defineProperty(panel, "clientHeight", { configurable: true, value: 30 });
+    panel.querySelectorAll("li").forEach((entry, position) => {
+      Object.defineProperty(entry, "offsetTop", { configurable: true, value: position * 20 });
+      Object.defineProperty(entry, "offsetHeight", { configurable: true, value: 20 });
+    });
+
+    fireEvent.pointerMove(rail, { pointerType: "mouse", clientY: 31 });
+    expect(screen.getByRole("link", { name: "Evaluation" })).toHaveClass("is-scrubbed");
+    expect(screen.getByRole("link", { name: "System Design" })).not.toHaveClass("is-scrubbed");
+    // The panel centres the entry (60–80px) in its 30px view.
+    expect(panel.scrollTop).toBe(55);
+    expect(document.querySelector(".pdf-outline-scrub-label")).toBeNull();
+
+    fireEvent.pointerLeave(rail, { pointerType: "mouse" });
+    expect(panel.querySelector(".is-scrubbed")).toBeNull();
+  });
+
   it("opens a #pdf-section deep link instead of the remembered page", async () => {
     const placeholderHeightsAtScroll: string[] = [];
     const scrollTo = vi.fn(function (this: HTMLElement) {

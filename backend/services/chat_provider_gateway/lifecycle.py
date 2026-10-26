@@ -380,12 +380,18 @@ class ProviderCallLifecycle:
             raise HTTPException(status_code=403, detail="Capability rejected") from None
         record_gateway_timing(settings, turn_id, received_at=datetime.now(UTC))
         token = self.authenticate()
-        parsed = protocol.parse(await request.body())
+        # Authorize (and meter) the token and turn once, before reading or
+        # decoding a body of up to 8 MiB; then bind the parsed model to the
+        # capability, as validate(model=...) would, without metering again.
         try:
-            row = self.authorize(token, parsed.capability_model)
+            row = self.authorize(token, None)
         except HTTPException:
             protocol.observe_rejection("capability_scope")
             raise
+        parsed = protocol.parse(await request.body())
+        if parsed.capability_model is not None and row.model != parsed.capability_model:
+            protocol.observe_rejection("capability_scope")
+            raise HTTPException(status_code=403, detail="Capability rejected")
         call = protocol.prepare(
             parsed, row, self.db, lambda: self.owner(row), turn_id=turn_id
         )

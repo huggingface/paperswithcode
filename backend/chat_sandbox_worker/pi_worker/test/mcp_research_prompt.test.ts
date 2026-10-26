@@ -59,6 +59,7 @@ test("MCP research turns are sandbox-free and mention every registered tool", ()
   assert.match(rendered, /Call pwc_get_framework with the slug from the framework lookup index, or pwc_list_frameworks/u);
   assert.match(rendered, /When a paper is in view[^.]*do not call pwc_get_method with the paper's title, model name, or acronym/u);
   assert.match(rendered, /When the method index does not list it, call pwc_get_method/u);
+  assert.match(rendered, /about what a specific paper says[^]*call pwc_read_paper for that paper before answering/u);
   assert.match(rendered, /When a conversation opens without a paper in view[^.]*call at least one catalog tool before answering/u);
   assert.match(rendered, /Read a bare topic or short phrase[^.]*as a request for the key and recent papers/u);
   assert.match(rendered, /For latest, newest, recent[^.]*do not rely on pwc_search_papers/u);

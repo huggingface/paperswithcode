@@ -21,6 +21,7 @@ from backend.tests.paper.markdown_harness import (
 def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
     job = object.__new__(MODULE.PaperMarkdownBackfillJob)
     job._prepare_external_pages = lambda: {}
+    job._fresh_paper_keys = set
     job.settings = type(
         "Settings",
         (),
@@ -232,16 +233,60 @@ def test_live_repair_fallback_prioritizes_missing_work_and_respects_mode(
     assert papers[1]["arxiv_id"] not in [item["arxiv_id"] for item in candidates]
 
 
-def test_repair_dispatch_waits_for_existing_remote_worker():
+def _planned_candidates(monkeypatch, job, candidates):
+    planned = []
+    chunks = MODULE.chunks
+
+    def record(items, size):
+        planned.extend(items)
+        return chunks(items, size)
+
+    monkeypatch.setattr(MODULE, "chunks", record)
+    job._budget_decision = Mock(return_value={"affordable_jobs": 0})
+    job._launch(candidates)
+    return [item["arxiv_id"] for item in planned]
+
+
+def test_repair_dispatches_beside_workers_with_readable_manifests(monkeypatch):
     job = _scheduler(execute=True, confirm=True, full=False)
     job._remote_jobs = Mock(
         return_value=[SimpleNamespace(id="existing", stage="RUNNING")]
     )
     job._active_jobs = Mock(side_effect=lambda jobs: jobs)
-    entry = {**_candidates(1)[0], "replace_invalid_sha256": "original-hash"}
-    job._budget_decision = Mock()
-    assert job._launch([entry]) == []
-    job._budget_decision.assert_not_called()
+    busy, repair = _candidates(2)
+    repair["replace_invalid_sha256"] = "original-hash"
+    job._busy_paper_keys = Mock(return_value=({MODULE.entry_paper_key(busy)}, True))
+
+    assert _planned_candidates(monkeypatch, job, [busy, repair]) == [repair["arxiv_id"]]
+
+
+def test_unreadable_active_manifest_defers_only_repairs(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job._remote_jobs = Mock(
+        return_value=[SimpleNamespace(id="existing", stage="RUNNING")]
+    )
+    job._active_jobs = Mock(side_effect=lambda jobs: jobs)
+    missing, repair = _candidates(2)
+    repair["replace_invalid_sha256"] = "original-hash"
+    job._busy_paper_keys = Mock(return_value=(set(), False))
+
+    assert _planned_candidates(monkeypatch, job, [missing, repair]) == [
+        missing["arxiv_id"]
+    ]
+
+
+def test_busy_keys_report_unreadable_active_manifests():
+    job = _scheduler(execute=False, confirm=False)
+    job.filesystem = Mock()
+    job.filesystem.open.side_effect = OSError("unavailable")
+    running = SimpleNamespace(
+        id="ocr",
+        stage="RUNNING",
+        labels={"job_type": "ocr", "run_id": "live-1", "shard_id": "00000"},
+    )
+
+    assert job._busy_paper_keys([running]) == (set(), False)
+    assert job._busy_paper_keys([]) == (set(), True)
 
 
 def test_full_lane_repairs_small_invalid_objects_outside_the_live_window(

@@ -7,6 +7,7 @@ import socket
 import urllib.error
 import uuid
 from contextlib import nullcontext
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -411,7 +412,7 @@ def test_immutable_runtime_build_reuse_and_failed_cleanup(tmp_path: Path):
     runtimes = tmp_path / "runtimes"
     builds = 0
 
-    def build(command, *, env, check):
+    def build(command, *, cwd, env, check):
         nonlocal builds
         builds += 1
         target = Path(env["UV_PROJECT_ENVIRONMENT"])
@@ -467,7 +468,7 @@ def test_runtime_builder_uses_stable_absolute_uv_path(
     monkeypatch.setattr(runtime_module, "UV_BINARY", uv)
     command_seen: list[str] = []
 
-    def build(command, *, env, check):
+    def build(command, *, cwd, env, check):
         command_seen.extend(command)
         assert env["UV_PYTHON"] == "/usr/bin/python3"
         assert env["UV_PYTHON_PREFERENCE"] == "only-system"
@@ -494,6 +495,10 @@ def test_legacy_bridge_flag_is_explicit_on_deploy_parser(environment: str):
     args = parser.parse_args([environment, "a" * 40, "--legacy-bridge"])
     assert args.legacy_bridge is True
     assert args.qualify_only is False
+    # The flag still parses, but the fixed-port bridge is retired.
+    args.confirm = "DEPLOY_PRODUCTION"
+    with pytest.raises(deploy_cli.DeployError, match="--legacy-bridge is retired"):
+        deploy_cli.deploy(args)
 
 
 @pytest.fixture(autouse=True)
@@ -1284,6 +1289,130 @@ def test_next_deploy_refuses_while_the_displaced_slot_still_streams(
 
     assert events == []
     assert journals == []
+
+
+def _drained_status(minutes: float, **counts: int) -> dict:
+    started = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+    return {
+        "accepting_chat_turns": False,
+        "drain_started_at": started.isoformat(),
+        "active_http_requests": 0,
+        "active_chat_streams": 0,
+        "active_gateway_streams": 0,
+        **counts,
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "stale"),
+    [
+        (_drained_status(11, active_http_requests=2), True),
+        (_drained_status(9, active_http_requests=2), False),
+        (_drained_status(60, active_http_requests=2, active_chat_streams=1), False),
+        (
+            _drained_status(60, active_http_requests=2, active_gateway_streams=1),
+            False,
+        ),
+        ({**_drained_status(60), "accepting_chat_turns": True}, False),
+        ({**_drained_status(60), "drain_started_at": None}, False),
+    ],
+)
+def test_bounded_drain_applies_only_to_plain_http_past_the_timeout(
+    status: dict, stale: bool
+):
+    assert deploy_cli._drain_is_stale(status) is stale
+
+
+def _bounded_reap_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: dict
+) -> list[tuple]:
+    events: list[tuple] = []
+    monkeypatch.setattr(deploy_cli, "_unix_json", lambda *_args, **_kwargs: status)
+    monkeypatch.setattr(
+        deploy_cli, "run", lambda command, **_kwargs: events.append(tuple(command))
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "log_event",
+        lambda action, environment, result, **details: events.append(
+            (action, environment, result, details["slot"])
+        ),
+    )
+    monkeypatch.setattr(deploy_cli, "_slot_release", lambda *_args: tmp_path)
+    monkeypatch.setattr(
+        deploy_cli, "validate_manifest", lambda *_args: {"release_id": "old"}
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda environment, slot, release_id, **_kwargs: events.append(
+            ("external", environment, slot, release_id)
+        ),
+    )
+    return events
+
+
+def test_reap_force_stops_a_slot_stuck_on_plain_http_past_the_bounded_drain(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """2026-10-23: green reported active_http_requests=2 with no streams for
+    45+ minutes after its drain, and every pwc-reap and pwc-deploy refused."""
+    events = _bounded_reap_fixture(
+        tmp_path, monkeypatch, _drained_status(45, active_http_requests=2)
+    )
+
+    assert deploy_cli._reap_draining_slot("production", "green") is None
+    assert events == [
+        ("forced-reap", "production", "success", "green"),
+        ("systemctl", "stop", "paperswithcode-production-backend@green.service"),
+        ("systemctl", "stop", "paperswithcode-production-backend@green.socket"),
+        ("external", "production", "green", "old"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        _drained_status(5, active_http_requests=2),
+        _drained_status(45, active_http_requests=1, active_chat_streams=1),
+        _drained_status(45, active_http_requests=1, active_gateway_streams=1),
+    ],
+)
+def test_reap_still_waits_for_streams_and_young_drains(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: dict
+):
+    events = _bounded_reap_fixture(tmp_path, monkeypatch, status)
+
+    assert deploy_cli._reap_draining_slot("production", "green") == status
+    assert events == []
+
+
+def test_prepare_slot_reuses_a_slot_stuck_on_plain_http_past_the_bounded_drain(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    logged: list[str] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_unix_json",
+        lambda *_args, **_kwargs: _drained_status(45, active_http_requests=2),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "log_event",
+        lambda action, *_args, **_kwargs: logged.append(action),
+    )
+
+    class Stopped(Exception):
+        pass
+
+    def systemctl(command, **_kwargs):
+        raise Stopped(command)
+
+    monkeypatch.setattr(deploy_cli.subprocess, "run", systemctl)
+
+    with pytest.raises(Stopped):
+        deploy_cli._prepare_slot("production", "green", Path("r"), Path("rt"))
+    assert logged == ["forced-reap"]
 
 
 def test_deferred_drain_without_external_pi_keeps_the_rollback_target(

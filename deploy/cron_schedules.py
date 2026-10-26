@@ -121,6 +121,15 @@ TIMERS: tuple[TimerSpec, ...] = (
         ),
         after=("pwc-cron-import-hf-daily-papers",),
     ),
+    # Fresh lane: papers indexed in the last 24 hours get layout OCR on two
+    # dedicated small-shard slots within minutes, under their own lane lock.
+    TimerSpec(
+        job="paper_markdown_backfill",
+        unit_name="pwc-cron-paper-markdown-fresh",
+        on_calendar=("*-*-* *:00/5:00",),
+        description="Dispatch layout OCR for papers indexed in the last day",
+        args=("--lane", "fresh", "--execute", "--confirm"),
+    ),
     TimerSpec(
         job="enqueue_hf_daily_paper_curation",
         on_calendar=("*-*-* *:27:00",),
@@ -166,6 +175,16 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="post_x_insight",
         on_calendar=("*-*-* 09,17:43:00",),
         description="Post a SOTA, trend, or roundup insight to X twice daily",
+    ),
+    TimerSpec(
+        job="link_abstract_mentions",
+        on_calendar=("*-*-* *:51:00",),
+        description="Link catalog names in new and changed paper abstracts",
+    ),
+    TimerSpec(
+        job="rescan_abstract_mentions",
+        on_calendar=("*-*-* 03:21:00",),
+        description="Re-link every abstract after catalog changes",
     ),
     TimerSpec(
         job="warm_paper_suggested_questions",
@@ -232,6 +251,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="sync_surge_chartography",
         on_calendar=("*-*-* *:38:00",),
         description="Sync Surge AI Chartography leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_frontiercs_2",
+        on_calendar=("*-*-* *:43:00",),
+        description="Sync FrontierCS 2 leaderboard hourly",
     ),
     TimerSpec(
         job="sync_physics_iq_verified",

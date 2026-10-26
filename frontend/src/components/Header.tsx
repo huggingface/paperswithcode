@@ -12,7 +12,7 @@ import {
 } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 
-type HeaderIconName = "search" | "bookmark" | "menu" | "close";
+type HeaderIconName = "search" | "bookmark" | "menu" | "close" | "github";
 
 const HeaderIcon: React.FC<{ name: HeaderIconName; size?: number }> = ({ name, size = 14 }) => {
   const paths: Record<HeaderIconName, React.ReactNode> = {
@@ -20,6 +20,7 @@ const HeaderIcon: React.FC<{ name: HeaderIconName; size?: number }> = ({ name, s
     bookmark: <path d="M4 2h8v12l-4-3-4 3V2z" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="round" />,
     menu: <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />,
     close: <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />,
+    github: <path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />,
   };
 
   return (
@@ -35,6 +36,7 @@ interface HeaderProps {
 
 const FEEDBACK_URL =
   "https://github.com/huggingface/paperswithcode-feedback/issues";
+const GITHUB_URL = "https://github.com/huggingface/paperswithcode";
 const CANONICAL_FOLLOWING_URL = "https://paperswithcode.co/following";
 // A new key per announcement, so readers who closed an earlier one still see it.
 const ANNOUNCEMENT_DISMISSED_KEY = "pwc:announcement:following-feed:v1:dismissed";
@@ -188,6 +190,16 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
           >
             Submit feedback
           </a>
+          <a
+            className="icon-btn header-github-btn"
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="GitHub repository"
+            title="GitHub repository"
+          >
+            <HeaderIcon name="github" size={14} />
+          </a>
           <button className="search-trigger" onClick={onOpenSearch}>
             <HeaderIcon name="search" size={13} />
             <span>Search papers, authors, domains…</span>
@@ -292,6 +304,15 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
               onClick={closeMobile}
             >
               Submit feedback
+            </a>
+            <a
+              className="mobile-nav-link"
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer"
+              onClick={closeMobile}
+            >
+              GitHub
             </a>
             {!authDisabled && (
               <NavLink to="/saved" className="mobile-nav-link" onClick={closeMobile}>

@@ -111,6 +111,7 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     ),
     "sync_vals_finance_agent": ("backend/services/vals_finance_agent_sync_service.py",),
     "sync_surge_chartography": ("backend/services/surge_chartography_sync_service.py",),
+    "sync_frontiercs_2": ("backend/services/frontiercs_2_sync_service.py",),
     "sync_frontiercode": ("backend/services/frontiercode_sync_service.py",),
     "sync_coarena": ("backend/services/coarena_sync_service.py",),
     "sync_arc_prize": ("backend/services/arc_prize_sync_service.py",),
@@ -213,6 +214,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "sync_surge_chartography": (
         "backend/tests/evaluation/test_surge_chartography_sync.py",
     ),
+    "sync_frontiercs_2": ("backend/tests/evaluation/test_frontiercs_2_sync.py",),
     "sync_frontiercode": ("backend/tests/evaluation/test_frontiercode_sync.py",),
     "sync_coarena": ("backend/tests/evaluation/test_coarena_sync.py",),
     "sync_arc_prize": ("backend/tests/evaluation/test_arc_prize_sync.py",),

@@ -166,11 +166,26 @@ def unsubscribe(token: str, db: Session = Depends(get_database_session)):
     return "<h1>You are unsubscribed</h1><p>Your research follows are unchanged.</p>"
 
 
+MAX_WEBHOOK_BYTES = 100_000
+
+
+async def _bounded_body(request: Request, limit: int) -> bytes:
+    """Read at most ``limit`` bytes, refusing before buffering anything larger."""
+
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > limit:
+        raise HTTPException(413, "Webhook too large")
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > limit:
+            raise HTTPException(413, "Webhook too large")
+    return bytes(body)
+
+
 @router.post("/research/resend-webhook", status_code=204)
 async def resend_webhook(request: Request, db: Session = Depends(get_database_session)):
-    body = await request.body()
-    if len(body) > 100_000:
-        raise HTTPException(413, "Webhook too large")
+    body = await _bounded_body(request, MAX_WEBHOOK_BYTES)
     try:
         event = verify_webhook(
             body, request.headers, get_settings().resend_webhook_secret

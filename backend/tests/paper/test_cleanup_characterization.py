@@ -290,9 +290,9 @@ def _related_paper(paper_id, title):
     ("loader_method", "include_resources", "expected_queries"),
     [
         ("load_cards", False, 7),
-        ("load_details", False, 13),
+        ("load_details", False, 15),
         ("load_cards", True, 10),
-        ("load_details", True, 16),
+        ("load_details", True, 18),
     ],
 )
 @pytest.mark.parametrize(
@@ -453,6 +453,7 @@ FRONTEND_PAPER_FIELDS = {
     "hf_datasets",
     "hf_spaces",
     "hf_artifact_summary",
+    "linked_hf_artifacts",
     "tasks",
     "methods",
     "introduced_benchmarks",

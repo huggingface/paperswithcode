@@ -12,6 +12,7 @@ import type { Paper } from "@/lib/api/papers.types";
 import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
 import { refreshPaperQueries } from "@/lib/queryInvalidation";
 import { useToast } from "@/hooks/use-toast";
 import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
@@ -145,10 +146,17 @@ export function EditTasksDialog({
   const updateTasksMutation = useMutation({
     mutationFn: async ({ paperId, taskIds }: { paperId: string; taskIds: number[] }) => {
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: parseInt(paperId),
           edit_type: "tasks",
           proposed_payload: { task_ids: taskIds },
+        });
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId, arxivId],
+          queuedDescription:
+            "Thanks! An admin will review your proposed task changes shortly.",
         });
         return null;
       }
@@ -210,11 +218,6 @@ export function EditTasksDialog({
     },
     onSuccess: (updatedPaper) => {
       if (submitMode === "pending") {
-        toast({
-          title: "Edit submitted for review",
-          description:
-            "Thanks! An admin will review your proposed task changes shortly.",
-        });
         onSuccess?.();
         onOpenChange(false);
         return;

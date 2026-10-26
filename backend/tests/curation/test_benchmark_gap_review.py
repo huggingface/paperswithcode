@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import uuid
@@ -51,6 +52,7 @@ from backend.services.benchmark_gap_service import (
 from backend.services.codex_add_evals_service import CodexPaperJobService
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
+    _retryable_validation,
 )
 from jobs import curation_api
 
@@ -385,23 +387,44 @@ def test_create_refuses_duplicates_of_existing_catalog_rows(db):
 
     with pytest.raises(ValueError, match="dataset 77.*map_existing"):
         service(db).apply_add_benchmark(job, create_mutation())
-    with pytest.raises(ValueError, match="duplicates metric 3"):
+
+
+def _respelled_overall_accuracy(direction: str) -> list[dict]:
+    return [
+        {
+            "new_metric": {
+                "name": "overall accuracy",
+                "full_name": "Overall accuracy",
+                "direction": direction,
+                "description": "Share of correct shapes.",
+            }
+        }
+    ]
+
+
+def test_create_reuses_an_existing_metric_proposed_under_a_new_spelling(db):
+    candidate, job, _source, _parent = creation_setup(db)
+
+    service(db).apply_add_benchmark(
+        job,
+        create_mutation(metrics=_respelled_overall_accuracy("higher_is_better")),
+    )
+
+    dataset = db.query(Dataset).filter(Dataset.slug == "modelnet40").one()
+    task = db.query(Task).filter(Task.slug == "3d-shape-classification").one()
+    assert db.query(Metric).count() == 1
+    assert db.get(TaskDatasetMetric, (task.id, dataset.id, 3)) is not None
+    assert candidate.resolution["metric_ids"] == [3]
+    assert candidate.resolution["created"]["metric_ids"] == []
+
+
+def test_create_refuses_a_respelled_metric_with_the_opposite_direction(db):
+    _candidate, job, _source, _parent = creation_setup(db)
+
+    with pytest.raises(ValueError, match="duplicates metric 3.*higher_is_better"):
         service(db).apply_add_benchmark(
             job,
-            create_mutation(
-                new_task=None,
-                existing_task_id=263,
-                metrics=[
-                    {
-                        "new_metric": {
-                            "name": "overall accuracy",
-                            "full_name": "Overall accuracy",
-                            "direction": "higher_is_better",
-                            "description": "Share of correct shapes.",
-                        }
-                    }
-                ],
-            ),
+            create_mutation(metrics=_respelled_overall_accuracy("lower_is_better")),
         )
 
 
@@ -412,6 +435,64 @@ def test_create_requires_source_paper_evidence(db):
         service(db).apply_add_benchmark(
             job, create_mutation(evidence_urls=["https://modelnet.cs.princeton.edu/"])
         )
+
+
+def test_arxiv_source_evidence_rejection_names_the_url_to_add(db):
+    _candidate, job, _source, _parent = creation_setup(db)
+
+    with pytest.raises(ValueError, match=r"add https://arxiv\.org/abs/2407\.04973$"):
+        service(db).apply_add_benchmark(
+            job,
+            create_mutation(
+                source_paper={"arxiv_id": "2407.04973"},
+                evidence_urls=["https://arxiv.org/html/2605.25571"],
+            ),
+        )
+
+
+def test_external_source_evidence_rejection_names_the_source_url(db):
+    _candidate, job, _source, _parent = creation_setup(db)
+
+    with pytest.raises(ValueError, match="add https://example.com/faust exactly"):
+        service(db).apply_add_benchmark(
+            job,
+            create_mutation(
+                source_paper={
+                    "external_paper": {
+                        "title": "FAUST",
+                        "abstract": "Mesh registration benchmark.",
+                        "source_url": "https://example.com/faust",
+                        "date_published": "2014-06-24",
+                    }
+                },
+                evidence_urls=["https://example.com/other"],
+            ),
+        )
+
+
+def test_runner_preflight_requires_the_source_paper_in_evidence():
+    def proposal(source, evidence):
+        return {"add_benchmark": {"source_paper": source, "evidence_urls": evidence}}
+
+    with pytest.raises(ValueError, match=r"add https://arxiv\.org/abs/1903\.12261$"):
+        curation_api.check_benchmark_source_evidence(
+            proposal({"arxiv_id": "1903.12261"}, ["https://arxiv.org/html/2609.00374"])
+        )
+    curation_api.check_benchmark_source_evidence(
+        proposal({"arxiv_id": "1903.12261"}, ["https://arxiv.org/html/1903.12261v2"])
+    )
+    faust = "https://openaccess.thecvf.com/content_cvpr_2014/html/Bogo_FAUST.html"
+    with pytest.raises(ValueError, match=f"add {re.escape(faust)}$"):
+        curation_api.check_benchmark_source_evidence(
+            proposal({"external_paper": {"source_url": faust}}, [])
+        )
+    curation_api.check_benchmark_source_evidence(
+        proposal({"external_paper": {"source_url": faust}}, [faust + "/"])
+    )
+    curation_api.check_benchmark_source_evidence(
+        proposal({"existing_paper_id": 10}, [])
+    )
+    curation_api.check_benchmark_source_evidence({"evaluations": []})
 
 
 def test_map_existing_adds_links_without_rewriting_the_dataset(db):
@@ -921,6 +1002,48 @@ def test_review_decides_exactly_the_batch_it_was_served(db):
     assert result["skipped_no_longer_eligible"] == [str(gone.id)]
     assert gone.status == "rejected"
     assert late.status == "candidate" and late.reviewed_at is None
+
+
+def test_mistyped_review_candidate_is_a_retryable_proposal_error(db):
+    candidate = add_candidate(db, "H2O", papers=5)
+    review = service(db)
+    job = review.job_service.enqueue_benchmark_job(
+        db,
+        kind="review-benchmark-gaps",
+        benchmark_candidate_id=None,
+        requested_by="test",
+        settings=get_settings(),
+        priority=10,
+    )
+    review.review_context(job)
+    callback = CodexCurationCallbackService(db)
+    typo = uuid.UUID(
+        str(candidate.id)[:-1] + ("0" if str(candidate.id)[-1] != "0" else "1")
+    )
+
+    def body(candidate_id):
+        return ApplyMutationRequest(
+            review_benchmark_gaps={
+                "summary": "x",
+                "decisions": [
+                    {
+                        "candidate_id": str(candidate_id),
+                        "decision": "reject",
+                        "reason": "x",
+                    }
+                ],
+            }
+        )
+
+    with pytest.raises(
+        ValueError, match=f"outside this review's batch: {typo}"
+    ) as error:
+        callback._validate_scheduled_capability_boundary(job, body(typo))
+    assert _retryable_validation(job, error.value)
+    [(_, resource)] = callback._validate_scheduled_capability_boundary(
+        job, body(candidate.id)
+    )
+    assert resource.exists
 
 
 def test_skipped_merges_do_not_block_eligible_merges_into_them(db):

@@ -60,6 +60,7 @@ from backend.utils.urls import (
     get_arxiv_abs_url,
     get_paper_abs_url,
     get_paper_pdf_url,
+    get_paper_route_identifier,
     get_paper_url,
 )
 from backend.utils.exceptions import (
@@ -73,6 +74,7 @@ from backend.services.paper_implementation_service import (
 )
 from backend.services.paper_feed_executor import PaperFeedExecutor, GENERAL_ORDERING
 from backend.services.paper_citation_refresh_service import PaperCitationRefreshService
+from backend.services.paper_seo_service import build_paper_seo_document
 from backend.services.paper_relation_loader import PaperRelationLoader, PaperRelations
 from backend.services.paper_retrieval_service import PaperRetrievalService
 from backend.services.paper_version_refresh_service import (
@@ -187,7 +189,16 @@ class PaperService:
         relations = loader.load_details(paper_ids)
         if include_resources:
             loader.load_resources(paper_ids, relations)
-        return [self._to_api_paper(paper, relations) for paper in papers]
+            loader.load_linked_hf_artifacts(paper_ids, relations)
+        hydrated = [self._to_api_paper(paper, relations) for paper in papers]
+        for paper in hydrated:
+            route_identifier = get_paper_route_identifier(
+                paper.source, paper.arxiv_id, int(paper.id)
+            )
+            paper.page_title = build_paper_seo_document(
+                paper, route_identifier
+            ).search_title
+        return hydrated
 
     # Map the singular DB artifact kind to the Hugging Face listing path segment.
     _HF_KIND_TO_PATH = {"model": "models", "dataset": "datasets", "space": "spaces"}
@@ -352,11 +363,14 @@ class PaperService:
             "urls_extracted": db_paper.urls_extracted,
             "tldr": db_paper.tldr,
             "suggested_questions": relations.suggested_questions.get(db_paper.id),
+            "evaluated_benchmarks": relations.evaluated_benchmarks.get(db_paper.id),
+            "abstract_mentions": relations.abstract_mentions.get(db_paper.id),
             "num_pages": db_paper.num_pages,
             "hf_models": db_paper.hf_models or [],
             "hf_datasets": db_paper.hf_datasets or [],
             "hf_spaces": db_paper.hf_spaces or [],
             "hf_artifact_summary": hf_artifact_summary,
+            "linked_hf_artifacts": relations.linked_hf_artifacts.get(db_paper.id),
             "has_official_implementation": has_official_implementation,
             "code_repository_count": code_repository_count,
             "repositories": repositories,
@@ -2009,6 +2023,16 @@ class PaperService:
     ) -> List[Dict[str, Any]]:
         return PaperCitationRefreshService(self.db).pending_chunk(
             offset, limit, threshold_days
+        )
+
+    def get_citation_refreshable_count(self) -> int:
+        return PaperCitationRefreshService(self.db).count_refreshable()
+
+    def get_papers_for_early_citation_refresh(
+        self, limit: int, threshold_days: int = 7
+    ) -> List[Dict[str, Any]]:
+        return PaperCitationRefreshService(self.db).refresh_ahead_chunk(
+            limit, threshold_days
         )
 
     def update_citation_counts_batch(

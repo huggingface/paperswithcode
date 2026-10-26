@@ -23,7 +23,6 @@ from backend.chat_sandbox_worker.contract import (
     PI_NODE_VERSION,
     PI_SOURCE_COMMIT,
     PI_VERSION,
-    POSTERLY_ARTIFACT_BUCKET_ID,
     POSTERLY_CHROMIUM_REVISION,
     POSTERLY_ENABLED,
     POSTERLY_LICENSE,
@@ -37,6 +36,7 @@ from backend.chat_sandbox_worker.contract import (
     SUPPORTED_AGENT_HARNESSES,
     WORKER_CONTRACT_VERSION,
 )
+from backend.operator_profile import OPERATOR
 from backend.services.chat_runtime_contract import require_immutable_image_id
 
 try:
@@ -218,7 +218,7 @@ def chat_runtime(
             "posterly_license": POSTERLY_LICENSE,
             "posterly_playwright_version": POSTERLY_PLAYWRIGHT_VERSION,
             "posterly_chromium_revision": POSTERLY_CHROMIUM_REVISION,
-            "posterly_artifact_bucket_id": POSTERLY_ARTIFACT_BUCKET_ID,
+            "posterly_artifact_bucket_id": OPERATOR.chat_artifact_bucket,
         }
     from backend.chat_sandbox_worker.prompt import sha256
 
@@ -250,7 +250,7 @@ def chat_runtime(
         "posterly_license": POSTERLY_LICENSE,
         "posterly_playwright_version": POSTERLY_PLAYWRIGHT_VERSION,
         "posterly_chromium_revision": POSTERLY_CHROMIUM_REVISION,
-        "posterly_artifact_bucket_id": POSTERLY_ARTIFACT_BUCKET_ID,
+        "posterly_artifact_bucket_id": OPERATOR.chat_artifact_bucket,
     }
 
 
@@ -521,7 +521,7 @@ def validate_manifest(release_dir: Path, environment: str | None = None) -> dict
             "posterly_license": POSTERLY_LICENSE,
             "posterly_playwright_version": POSTERLY_PLAYWRIGHT_VERSION,
             "posterly_chromium_revision": POSTERLY_CHROMIUM_REVISION,
-            "posterly_artifact_bucket_id": POSTERLY_ARTIFACT_BUCKET_ID,
+            "posterly_artifact_bucket_id": OPERATOR.chat_artifact_bucket,
         }
         if runtime["posterly_enabled"] not in {True, False}:
             raise ValueError("Posterly release activation must be a boolean")

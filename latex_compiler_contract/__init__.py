@@ -28,10 +28,6 @@ SANDBOX_WORKSPACE_LIMIT_BYTES = 96 * 1024 * 1024
 _QUALIFIED_COMPILER_IMAGE = re.compile(
     r"^registry\.hf\.space/[a-z0-9][a-z0-9._-]{0,254}@sha256:[0-9a-f]{64}$"
 )
-STAGING_SANDBOX_COMPILER_NAMESPACE = "nielsr"
-_STAGING_SANDBOX_COMPILER_IMAGE = re.compile(
-    r"^registry\.hf\.space/nielsr-pwc-latex-compiler-[a-z0-9-]+-staging@sha256:[0-9a-f]{64}$"
-)
 
 
 class EnvelopeError(ValueError):
@@ -263,17 +259,24 @@ def validate_qualified_compiler_image(image: str) -> str:
     return image
 
 
-def validate_staging_sandbox_compiler_identity(image: str, namespace: str) -> str:
-    """Bind user-facing compiler work to the one approved private staging owner."""
-    if namespace != STAGING_SANDBOX_COMPILER_NAMESPACE:
+def validate_staging_sandbox_compiler_identity(
+    image: str, namespace: str, approved_namespace: str
+) -> str:
+    """Bind user-facing compiler work to the one approved private staging owner.
+
+    ``approved_namespace`` is the operator's Hub namespace (config/operator.toml);
+    the compiler image must be that namespace's staging LaTeX compiler Space.
+    """
+    if namespace != approved_namespace:
         raise EnvelopeError(
             "Compiler Sandbox must use the approved staging compiler identity"
         )
     image = validate_qualified_compiler_image(image)
-    if (
-        not _STAGING_SANDBOX_COMPILER_IMAGE.fullmatch(image)
-        or "production" in image.lower()
-    ):
+    staging_image = re.compile(
+        rf"^registry\.hf\.space/{re.escape(approved_namespace)}"
+        r"-pwc-latex-compiler-[a-z0-9-]+-staging@sha256:[0-9a-f]{64}$"
+    )
+    if not staging_image.fullmatch(image) or "production" in image.lower():
         raise EnvelopeError(
             "Compiler Sandbox must use the approved staging compiler identity"
         )

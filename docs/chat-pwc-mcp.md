@@ -31,7 +31,7 @@ execution, the gateway checks the capability and durable turn claim; it commits
 search metering before making an upstream request. Searches and filtered list
 searches share the CLI search allowance. General call and output budgets remain
 in the Pi policy. No private capability, session, or ownership headers are sent
-to the public MCP server. The upstream URL and tool allowlist are fixed; discovery fails closed when any of the twenty-one tools is missing.
+to the public MCP server. The per-environment upstream URL and tool allowlist are fixed; discovery fails closed when any of the twenty-one tools is missing.
 
 The gateway uses the deployed MCP 2026-07-28 stateless JSON-RPC envelope, with empty
 client capabilities. It reuses an HTTP connection pool, requests JSON responses,
@@ -47,22 +47,18 @@ chat output budgets can truncate long paper chunks, so this integration does not
 promise a complete paper read within one turn. The normal truncation marker must
 be respected; continuation cursors do not recover text omitted by chat's budget.
 
-## Staging rollout
+## Enablement
 
-After merge and review, install the exact merged deployment tools so external Pi
-workers receive the new flag. Apply the reviewed staging nginx template, which
-adds only the exact POST gateway route alongside the existing catalog route.
-Deploy the merged source to staging with the flag still false, then run:
+The flag is `true` in both `/etc/paperswithcode/staging.env` and
+`production.env`; MCP-only chat has been live in production since 2026-09-16.
+To enable a fresh environment (the script refuses unless the flag is currently
+false), run as root, then refresh so external Pi workers pick it up:
 
 ```
-uv run --env-file backend/keys.env python -m deploy.configure_chat_pwc_mcp staging \
-  --confirm ENABLE_STAGING_PWC_MCP
-pwc-deploy staging <exact-active-sha> --refresh-environment
+uv run --env-file backend/keys.env python -m deploy.configure_chat_pwc_mcp <staging|production> \
+  --confirm ENABLE_<STAGING|PRODUCTION>_PWC_MCP
+pwc-deploy <environment> <exact-active-sha> --refresh-environment
 ```
 
-Verify tool discovery, real model tool selection, search budget enforcement,
-cancellation, output bounds, no sandbox creation for catalog-only turns, and
-latency before production activation. Production remains off until explicitly
-authorized. Its installer requires `ENABLE_PRODUCTION_PWC_MCP` and the same
-reviewed source/nginx/refresh sequence. Preserve the existing Modal qualification
-and spend gates; this feature does not qualify persistent sandbox transport.
+There is no disable path in that script; revert by editing the protected env
+file and refreshing. Production changes need explicit authorization.

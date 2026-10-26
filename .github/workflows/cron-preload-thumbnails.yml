@@ -89,6 +89,7 @@ permissions: {}
 
 jobs:
   run:
+    environment: vps-operations
     permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 240
@@ -146,58 +147,38 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
-          ARGS=""
-          if [ -n "${INPUT_PRIORITY}" ]; then
-            ARGS="${ARGS} --priority ${INPUT_PRIORITY}"
-          fi
-          if [ -n "${INPUT_LIMIT}" ]; then
-            ARGS="${ARGS} --limit ${INPUT_LIMIT}"
-          fi
-          if [ -n "${INPUT_RECENT_DAYS}" ]; then
-            ARGS="${ARGS} --recent-days ${INPUT_RECENT_DAYS}"
-          fi
-          if [ -n "${INPUT_PER_TASK}" ]; then
-            ARGS="${ARGS} --per-task ${INPUT_PER_TASK}"
-          fi
-          if [ -n "${INPUT_PER_METHOD}" ]; then
-            ARGS="${ARGS} --per-method ${INPUT_PER_METHOD}"
-          fi
-          if [ -n "${INPUT_TRENDING_MAX_AGE_DAYS}" ]; then
-            ARGS="${ARGS} --trending-max-age-days ${INPUT_TRENDING_MAX_AGE_DAYS}"
-          fi
-          if [ -n "${INPUT_CITATION_TOP}" ]; then
-            ARGS="${ARGS} --citation-top ${INPUT_CITATION_TOP}"
-          fi
-          if [ -n "${INPUT_TRENDING_TOP}" ]; then
-            ARGS="${ARGS} --trending-top ${INPUT_TRENDING_TOP}"
-          fi
-          if [ -n "${INPUT_NEWEST_TOP}" ]; then
-            ARGS="${ARGS} --newest-top ${INPUT_NEWEST_TOP}"
-          fi
-          if [ -n "${INPUT_AFTER_ID}" ]; then
-            ARGS="${ARGS} --after-id ${INPUT_AFTER_ID}"
-          fi
-          if [ -n "${INPUT_BEFORE_ID}" ]; then
-            ARGS="${ARGS} --before-id ${INPUT_BEFORE_ID}"
-          fi
-          if [ -n "${INPUT_SHARD}" ]; then
-            ARGS="${ARGS} --shard ${INPUT_SHARD}"
-          fi
-          if [ "${INPUT_MISSING_ONLY}" = "true" ]; then
-            ARGS="${ARGS} --missing-only"
-          fi
-          if [ "${INPUT_TRUST_LOCAL_CACHE}" = "true" ]; then
-            ARGS="${ARGS} --trust-local-cache"
-          fi
-          if [ "${INPUT_DRY_RUN}" = "true" ]; then
-            ARGS="${ARGS} --dry-run"
-          fi
-          if [ "${INPUT_REFRESH_EXISTING}" = "true" ]; then
-            ARGS="${ARGS} --refresh-existing"
-          fi
-          if [ -n "${INPUT_REQUEST_DELAY_SECONDS}" ]; then
-            ARGS="${ARGS} --request-delay-seconds ${INPUT_REQUEST_DELAY_SECONDS}"
-          fi
+          # Inputs are free-form strings and ssh hands the command to a remote
+          # shell, so accept only each option's exact grammar and quote every
+          # word. Never splice raw input into the remote command.
+          set -eo pipefail
+          args=(preload_thumbnails)
+          add() {
+            local flag="$1" value="$2" pattern="$3"
+            [ -n "$value" ] || return 0
+            if [[ ! "$value" =~ $pattern ]]; then
+              echo "Invalid value for ${flag}: must match ${pattern}" >&2
+              exit 2
+            fi
+            args+=("$flag" "$value")
+          }
+          INTEGER='^[0-9]{1,9}$'
+          add --priority "${INPUT_PRIORITY}" '^(visible|trending|task-top|method-top|recent|missing-all|external-missing)$'
+          add --limit "${INPUT_LIMIT}" "$INTEGER"
+          add --recent-days "${INPUT_RECENT_DAYS}" "$INTEGER"
+          add --per-task "${INPUT_PER_TASK}" "$INTEGER"
+          add --per-method "${INPUT_PER_METHOD}" "$INTEGER"
+          add --trending-max-age-days "${INPUT_TRENDING_MAX_AGE_DAYS}" "$INTEGER"
+          add --citation-top "${INPUT_CITATION_TOP}" "$INTEGER"
+          add --trending-top "${INPUT_TRENDING_TOP}" "$INTEGER"
+          add --newest-top "${INPUT_NEWEST_TOP}" "$INTEGER"
+          add --after-id "${INPUT_AFTER_ID}" "$INTEGER"
+          add --before-id "${INPUT_BEFORE_ID}" "$INTEGER"
+          add --shard "${INPUT_SHARD}" '^[0-9]{1,4}/[0-9]{1,4}$'
+          add --request-delay-seconds "${INPUT_REQUEST_DELAY_SECONDS}" '^[0-9]{1,4}(\.[0-9]{1,3})?$'
+          [ "${INPUT_MISSING_ONLY}" = "true" ] && args+=(--missing-only)
+          [ "${INPUT_TRUST_LOCAL_CACHE}" = "true" ] && args+=(--trust-local-cache)
+          [ "${INPUT_DRY_RUN}" = "true" ] && args+=(--dry-run)
+          [ "${INPUT_REFRESH_EXISTING}" = "true" ] && args+=(--refresh-existing)
           ssh -o StrictHostKeyChecking=yes \
               "${VPS_USER}@${VPS_HOST}" \
-              "sudo /usr/local/sbin/pwc-cron preload_thumbnails${ARGS}"
+              "sudo /usr/local/sbin/pwc-cron ${args[*]@Q}"

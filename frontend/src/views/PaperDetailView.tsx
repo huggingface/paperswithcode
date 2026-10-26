@@ -326,7 +326,6 @@ const PaperDetailView: React.FC = () => {
     safeAbstractUrl,
     safeConferenceUrl,
     safePdfUrl,
-    sourceActionLabel,
     successorPapers,
   } = presentation;
   const authorLimit = 12;
@@ -343,7 +342,20 @@ const PaperDetailView: React.FC = () => {
       <div className="breadcrumb">
         <Link to="/">Trending</Link>
         <span className="sep">/</span>
-        <span>{paperSourceLabel}</span>
+        {paper.arxiv_id && safeAbstractUrl ? (
+          <a
+            className="breadcrumb-external"
+            href={safeAbstractUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open on arXiv"
+          >
+            {paperSourceLabel}
+            <span aria-hidden="true">↗</span>
+          </a>
+        ) : (
+          <span>{paperSourceLabel}</span>
+        )}
       </div>
 
       <div className="detail-grid">
@@ -376,8 +388,6 @@ const PaperDetailView: React.FC = () => {
             ))}
           </h1>
           <div className="detail-meta">
-            <span>{paperSourceLabel}</span>
-            <span>·</span>
             <span>Submitted {formatLongDate(paper.published)}</span>
             {numPages && (
               <>
@@ -487,23 +497,19 @@ const PaperDetailView: React.FC = () => {
                 <Icon name="pdf" size={12} /> View PDF
               </a>
             ) : null}
-            {safeAbstractUrl && (
+            {safeAbstractUrl && paper.source === "external" && (
               <EditableActionButton
-                showEdit={paper.source === "external"}
+                showEdit
                 onEdit={() => openEdit("source-url")}
                 editAriaLabel="Edit source URL"
               >
                 <a
-                  className={
-                    paper.source === "external"
-                      ? "action-btn-segment action-btn-main"
-                      : "action-btn"
-                  }
+                  className="action-btn-segment action-btn-main"
                   href={safeAbstractUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <Icon name="external" size={12} /> {sourceActionLabel}
+                  <Icon name="external" size={12} /> Source page
                 </a>
               </EditableActionButton>
             )}
@@ -576,7 +582,7 @@ const PaperDetailView: React.FC = () => {
             >
               Edit organizations
             </button>
-            <PaperAgentEdits paperId={Number(paper.id)} isAdmin={isAdmin} />
+            <PaperAgentEdits paperId={Number(paper.id)} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
               <CodexEnrichPaperDialog
                 paperId={Number(paper.id)}

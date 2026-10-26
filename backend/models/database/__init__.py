@@ -96,6 +96,7 @@ from backend.models.database.conferences import (
 from backend.models.database.curation import (
     TrendingModelCandidate,
     TrendingModelCurationState,
+    ModelReleaseSignal,
     PaperCurationJob,
     PaperCurationWorkflow,
     BenchmarkCurationCandidate,
@@ -118,6 +119,7 @@ from backend.models.database.frameworks import (
     TaskFramework,
 )
 from backend.models.database.identity import (
+    AuthSession,
     UserBookmark,
     UserPreference,
     StagingAccessRequest,
@@ -153,6 +155,7 @@ from backend.models.database.papers import (
     PaperDataset,
     PaperRelation,
     PaperSuggestedQuestions,
+    PaperAbstractMention,
 )
 from backend.models.database.resources import (
     Repository,
@@ -259,6 +262,7 @@ __all__ = [
     "PaperConference",
     "TrendingModelCandidate",
     "TrendingModelCurationState",
+    "ModelReleaseSignal",
     "PaperCurationJob",
     "PaperCurationWorkflow",
     "BenchmarkCurationCandidate",
@@ -275,6 +279,7 @@ __all__ = [
     "Framework",
     "FrameworkPlatform",
     "TaskFramework",
+    "AuthSession",
     "UserBookmark",
     "UserPreference",
     "StagingAccessRequest",
@@ -311,6 +316,7 @@ __all__ = [
     "ProjectPage",
     "PaperProjectPage",
     "PaperSuggestedQuestions",
+    "PaperAbstractMention",
     "PaperXThread",
     "PaperXPost",
     "XInsightPost",

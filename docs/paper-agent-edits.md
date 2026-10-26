@@ -27,8 +27,9 @@ approval. All authenticated HF users can publish when direct editing is enabled.
   encourage source URLs and precise locations in methodology.
 - Public history shows HF username, time, and before/after values, excluding
   credentials, internal identity IDs, and internal provenance metadata.
-- The admin catalog-audit page provides a UTC daily summary, rollback, and
-  suspension/restore controls. Suspension invalidates active grants permanently;
+- The Catalog Audit tab on `/admin-dashboard`
+  (`frontend/src/components/admin/CatalogAuditPanel.tsx`) provides a UTC daily
+  summary, rollback, and suspension/restore controls. Suspension invalidates active grants permanently;
   restoring an account requires new CLI authorization. Rollback remains
   conflict-aware and does not silently overwrite later changes.
 
@@ -58,25 +59,17 @@ pending authorizations globally. Expired records older than one day are removed
 when a new authorization starts. Grant IDs and device secrets have separate roles:
 the browser sees the ID, while exchange requires the secret held only by the CLI.
 
-## Release order
+## Configuration
 
-1. Merge both reviewed PRs. Apply
-   `backend/database/migrations/add_paper_agent_edits.sql` to production before
-   deploying this application commit. Apply as the catalog schema owner and ensure
-   the runtime role has SELECT/INSERT/UPDATE/DELETE on the two new tables. Do not
-   grant staging write access to public.
-2. Deploy the reviewed backend/frontend commit through the normal immutable
-   release workflow. Enable `PWC_CONTRIBUTOR_DIRECT_EDITS_ENABLED=true` in
-   production after verifying the migration and audit controls. The existing
-   `PWC_CATALOG_MUTATIONS_ENABLED` switch must also remain enabled. Staging does
-   not accept these catalog writes.
-3. Publish the companion CLI release. Earlier servers reject unsupported edit
-   endpoints; public research commands continue to work.
-4. Smoke-test browser consent, one paper's preview/publication/history, account
-   suspension, and conflict-aware rollback using a designated test paper/account.
-
-This implementation task does not apply the production migration, deploy, or
-publish a CLI release before the PRs are merged.
+Schema: `backend/database/migrations/add_paper_agent_edits.sql`. Direct edits
+need both `PWC_CONTRIBUTOR_DIRECT_EDITS_ENABLED=true` and
+`PWC_CATALOG_MUTATIONS_ENABLED` (see `can_directly_edit_catalog` in
+`backend/utils/auth.py`); production enables both. Staging never accepts these
+catalog writes. Endpoints live in `backend/routers/paper_edits.py`, quotas in
+`backend/services/paper_edit_access.py`, and authorization in
+`backend/services/paper_edit_authorization.py`. After changing edit behaviour,
+smoke-test browser consent, one paper's preview/publication/history, account
+suspension, and conflict-aware rollback using a designated test paper/account.
 
 ## Verification
 

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Dispatch layout OCR for papers indexed in the last day
+
+[Timer]
+OnCalendar=*-*-* *:00/5:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-paper-markdown-fresh.service
+
+[Install]
+WantedBy=timers.target

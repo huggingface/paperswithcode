@@ -169,6 +169,10 @@ Hugging Face buckets in the `huggingface` organization:
 - [.github/workflows/scripts/README.md](.github/workflows/scripts/README.md): scheduled job scripts
 - [AGENTS.md](AGENTS.md): instructions for coding agents
 
+## Security
+
+Please report vulnerabilities privately; see [SECURITY.md](SECURITY.md).
+
 ## License
 
 Papers with Code is licensed under the [Apache License 2.0](LICENSE).

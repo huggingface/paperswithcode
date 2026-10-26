@@ -8,10 +8,9 @@ Analysis leaderboard, and a web news search (for labs without a feed, such
 as Reflection's Beam or Aleph Alpha's Kolibri), keeps posts that announce a
 named model, and reports every recent release that no paper row covers yet.
 
-The radar is read-only. Automated jobs must not create external papers
-(scheduled resolution rejects them by policy), so unindexed releases are
-logged as a warning for an operator to index with the add-external-paper and
-add-evals skills.
+Scanning and catalog matching are read-only. The production entrypoint
+records unindexed releases as signals and queues scoped resolution jobs for
+them (see model_release_signal_service).
 """
 
 from __future__ import annotations
@@ -217,6 +216,9 @@ class ReleaseSignal:
     status: Literal["indexed", "unindexed"] = "unindexed"
     paper_id: int | None = None
     matched_by: str | None = None
+    # A web signal's url is the lab's own page only when the extractor cited
+    # one; otherwise it is a news article.
+    official_url: bool = False
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -632,7 +634,8 @@ def web_search_signals(
         # The model must cite hits; uncited or invented ids are dropped.
         cited = [ordered[i] for i in release.hit_ids if 0 <= i < len(ordered)]
         official_id = release.official_hit_id
-        if official_id is not None and 0 <= official_id < len(ordered):
+        official = official_id is not None and 0 <= official_id < len(ordered)
+        if official:
             cited.insert(0, ordered[official_id])
         if not cited or not release.model_name.strip():
             continue
@@ -650,6 +653,7 @@ def web_search_signals(
                 title=cited[0].title,
                 url=cited[0].url,
                 published=published,
+                official_url=official,
             )
         )
     return signals

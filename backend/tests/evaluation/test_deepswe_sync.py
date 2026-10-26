@@ -24,6 +24,8 @@ from backend.services.deepswe_sync_service import (
     DEEPSWE_SOURCE_URL,
     HARNESS_NAME,
     MANAGED_METHODOLOGY_PREFIX,
+    MODEL_DISPLAY_NAMES,
+    MODEL_PAPER_IDENTITIES,
     DeepSweEntry,
     DeepSweLeaderboard,
     DeepSweSyncService,
@@ -178,6 +180,12 @@ def test_parser_rejects_truncated_duplicate_or_wrong_harness_data():
     payload["rows"][0]["harness"] = "unknown-agent"
     with pytest.raises(ValueError, match="harness is invalid"):
         parse_deepswe_leaderboard(payload)
+
+
+def test_every_named_upstream_model_has_a_release_identity():
+    # The 28 upstream ids live on 2026-10-20 all have display names and papers.
+    assert set(MODEL_DISPLAY_NAMES) == set(MODEL_PAPER_IDENTITIES)
+    assert len(MODEL_PAPER_IDENTITIES) == 28
 
 
 def test_sync_upserts_known_rows_and_preserves_unmatched_models():

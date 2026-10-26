@@ -11,6 +11,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `paper_markdown_backfill`
 
 - **Effect:** Creates/copies paper Markdown objects and `_jobs/status/*.json` plus coverage/progress records in the paper-Markdown Hugging Face bucket; may launch OCR jobs.
+- **Lanes:** hourly live (14 days, minus the last 24 h) and full lanes share the `paper_markdown_backfill` lock; the 5-minute fresh lane (`--lane fresh`, `pwc-cron-paper-markdown-fresh.timer`, lock `paper_markdown_backfill.fresh`) owns papers indexed in the last 24 h and labels its HF jobs `mode=live, lane=fresh`. A paper older than an hour with no layout in `huggingface/pwc-papers-pages` means the fresh lane is stuck (check its HF jobs for SCHEDULING stalls).
 - **Independent proof:** Anti-join all latest arXiv papers—and recent 14-day papers separately—against expected object keys. Classify missing, invalid, empty, oversized, failed, interrupted, and unresolved-volume-mount states. Inspect coverage-history movement and orphan keys.
 - **Correctness:** Decode a stratified sample and verify nontrivial text, title/arXiv identity, version, and absence of obvious OCR/error payloads. Key existence alone is insufficient.
 
@@ -133,6 +134,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `chartography-no-tools` on task `image-understanding`; Pass@1 0–1 (Surge percent / 100); the "Chartography Leaderboard" block on https://surgehq.ai/benchmarks/chartography (fetch with a browser User-Agent); typically 25–400 upstream rows, of which only reviewed labels are published (41 of 42 on 2026-10-17; DeepSeek V4 Flash Vision (experimental) is excluded on purpose).
 - **Proof:** Diff the Surge block against managed rows (label, percent at one decimal); confirm `surge_chartography_unreviewed` labels get an identity (index the model's paper first), `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); confirm the with-tools `chartography` benchmark was not touched.
 
+## `sync_frontiercs_2`
+
+- **Contract:** `frontiercs-2` on task `coding-agents`; Pass Rate (%) 0–100 (best metric) and FCI (unbounded, Kimi K2.7 = 0); the `MODELS`/`PASS`/`ECI` constants in https://frontier-cs.org/assets/js/fcs2-data.js behind https://frontier-cs.org/#leaderboard; typically 8–200 entries, one per model and harness (14 on 2026-10-26, all reviewed).
+- **Proof:** Diff the data file against managed rows (model, harness, pass rate, FCI); confirm `frontiercs_2_unreviewed` names get an identity (index the model's paper first), `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on Pass Rate.
+
 ## `sync_physics_iq_verified`
 
 - **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.
@@ -192,6 +198,13 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Compare `benchmark_curation_candidates` status counts and `reviewed_at` with the latest `review-benchmark-gaps` job's `mutation_result`; open one promoted candidate's `resolution.dataset_id` on the live site and confirm the leaderboard, source paper, and primary metric.
 - **Correctness:** A review job that never applies leaves `reviewed_at` stale while eligible candidates exist. Repeated `add-benchmark` failures back a candidate off 3 days, then return it to review after two failures. Roll back a wrong benchmark with `POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`.
 
+## `link_abstract_mentions` / `rescan_abstract_mentions`
+
+- **Effect:** Logs `papers rewritten`, `unchanged`, `already current`, and `judge failures`, and replaces `paper_abstract_mentions` rows per paper. The hourly job looks at papers created or updated in the last 3 days whose stored mentions are missing or stale for the current abstract (at most 500 rewritten per run); the nightly `--rescan` re-runs every abstract so catalog changes reach older papers, reusing earlier Jev verdicts for unchanged abstracts. Needs `PWC_OPENROUTER_API_KEY`; exits 1 when it is missing or when every judged paper failed.
+- **Independent proof:** `curl https://paperswithcode.co/api/v1/papers/<id>` for a paper imported in the last hour has `abstract_mentions` (spans whose `surface` equals `abstract[start:end]`), unless its abstract names no catalog entry.
+- **Correctness:** Judge failures are OpenRouter errors (key, credits, or a 429): those papers stay unlinked and retry next hour. A rescan that rewrites thousands of papers means the catalog or the matching rules changed; check `SELECT judge, count(*) FROM paper_abstract_mentions WHERE created_at > now() - interval '1 day' GROUP BY 1` for the judge share.
+- **Dashboard evidence:** latest `paper_abstract_mentions.created_at` and rows written in 3 hours. Quiet hours are healthy (no new abstracts); a full day without writes while HF daily papers were imported is not.
+
 ## `warm_paper_suggested_questions`
 
 - **Effect:** Prints a JSON summary (`candidates`, `already_stored`, `generated`, `failed`, `remaining`) and inserts `paper_suggested_questions` rows. Candidates are the home feed's first three trending pages (past week) plus the first trending page of every task and method; `remaining` is the eligible backlog beyond `--limit`. Exits 1 only when every generation failed.
@@ -215,9 +228,9 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 ## `scan_model_releases`
 
-- **Effect:** Read-only. Prints a JSON report of recent model releases from official lab feeds and unmapped Artificial Analysis models, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It writes no catalog rows; exit 1 only when every source failed.
-- **Independent proof:** Open one or two lab news pages and confirm the newest model announcement within 14 days appears in the report with the right indexed/unindexed status and `paper_id`.
-- **Correctness:** Recurring `source_error` for one lab means its feed or page layout changed; a long-lived unindexed release means nobody indexed it, which is a curation gap rather than a job failure.
+- **Effect:** Prints a JSON report of recent model releases from official lab feeds, unmapped Artificial Analysis models, and web news, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It upserts each unindexed feed or web release into `model_release_signals` and queues at most 6 `resolve-model-paper` jobs (trigger `model-release-radar`) per UTC day, logged as `model_release_radar_queued`. Exit 1 only when every source failed.
+- **Independent proof:** Open one or two lab news pages and confirm the newest model announcement within 14 days appears in the report with the right indexed/unindexed status and `paper_id`. For a queued signal, check its job in `paper_curation_jobs` (`release_signal_id`) and, once resolved, the signal's `paper_id` page.
+- **Correctness:** Recurring `source_error` for one lab means its feed or page layout changed. Signals stuck in `queued` mean scheduled curation is paused or saturated. A `rejected` signal with a news-page `source_url` refusal in its job's `validation_summary` means the curator could not find a first-party source; read its report before indexing by hand. A long-lived unindexed release that never becomes a signal is an Artificial Analysis slug (report-only) or a web hit seen only once.
 - **Dashboard evidence:** report-only, so a successful systemd exit (the job exits 1 only when every source failed) is the output proof. Read the radar JSON from `journalctl -u pwc-cron-scan-model-releases.service --since '6 hours ago' -o cat | grep '^{'` for `sources_checked` versus `errors`.
 
 ## `export_enrichment_dashboard`

@@ -463,6 +463,13 @@ def reader_client():
     app.dependency_overrides.clear()
 
 
+@pytest.fixture(autouse=True)
+def signed_in(monkeypatch):
+    """Scraping on a miss is for signed-in readers; tests opt out explicitly."""
+
+    monkeypatch.setattr(paper_reader, "has_session", lambda _request: True)
+
+
 def test_web_markdown_returns_stored_markdown_without_scraping(
     monkeypatch, reader_client
 ):
@@ -614,3 +621,18 @@ def test_hourly_backfill_prepares_a_bounded_batch_of_due_pages(monkeypatch):
         "external_pages_published": 1,
         "external_pages_failed": 0,
     }
+
+
+def test_anonymous_miss_does_not_spend_firecrawl_credits(monkeypatch, reader_client):
+    client, _ = reader_client
+    monkeypatch.setattr(paper_reader, "has_session", lambda _request: False)
+
+    def missing(*args, **kwargs):
+        raise ValueError("Markdown for paper external/123294 was not found")
+
+    monkeypatch.setattr(paper_reader, "read_paper_markdown_bounded", missing)
+    monkeypatch.setattr(paper_reader, "prepare_external_page_markdown", pytest.fail)
+
+    response = client.get("/api/v1/papers/123294/web-markdown")
+
+    assert response.status_code == 503

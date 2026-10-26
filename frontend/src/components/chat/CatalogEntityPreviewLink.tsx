@@ -17,7 +17,7 @@ import {
 import { catalogApi } from "@/lib/api/catalog";
 import { assetUrl } from "@/lib/apiUrl";
 
-export type CatalogEntityKind = "task" | "method" | "benchmark";
+export type CatalogEntityKind = "task" | "method" | "benchmark" | "framework";
 
 export interface CatalogEntityRef {
   kind: CatalogEntityKind;
@@ -38,12 +38,14 @@ const ENTITY_PATH: Record<CatalogEntityKind, string> = {
   task: "/tasks/",
   method: "/methods/",
   benchmark: "/benchmark/",
+  framework: "/papers?framework=",
 };
 
 const KIND_LABEL: Record<CatalogEntityKind, string> = {
   task: "Task",
   method: "Method",
   benchmark: "Benchmark",
+  framework: "Framework",
 };
 
 /** A benchmark's `paper_count` counts leaderboard rows, not papers. */
@@ -51,9 +53,10 @@ const COUNT_NOUN: Record<CatalogEntityKind, [string, string]> = {
   task: ["paper", "papers"],
   method: ["paper", "papers"],
   benchmark: ["entry", "entries"],
+  framework: ["paper", "papers"],
 };
 
-interface CatalogEntityPreview {
+export interface CatalogEntityPreview {
   name: string;
   description: string | null;
   imageUrl: string | null;
@@ -80,6 +83,21 @@ async function fetchPreview({ kind, slug }: CatalogEntityRef): Promise<CatalogEn
       imageUrl: method.image_url ?? null,
       count: method.paper_count ?? null,
       detail: method.introduced_year ? `Introduced ${method.introduced_year}` : null,
+    };
+  }
+  if (kind === "framework") {
+    const catalog = await catalogApi.frameworkCatalog();
+    const framework = catalog.domains
+      .flatMap((domain) => domain.categories)
+      .flatMap((category) => category.frameworks)
+      .find((entry) => entry.slug === slug);
+    if (!framework) throw new Error(`Unknown framework ${slug}`);
+    return {
+      name: framework.name,
+      description: framework.description,
+      imageUrl: null,
+      count: framework.paper_count,
+      detail: framework.organization_name ?? null,
     };
   }
   const dataset = await catalogApi.getDatasetBySlug(slug);
@@ -146,12 +164,18 @@ const CatalogEntityCard: React.FC<{
 export const CatalogEntityPreviewLink: React.FC<{
   entity: CatalogEntityRef;
   children: React.ReactNode;
-}> = ({ entity, children }) => {
+  /** Defaults suit chat answers: chat link styling, opening in a new tab. */
+  className?: string;
+  newTab?: boolean;
+  /** Card content already in hand (e.g. from the paper API): no fetch on hover. */
+  initialPreview?: CatalogEntityPreview;
+}> = ({ entity, children, className = "chat-paper-link", newTab = true, initialPreview }) => {
   const [open, setOpen] = React.useState(false);
   const query = useQuery({
     queryKey: ["chat-catalog-preview", entity.kind, entity.slug],
     queryFn: () => fetchPreview(entity),
-    enabled: open,
+    initialData: initialPreview,
+    enabled: open && !initialPreview,
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     retry: false,
@@ -168,10 +192,10 @@ export const CatalogEntityPreviewLink: React.FC<{
     >
       <HoverCardTrigger asChild>
         <Link
-          className="chat-paper-link"
+          className={className}
           to={`${ENTITY_PATH[entity.kind]}${encodeURIComponent(entity.slug)}`}
-          target="_blank"
-          rel="noopener noreferrer"
+          target={newTab ? "_blank" : undefined}
+          rel={newTab ? "noopener noreferrer" : undefined}
           onClick={() => setOpen(false)}
         >
           {children}

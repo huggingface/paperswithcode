@@ -49,6 +49,39 @@ describe("paper detail presentation model", () => {
     expect(model.citationCopy).toContain("Ada Lovelace and Grace Hopper");
   });
 
+  it("falls back to stored Hub links when the live lookup fails", () => {
+    const model = buildPaperDetailPresentation({
+      ...paper,
+      hf_models: [],
+      linked_hf_artifacts: {
+        models: ["https://huggingface.co/org/stored-model"],
+        datasets: [],
+        spaces: ["https://huggingface.co/spaces/org/demo"],
+      },
+      hf_artifact_summary: {
+        model_count: 9,
+        dataset_count: 0,
+        space_count: 1,
+        best_kind: "model",
+        best_count: 9,
+        best_url: null,
+      },
+    }, {
+      models: 0,
+      datasets: 0,
+      spaces: 0,
+      modelUrls: [],
+      datasetUrls: [],
+      spaceUrls: [],
+      isLimited: false,
+      paperExists: false,
+    }, false);
+
+    expect(model.hfArtifactViewer.rows.map(({ count }) => count)).toEqual([9, 0, 1]);
+    expect(model.allHfArtifactUrls.models).toEqual(["https://huggingface.co/org/stored-model"]);
+    expect(model.allHfArtifactUrls.spaces).toEqual(["https://huggingface.co/spaces/org/demo"]);
+  });
+
   it("carries each linked author's Hugging Face avatar", () => {
     const model = buildPaperDetailPresentation(
       {

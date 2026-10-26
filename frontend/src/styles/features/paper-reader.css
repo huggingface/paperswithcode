@@ -6,6 +6,7 @@
 .reader-paper-pane, .reader-assistant-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .reader-paper-pane { background: #fff; transition: width 240ms cubic-bezier(.22, 1, .36, 1); }
 .reader-assistant-pane { visibility: visible; background: var(--bg); opacity: 1; transform: translateX(0); transition: width 240ms cubic-bezier(.22, 1, .36, 1), opacity 180ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1), visibility 0s; }
+.reader-assistant-pane:focus { outline: none; }
 .reader-assistant-pane.is-collapsed { visibility: hidden; opacity: 0; transform: translateX(28px); pointer-events: none; transition: width 240ms cubic-bezier(.22, 1, .36, 1), opacity 140ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1), visibility 0s linear 240ms; }
 .reader-workspace.is-resizing { cursor: col-resize; user-select: none; }
 .reader-workspace.is-resizing .reader-paper-pane, .reader-workspace.is-resizing .reader-assistant-pane { transition: none; }
@@ -81,17 +82,23 @@
 @media (prefers-reduced-motion: reduce) { .pdf-citation-highlight { animation: pdf-citation-flash 4s step-end forwards; } }
 /* Hover table of contents: one tick per section along the right edge; the full outline appears while the rail is hovered, focused, or tapped open. */
 .pdf-outline { position: absolute; z-index: 9; top: 0; right: 14px; bottom: 0; display: flex; align-items: center; pointer-events: none; }
-.pdf-outline-rail { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 5px; max-height: 100%; overflow: hidden; border: 0; padding: 12px 6px 12px 10px; background: transparent; cursor: pointer; pointer-events: auto; }
+.pdf-outline-rail { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 5px; max-height: 100%; overflow: hidden; border: 0; width: 56px; padding: 12px 6px 12px 0; background: transparent; cursor: pointer; pointer-events: auto; touch-action: none; }
 .pdf-outline-rail:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
-.pdf-outline-tick { display: block; width: 18px; height: 2px; border-radius: 1px; background: var(--ink-faint); transition: background 120ms ease, width 120ms ease; }
-.pdf-outline-tick.level-1 { width: 10px; }
-.pdf-outline-tick.is-active { width: 22px; background: var(--accent); }
+/* Ticks near the pointer (--pop runs 0..1) swell leftward toward one shared width, with a slight springy overshoot; the fixed rail width leaves them room without moving the panel. */
+.pdf-outline-tick { --pop: 0; --tick-width: 18px; display: block; width: calc(var(--tick-width) + var(--pop) * (34px - var(--tick-width))); height: 2px; border-radius: 1px; background: var(--ink-faint); transform: scaleY(calc(1 + var(--pop))); transition: background 120ms ease, width 180ms cubic-bezier(.34, 1.56, .64, 1), transform 180ms cubic-bezier(.34, 1.56, .64, 1); }
+.pdf-outline-tick.level-1 { --tick-width: 10px; }
+.pdf-outline-tick.is-active { --tick-width: 22px; background: var(--accent); }
+.pdf-outline-tick.is-scrubbed { background: var(--accent); }
+.pdf-outline-scrub-label { position: absolute; right: calc(100% - 4px); max-width: min(260px, 60vw); overflow: hidden; padding: 6px 12px; border: 1px solid var(--hairline); border-radius: 999px; background: var(--bg-elevated); color: var(--ink); box-shadow: 0 6px 20px #0003; font-size: 13px; font-weight: 600; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; transform: translateY(-50%); transition: top 90ms ease; animation: pdf-outline-label-in 160ms cubic-bezier(.34, 1.56, .64, 1); }
+@keyframes pdf-outline-label-in { from { opacity: 0; transform: translate(8px, -50%) scale(.9); } }
 .pdf-outline-panel { position: absolute; right: 100%; top: 50%; width: min(320px, 60vw); max-height: min(70vh, 100%); overflow-y: auto; margin-right: -6px; padding: 10px 6px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--bg-elevated); color: var(--ink); box-shadow: 0 8px 28px #0003; font-size: 14px; line-height: 1.35; opacity: 0; visibility: hidden; transform: translate(6px, -50%); transition: opacity 120ms ease, transform 120ms ease, visibility 0s linear 120ms; pointer-events: none; }
 .pdf-outline:hover .pdf-outline-panel, .pdf-outline:focus-within .pdf-outline-panel, .pdf-outline.is-pinned .pdf-outline-panel { opacity: 1; visibility: visible; transform: translate(0, -50%); transition-delay: 0s; pointer-events: auto; }
 .pdf-outline-panel ol { margin: 0; padding: 0; list-style: none; }
 .pdf-outline-panel li.level-1 a { padding-left: 32px; font-size: 13px; color: var(--ink-soft); }
 .pdf-outline-panel a { display: block; padding: 7px 16px; border-radius: 6px; color: var(--ink-muted); text-decoration: none; overflow-wrap: anywhere; }
 .pdf-outline-panel a:hover { background: var(--bg-subtle); color: var(--ink); text-decoration: none; }
+/* The entry for the tick under the pointer, so sliding along the rail reads out the sections. */
+.pdf-outline-panel a.is-scrubbed { background: var(--bg-subtle); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
 .pdf-outline-panel a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pdf-outline-panel a[aria-current="location"] { color: var(--accent-text); font-weight: 600; }
 @media (hover: none) {
@@ -102,20 +109,25 @@
   .pdf-outline-tick.is-active { background: Highlight; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .pdf-outline-panel, .pdf-outline-tick { transition: none; }
+  .pdf-outline-panel, .pdf-outline-tick, .pdf-outline-scrub-label { transition: none; animation: none; }
 }
 .pdf-loading, .pdf-error { min-height: 50vh; display: grid; place-content: center; color: var(--ink); text-align: center; padding: 24px; }
 .pdf-error a, .pdf-error button { color: inherit; }
 .chat-page--reader .chat-main { min-width: 0; }
-.chat-page--reader .chat-topbar { min-height: 48px; padding: 7px 112px 7px 20px; }
+/* Mirror the header's right gutter and gaps so Share, ⋮ and × sit under search, bookmark and avatar. */
+.chat-page--reader .chat-topbar { min-height: 48px; gap: 24px; padding: 7px 32px 7px 20px; }
+.chat-reader-icon-btn { flex: none; color: var(--ink); }
+.chat-reader-icon-btn svg { width: 15px; height: 15px; }
 .chat-page--reader .chat-empty-inner { width: min(100%, 560px); padding-inline: 16px; }
 .chat-page--reader .chat-examples { width: min(100%, 300px); margin-inline: auto; flex-direction: column; align-items: stretch; }
 .chat-page--reader .chat-example { width: 100%; }
 .chat-reader-action { border: 0; background: transparent; color: var(--accent-text); text-decoration: none; font-size: 12px; white-space: nowrap; }
 @media (max-width: 880px) {
+  .chat-page--reader .chat-topbar { gap: 12px; padding-right: 16px; }
   .pdf-toolbar { padding-left: 16px; }
 }
 @media (max-width: 640px) {
+  .chat-page--reader .chat-topbar { gap: 8px; padding-right: 14px; }
   .pdf-zoom-value { display: none; }
   .pdf-toolbar { gap: 8px; overflow-x: auto; padding-left: 14px; }
   .pdf-toolbar-paper { min-width: 150px; }

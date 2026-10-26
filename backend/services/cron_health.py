@@ -2559,7 +2559,17 @@ def evaluate_job_health(
         reasons.append("lock is held during the wrapper-to-Python handoff window")
 
     if running:
-        start_age = _minutes_since(log_status.get("last_run"))
+        # A queued or just-started invocation has not logged yet, so the log's
+        # last_run still belongs to the previous run; the newest start wins.
+        start_ages = [
+            age
+            for age in (
+                _minutes_since(log_status.get("last_run"), now=now),
+                _minutes_since((systemd_status or {}).get("last_started_at"), now=now),
+            )
+            if age is not None
+        ]
+        start_age = min(start_ages) if start_ages else None
         if start_age is not None and start_age > job.expected_runtime_minutes:
             status = "stuck"
             reasons.append(

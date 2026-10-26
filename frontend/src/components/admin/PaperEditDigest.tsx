@@ -16,7 +16,7 @@ export function PaperEditDigest() {
     {query.data && <>
       <p>{query.data.edits} published changes · {query.data.papers} papers · {query.data.contributors} contributors</p>
       <ul className="space-y-1">{query.data.rows.map((row, index) => <li key={index}>
-        <Link className="underline" to={`/paper/${row.paper_id}#edit-history`}>Paper {row.paper_id}</Link> · @{row.actor_username ?? "admin"} · {row.edits} changes
+        <Link className="underline" to={`/paper/${row.paper_id}`}>Paper {row.paper_id}</Link> · @{row.actor_username ?? "admin"} · {row.edits} changes
       </li>)}</ul>
       <div className="flex gap-2">
         {page > 1 && <Button variant="outline" onClick={() => setPage(page - 1)}>Previous</Button>}

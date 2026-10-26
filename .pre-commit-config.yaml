@@ -14,3 +14,7 @@ repos:
       args: [ --fix ]
     # Run the formatter.
     - id: ruff-format
+-   repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+    -   id: gitleaks

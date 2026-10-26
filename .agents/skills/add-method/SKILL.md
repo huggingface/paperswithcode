@@ -19,7 +19,7 @@ For a typical new method with a source paper:
 
 1. Confirm the method does not already exist (`slug`, `name`, `keywords`).
 2. Decide whether the method has an introducing paper at all (see No introducing paper). If it does, confirm the source `papers` row exists (import first if needed).
-3. Write metadata + migration SQL.
+3. Write metadata + migration SQL, including the abstract-linking mode (`abstract_linking`) and any `aliases` (see Choose metadata).
 4. Add hero image: save seed PNG under `/tmp/paperswithcode_entity_image_seeds/methods/<slug>.png`, then import into SQL (see Thumbnail).
 5. Apply migration to the live DB.
 6. Link papers: **all local papers that cite the source paper** (see Citation linking), or, for a method without an introducing paper, a reviewed candidate set (see No introducing paper).
@@ -72,7 +72,13 @@ For methods that do have a source paper, keep in mind that the hourly reference 
 - **`name`**: short display name (e.g. `Conformer`, `RNN-Transducer`, `TDT`).
 - **`full_name`**: expanded form with abbreviation when useful (e.g. `Token-and-Duration Transducer (TDT)`).
 - **`description`**: one concise paragraph — what it does, why it matters, one concrete result if grounded in the source. Link related methods on-site, e.g. `[Conformer](/methods/conformer)`, `[RNN-Transducer](/methods/rnn-transducer)`, `[Transformer](/methods/transformer)`. Use relative links only; never hard-code `paperswithcode.co` or localhost inside markdown fields.
-- **`keywords`**: exact name, abbreviation, hyphenated variants, common aliases (`RNNT`, `FastConformer`, etc.).
+- **`keywords`**: exact name, abbreviation, hyphenated variants, common aliases (`RNNT`, `FastConformer`, etc.). Keywords drive paper tagging only; they are never used to link abstracts.
+- **`abstract_linking`**: how literal mentions of this method in paper abstracts become hover links (`backend/services/abstract_link_service.py`). New rows default to `judge`, so always set it explicitly:
+  - `always`: the name means exactly this method wherever it appears in an ML abstract. Use it for named methods, models and versions (`GRPO`, `Qwen3.5`, `Claude Fable 5`, `Gated DeltaNet-2`) and for established single-meaning concepts (`Pre-training`, `Supervised Fine-Tuning (SFT)`, `Knowledge Distillation`).
+  - `judge`: the name is an ordinary word or has other common senses, so the Jev judge decides per abstract. Examples: `Reasoning`, `Transformer`, `Embedding`, `Whisper`, `Mamba`, `Rollout`, short lowercase names such as `o1`/`o3`, and abbreviations that also mean something else (`SAM` = sharpness-aware minimization, `MAE` = mean absolute error).
+  - `never`: too generic to be a useful link even when correct (`Agent`, `Attention`, `Diffusion`).
+- **`aliases`** (`TEXT[]`, optional): other names papers really use for exactly this method, matched like the name. Examples: `{"Multimodal Large Language Model (MLLM)", "Large Vision-Language Model (LVLM)"}` on Vision-language model, `{"Loop Transformer"}` on Looped Transformer. Do not add keyword-style related terms. A capitalised one-word alias (`Astra`) is always judged.
+- **Names that link well**: `name` must be the exact form papers write (`Qwen3.5`, not `Qwen 3.5 family`). Put an abbreviation in a trailing bracket of `name` or `full_name` (`Direct Preference Optimization (DPO)`) so both "DPO" and "direct preference optimization (DPO)" link. Plurals, model-size suffixes (`-8B`), checkpoint suffixes (`-Instruct`) and British spellings are matched automatically.
 - **`area_id`**: resolve by area name. Live DB areas include `Audio`, `Vision`, `Language`, `Video`, `General`, `Other`. Use the area the user names (e.g. speech/ASR methods → `Audio`).
 - **`introduced_year`**: source paper publication year.
 - **`code_snippet_url`**: optional pointer to a canonical implementation file (NeMo, ESPnet, torchaudio, official repo) — not the introducing paper PDF.
@@ -106,6 +112,14 @@ uv run --env-file backend/keys.env python backend/database/import_entity_image.p
 
 Prefer the main architecture diagram (encoder block, lattice, joint network) over alignment heatmaps unless the user asks otherwise.
 
+**Never generate or draw the image.** Do not use AI-generated, matplotlib-drawn, or hand-made illustrations, and never credit one as "Illustration by Papers with Code". Every method image must be a real figure with attribution. When the source paper has no usable figure (classic or pre-arXiv methods, code-only papers), use, in this order:
+
+1. A figure from a later paper that explains the method (survey, follow-up), credited as `[Title](/paper/<id>)`.
+2. A Creative Commons or public-domain figure from Wikimedia Commons, credited as a markdown link to its Commons file page, plus author and license in the same string (for example `[Gradient descent](https://commons.wikimedia.org/wiki/File:Gradient_descent.svg), public domain`). Respect share-alike and attribution terms.
+3. If neither exists, leave the image empty rather than inventing one, and tell the user.
+
+Skip figures with no open license (company blogs, system cards) unless the user supplies the image.
+
 No frontend rebuild is needed for entity images — they are served from the backend API.
 
 ### 5. Create and apply migration
@@ -132,7 +146,7 @@ Example migration shape:
 INSERT INTO methods (
     slug, name, full_name, description, keywords,
     area_id, introduced_year, source_paper_id, source_url, source_title,
-    code_snippet_url, image_url, image_credit
+    code_snippet_url, image_url, image_credit, abstract_linking, aliases
 )
 VALUES (
     '<slug>',
@@ -148,7 +162,9 @@ VALUES (
     '<source paper title>',
     '<implementation URL>',
     NULL,
-    '[<source paper title>](/paper/<arxiv_id>)'
+    '[<source paper title>](/paper/<arxiv_id>)',
+    '<always|judge|never>',
+    ARRAY[]::text[]  -- or ARRAY['<Alias>']
 )
 ON CONFLICT (slug) DO UPDATE SET
     name = EXCLUDED.name,
@@ -163,6 +179,8 @@ ON CONFLICT (slug) DO UPDATE SET
     code_snippet_url = EXCLUDED.code_snippet_url,
     image_url = EXCLUDED.image_url,
     image_credit = EXCLUDED.image_credit,
+    abstract_linking = EXCLUDED.abstract_linking,
+    aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
 
 INSERT INTO paper_methods (paper_id, method_id)
@@ -253,7 +271,20 @@ curl -fsS "http://localhost:8000/api/v1/methods/<slug>" | uv run python3 -m json
 curl -fsS -o /dev/null -w "%{http_code}\n" "http://localhost:8000/api/v1/methods/<slug>/image"
 ```
 
-5. Source paper lists the method (introduced banner):
+5. Abstract linking is set, and the method links in an abstract that names it (the hourly `link_abstract_mentions` CRON and the nightly rescan pick it up anyway; this checks it now):
+
+```sql
+SELECT slug, abstract_linking, aliases FROM methods WHERE slug = '<slug>';
+```
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.link_abstract_mentions \
+  --paper-ids <paper id whose abstract mentions the method>
+curl -fsS "https://paperswithcode.co/api/v1/papers/<arxiv_id>" \
+  | uv run python3 -c "import json,sys; print([m['surface'] for m in json.load(sys.stdin).get('abstract_mentions') or [] if m['slug']=='<slug>'])"
+```
+
+6. Source paper lists the method (introduced banner):
 
 ```bash
 curl -fsS "http://localhost:8000/api/v1/papers/<arxiv_id>?include_resources=true" \
@@ -272,6 +303,7 @@ Always include:
 - Whether `paper_methods` includes the source paper (introduced banner)
 - Citation linking summary: how many Semantic Scholar citations fetched, how many local papers linked (`paper_count` on the method API)
 - Thumbnail: confirm `/api/v1/methods/<slug>/image` returns HTTP 200 after import
+- Abstract linking: the `abstract_linking` mode chosen (and why), any `aliases`, and an abstract where the method now links
 
 ## Reference: recent Audio methods
 

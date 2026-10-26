@@ -80,11 +80,11 @@ export function usePaperDetailPageModel(
 
   useEffect(() => {
     if (!paper?.title) return;
-    document.title = formatPageTitle(paper.title);
+    document.title = paper.page_title || formatPageTitle(paper.title);
     return () => {
       document.title = DEFAULT_SITE_SUFFIX;
     };
-  }, [paper?.title]);
+  }, [paper?.page_title, paper?.title]);
 
   useEffect(() => {
     setSecondaryQueriesEnabled(false);

@@ -189,3 +189,24 @@ test("cancellation or timeout wins even if a late answer arrives", async () => {
   });
   assert.equal(result.outcome, "aborted");
 });
+
+test("recovery lowers reasoning once before the first recovery prompt", async () => {
+  const completion = policy();
+  completion.reset(false);
+  const events: string[] = [];
+
+  await recoverIncompleteResponse(completion, {
+    prompt: async () => {
+      events.push("prompt");
+    },
+    disableTools: () => {
+      events.push("disable");
+    },
+    canContinue: () => true,
+    lowerReasoning: () => {
+      events.push("lower");
+    },
+  });
+
+  assert.deepEqual(events, ["lower", "prompt", "disable", "prompt"]);
+});

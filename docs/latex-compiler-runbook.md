@@ -38,10 +38,14 @@ script, and Space-specific settings have been removed. The compiler image under
 `latex_compiler_space/` is retained only as the OCI runtime launched inside each
 per-job Sandbox.
 
-The required external staging inputs remain intentionally blank in the release
-example: an operator-approved private namespace, an immutable compiler image
-digest, a protected Sandbox-only credential, and the exact
-`sandbox-netns-v1` egress-policy attestation. Do not derive these from the
+The required external staging inputs remain intentionally blank in
+`deploy/env/staging.env.example` and unset in the protected staging
+configuration: an operator-approved private namespace, an immutable compiler
+image digest, a protected Sandbox-only credential, and the exact
+`sandbox-netns-v1` egress-policy attestation
+(`PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE`, `_IMAGE`, `_TOKEN`,
+`_EGRESS_POLICY_ATTESTATION`). Production has no compiler configuration; the
+transport and runtime validation refuse any environment other than staging. Do not derive these from the
 authenticated developer identity, reuse an unrelated credential, or invent a
 target.
 
@@ -108,8 +112,11 @@ this mode never submits or resumes compiler work.
 
 ## Qualification procedure
 
-Only after the exact external inputs above are supplied and the kill switch is
-intentionally enabled for this isolated staging exercise:
+Only after the exact external inputs above are supplied. The script requires
+`PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE=true` and refuses to run unless
+`PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED`, `PWC_CHAT_LATEX_PAPER_ENABLED`, and all
+user-facing artifact features (artifacts, shared previews, Posterly) are
+disabled:
 
 ```bash
 uv run --env-file /etc/paperswithcode/staging.env \
@@ -120,7 +127,11 @@ uv run --env-file /etc/paperswithcode/staging.env \
 The suite uses fixed synthetic bundles for shell escape, host file reads,
 network pipe input, recursive expansion, process pressure, oversized output,
 path traversal, malformed archives, and malformed PDF figures. It prints only
-case names, terminal outcomes, and elapsed milliseconds. Also perform one
+case names, terminal outcomes, and elapsed milliseconds, and writes the same
+evidence to
+`/var/lib/paperswithcode/staging-compiler-qualification/latex-compiler-qualification.json`
+for a full run unless `--no-write-evidence` is passed; `--case <name>` runs
+selected cases without writing evidence. Also perform one
 manual cancellation while compiling and one controlled Sandbox/backend restart
 followed by the reconciliation command; record `/health` and `/metrics` before
 and after. Confirm that the Sandbox preflight completed before submitting the

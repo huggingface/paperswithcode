@@ -1,0 +1,21 @@
+# Secret scanning for this repository: gitleaks' default rules plus a narrow
+# allowlist of reviewed false positives. Run locally with pre-commit (staged
+# changes) or `gitleaks dir . --config .gitleaks.toml --redact`; CI runs the
+# same tree scan in .github/workflows/secret-scan.yml.
+#
+# Never allowlist a real credential: rotate it and remove it instead.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Reviewed false positives"
+regexTarget = "line"
+regexes = [
+    # OpenAI prompt-cache names, not keys.
+    '''"prompt_cache_key": "pwc-[a-z-]+-v\d+"''',
+    # A type annotation.
+    '''private_key: Ed25519PrivateKey$''',
+    # Fixed signing secret used only by the test suite.
+    '''jwt_secret="test-secret-32-characters-long-enough"''',
+]

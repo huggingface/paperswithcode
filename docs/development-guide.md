@@ -7,21 +7,22 @@ contract.
 ## Local workflow
 
 ```bash
-# Backend
-uv run --env-file backend/keys.env backend/run_server.py
+# Backend (PWC_PORT defaults to 8000, which is production; pick a free port)
+PWC_PORT=18000 uv run --env-file backend/keys.env backend/run_server.py
 
 # Frontend
 cd frontend && npm run dev
 
 # Checks
-cd frontend && npm run lint
+cd frontend && npm run lint && npm run typecheck && npm test -- --run
 # DB-backed tests refuse the live database; see "Database-backed tests"
 uv run --env-file backend/keys.env pytest backend/tests -q
 ```
 
-Use an isolated backend port for local testing. Do not rebuild the frontend or
-restart the production services during routine development; `frontend/dist` is
-served by nginx in production.
+Use an isolated backend port for local testing; ports 8000 and 8001 belong to
+production and staging. Do not rebuild the frontend or restart the production
+services during routine development; nginx serves each environment's
+`current/frontend-dist` release.
 
 ## Backend
 
@@ -56,6 +57,7 @@ served by nginx in production.
   | Datasets and benchmarks | `uv run pytest backend/tests/dataset -q` |
   | Evaluations, ranks, leaderboard badges, leaderboard syncs | `uv run pytest backend/tests/evaluation -q` |
   | CRON registry, schedules, health, dashboard, logs | `uv run pytest backend/tests/cron -q` |
+  | Research follows: privacy, discovery, ranking, delivery (Postgres cases need a disposable database) | `uv run pytest backend/tests/research -q` |
 
 ### Database-backed tests
 
@@ -79,9 +81,11 @@ Run them with `uv run --env-file backend/keys.env …`.
 ## Frontend
 
 - Keep routes in `frontend/src/App.tsx` and place new routes before the catch-all.
-- Use `frontend/src/lib/api.ts` for backend calls and TanStack Query for server
+- Use the domain clients under `frontend/src/lib/api/` (for example
+  `papers.ts`, `catalog.ts`) for backend calls and TanStack Query for server
   state.
-- Reuse the components and design tokens under `frontend/src/components/`.
+- Reuse the components under `frontend/src/components/` (primitives in
+  `components/ui/`) and the design tokens in `frontend/src/index.css`.
 - Keep TypeScript strict and handle loading, empty, and error states.
 
 ## Isolated nginx tests
@@ -154,13 +158,16 @@ unchanged. Small GET health checks do not exercise this failure mode.
 
 ## Cron and operations
 
-Follow `.github/workflows/scripts/README.md` for cron jobs. Test a job with:
+Follow `.github/workflows/scripts/README.md` for cron jobs. Run production
+jobs only through the installed `sudo pwc-cron <job>` allowlist. `manage_cron.py
+test` runs the real job against whatever database `PWC_DB_*` names, so point it
+at a disposable database before testing a job from the checkout:
 
 ```bash
-uv run --env-file backend/keys.env \
+uv run --env-file <disposable-db.env> \
   .github/workflows/scripts/manage_cron.py test <job_name>
 ```
 
-The VPS has about 4 GB of RAM: stream large inputs, use bounded batches, and
-keep heavy work out of request handlers. Use `docs/deployment.md` only for an
-explicit production release.
+The VPS has 8 vCPUs, 16 GB of RAM, and an 80 GB disk shared with production:
+stream large inputs, use bounded batches, and keep heavy work out of request
+handlers. Use `docs/deployment.md` only for an explicit production release.

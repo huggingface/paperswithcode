@@ -73,6 +73,31 @@ const AttentionFig: React.FC = () => (
   </svg>
 );
 
+const ContrastiveFig: React.FC = () => (
+  <svg viewBox="0 0 360 420" width="100%" height="100%" style={{ display: "block" }}>
+    <text x="180" y="20" fontSize="11" fontFamily="var(--serif)" fontStyle="italic" fill={C.faint} textAnchor="middle">Contrastive learning</text>
+    <MFBox x={120} y={40} w={120} h={26} fill={C.blue} stroke={C.blueS} label="Input x" fontSize={11} />
+    <path d="M180 66 V76 M90 76 H270 M90 76 V88 M270 76 V88" stroke={C.ink} />
+    <MFBox x={35} y={88} w={110} h={26} fill={C.yellow} stroke={C.yellowS} label="Augment t₁" fontSize={11} />
+    <MFBox x={215} y={88} w={110} h={26} fill={C.yellow} stroke={C.yellowS} label="Augment t₂" fontSize={11} />
+    <path d="M90 114 V138 M270 114 V138" stroke={C.ink} />
+    <MFBox x={35} y={138} w={110} h={26} fill={C.orange} stroke={C.orangeS} label="Encoder f" fontSize={11} />
+    <MFBox x={215} y={138} w={110} h={26} fill={C.orange} stroke={C.orangeS} label="Encoder f" fontSize={11} />
+    <text x="180" y="155" fontSize="9" fontFamily="var(--serif)" fontStyle="italic" fill={C.faint} textAnchor="middle">shared weights</text>
+    <path d="M90 164 V188 M270 164 V188" stroke={C.ink} />
+    <MFBox x={35} y={188} w={110} h={26} fill={C.purple} stroke={C.purpleS} label="Projection g" fontSize={11} />
+    <MFBox x={215} y={188} w={110} h={26} fill={C.purple} stroke={C.purpleS} label="Projection g" fontSize={11} />
+    <path d="M90 214 V238 M270 214 V238" stroke={C.ink} />
+    <MFBox x={35} y={238} w={110} h={26} fill={C.pink} stroke={C.pinkS} label="z₁" fontSize={13} />
+    <MFBox x={215} y={238} w={110} h={26} fill={C.pink} stroke={C.pinkS} label="z₂" fontSize={13} />
+    <path d="M145 251 H215" stroke={C.greenS} strokeWidth="1.5" strokeDasharray="4 3" />
+    <text x="180" y="244" fontSize="9" fontFamily="var(--sans)" fill={C.greenS} textAnchor="middle">attract</text>
+    <text x="180" y="318" fontSize="12" fontFamily="var(--serif)" fontStyle="italic" fill={C.ink} textAnchor="middle">Positive pair: pull together</text>
+    <text x="180" y="336" fontSize="12" fontFamily="var(--serif)" fontStyle="italic" fill={C.ink} textAnchor="middle">Other samples: push apart</text>
+    <text x="180" y="370" fontSize="11" fontFamily="var(--serif)" fill={C.faint} textAnchor="middle">InfoNCE: maximize sim(z₁, z₂) / τ</text>
+  </svg>
+);
+
 const AGENT_SKILL_TREE_LINES: ReadonlyArray<readonly [string, string]> = [
   ["my-skill/", ""],
   ["├── SKILL.md", "# Required: metadata + instructions"],
@@ -108,6 +133,7 @@ const AgentSkillsFig: React.FC = () => (
 
 const FIGURE_BY_SLUG: Record<string, React.FC> = {
   attention: AttentionFig,
+  "contrastive-learning": ContrastiveFig,
   "agent-skills": AgentSkillsFig,
 };
 

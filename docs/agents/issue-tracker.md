@@ -6,8 +6,9 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 For `Verify evals on Papers with Code` outreach, do not create an issue when:
 
-- the target repository is owned by `huggingface`;
-- the repository name is `vllm`, `sglang`, or `llama.cpp`;
+- the repository is excluded in `backend/services/github_issue_publish_service.py`
+  (`EXCLUDED_REPOSITORY_OWNERS`, `EXCLUDED_REPOSITORY_NAMES`,
+  `EXCLUDED_REPOSITORIES`; see the scheduled section below);
 - the repository already has an open issue authored by the outreach login
   (`PWC_GITHUB_OUTREACH_LOGIN`).
 
@@ -66,8 +67,9 @@ producers are covered too. The job groups papers by GitHub's canonical repositor
 ID and waits until native evaluations are at least one hour old and no linked
 paper has queued/running curation work.
 
-The exclusions also cover owners `tensorflow`, `pytorch`, `openai`, `anthropic`,
-and `anthropics`; repository names `tensorflow` and `pytorch`; and exact repos
+The exclusions cover owners `huggingface`, `tensorflow`, `pytorch`, `openai`,
+`anthropic`, and `anthropics`; repository names `vllm`, `sglang`, `llama.cpp`,
+`tensorflow`, and `pytorch`; and exact repos
 `google-research/google-research` and `pwc-1/Paper-9`. Owner/name comparisons are
 case insensitive and apply again after redirects. There is no blanket star-count
 or repository-age cutoff.
@@ -115,8 +117,8 @@ environment. Logs and counts appear under `create_eval_verification_issues` in
 the admin CRON dashboard; a successful run is not proof that discovery/backlog
 is exhausted—inspect `aliases_remaining` and the durable last-run summary.
 
-To pause publication after rollout, disable the
+To pause publication, disable the
 `pwc-cron-create-eval-verification-issues.timer` through normal operations.
-Activating this feature requires merging/deploying its application release and
-installing the updated deploy tooling/host timer units; a code-only release does
-not update the installed launcher allowlist.
+Launcher changes (`deploy/cron_launcher.py`) take effect only after the updated
+deploy tooling and timer units are installed; a code-only release does not
+update the installed launcher allowlist.

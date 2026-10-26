@@ -217,6 +217,20 @@ def get_latest_paper_ids_for_repositories(
     return [row[0] for row in rows]
 
 
+def get_aged_out_scored_paper_ids(session, cutoff) -> list[int]:
+    """Return papers that left the scoring window but still hold a score."""
+    rows = session.execute(
+        text("""
+            SELECT id
+            FROM papers
+            WHERE trending_score IS NOT NULL
+              AND date_published < :cutoff
+        """),
+        {"cutoff": cutoff},
+    ).fetchall()
+    return [row[0] for row in rows]
+
+
 def calculate_paper_scores(session, paper_ids=None) -> dict:
     """Normalize against the full corpus and write only selected paper rows."""
     cutoff = (datetime.now() - timedelta(days=SCORING_WINDOW_DAYS)).date()
@@ -231,6 +245,10 @@ def calculate_paper_scores(session, paper_ids=None) -> dict:
         sorted_by_kind,
         paper_ids=paper_ids,
     )
+    if paper_ids is None:
+        # The population only covers the window, so aged-out scores would
+        # otherwise stay frozen forever.
+        clears.extend(get_aged_out_scored_paper_ids(session, cutoff))
     written, cleared = write_scores(session, updates, clears)
     selected = len(population) if paper_ids is None else len(set(paper_ids))
     return {

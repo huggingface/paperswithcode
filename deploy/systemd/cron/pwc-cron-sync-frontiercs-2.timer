@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync FrontierCS 2 leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:43:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-frontiercs-2.service
+
+[Install]
+WantedBy=timers.target

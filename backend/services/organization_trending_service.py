@@ -14,10 +14,13 @@ from backend.models.database import (
     Paper,
     PaperOrganization,
 )
+from backend.services.sitemap_service import eligible_paper_filter
 from backend.services.trending_ranking_service import active_paper_score_components
 
 ROLLING_DAYS = 30
 RETENTION_DAYS = 120
+# Organizations with at least this many public papers are featured automatically.
+AUTO_FEATURE_MIN_PAPERS = 25
 
 
 class OrganizationTrendingService:
@@ -26,6 +29,7 @@ class OrganizationTrendingService:
 
     def calculate(self, snapshot_date: date | None = None) -> dict[str, int]:
         snapshot_date = snapshot_date or datetime.now(timezone.utc).date()
+        newly_featured = self._feature_established_organizations()
         repo_stats, active_score = active_paper_score_components(
             self.db, get_settings().trending_ranking_mode
         )
@@ -102,4 +106,26 @@ class OrganizationTrendingService:
             .delete(synchronize_session=False)
         )
         self.db.commit()
-        return {"snapshots": len(score_rows), "history_pruned": deleted}
+        return {
+            "snapshots": len(score_rows),
+            "history_pruned": deleted,
+            "newly_featured": newly_featured,
+        }
+
+    def _feature_established_organizations(self) -> int:
+        """Feature every organization with enough public papers; never unfeature."""
+        established = (
+            self.db.query(PaperOrganization.organization_id)
+            .join(Paper, Paper.id == PaperOrganization.paper_id)
+            .filter(eligible_paper_filter())
+            .group_by(PaperOrganization.organization_id)
+            .having(func.count(func.distinct(Paper.id)) >= AUTO_FEATURE_MIN_PAPERS)
+        )
+        return (
+            self.db.query(Organization)
+            .filter(
+                Organization.is_featured.is_(False),
+                Organization.id.in_(established),
+            )
+            .update({Organization.is_featured: True}, synchronize_session=False)
+        )

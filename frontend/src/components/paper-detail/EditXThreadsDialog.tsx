@@ -17,6 +17,7 @@ import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
 import { useToast } from "@/hooks/use-toast";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
 import { refreshPaperQueries } from "@/lib/queryInvalidation";
 
 const MAX_X_THREADS = 10;
@@ -70,22 +71,24 @@ export function EditXThreadsDialog({
   const mutation = useMutation({
     mutationFn: async (next: string[]) => {
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: parseInt(paperId),
           edit_type: "x_threads",
           proposed_payload: { x_threads: next },
+        });
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId, arxivId],
+          queuedDescription:
+            "Thanks! An admin will review your proposed X threads shortly.",
         });
         return null;
       }
       return papersApi.updateXThreads(paperId, next);
     },
     onSuccess: (updatedPaper) => {
-      if (submitMode === "pending") {
-        toast({
-          title: "Edit submitted for review",
-          description: "Thanks! An admin will review your proposed X threads shortly.",
-        });
-      } else if (updatedPaper) {
+      if (submitMode !== "pending" && updatedPaper) {
         refreshPaperQueries(queryClient, updatedPaper, [paperId, arxivId]);
       }
       onOpenChange(false);

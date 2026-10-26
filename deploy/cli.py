@@ -8,14 +8,11 @@ import fcntl
 import json
 import os
 import shutil
-import socket
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
-import urllib.error
-import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,7 +49,7 @@ try:
         slot_status as external_pi_slot_status,
         stop_slot_if_enabled,
     )
-    from deploy import mcp_release
+    from deploy import build_sandbox, mcp_release
 except ModuleNotFoundError:
     from release import (  # type: ignore[no-redef]
         ENVIRONMENTS,
@@ -85,6 +82,7 @@ except ModuleNotFoundError:
         slot_status as external_pi_slot_status,
         stop_slot_if_enabled,
     )
+    import build_sandbox  # type: ignore[no-redef]
     import mcp_release  # type: ignore[no-redef]
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
@@ -94,12 +92,15 @@ RUNTIMES = APP_ROOT / "runtimes"
 EXTERNAL_PI_RUNTIMES = RUNTIMES / "external-pi"
 ENVIRONMENTS_ROOT = APP_ROOT / "environments"
 VENV = APP_ROOT / ".venv"
-PYTHON_RUNTIME = APP_ROOT / "python-runtime"
 RUNTIME_LOCK = APP_ROOT / "runtime-lock.sha256"
 CONFIG_ROOT = Path(os.environ.get("PWC_DEPLOY_CONFIG_ROOT", "/etc/paperswithcode"))
 LOG_ROOT = Path(os.environ.get("PWC_DEPLOY_LOG_ROOT", "/var/log/paperswithcode/deploy"))
 MIN_FREE_BYTES = int(os.environ.get("PWC_DEPLOY_MIN_FREE_BYTES", str(1536 * 1024**2)))
 DEPLOY_LOCK = APP_ROOT / "deployment.lock"
+# A drained slot whose only remaining work is plain HTTP requests is stopped
+# anyway after this long: such requests are short, so a count that outlives it
+# is a leaked accounting record, not a live request.
+BOUNDED_DRAIN_SECONDS = 600
 PORTS = {"production": 8000, "staging": 8001}
 PUBLIC_URLS = {
     "production": "https://paperswithcode.co",
@@ -227,6 +228,16 @@ try:
     from deploy import production_chat_contract as production_contract
 except ImportError:
     production_contract = None
+
+
+def posterly_artifact_bucket_id():
+    try:
+        from backend.operator_profile import OPERATOR
+    except ImportError:
+        # Releases from before config/operator.toml pinned it in the contract.
+        return contract.POSTERLY_ARTIFACT_BUCKET_ID
+    return OPERATOR.chat_artifact_bucket
+
 enabled = os.environ["PWC_RELEASE_CHAT_ENABLED"] == "true"
 production = os.environ["PWC_RELEASE_ENVIRONMENT"] == "production"
 descriptor = {
@@ -301,7 +312,7 @@ if present_pi_fields:
         "posterly_license": contract.POSTERLY_LICENSE,
         "posterly_playwright_version": contract.POSTERLY_PLAYWRIGHT_VERSION,
         "posterly_chromium_revision": contract.POSTERLY_CHROMIUM_REVISION,
-        "posterly_artifact_bucket_id": contract.POSTERLY_ARTIFACT_BUCKET_ID,
+        "posterly_artifact_bucket_id": posterly_artifact_bucket_id(),
     })
 print(json.dumps(descriptor, sort_keys=True))
 """
@@ -309,14 +320,19 @@ print(json.dumps(descriptor, sort_keys=True))
         "PATH": os.defpath,
         "PYTHONPATH": str(source),
         "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
         "PWC_RELEASE_ENVIRONMENT": environment,
         "PWC_RELEASE_CHAT_ENABLED": "true" if enabled else "false",
     }
+    # Importing release modules runs release code, so never do it as root.
     output = subprocess.check_output(
-        [sys.executable, "-c", script],
+        build_sandbox.command([sys.executable, "-c", script]),
         cwd=source,
         env=environment_values,
         text=True,
+        # A process the import leaves behind can hold stdout open; never wait
+        # for it forever.
+        timeout=300,
     )
     descriptor = json.loads(output)
     if not isinstance(descriptor, dict):
@@ -475,7 +491,23 @@ def prepare_release(sha: str, environment: str) -> Path:
     try:
         _extract_commit(sha, source)
         frontend = source / "frontend"
-        build_env = os.environ.copy()
+        build_home = build_root / "home"
+        build_home.mkdir()
+        npm_cache = build_root / "npm-cache"
+        npm_cache.mkdir()
+        # The build user may enter build_root but never rename its entries, so
+        # it cannot swap ``source`` for a symlink before root publishes it.
+        build_root.chmod(0o711)
+        # npm lifecycle scripts and the Vite config are release code: build as
+        # the unprivileged build user with a private HOME and npm cache instead
+        # of root's environment.
+        build_env = {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(build_home),
+            "LANG": "C.UTF-8",
+            "npm_config_cache": str(npm_cache),
+            "npm_config_update_notifier": "false",
+        }
         build_env.update(
             frontend_feature_environment(
                 environment,
@@ -484,12 +516,22 @@ def prepare_release(sha: str, environment: str) -> Path:
         )
         build_env.update(frontend_analytics_environment(environment))
         build_env.update(frontend_host_environment(environment))
-        run(["npm", "ci"], cwd=frontend, env=build_env)
-        run(
-            ["npm", "run", "build", "--", "--mode", environment],
-            cwd=frontend,
-            env=build_env,
-        )
+        for lent in (source, build_home, npm_cache):
+            build_sandbox.lend(lent)
+        try:
+            run(build_sandbox.command(["npm", "ci"]), cwd=frontend, env=build_env)
+            run(
+                build_sandbox.command(
+                    ["npm", "run", "build", "--", "--mode", environment]
+                ),
+                cwd=frontend,
+                env=build_env,
+            )
+            descriptor = _chat_descriptor_from_source(
+                source, environment, chat_enabled=expected_features["chat"]
+            )
+        finally:
+            build_sandbox.reclaim(source)
         shutil.move(str(frontend / "dist"), str(source / "frontend-dist"))
         shutil.rmtree(frontend / "node_modules")
         for env_file in source.rglob(".env*"):
@@ -510,9 +552,6 @@ def prepare_release(sha: str, environment: str) -> Path:
                 "release contains forbidden artifacts: "
                 + ", ".join(str(path.relative_to(source)) for path in forbidden[:10])
             )
-        descriptor = _chat_descriptor_from_source(
-            source, environment, chat_enabled=expected_features["chat"]
-        )
         manifest = build_manifest(
             sha,
             environment,
@@ -550,194 +589,18 @@ def make_release_readable(release: Path) -> None:
     release.chmod(0o555)
 
 
-def sync_runtime(release: Path) -> bool:
-    wanted = sha256_file(release / "uv.lock")
-    current = RUNTIME_LOCK.read_text().strip() if RUNTIME_LOCK.is_file() else ""
-    if current == wanted and (VENV / "bin" / "python").is_file():
-        make_runtime_readable()
-        return False
-    env = os.environ.copy()
-    env["UV_PROJECT_ENVIRONMENT"] = str(VENV)
-    previous_umask = os.umask(0o022)
-    try:
-        run(["uv", "sync", "--frozen", "--project", str(release)], env=env)
-    finally:
-        os.umask(previous_umask)
-    make_runtime_readable()
-    RUNTIME_LOCK.write_text(wanted + "\n", encoding="utf-8")
-    return True
-
-
-def sync_runtime_with_recovery(release: Path, previous_lock_hash: str) -> bool:
-    try:
-        return sync_runtime(release)
-    except (subprocess.CalledProcessError, OSError):
-        if previous_lock_hash:
-            restore_runtime(previous_lock_hash)
-        raise
-
-
-def make_runtime_readable() -> None:
-    config = VENV / "pyvenv.cfg"
-    lines = config.read_text(encoding="utf-8").splitlines()
-    home_line = next(line for line in lines if line.startswith("home = "))
-    source_root = Path(home_line.split("=", 1)[1].strip()).parent
-    if source_root != PYTHON_RUNTIME:
-        if not PYTHON_RUNTIME.exists():
-            temporary = PYTHON_RUNTIME.with_name(
-                f".{PYTHON_RUNTIME.name}.new-{os.getpid()}"
-            )
-            shutil.copytree(source_root, temporary, symlinks=True)
-            os.replace(temporary, PYTHON_RUNTIME)
-        updated = [
-            line.replace(str(source_root), str(PYTHON_RUNTIME)) for line in lines
-        ]
-        config.write_text("\n".join(updated) + "\n", encoding="utf-8")
-    versioned = f"python{sys.version_info.major}.{sys.version_info.minor}"
-    base_launcher = PYTHON_RUNTIME / "bin" / versioned
-    for name in ("python", "python3", versioned):
-        launcher = VENV / "bin" / name
-        launcher.unlink(missing_ok=True)
-        launcher.symlink_to(base_launcher)
-    for path in VENV.rglob("*"):
-        if path.is_symlink():
-            continue
-        mode = path.stat().st_mode
-        path.chmod(mode | (0o555 if path.is_dir() else 0o444))
-    VENV.chmod(VENV.stat().st_mode | 0o555)
-
-
-def restore_runtime(lock_hash: str) -> None:
-    for environment in ENVIRONMENTS:
-        pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
-        for release in (pointers.current, pointers.previous):
-            if release and sha256_file(release / "uv.lock") == lock_hash:
-                env = os.environ.copy()
-                env["UV_PROJECT_ENVIRONMENT"] = str(VENV)
-                run(
-                    ["uv", "sync", "--frozen", "--project", str(release)],
-                    env=env,
-                )
-                make_runtime_readable()
-                RUNTIME_LOCK.write_text(lock_hash + "\n", encoding="utf-8")
-                return
-    raise DeployError("cannot find a retained release for the previous runtime lock")
-
-
-def free_candidate_port() -> int:
-    for port in range(8100, 8200):
-        with socket.socket() as probe:
-            try:
-                probe.bind(("127.0.0.1", port))
-            except OSError:
-                continue
-            return port
-    raise DeployError("no free candidate qualification port")
-
-
-def _read_json(url: str, timeout: int = 2) -> dict | None:
-    try:
-        with urllib.request.urlopen(url, timeout=timeout) as response:
-            return json.load(response)
-    except (OSError, urllib.error.URLError, json.JSONDecodeError):
-        return None
-
-
-def candidate_start_command(
-    release: Path,
-    environment: str,
-    manifest: dict,
-    port: int,
-    unit: str,
-) -> list[str]:
-    user = f"pwc-{environment}"
-    return [
-        "systemd-run",
-        "--unit",
-        unit,
-        "--uid",
-        user,
-        "--gid",
-        user,
-        "--working-directory",
-        str(release),
-        "--property",
-        f"EnvironmentFile={CONFIG_ROOT / (environment + '.env')}",
-        "/usr/bin/env",
-        f"UVICORN_PORT={port}",
-        f"PWC_PORT={port}",
-        f"PWC_RELEASE_ID={manifest['release_id']}",
-        f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",
-        f"PWC_CHAT_ENABLED={'true' if manifest['backend_features']['chat'] else 'false'}",
-        (
-            "PWC_CODEX_ADD_EVALS_ENABLED="
-            f"{'true' if manifest['backend_features'].get('codex_add_evals', False) else 'false'}"
-        ),
-        (
-            "PWC_CODEX_ENRICH_PAPER_ENABLED="
-            f"{'true' if manifest['backend_features'].get('codex_enrich_paper', False) else 'false'}"
-        ),
-        (
-            "PWC_CODEX_JOBS_ENABLED="
-            f"{'true' if manifest['backend_features'].get('codex_add_evals', False) or manifest['backend_features'].get('codex_enrich_paper', False) else 'false'}"
-        ),
-        str(VENV / "bin" / "python"),
-        str(release / "deploy" / "run_backend.py"),
-    ]
-
-
-def qualify(release: Path, environment: str) -> None:
-    manifest = validate_manifest(release, environment)
-    port = free_candidate_port()
-    unit = f"pwc-candidate-{environment}-{os.getpid()}"
-    command = candidate_start_command(release, environment, manifest, port, unit)
-    run(command)
-    try:
-        deadline = time.monotonic() + 45
-        ready = None
-        while time.monotonic() < deadline:
-            ready = _read_json(f"http://127.0.0.1:{port}/internal/ready")
-            if ready and ready.get("status") == "ready":
-                break
-            time.sleep(0.5)
-        else:
-            raise DeployError(f"candidate failed readiness: {ready!r}")
-        if ready["environment"] != environment:
-            raise DeployError("candidate answered with the wrong environment")
-        if ready["release_id"] != manifest["release_id"]:
-            raise DeployError("candidate answered with the wrong release ID")
-        run(
-            [
-                str(VENV / "bin" / "python"),
-                str(release / "deploy" / "smoke_test.py"),
-                "--environment",
-                environment,
-                "--base-url",
-                f"http://127.0.0.1:{port}",
-                "--expected-release",
-                manifest["release_id"],
-                "--release-dir",
-                str(release),
-                "--candidate",
-            ]
-        )
-    finally:
-        subprocess.run(["systemctl", "stop", f"{unit}.service"], check=False)
-        subprocess.run(["systemctl", "reset-failed", f"{unit}.service"], check=False)
-
-
 def _unit(environment: str) -> str:
     return f"paperswithcode-backend@{environment}.service"
 
 
-def wait_for_release(environment: str, expected_release: str) -> bool:
-    deadline = time.monotonic() + 45
-    while time.monotonic() < deadline:
-        ready = _read_json(f"http://127.0.0.1:{PORTS[environment]}/internal/ready")
-        if ready and ready.get("release_id") == expected_release:
-            return True
-        time.sleep(0.5)
-    return False
+def _run_smoke(environment: str, argv: list[str]) -> None:
+    # The smoke interpreter is the release's runtime, whose dependencies (and
+    # their .pth files) the release chose, so run it as the environment's own
+    # service account, never as root. That account owns the slot socket.
+    run(
+        build_sandbox.command_as(f"pwc-{environment}", argv),
+        env={"PATH": os.defpath, "LANG": "C.UTF-8", "HOME": "/nonexistent"},
+    )
 
 
 def smoke_public(release: Path, environment: str, expected_release: str) -> None:
@@ -747,7 +610,8 @@ def smoke_public(release: Path, environment: str, expected_release: str) -> None
         else Path()
     )
     python = immutable_python if immutable_python.is_file() else VENV / "bin" / "python"
-    run(
+    _run_smoke(
+        environment,
         [
             str(python),
             str(Path(__file__).resolve().parent / "smoke_test.py"),
@@ -767,7 +631,7 @@ def smoke_public(release: Path, environment: str, expected_release: str) -> None
                 if environment == "staging"
                 else []
             ),
-        ]
+        ],
     )
 
 
@@ -904,7 +768,8 @@ def _smoke_slot_candidate(
     runtime: Path,
     manifest: dict,
 ) -> None:
-    run(
+    _run_smoke(
+        environment,
         [
             str(runtime / "bin" / "python"),
             str(Path(__file__).resolve().parent / "smoke_test.py"),
@@ -919,7 +784,7 @@ def _smoke_slot_candidate(
             "--candidate",
             "--unix-socket",
             str(_slot_socket(environment, slot)),
-        ]
+        ],
     )
 
 
@@ -1119,10 +984,12 @@ def _prepare_slot(environment: str, slot: str, release: Path, runtime: Path) -> 
             + int(existing.get("active_chat_streams", 0))
             + int(existing.get("active_gateway_streams", 0))
         )
-        if busy:
+        if busy and not _drain_is_stale(existing):
             raise DeployError(
                 f"inactive slot {slot} is still draining with {busy} streams"
             )
+        if busy:
+            _log_forced_reap(environment, slot, existing)
     subprocess.run(["systemctl", "stop", _slot_unit(environment, slot)], check=False)
     subprocess.run(
         ["systemctl", "stop", _slot_unit(environment, slot, "socket")], check=False
@@ -1279,6 +1146,45 @@ def _drain_deadline_seconds(environment: str) -> float:
                 except ValueError:
                     raise DeployError(f"{key} must be numeric for drain calculation")
     return max(values.values()) + 60
+
+
+def _drain_is_stale(status: dict) -> bool:
+    """Return whether only plain HTTP requests outlived the bounded drain."""
+
+    started_at = status.get("drain_started_at")
+    if (
+        status.get("accepting_chat_turns")
+        or not isinstance(started_at, str)
+        or int(status.get("active_chat_streams", 0))
+        or int(status.get("active_gateway_streams", 0))
+    ):
+        return False
+    drained_for = datetime.now(timezone.utc) - datetime.fromisoformat(started_at)
+    return drained_for.total_seconds() >= BOUNDED_DRAIN_SECONDS
+
+
+def _log_forced_reap(environment: str, slot: str, status: dict) -> None:
+    log_event(
+        "forced-reap",
+        environment,
+        "success",
+        slot=slot,
+        active_http_requests=int(status.get("active_http_requests", 0)),
+        drain_started_at=status.get("drain_started_at"),
+        bounded_drain_seconds=BOUNDED_DRAIN_SECONDS,
+    )
+
+
+def _force_stop_stale_drained_slot(environment: str, slot: str) -> bool:
+    """Stop a drained slot stuck on plain HTTP requests past the bounded drain."""
+
+    status = _unix_json(environment, slot, "/internal/deployment-status", check=False)
+    if not status or not _drain_is_stale(status):
+        return False
+    _log_forced_reap(environment, slot, status)
+    run(["systemctl", "stop", _slot_unit(environment, slot)])
+    run(["systemctl", "stop", _slot_unit(environment, slot, "socket")])
+    return True
 
 
 def _stop_drained_slot(environment: str, slot: str) -> bool:
@@ -1573,76 +1479,6 @@ def activate_slot(
     return "success-with-draining"
 
 
-def activate(
-    release: Path,
-    environment: str,
-    *,
-    previous_runtime_lock: str = "",
-    defer_public_smoke: bool = False,
-) -> None:
-    root = ENVIRONMENTS_ROOT / environment
-    pointers = read_pointers(root)
-    if pointers.current == release:
-        manifest = validate_manifest(release, environment)
-        if not wait_for_release(environment, manifest["release_id"]):
-            raise DeployError("active release failed readiness")
-        if not defer_public_smoke:
-            smoke_public(release, environment, manifest["release_id"])
-        return
-    if pointers.current:
-        atomic_symlink(pointers.current, root / "previous")
-    atomic_symlink(release, root / "current")
-    try:
-        run(["systemctl", "restart", _unit(environment)])
-        manifest = validate_manifest(release, environment)
-        if not wait_for_release(environment, manifest["release_id"]):
-            raise DeployError("live readiness failed")
-        if not defer_public_smoke:
-            smoke_public(release, environment, manifest["release_id"])
-    except (DeployError, subprocess.CalledProcessError, OSError) as exc:
-        rollback_after_failed_activation(
-            environment,
-            release,
-            previous_runtime_lock=previous_runtime_lock,
-        )
-        raise DeployError("activation failed; automatic rollback completed") from exc
-
-
-def rollback_after_failed_activation(
-    environment: str,
-    failed: Path,
-    *,
-    previous_runtime_lock: str = "",
-) -> None:
-    root = ENVIRONMENTS_ROOT / environment
-    pointers = read_pointers(root)
-    if not pointers.previous:
-        (root / "current").unlink(missing_ok=True)
-        subprocess.run(["systemctl", "stop", _unit(environment)], check=False)
-        log_event(
-            "automatic-rollback",
-            environment,
-            "initial-activation-removed",
-            failed_release=failed.name,
-        )
-        return
-    atomic_symlink(pointers.previous, root / "current")
-    if previous_runtime_lock:
-        restore_runtime(previous_runtime_lock)
-    run(["systemctl", "restart", _unit(environment)])
-    restored = validate_manifest(pointers.previous, environment)
-    if not wait_for_release(environment, restored["release_id"]):
-        raise DeployError("automatic rollback target failed readiness")
-    smoke_public(pointers.previous, environment, restored["release_id"])
-    log_event(
-        "automatic-rollback",
-        environment,
-        "success",
-        failed_release=failed.name,
-        restored_release=pointers.previous.name,
-    )
-
-
 def protected_release_paths() -> set[Path]:
     protected = set()
     for environment in ENVIRONMENTS:
@@ -1775,54 +1611,19 @@ def deploy(args: argparse.Namespace) -> int:
         raise DeployError(
             "--defer-public-smoke is retired; slot activation has no listener gap"
         )
-    if args.refresh_environment and (args.qualify_only or args.legacy_bridge):
+    if args.legacy_bridge:
         raise DeployError(
-            "--refresh-environment cannot be combined with --qualify-only or "
-            "--legacy-bridge"
+            "--legacy-bridge is retired; both environments use blue/green slots"
+        )
+    if args.refresh_environment and args.qualify_only:
+        raise DeployError(
+            "--refresh-environment cannot be combined with --qualify-only"
         )
     with deployment_lock():
         _recover_interrupted_activation(args.environment)
         require_production_chat_monitor(args.environment)
         sha = resolve_sha(args.source, args.environment)
         release = prepare_release(sha, args.environment)
-        if args.legacy_bridge:
-            if args.qualify_only:
-                raise DeployError(
-                    "--legacy-bridge and --qualify-only are mutually exclusive"
-                )
-            if _active_slot(args.environment) is not None or _nginx_uses_active_slot(
-                args.environment
-            ):
-                raise DeployError(
-                    "--legacy-bridge is forbidden after active-slot migration"
-                )
-            installed_lock = (
-                RUNTIME_LOCK.read_text().strip() if RUNTIME_LOCK.is_file() else ""
-            )
-            candidate_lock = sha256_file(release / "uv.lock")
-            if (
-                not installed_lock
-                or installed_lock != candidate_lock
-                or not (VENV / "bin" / "python").is_file()
-            ):
-                raise DeployError(
-                    "--legacy-bridge cannot change the shared Python runtime"
-                )
-            qualify(release, args.environment)
-            activate(release, args.environment)
-            cleanup_releases()
-            log_event(
-                "deploy-legacy-bridge",
-                args.environment,
-                "success",
-                git_sha=sha,
-                source=args.source,
-                runtime_id=f"legacy-shared:{installed_lock}",
-            )
-            print(
-                f"deployed {args.source} ({sha}) to {args.environment}: legacy-bridge"
-            )
-            return 0
         runtime, runtime_built = prepare_runtime(release, RUNTIMES)
         external_pi_runtime = None
         external_pi_runtime_built = False
@@ -1963,24 +1764,10 @@ def rollback(args: argparse.Namespace) -> int:
                     "rollback target changed since the failure was observed"
                 )
         if _active_slot(args.environment) is None:
-            target = pointers.previous
-            old_current = pointers.current
-            sync_runtime(target)
-            atomic_symlink(target, root / "current")
-            atomic_symlink(old_current, root / "previous")
-            run(["systemctl", "restart", _unit(args.environment)])
-            expected = validate_manifest(target, args.environment)["release_id"]
-            if not wait_for_release(args.environment, expected):
-                raise DeployError("legacy rollback target failed readiness")
-            smoke_public(target, args.environment, expected)
-            log_event(
-                "rollback",
-                args.environment,
-                "legacy-success",
-                restored_release=target.name,
+            raise DeployError(
+                "legacy fixed-port rollback is retired; "
+                f"{args.environment} has no active blue/green slot"
             )
-            print(f"rolled {args.environment} back to {target.name}: legacy-success")
-            return 0
         validate_manifest(pointers.previous, args.environment)
         target = pointers.previous
         runtime, _ = prepare_runtime(target, RUNTIMES)
@@ -2010,7 +1797,10 @@ def _reap_draining_slot(environment: str, draining: str) -> dict | None:
         "/internal/deployment-status",
         check=False,
     )
-    if status_value is not None and not _stop_drained_slot(environment, draining):
+    if status_value is not None and not (
+        _stop_drained_slot(environment, draining)
+        or _force_stop_stale_drained_slot(environment, draining)
+    ):
         return status_value
     draining_release = _slot_release(environment, draining)
     if draining_release is None:
@@ -2056,6 +1846,10 @@ def reap(args: argparse.Namespace) -> int:
                         "active_gateway_streams": status_value.get(
                             "active_gateway_streams", 0
                         ),
+                        "active_http_requests": status_value.get(
+                            "active_http_requests", 0
+                        ),
+                        "drain_started_at": status_value.get("drain_started_at"),
                     },
                     indent=2,
                 )

@@ -17,7 +17,10 @@ from backend.models.database import (
     PaperRepository,
     Repository,
 )
-from backend.services.organization_trending_service import OrganizationTrendingService
+from backend.services.organization_trending_service import (
+    AUTO_FEATURE_MIN_PAPERS,
+    OrganizationTrendingService,
+)
 
 
 @compiles(BigInteger, "sqlite")
@@ -30,9 +33,7 @@ def _compile_array_sqlite(_element, _compiler, **_kw):
     return "TEXT"
 
 
-def test_cold_start_writes_snapshot_and_rolling_score_with_autoflush_disabled(
-    monkeypatch,
-):
+def _session(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(
         engine,
@@ -47,6 +48,13 @@ def test_cold_start_writes_snapshot_and_rolling_score_with_autoflush_disabled(
     )
     session = sessionmaker(bind=engine, autoflush=False)()
     monkeypatch.setattr(get_settings(), "trending_ranking_mode", "composite")
+    return session
+
+
+def test_cold_start_writes_snapshot_and_rolling_score_with_autoflush_disabled(
+    monkeypatch,
+):
+    session = _session(monkeypatch)
     session.add(
         Organization(
             id=1,
@@ -82,3 +90,42 @@ def test_cold_start_writes_snapshot_and_rolling_score_with_autoflush_disabled(
 
     service.calculate(date(2026, 7, 29))
     assert session.query(OrganizationTrendingHistory).count() == 1
+
+
+def test_organizations_with_enough_public_papers_are_featured(monkeypatch):
+    session = _session(monkeypatch)
+    session.add_all(
+        [
+            Organization(id=1, name="Big", slug="big", is_featured=False),
+            Organization(id=2, name="Small", slug="small", is_featured=False),
+            Organization(id=3, name="Kept", slug="kept", is_featured=True),
+        ]
+    )
+    for paper_id in range(1, AUTO_FEATURE_MIN_PAPERS + 2):
+        session.add(
+            Paper(
+                id=paper_id,
+                title=f"Paper {paper_id}",
+                # The last paper is not public, so "small" stays one short.
+                abstract="" if paper_id == AUTO_FEATURE_MIN_PAPERS + 1 else "Abstract",
+                arxiv_id=f"2501.{paper_id:05d}",
+                source="arxiv",
+                version="v1",
+                is_latest_version=True,
+            )
+        )
+        if paper_id <= AUTO_FEATURE_MIN_PAPERS:
+            session.add(PaperOrganization(paper_id=paper_id, organization_id=1))
+        if paper_id > 1:
+            session.add(PaperOrganization(paper_id=paper_id, organization_id=2))
+    session.commit()
+
+    stats = OrganizationTrendingService(session).calculate(date(2026, 10, 26))
+
+    featured = {
+        organization.slug: organization.is_featured
+        for organization in session.query(Organization)
+    }
+    assert featured == {"big": True, "small": False, "kept": True}
+    assert stats["newly_featured"] == 1
+    assert stats["snapshots"] == 2

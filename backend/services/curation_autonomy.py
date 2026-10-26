@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from backend.models.database import (
     AutonomousRun,
     BenchmarkCurationCandidate,
+    ModelReleaseSignal,
     Paper,
     PaperCurationJob,
     TrendingModelCandidate,
@@ -69,6 +70,17 @@ def curation_primary_authorization(
     db: Session, row: PaperCurationJob
 ) -> tuple[Capability, ResourceRef]:
     """Resolve the job-scoped capability and primary durable resource."""
+    if row.kind == "resolve-model-paper" and (
+        signal_id := getattr(row, "release_signal_id", None)
+    ):
+        return (
+            Capability.RESOLVE_MODEL_PAPER,
+            ResourceRef(
+                ResourceKind.MODEL_RELEASE_SIGNAL,
+                str(signal_id),
+                db.get(ModelReleaseSignal, signal_id) is not None,
+            ),
+        )
     if row.kind == "resolve-model-paper":
         candidate_id = getattr(row, "candidate_id", None)
         return (

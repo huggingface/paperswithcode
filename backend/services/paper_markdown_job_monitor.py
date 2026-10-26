@@ -22,7 +22,7 @@ from backend.services.paper_markdown_budget_service import (
 )
 from backend.services.paper_markdown_job_profile import paper_markdown_job_profile
 
-_RUN_ID = re.compile(r"^(?:backfill|live)-\d{8}T\d{6}-[0-9a-f]{8}$")
+_RUN_ID = re.compile(r"^(?:backfill|live|live-fresh)-\d{8}T\d{6}-[0-9a-f]{8}$")
 _SHARD_ID = re.compile(r"^\d{5}$")
 _JOB_STAGES = [
     "SCHEDULING",
@@ -154,6 +154,11 @@ def _logical_shards(provider_attempts: list[dict[str, Any]]) -> list[dict[str, A
             }
         )
     return logical
+
+
+def _run_lane(run_id: str) -> str:
+    """``live``, ``live-fresh`` or ``backfill`` from ``<lane>-<stamp>-<hex>``."""
+    return run_id.rsplit("-", 2)[0]
 
 
 def _retry_dispositions(coverage: dict[str, dict[str, Any]]) -> dict[str, int]:
@@ -466,22 +471,19 @@ def _fetch(settings: Settings) -> dict[str, Any]:
         if shard.get("failure_cause"):
             cause = shard["failure_cause"]
             failure_causes[cause] = failure_causes.get(cause, 0) + 1
+    # Keyed by lane (the run-id prefix), so a 5-minute live-fresh run never
+    # hides the latest hourly live run.
     latest_run_ids: dict[str, str] = {}
     for shard in logical_shards:
         mode = shard.get("mode")
         run_id = shard.get("run_id")
         if mode in {"live", "backfill"} and run_id:
-            latest_run_ids.setdefault(str(mode), str(run_id))
+            latest_run_ids.setdefault(_run_lane(str(run_id)), str(run_id))
+    latest = set(latest_run_ids.values())
     latest_run_shards = [
-        shard
-        for shard in logical_shards
-        if shard.get("run_id") == latest_run_ids.get(str(shard.get("mode")))
+        shard for shard in logical_shards if shard.get("run_id") in latest
     ]
-    latest_run_jobs = [
-        job
-        for job in jobs
-        if job.get("run_id") == latest_run_ids.get(str(job.get("mode")))
-    ]
+    latest_run_jobs = [job for job in jobs if job.get("run_id") in latest]
     active_checkpoint_ages = []
     for job in latest_run_jobs:
         if job["stage"] not in {

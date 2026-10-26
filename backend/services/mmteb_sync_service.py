@@ -60,6 +60,17 @@ _ARXIV_PATTERNS = (
     re.compile(r"\barXiv\s*:\s*([0-9]{4}\.[0-9]{4,5})", re.IGNORECASE),
 )
 
+# Some model cards cite both the model's own report and an earlier report whose
+# paper is linked to the same HF repository. These curated picks name the
+# model's own report; they apply only when the upstream citation includes it.
+MODEL_ARXIV_OVERRIDES = {
+    # The card's Paper badge points to KaLM-Embedding-V2; 2501.01028 is V1.
+    "KaLM-Embedding-Gemma3-12B-2511": "2506.20923",
+    # "Improving Text Embeddings with LLMs" introduces E5-Mistral; 2212.03533
+    # is the original E5 report.
+    "e5-mistral-7b-instruct": "2401.00368",
+}
+
 
 @dataclass(frozen=True)
 class MmtebLane:
@@ -390,6 +401,10 @@ class MmtebSyncService:
                 continue
             if len(candidates) == 1:
                 resolved[entry.model_name] = candidates[0]
+                continue
+            override = MODEL_ARXIV_OVERRIDES.get(entry.model_name)
+            if override in entry.arxiv_ids and override in papers_by_arxiv:
+                resolved[entry.model_name] = papers_by_arxiv[override]
                 continue
 
             model_url = entry.hf_model_url

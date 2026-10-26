@@ -24,6 +24,9 @@ from backend.models.database import (
     CatalogMutationIdempotency,
 )
 
+# Deferred trigger in add_single_benchmark_board_guard.sql.
+SINGLE_BOARD_CONSTRAINT = "evaluations_single_benchmark_board"
+
 
 def canonical_hash(value: Any) -> str:
     payload = json.dumps(
@@ -170,8 +173,11 @@ class CatalogMutationService:
                     )
                 )
             self.db.commit()
-        except IntegrityError:
+        except IntegrityError as error:
             self.db.rollback()
+            diag = getattr(error.orig, "diag", None)
+            if getattr(diag, "constraint_name", None) == SINGLE_BOARD_CONSTRAINT:
+                raise CatalogValidationError(diag.message_primary) from None
             if idempotency_key:
                 winner = self.db.get(
                     CatalogMutationIdempotency,

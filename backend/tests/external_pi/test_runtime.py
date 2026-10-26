@@ -124,7 +124,8 @@ class PackageRunner:
             output.parent.mkdir(parents=True)
             output.write_text("export const worker = true;\n", encoding="utf-8")
         elif "prune" in command:
-            pass
+            # npm rewrites the lockfile; the build user must be able to.
+            assert (cwd / "package-lock.json").stat().st_mode & 0o200
         else:
             Path(command[-1]).write_text("canonical prompt\n", encoding="utf-8")
         return SimpleNamespace(stdout="")
@@ -491,6 +492,10 @@ def test_runtime_is_strictly_validated_and_reused(
     tmp_path: Path, pinned_node_archive: Path
 ):
     release = release_fixture(tmp_path)
+    # Deployed releases are read-only.
+    worker = release / "backend/chat_sandbox_worker/pi_worker"
+    for name in ("package.json", "package-lock.json", "tsconfig.json"):
+        (worker / name).chmod(0o444)
     runtimes = tmp_path / "runtimes"
     runner = PackageRunner()
     runtime, created = prepare_external_pi_runtime(

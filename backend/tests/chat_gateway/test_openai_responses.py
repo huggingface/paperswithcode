@@ -206,7 +206,13 @@ def test_openai_stream_closes_inside_an_already_cancelled_anyio_scope():
     assert client.closed is True
 
 
-def test_oversized_openai_request_returns_a_typed_public_error():
+def test_oversized_openai_request_returns_a_typed_public_error(monkeypatch):
+    # The gateway authorizes the turn before it reads the body; a capable
+    # worker that sends too much gets the protocol's typed error.
+    monkeypatch.setattr(
+        gateway_app, "_scope", lambda *_args, **_kwargs: SimpleNamespace(scopes=[])
+    )
+
     class OversizedRequest:
         async def body(self):
             return b"x" * (MAX_REQUEST_BYTES + 1)

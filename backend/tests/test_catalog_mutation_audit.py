@@ -20,7 +20,12 @@ from backend.services.catalog_mutation_service import (
     CatalogMutationService,
     canonical_hash,
 )
-from backend.services.catalog_errors import CatalogConflictError
+from sqlalchemy.exc import IntegrityError
+
+from backend.services.catalog_errors import (
+    CatalogConflictError,
+    CatalogValidationError,
+)
 
 
 @compiles(JSONB, "sqlite")
@@ -104,6 +109,21 @@ def test_failed_mutation_leaves_no_data_or_audit_event(db):
     with pytest.raises(ValueError):
         mutate(db, apply=fail)
     assert snapshot(db) is None
+    assert db.query(CatalogMutationEvent).count() == 0
+
+
+def test_split_benchmark_board_is_a_validation_error(db):
+    message = 'Benchmark "GPQA Diamond" already has its Accuracy leaderboard on task "World Knowledge"'
+    diag = SimpleNamespace(
+        constraint_name=module.SINGLE_BOARD_CONSTRAINT, message_primary=message
+    )
+
+    def split_board():
+        raise IntegrityError("insert", {}, SimpleNamespace(diag=diag))
+
+    with pytest.raises(CatalogValidationError) as error:
+        mutate(db, apply=split_board)
+    assert error.value.detail == message
     assert db.query(CatalogMutationEvent).count() == 0
 
 

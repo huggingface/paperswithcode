@@ -62,7 +62,7 @@ def test_systemd_templates_split_worker_and_supervisor_credentials():
     assert "User=pwc-staging" in supervisor
     assert "EnvironmentFile=/etc/paperswithcode/staging.env" in supervisor
     assert "external_pi_slot_launcher.py staging %i" in supervisor
-    assert "User=pwc-external-pi" in worker
+    assert "User=pwc-external-pi-staging" in worker
     assert "EnvironmentFile=/etc/paperswithcode/external-pi-worker.env" in worker
     assert (
         "BindReadOnlyPaths=/etc/paperswithcode/external-pi-hosts:/etc/hosts" in worker
@@ -293,3 +293,14 @@ def test_fleet_sessions_reads_the_protected_tier_and_defaults_when_unreadable(
     )
     with pytest.raises(ValueError, match="reviewed tier"):
         lifecycle.fleet_sessions("production")
+
+
+def test_staging_and_production_workers_never_share_a_unix_user():
+    root = Path(__file__).parents[3] / "deploy/systemd"
+    staging = (root / "paperswithcode-staging-external-pi-worker@.service").read_text()
+    production = (
+        root / "paperswithcode-production-external-pi-worker@.service"
+    ).read_text()
+
+    assert "User=pwc-external-pi-staging" in staging
+    assert "User=pwc-external-pi\n" in production

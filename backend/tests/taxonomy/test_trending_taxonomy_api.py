@@ -154,3 +154,25 @@ def test_trending_tasks_keep_ranking_and_level_filter(client, trending_catalog):
 
     level_one = client.get(f"/api/v1/tasks/trending?level=1&{LOOSE_GATES}")
     assert level_one.json()["results"] == []
+
+
+def test_trending_ignores_external_papers(client, trending_catalog):
+    # A bulk external backfill in the baseline window must not dilute shares.
+    db = TestingSessionLocal()
+    db.add_all(
+        DBPaper(
+            id=paper_id,
+            title=f"External {paper_id}",
+            source="external",
+            source_url=f"https://example.com/{paper_id}",
+            is_latest_version=True,
+            date_published=date.today() - timedelta(days=60),
+        )
+        for paper_id in range(100, 140)
+    )
+    db.commit()
+    db.close()
+
+    response = client.get(f"/api/v1/tasks/trending?{LOOSE_GATES}")
+
+    assert response.json()["results"][0]["share_lift"] == pytest.approx(3.0)

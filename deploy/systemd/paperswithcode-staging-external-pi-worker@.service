@@ -6,8 +6,8 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-User=pwc-external-pi
-Group=pwc-external-pi
+User=pwc-external-pi-staging
+Group=pwc-external-pi-staging
 WorkingDirectory=/srv/paperswithcode/environments/staging/slots/%i/release
 EnvironmentFile=/etc/paperswithcode/external-pi-worker.env
 Environment=PWC_EXTERNAL_PI_STATE_ROOT=/run/paperswithcode/external-pi-%i

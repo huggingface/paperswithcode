@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import fcntl
 import json
 import os
@@ -52,6 +53,43 @@ RESTRICTED_TRENDING_ENV_KEYS = RESTRICTED_TRENDING_PASSTHROUGH_KEYS | {
     "PWC_RELEASE_ID",
     "PYTHONPATH",
 }
+
+# production.env is shared with the web app, so general jobs would otherwise
+# inherit secrets that only the app or chat runtime uses. No CRON job reads
+# these (session/OAuth signing, admin API, chat providers and sandboxes), so a
+# compromised job must not receive them.
+APP_ONLY_SECRET_KEYS = frozenset(
+    {
+        "PWC_SESSION_SIGNING_PRIVATE_KEY",
+        "PWC_JWT_SECRET",
+        "PWC_HF_OAUTH_CLIENT_SECRET",
+        "PWC_HF_OAUTH_CREDENTIAL_SECRET",
+        "PWC_ADMIN_API_TOKEN",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN",
+        "PWC_CHAT_OPENROUTER_API_KEY",
+        "PWC_CHAT_OPENROUTER_CREDENTIAL_KEYRING",
+        "PWC_CHAT_OPENROUTER_USER_TRACKING_SECRET",
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN",
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY",
+        "PWC_CHAT_TITLE_HF_TOKEN",
+        "PWC_CHAT_TRACKIO_HF_TOKEN",
+        "PWC_CHAT_WEB_SEARCH_EXA_API_KEY",
+        "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION",
+        "MODAL_TOKEN_ID",
+        "MODAL_TOKEN_SECRET",
+    }
+)
+# The manual legacy URL extractor still drives Modal from the VPS.
+APP_SECRET_EXCEPTIONS = {
+    "extract_urls": frozenset({"MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"}),
+}
+
+
+def general_environment(source: dict[str, str], job: str) -> dict[str, str]:
+    """Copy the CRON environment without app-only secrets the job never uses."""
+
+    withheld = APP_ONLY_SECRET_KEYS - APP_SECRET_EXCEPTIONS.get(job, frozenset())
+    return {key: value for key, value in source.items() if key not in withheld}
 
 
 def restricted_trending_environment(
@@ -405,6 +443,15 @@ COMMANDS: dict[str, Job] = {
             "from the validated Surge AI leaderboard; never creates papers"
         ),
     ),
+    "sync_frontiercs_2": job(
+        "-m",
+        "scripts.hourly.sync_frontiercs_2",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed FrontierCS 2 evaluation rows from the "
+            "validated frontier-cs.org leaderboard data; never creates papers"
+        ),
+    ),
     "sync_physics_iq_verified": job(
         "-m",
         "scripts.hourly.sync_physics_iq_verified",
@@ -459,17 +506,17 @@ COMMANDS: dict[str, Job] = {
         timeout="30m",
         idempotency=(
             "queue at most one daily overseer review of eligible benchmark-gap "
-            "candidates and at most 20 add-benchmark jobs per UTC day"
+            "candidates and at most 40 add-benchmark jobs per UTC day"
         ),
     ),
     "scan_model_releases": job(
         "-m",
         "backend.scripts.scan_model_releases",
         timeout="30m",
-        mutates_shared_data=False,
         idempotency=(
-            "read-only scan of official lab news feeds and unmapped Artificial "
-            "Analysis models for releases without a paper row"
+            "scan lab news feeds, unmapped Artificial Analysis models, and web "
+            "news for releases without a paper row; upsert one signal per "
+            "release and queue at most 6 scoped resolution jobs per UTC day"
         ),
     ),
     "discover_x_threads": job(
@@ -499,6 +546,28 @@ COMMANDS: dict[str, Job] = {
             "post at most one insight per run; x_insight_posts is written right "
             "after the post, so a subject is never posted twice"
         ),
+    ),
+    "link_abstract_mentions": job(
+        "-m",
+        "backend.scripts.link_abstract_mentions",
+        timeout="45m",
+        idempotency=(
+            "judge only papers whose stored mentions are missing or stale for the "
+            "current abstract; each paper's rows are replaced in one transaction"
+        ),
+    ),
+    "rescan_abstract_mentions": job(
+        "-m",
+        "backend.scripts.link_abstract_mentions",
+        "--rescan",
+        "--limit",
+        "1000000",
+        timeout="2h",
+        idempotency=(
+            "reuse earlier verdicts for unchanged abstracts and rewrite a paper's "
+            "rows only when its links changed"
+        ),
+        health_job="link_abstract_mentions",
     ),
     "warm_paper_suggested_questions": job(
         "-m",
@@ -611,6 +680,7 @@ COMMANDS: dict[str, Job] = {
             "copy immutable upstream Markdown or dispatch one manifest per "
             "missing arXiv identity"
         ),
+        lane_arg="--lane",
     ),
     "process_curation_thumbnails": job(
         "-m",
@@ -664,7 +734,26 @@ def terminal_record(start: dict, event: str, *, returncode: int) -> dict:
     }
 
 
+PR_SET_DUMPABLE = 4
+
+
+def hide_launcher_environment() -> None:
+    """Keep the launcher's full environment away from the jobs it starts.
+
+    systemd hands the launcher every configured secret, while jobs get a
+    filtered copy. Jobs run as the same user, so they could otherwise read the
+    launcher's /proc/<pid>/environ. A non-dumpable process's /proc entries are
+    owned by root.
+    """
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
 def main() -> int:
+    hide_launcher_environment()
     manifest = json.loads((CURRENT / "release.json").read_text())
     if len(sys.argv) == 2 and sys.argv[1] == "status":
         print(
@@ -729,7 +818,7 @@ def main() -> int:
             print(str(exc), file=sys.stderr)
             return 2
     else:
-        env = os.environ.copy()
+        env = general_environment(dict(os.environ), job)
         env["PWC_ENVIRONMENT"] = "production"
         env["PWC_RELEASE_ID"] = manifest["release_id"]
         env["PWC_CRON_LOG_DIR"] = str(log_dir)

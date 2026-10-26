@@ -26,10 +26,18 @@ _CATALOG_RESOURCES = frozenset(
 _CATALOG_PAGES = _CATALOG_RESOURCES | {"paper", "orgs"}
 
 
+# Read-only catalog queries sent as POST because their input is a large body.
+_CATALOG_POST_READS = frozenset({"/api/v1/papers/lookup"})
+
+
 def is_catalog_read(scope: Scope) -> bool:
-    if scope["type"] != "http" or scope["method"] not in {"GET", "HEAD"}:
+    if scope["type"] != "http":
         return False
     path = scope["path"]
+    if scope["method"] == "POST":
+        return path.rstrip("/") in _CATALOG_POST_READS
+    if scope["method"] not in {"GET", "HEAD"}:
+        return False
     if path.startswith("/api/v1/"):
         return path.removeprefix("/api/v1/").split("/", 1)[0] in _CATALOG_RESOURCES
     return path == "/" or path.strip("/").split("/", 1)[0] in _CATALOG_PAGES

@@ -15,11 +15,20 @@ export const PROVIDER_ID = "pwc-gateway";
 export const PLACEHOLDER_KEY = "sandbox-placeholder-not-a-credential";
 export const GATEWAY_PAYLOAD_LIMIT_BYTES = 7 * 1024 * 1024;
 
-// Use the short-context working window for Luna and GLM. Their larger model
-// capacity does not require sending larger requests by default.
+// Use the short-context working window for Luna, GLM and the reviewed
+// DeepSeek V4 routes. Their larger model capacity (1M on the Hugging Face
+// router) does not require sending larger requests by default, but the 200K
+// fallback caps the gateway payload at 240 KB, which long paper reads exceed.
 export function modelContextWindow(modelId: string, api: ProviderProtocol): number {
   const model = modelId.split(":")[0]!.split("@")[0]!;
-  if (["gpt-6-luna", "gpt-5.6-luna", "openai/gpt-5.6-luna", "zai-org/GLM-5.3-Flash"].includes(model)) return 272_000;
+  if ([
+    "gpt-6-luna",
+    "gpt-5.6-luna",
+    "openai/gpt-5.6-luna",
+    "zai-org/GLM-5.3-Flash",
+    "deepseek-ai/DeepSeek-V4-Flash-0731",
+    "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+  ].includes(model)) return 272_000;
   return api === "openai-responses" ? 48_000 : 200_000;
 }
 export function gatewayPayloadLimit(contextWindow: number): number {

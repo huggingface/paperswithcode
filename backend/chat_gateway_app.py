@@ -51,6 +51,11 @@ from backend.services.chat_pwc_mcp import (
     endpoint_for,
     request_mcp,
 )
+from backend.services.chat_reader_paper_read import (
+    UNTAGGED_CURSOR_PREFIX,
+    ReaderPaperCursorError,
+    read_reader_paper,
+)
 from backend.services.chat_hf_hub_service import (
     ChatHfHubError,
     ChatHfHubService,
@@ -64,6 +69,7 @@ from backend.services.chat_pi_transcript_service import (
 from backend.services.chat_semantic_scholar_service import (
     SemanticScholarGatewayError,
     fetch_semantic_scholar,
+    is_search_path,
 )
 from backend.services.chat_session_service import ChatServiceError
 from backend.services.chat_session_store_gateway import (
@@ -343,7 +349,31 @@ def _session_header(request: Request) -> str:
 
 
 @app.post("/catalog-mcp", dependencies=[Depends(_authorize_pwc_mcp)])
-async def catalog_mcp(body: McpCatalogRequest, request: Request):
+async def catalog_mcp(
+    body: McpCatalogRequest,
+    request: Request,
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    arguments = body.arguments
+    if body.tool == "read_paper":
+        if str(arguments.get("cursor") or "").startswith(UNTAGGED_CURSOR_PREFIX):
+            arguments = {k: v for k, v in arguments.items() if k != "cursor"}
+        else:
+            # The reader's primary paper reads from the same page-tagged text
+            # its answer cites, rather than the untagged stored Markdown.
+            try:
+                page = await asyncio.to_thread(
+                    read_reader_paper,
+                    db,
+                    settings,
+                    request.headers.get("x-pwc-turn", ""),
+                    arguments,
+                )
+            except ReaderPaperCursorError as error:
+                raise HTTPException(status_code=409, detail=str(error)) from None
+            if page is not None:
+                return {"result": page}
     finished = asyncio.Event()
 
     async def disconnected():
@@ -351,9 +381,7 @@ async def catalog_mcp(body: McpCatalogRequest, request: Request):
             await asyncio.sleep(0.1)
 
     method = "tools/list" if body.tool is None else "tools/call"
-    params = (
-        {} if body.tool is None else {"name": body.tool, "arguments": body.arguments}
-    )
+    params = {} if body.tool is None else {"name": body.tool, "arguments": arguments}
     call = asyncio.create_task(
         request_mcp(
             request.app.state.pwc_mcp_client,
@@ -410,7 +438,7 @@ def catalog(
         elif body.operation == "semantic_scholar":
             operation = (
                 "search"
-                if body.arguments.get("path", "").strip("/") == "paper/search"
+                if is_search_path(str(body.arguments.get("path", "")))
                 else body.operation
             )
             ChatCapabilityService(db).meter_catalog(
