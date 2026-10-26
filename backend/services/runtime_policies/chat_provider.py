@@ -39,7 +39,10 @@ def validate_chat_scope_guardrail_configuration(settings: Settings) -> None:
         or settings.chat_latex_compiler_qualification_mode
     )
     if settings.environment == "staging" and (
-        not settings.chat_artifacts_enabled
+        (
+            not settings.chat_artifacts_enabled
+            and not settings.chat_latex_compiler_qualification_mode
+        )
         or (
             not private_paper_mode and not settings.chat_artifact_shared_preview_enabled
         )
