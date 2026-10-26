@@ -342,7 +342,13 @@ const PaperDetailView: React.FC = () => {
       <div className="breadcrumb">
         <Link to="/">Trending</Link>
         <span className="sep">/</span>
-        <span>{paperSourceLabel}</span>
+        {paper.arxiv_id && safeAbstractUrl ? (
+          <a href={safeAbstractUrl} target="_blank" rel="noopener noreferrer">
+            {paperSourceLabel}
+          </a>
+        ) : (
+          <span>{paperSourceLabel}</span>
+        )}
       </div>
 
       <div className="detail-grid">
@@ -375,19 +381,6 @@ const PaperDetailView: React.FC = () => {
             ))}
           </h1>
           <div className="detail-meta">
-            {paper.arxiv_id && safeAbstractUrl ? (
-              <a
-                href={safeAbstractUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{ color: "var(--accent-text)" }}
-              >
-                {paperSourceLabel}
-              </a>
-            ) : (
-              <span>{paperSourceLabel}</span>
-            )}
-            <span>·</span>
             <span>Submitted {formatLongDate(paper.published)}</span>
             {numPages && (
               <>
