@@ -245,8 +245,9 @@ def parse_frontiercs_2(source: str) -> FrontierCSLeaderboard:
         fci, low, high, _tasks = (_number(v, f"{upstream_id} FCI") for v in index_row)
         if not (runs > 0 and 0 <= passed <= runs and passed == int(passed)):
             raise ValueError(f"FrontierCS pass counts are invalid for {upstream_id}")
-        # The published percent must agree with the pass count it summarizes.
-        if round(passed / runs * 100, 1) != rate:
+        # The published one-decimal percent must agree with the pass count it
+        # summarizes, whichever way the site rounds a half tenth.
+        if abs(passed / runs * 100 - rate) > 0.05 + 1e-9:
             raise ValueError(f"FrontierCS pass rate disagrees for {upstream_id}")
         if not low <= fci <= high:
             raise ValueError(f"FrontierCS FCI interval is invalid for {upstream_id}")

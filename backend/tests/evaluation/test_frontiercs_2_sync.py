@@ -153,6 +153,14 @@ def test_parser_fails_loudly_on_layout_changes(old, new, message):
         parse_frontiercs_2(SOURCE.replace(old, new, 1))
 
 
+@pytest.mark.parametrize("published", ["6.2", "6.3"])
+def test_pass_rate_accepts_either_rounding_of_a_half_tenth(published):
+    # 1/16 = 6.25%: banker's rounding gives 6.2, half-up gives 6.3.
+    source = SOURCE.replace("step:[8.3,4,48]", f"step:[{published},1,16]", 1)
+    entries = {e.upstream_id: e for e in parse_frontiercs_2(source).entries}
+    assert entries["step"].pass_rate == float(published)
+
+
 def test_parser_enforces_entry_bounds_and_uniqueness(monkeypatch):
     duplicated = SOURCE.replace('h:"Antigravity"', 'h:"Pi"', 1)
     with pytest.raises(ValueError, match="twice"):
