@@ -1,6 +1,8 @@
 """Parsing rules for the OpenAlex affiliation backfill."""
 
 from backend.database.organizations_setup.backfill_openalex_organizations import (
+    BATCH_SIZE,
+    next_batch_size,
     work_arxiv_ids,
     work_organization_slugs,
 )
@@ -39,3 +41,9 @@ def test_only_mapped_institutions_become_organizations():
         ]
     }
     assert work_organization_slugs(work) == {"tsinghua"}
+
+
+def test_unlimited_runs_keep_full_batches():
+    assert next_batch_size(None, 0) == BATCH_SIZE
+    assert next_batch_size(None, 500) == BATCH_SIZE
+    assert next_batch_size(250, 200) == 50

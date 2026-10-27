@@ -57,6 +57,10 @@ def work_organization_slugs(work: dict) -> set[str]:
     }
 
 
+def next_batch_size(limit: int | None, papers_seen: int) -> int:
+    return BATCH_SIZE if limit is None else min(BATCH_SIZE, limit - papers_seen)
+
+
 def fetch_works(client: httpx.Client, arxiv_ids: list[str]) -> list[dict]:
     params = {
         "filter": "doi:" + "|".join(f"10.48550/arxiv.{a}" for a in arxiv_ids),
@@ -89,7 +93,7 @@ def main() -> int:
         )
         slug_by_id = {value: key for key, value in organization_ids.items()}
         while args.limit is None or papers_seen < args.limit:
-            batch_size = min(BATCH_SIZE, (args.limit or BATCH_SIZE) - papers_seen)
+            batch_size = next_batch_size(args.limit, papers_seen)
             batch = (
                 db.query(Paper.id, Paper.arxiv_id)
                 .filter(

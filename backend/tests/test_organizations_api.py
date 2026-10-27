@@ -364,6 +364,26 @@ def test_curated_index_ignores_rows_outside_reviewed_manifest(org_client, monkey
     assert [item["slug"] for item in response.json()["results"]] == ["acme"]
 
 
+def test_curated_index_includes_established_featured_organizations(
+    org_client, monkeypatch
+):
+    db = TestingSessionLocal()
+    try:
+        db.add(Organization(id=2, name="Quiet Lab", slug="quiet-lab", is_featured=True))
+        db.commit()
+    finally:
+        db.close()
+
+    monkeypatch.setattr("backend.services.organization_service.BY_PWC_SLUG", {})
+    monkeypatch.setattr(
+        "backend.services.organization_service.AUTO_FEATURE_MIN_PAPERS", 4
+    )
+    response = org_client.get("/api/v1/organizations/index/cards")
+
+    assert response.status_code == 200
+    assert [item["slug"] for item in response.json()["results"]] == ["acme"]
+
+
 def test_cached_logo_supports_edge_and_conditional_caching(org_client):
     digest = hashlib.sha256(b"fake-png").hexdigest()
     first = org_client.get(f"/api/v1/organizations/acme/logo/{digest}.png")

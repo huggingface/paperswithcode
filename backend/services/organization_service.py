@@ -27,6 +27,7 @@ from backend.models.database import PaperOrganization
 from backend.models.database import PaperTask
 from backend.models.database import Task as DBTask
 from backend.models.database import OrganizationTrendingHistory
+from backend.services.organization_trending_service import AUTO_FEATURE_MIN_PAPERS
 from backend.services.sitemap_service import eligible_paper_filter
 from backend.services.trending_ranking_service import (
     active_paper_score_components,
@@ -175,7 +176,14 @@ class OrganizationService:
                 .group_by(DBOrganization.id, OrganizationTrendingHistory.raw_score)
             )
             if curated_only:
-                rows = rows.filter(DBOrganization.slug.in_(BY_PWC_SLUG))
+                # The reviewed manifest plus every org established enough to be
+                # auto-featured, so backfilled institutions reach the directory.
+                rows = rows.having(
+                    or_(
+                        DBOrganization.slug.in_(BY_PWC_SLUG),
+                        paper_count_col >= AUTO_FEATURE_MIN_PAPERS,
+                    )
+                )
             if featured_only or curated_only:
                 rows = rows.filter(DBOrganization.is_featured.is_(True)).order_by(
                     desc(func.coalesce(DBOrganization.trending_score, 0.0)),
