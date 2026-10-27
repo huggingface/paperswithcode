@@ -71,16 +71,14 @@ export async function summarizeAll(
   for (;;) {
     const chunks = splitSummaryInput(input, chunkBytes);
     const summaries: string[] = [];
-    // Two independent chunks at a time; retain source order for the merge.
-    for (let offset = 0; offset < chunks.length; offset += 2) {
-      const batch = await Promise.all(chunks.slice(offset, offset + 2).map(async (chunk) => {
-        signal.throwIfAborted();
-        const summary = await summarize(chunk);
-        signal.throwIfAborted();
-        if (!summary.trim()) throw new Error("Empty compaction summary");
-        return summary;
-      }));
-      summaries.push(...batch);
+    // One chunk at a time: production allows each user one in-flight OpenAI
+    // call, so a parallel sibling summary is rejected for user concurrency.
+    for (const chunk of chunks) {
+      signal.throwIfAborted();
+      const summary = await summarize(chunk);
+      signal.throwIfAborted();
+      if (!summary.trim()) throw new Error("Empty compaction summary");
+      summaries.push(summary);
     }
     const combined = summaries.join("\n\n");
     if (chunks.length === 1 && Buffer.byteLength(combined) <= SUMMARY_BYTES) return combined;
@@ -299,7 +297,7 @@ export class CompactionController {
           return { cancel: true };
         } finally {
           clearTimeout(timer);
-          deadline.abort(); // Cancel a sibling summary if its parallel chunk failed.
+          deadline.abort(); // Cancel any summary request still in flight.
           const elapsed = Math.round(performance.now() - started);
           if (usage) this.emit({ type: "usage", phase: "compaction", usage, model_usage: {},
             total_cost_usd: usage.cost.total, provider_requests: chunks });

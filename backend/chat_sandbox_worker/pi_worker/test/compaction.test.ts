@@ -338,3 +338,22 @@ test("a failed threshold compaction leaves the overflow retry for recovery", asy
   assert.equal(attempts, 4);
   controller.finish();
 });
+
+test("summary chunks run one at a time to respect the per-user OpenAI concurrency limit", async () => {
+  let active = 0;
+  let peak = 0;
+  const order: number[] = [];
+  const text = Array.from({ length: 5 }, (_, index) => `CHUNK-${index}\n${"x".repeat(60_000)}`).join("\n");
+  await summarizeAll(text, async (chunk) => {
+    active++;
+    peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    active--;
+    const index = Number(/CHUNK-(\d)/u.exec(chunk)?.[1] ?? -1);
+    if (index >= 0) order.push(index);
+    return `summary ${index}`;
+  }, new AbortController().signal);
+  assert.equal(peak, 1);
+  assert.deepEqual(order, [...order].sort());
+  assert.ok(order.length > 1);
+});
