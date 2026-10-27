@@ -21,6 +21,7 @@ export function arxivIdFromUrl(value: string): string | null {
 }
 
 const MAX_TITLE_CANDIDATES = 8;
+const REFERENCE_HEADING_SCAN_PAGES = 12;
 const MAX_TITLE_LENGTH = 300;
 
 // Sentences of a bibliography entry that could be its title. The backend only
@@ -42,6 +43,25 @@ export function referenceTitleCandidates(entry: string): string[] {
 }
 
 interface ReferencePosition { name: string; page: number; x: number; y: number }
+interface TextLine { text: string; x: number; baseline: number }
+
+// Groups text items into printed lines; labels such as "[20]" may arrive split
+// across several items.
+function textLines(items: TextContent['items']): TextLine[] {
+  const lines: TextLine[] = [];
+  let current: TextLine | undefined;
+  for (const item of items) {
+    if (!('str' in item)) continue;
+    const y = item.transform[5];
+    if (!current || Math.abs(y - current.baseline) > 1) {
+      current = { text: '', x: item.transform[4], baseline: y };
+      lines.push(current);
+    }
+    current.text += item.str;
+    if (item.hasEOL) current = undefined;
+  }
+  return lines.map(line => ({ ...line, text: line.text.trim() })).filter(line => line.text);
+}
 interface ReferenceEntry { arxivId: string | null; titles: string[]; box: number[] | null }
 interface PageText { view: number[]; content: TextContent }
 
@@ -57,6 +77,14 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
   const pageText = new Map<number, Promise<PageText>>();
   const entries = new Map<string, Promise<ReferenceEntry | null>>();
   let catalog: Promise<Map<string, string>> | undefined;
+  const getPageText = (page: number) => {
+    let text = pageText.get(page);
+    if (!text) {
+      text = pdf.getPage(page).then(async proxy => ({ view: proxy.view, content: await proxy.getTextContent() }));
+      pageText.set(page, text);
+    }
+    return text;
+  };
   const getReferences = () => references ??= (async () => {
     const destinations = await pdf.getDestinations();
     const positions: ReferencePosition[] = [];
@@ -65,8 +93,35 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
       const page = typeof dest[0] === 'number' ? dest[0] + 1 : await pdf.getPageIndex(dest[0]) + 1;
       positions.push({ name, page, x: dest[2], y: dest[3] });
     }
-    return positions;
+    return positions.length ? positions : numberedReferences();
   })();
+  // PDFs without hyperref targets (Word exports, for example) still print a
+  // "References" heading followed by "[n]" labels at the start of entry lines.
+  const numberedReferences = async () => {
+    const pages: { page: number; lines: TextLine[] }[] = [];
+    let heading = -1;
+    for (let page = pdf.numPages; page > Math.max(0, pdf.numPages - REFERENCE_HEADING_SCAN_PAGES) && heading < 0; page--) {
+      const lines = textLines((await getPageText(page)).content.items);
+      pages.unshift({ page, lines });
+      const headings = lines.map((line, index) => /^(?:[\dIVX]+\.?\s*)?(?:references|bibliography)$/i.test(line.text) ? index : -1);
+      heading = Math.max(...headings, -1);
+    }
+    if (heading < 0) return [];
+    const positions: ReferencePosition[] = [];
+    let last = 0;
+    pages.forEach(({ page, lines }, index) => {
+      for (const line of index ? lines : lines.slice(heading + 1)) {
+        const label = Number(line.text.match(/^\[(\d{1,3})\]/)?.[1]);
+        // Labels ascend; a skipped number tolerates one the text layer garbled.
+        if (!(label > last && label <= last + 3)) continue;
+        last = label;
+        // The baseline, unlike a hyperref target, leaves no room above the
+        // label, so an entry never takes the previous entry's last line.
+        positions.push({ name: `text:${label}`, page, x: line.x, y: line.baseline });
+      }
+    });
+    return positions;
+  };
   const getEntry = (name: string) => {
     let entry = entries.get(name);
     if (!entry) {
@@ -92,14 +147,9 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
           const [x1, y1, x2, y2] = annotation.rect;
           if (insideEntry((x1 + x2) / 2, (y1 + y2) / 2)) ids.add(id);
         }
-        let text = pageText.get(start.page);
-        if (!text) {
-          text = pdf.getPage(start.page).then(async page => ({ view: page.view, content: await page.getTextContent() }));
-          pageText.set(start.page, text);
-        }
         // Line ends become spaces so sentence boundaries survive; the arXiv
         // scan drops all whitespace to catch identifiers broken across lines.
-        const { view, content } = await text;
+        const { view, content } = await getPageText(start.page);
         const items = content.items.filter((item): item is TextItem => 'str' in item && insideEntry(item.transform[4], item.transform[5]));
         const entryText = items.map(item => item.str + (item.hasEOL ? ' ' : '')).join('');
         // The last entry of a column runs to the page bottom, so a page footer

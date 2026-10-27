@@ -92,6 +92,41 @@ describe('arXiv PDF links', () => {
   });
 });
 
+describe('PDFs without bibliography destinations', () => {
+  const item = (str: string, x: number, y: number, hasEOL = false) => ({ str, transform: [8, 0, 0, 8, x, y], width: 100, height: 8, hasEOL });
+  function wordExport() {
+    const pages: Record<number, unknown[]> = {
+      1: [item('Prior work [7] shows this.', 47, 600, true), item('References', 47, 500, true)],
+      2: [
+        item('', 47, 700, true), item('[', 47, 700), item('1]', 50, 700), item(' A. Author. A first paper.', 60, 700, true),
+        item('arXiv:2501.11111', 57, 691, true),
+        item('[2] B. Author. A second paper. arXiv:2501.22222', 47, 682, true),
+        item('See also [9] in the text.', 57, 673, true),
+        item('[3] C. Author. A third paper.', 313, 700, true),
+      ],
+    };
+    const getPage = vi.fn(async (page: number) => ({
+      view: [0, 0, 600, 800],
+      getAnnotations: async () => [],
+      getTextContent: async () => ({ items: pages[page] }),
+    }));
+    return { numPages: 2, getDestinations: vi.fn().mockResolvedValue({}), getPage } as unknown as PDFDocumentProxy;
+  }
+
+  it('finds numbered entries after the References heading, including split labels', async () => {
+    const lookup = vi.fn().mockResolvedValue(new Map([['text:3', '2501.33333']]));
+    const resolve = createPdfCitationResolver(wordExport(), lookup);
+    const links = await resolve.bibliographyLinks(2);
+    expect(links.map(({ name, routeId }) => [name, routeId])).toEqual([
+      ['text:1', '2501.11111'],
+      ['text:2', '2501.22222'],
+      ['text:3', '2501.33333'],
+    ]);
+    expect(await resolve.bibliographyLinks(1)).toEqual([]);
+    expect(lookup.mock.calls[0][0].map((query: { key: string }) => query.key)).toEqual(['text:1', 'text:2', 'text:3']);
+  });
+});
+
 describe('bibliography title candidates', () => {
   it('splits a numbered entry into author, title, and venue sentences', () => {
     expect(referenceTitleCandidates('[13] Albert Gu and Tri Dao. Mamba: Linear-time sequence mod- eling with selective state spaces. In Conference on Language Modeling (COLM), 2024.')).toEqual([
