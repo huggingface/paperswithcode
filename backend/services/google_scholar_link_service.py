@@ -29,7 +29,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-QLEVER_WIKIDATA_URL = "https://qlever.cs.uni-freiburg.de/api/wikidata"
+WIKIDATA_SPARQL_URL = "https://query.wikidata.org/sparql"
 S2_BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"
 SERPAPI_URL = "https://serpapi.com/search.json"
 SERPAPI_ACCOUNT_URL = "https://serpapi.com/account.json"
@@ -37,12 +37,15 @@ SERPAPI_ACCOUNT_URL = "https://serpapi.com/account.json"
 # Scholar user IDs are 12 URL-safe characters; Wikidata also holds junk values.
 SCHOLAR_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12}$")
 
+# One shard per first character of the Scholar ID keeps each query far below
+# the Wikidata Query Service's 60 s limit (~2k people, under 20 s each).
 WIKIDATA_QUERY = """
 PREFIX wdt: <http://www.wikidata.org/prop/direct/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 SELECT ?p ?g ?s2 ?orcid (GROUP_CONCAT(DISTINCT ?n; SEPARATOR="|") AS ?names) WHERE {
   ?p wdt:P1960 ?g .
+  FILTER(STRSTARTS(?g, "%s"))
   { ?p rdfs:label ?n } UNION { ?p skos:altLabel ?n }
   FILTER(LANG(?n) = "en" || LANG(?n) = "mul")
   OPTIONAL { ?p wdt:P4012 ?s2 }
@@ -50,6 +53,9 @@ SELECT ?p ?g ?s2 ?orcid (GROUP_CONCAT(DISTINCT ?n; SEPARATOR="|") AS ?names) WHE
 }
 GROUP BY ?p ?g ?s2 ?orcid
 """
+SCHOLAR_ID_FIRST_CHARS = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+)
 
 MIN_MATCHED_PAPERS = 2
 MIN_MATCHED_SHARE = 0.5
@@ -138,14 +144,39 @@ def _strip_tsv(value: str) -> str:
     return match.group(1) if match else value
 
 
-def fetch_wikidata_tsv(client: httpx.Client) -> str:
-    response = client.get(
-        QLEVER_WIKIDATA_URL,
-        params={"query": WIKIDATA_QUERY},
-        headers={"Accept": "text/tab-separated-values"},
-        follow_redirects=True,
-        timeout=300,
-    )
+def fetch_wikidata_tsv(client: httpx.Client, attempts: int = 5) -> str:
+    """All Wikidata people with a Scholar ID, as one TSV with a single header."""
+    shards = [
+        _fetch_wikidata_shard(client, char, attempts) for char in SCHOLAR_ID_FIRST_CHARS
+    ]
+    header = shards[0].partition("\n")[0]
+    rows = [shard.partition("\n")[2].strip("\n") for shard in shards]
+    return "\n".join([header, *filter(None, rows)])
+
+
+def _fetch_wikidata_shard(client: httpx.Client, first_char: str, attempts: int) -> str:
+    for attempt in range(attempts):
+        response = client.get(
+            WIKIDATA_SPARQL_URL,
+            params={"query": WIKIDATA_QUERY % first_char},
+            headers={
+                "Accept": "text/tab-separated-values",
+                # Wikimedia asks automated clients to identify themselves.
+                "User-Agent": "PapersWithCode-ScholarLinks/1.0 (https://paperswithcode.co)",
+            },
+            timeout=120,
+        )
+        if response.status_code != 429 and response.status_code < 500:
+            break
+        if attempt + 1 < attempts:
+            wait = 30 * 2**attempt
+            logger.warning(
+                "Wikidata HTTP %d for shard %r; retrying in %d s",
+                response.status_code,
+                first_char,
+                wait,
+            )
+            time.sleep(wait)
     response.raise_for_status()
     return response.text
 

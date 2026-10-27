@@ -90,7 +90,10 @@ PENDING_PROFILES_SQL = text(
             WHERE o.author_id = c.author_id) > 1 AS common_name
     FROM author_google_scholar_candidates c
     JOIN (
-        SELECT author_id, count(*) AS papers FROM paper_authors GROUP BY author_id
+        SELECT pa.author_id, count(*) AS papers
+        FROM paper_authors pa
+        JOIN papers p ON p.id = pa.paper_id AND p.is_latest_version
+        GROUP BY pa.author_id
     ) n ON n.author_id = c.author_id
     WHERE c.serpapi_evidence IS NULL AND (c.s2_evidence->>'matched')::int > 0
     ORDER BY n.papers DESC, c.author_id, c.scholar_id

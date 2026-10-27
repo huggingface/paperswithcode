@@ -1,9 +1,12 @@
+import httpx
+
 from backend.services.google_scholar_link_service import (
     AuthorPaper,
     Evidence,
     WikidataPerson,
     candidate_people,
     decide,
+    fetch_wikidata_tsv,
     full_profile_evidence,
     index_people_by_name,
     names_compatible,
@@ -138,3 +141,18 @@ def test_decide_holds_back_a_profile_matched_by_two_authors():
     ]
     decide(rows)
     assert {r["status"] for r in rows} == {"shared_scholar_id"}
+
+
+def test_fetch_wikidata_tsv_merges_shards_under_one_header():
+    header = "?p\t?g\t?s2\t?orcid\t?names"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = request.url.params["query"]
+        if 'STRSTARTS(?g, "V")' in query:
+            row = '<http://www.wikidata.org/entity/Q1>\t"VoxU11IAAAAJ"\t\t\t"Ada Lovelace"'
+            return httpx.Response(200, text=f"{header}\n{row}\n")
+        return httpx.Response(200, text=f"{header}\n")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    (person,) = parse_wikidata_tsv(fetch_wikidata_tsv(client))
+    assert person.scholar_id == "VoxU11IAAAAJ"
