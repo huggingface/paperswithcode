@@ -200,7 +200,11 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
           >
             <HeaderIcon name="github" size={14} />
           </a>
-          <button className="search-trigger" onClick={onOpenSearch}>
+          <button
+            className="search-trigger"
+            aria-label="Search papers, authors, domains"
+            onClick={onOpenSearch}
+          >
             <HeaderIcon name="search" size={13} />
             <span>Search papers, authors, domains…</span>
             <SearchShortcutHint />
