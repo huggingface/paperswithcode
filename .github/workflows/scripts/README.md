@@ -63,6 +63,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-hf-organizations.timer` | `*-*-* 02:20:00` | `sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
 | `pwc-cron-sync-hf-author-profiles.timer` | `*-*-* 02:50:00` | `sync_hf_author_profiles` | `.github/workflows/scripts/daily/sync_hf_author_profiles.py` |
 | `pwc-cron-export-enrichment-dashboard.timer` | `*-*-* 03:10:00` | `export_enrichment_dashboard` | `backend/scripts/export_enrichment_dashboard.py` `--upload` |
+| `pwc-cron-link-openalex-organizations.timer` | `*-*-* 03:20:00` | `link_openalex_organizations` | `.github/workflows/scripts/daily/link_openalex_organizations.py` |
 | `pwc-cron-calculate-organization-trending-scores.timer` | `*-*-* 03:40:00` | `calculate_organization_trending_scores` | `.github/workflows/scripts/daily/calculate_organization_trending_scores.py` |
 | `pwc-cron-mirror-thumbnails-to-disk.timer` | `*-*-* 05:00:00` | `mirror_thumbnails_to_disk` | `.github/workflows/scripts/daily/mirror_thumbnails_to_disk.py` |
 | `pwc-cron-backfill-method-references.timer` | `*-*-* *:15:00` | `backfill_method_references --provider openalex --resume --retry-failures --limit 10000 --max-runtime-seconds 19800` | `.github/workflows/scripts/backfill/backfill_method_references.py` |
@@ -117,6 +118,7 @@ use `VACUUM FULL`.
 ├── daily/
 │   ├── import_hf_daily_papers.py
 │   ├── sync_hf_organizations.py
+│   ├── link_openalex_organizations.py
 │   └── calculate_organization_trending_scores.py
 ├── hourly/
 │   ├── calculate_trending_scores.py
@@ -439,6 +441,15 @@ account between rows, ignores HF's unconfirmed `extracted_pending` guesses, and
 logs claims of an already claimed slot and unmatched names as `conflicts` and
 `unmatched`. Pass `--days N` for a one-off historical backfill (`--days 10000`
 walks all of HF, about an hour) and `--dry-run` to roll back every batch.
+
+`link_openalex_organizations.py` revisits arXiv papers published in the last 60
+days (100 per OpenAlex request, `PWC_OPENALEX_API_KEY` when set) and adds
+`paper_organizations` rows with `source = 'openalex'` for author institutions in
+the reviewed map (`backend/database/organizations_setup/openalex_institutions.py`).
+OpenAlex adds affiliations days to weeks after a paper appears, so the window is
+wide; existing links are skipped and none are deleted. A refused OpenAlex request
+fails the run. Pass `--days N` for a wider window and `--dry-run` to count
+without writing; `backfill_openalex_organizations.py` handles historical runs.
 
 `calculate_organization_trending_scores.py` runs after paper trending and
 organization sync. It upserts one raw snapshot per featured organization and UTC

@@ -1,6 +1,6 @@
 """Parsing rules for the OpenAlex affiliation backfill."""
 
-from backend.database.organizations_setup.backfill_openalex_organizations import (
+from backend.services.openalex_organization_linking_service import (
     BATCH_SIZE,
     next_batch_size,
     work_arxiv_ids,

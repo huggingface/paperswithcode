@@ -2052,6 +2052,41 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
+        id="link_openalex_organizations",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(3, 20),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-link-openalex-organizations.timer",
+        systemd_service="pwc-cron-link-openalex-organizations.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Link OpenAlex Organizations",
+        category="daily",
+        schedule="20 3 * * * (daily)",
+        script_path="daily/link_openalex_organizations.py",
+        log_name="link_openalex_organizations",
+        process_patterns=("scripts.daily.link_openalex_organizations",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "link_openalex_organizations.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=1800,
+        critical=False,
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT count(*) AS openalex_links,
+                   count(DISTINCT po.paper_id) FILTER (
+                     WHERE p.date_published >= CURRENT_DATE - 60
+                   ) AS recent_linked_papers
+            FROM paper_organizations po
+            JOIN papers p ON p.id = po.paper_id
+            WHERE po.source = 'openalex'
+        """,
+        workflow_file="cron-link-openalex-organizations.yml",
+        workflow_jobs=("run",),
+    ),
+    CronJobDefinition(
         id="calculate_organization_trending_scores",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.daily(3, 40),),

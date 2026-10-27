@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Link recent papers to OpenAlex affiliation organizations daily
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-link-openalex-organizations.service
+
+[Install]
+WantedBy=timers.target

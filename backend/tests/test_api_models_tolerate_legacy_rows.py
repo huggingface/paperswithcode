@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from backend.database.organizations_setup.backfill_openalex_organizations import (
+from backend.services.openalex_organization_linking_service import (
     OPENALEX_SOURCE,
 )
 from backend.models.evaluations import Dataset

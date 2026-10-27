@@ -621,6 +621,15 @@ COMMANDS: dict[str, Job] = {
             "mark it claimed; already claimed links and accounts are unchanged"
         ),
     ),
+    "link_openalex_organizations": job(
+        "-m",
+        "scripts.daily.link_openalex_organizations",
+        timeout="30m",
+        idempotency=(
+            "insert missing openalex paper_organizations links for the last 60 "
+            "days of arXiv papers; never deletes links"
+        ),
+    ),
     "calculate_organization_trending_scores": job(
         "-m",
         "scripts.daily.calculate_organization_trending_scores",

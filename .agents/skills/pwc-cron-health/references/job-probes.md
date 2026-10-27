@@ -252,6 +252,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Sample recent HF papers with claimed authors (`/api/papers/<arxiv_id>`) and confirm the PwC paper links that account's author row with `claimed = true`; check `HF_AUTHOR_PROFILES_SUMMARY` for a sane `claimed`/`claims_seen` ratio.
 - **Trap:** `recent_writes` counts any author update, and a quiet day with no new claims is healthy; `unmatched` claims (name spelled differently on arXiv) are expected and never linked.
 
+## `link_openalex_organizations`
+
+- **Effect:** Inserts missing `paper_organizations` rows with `source = 'openalex'` for arXiv papers published in the last 60 days, only for institutions in the reviewed map (`openalex_institutions.py`); never deletes links.
+- **Independent proof:** Sample recent arXiv papers, query `https://api.openalex.org/works?filter=doi:10.48550/arxiv.<id>` directly, map author institution IDs through the reviewed map, and compare with the stored openalex links. Coverage of the newest two weeks is legitimately low because OpenAlex adds affiliations late.
+- **Trap:** A run that ends with `OpenAlex returned 429` failed (budget spent); `PWC_OPENALEX_API_KEY` in `production-cron.env` gives 10,000 requests/day, the run needs about 30.
+
 ## `calculate_organization_trending_scores`
 
 - **Effect:** Writes one daily raw history row per featured organization, updates its trailing-30-day mean/timestamp, and prunes old history.

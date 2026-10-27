@@ -326,6 +326,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Export the enrichment dashboard snapshot daily",
     ),
     TimerSpec(
+        job="link_openalex_organizations",
+        on_calendar=("*-*-* 03:20:00",),
+        description="Link recent papers to OpenAlex affiliation organizations daily",
+    ),
+    TimerSpec(
         job="calculate_organization_trending_scores",
         on_calendar=("*-*-* 03:40:00",),
         description="Calculate organization trending scores daily",
