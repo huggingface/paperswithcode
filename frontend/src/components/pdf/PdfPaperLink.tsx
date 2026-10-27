@@ -47,6 +47,7 @@ export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1] }: Pdf
   >
     <PaperPreviewLink
       routeId={routeId}
+      to={`/paper/${encodeURIComponent(routeId)}`}
       target="_blank"
       className="pdf-paper-preview-link"
       title={/^\d+$/.test(routeId) ? "Preview paper" : `Preview arXiv:${routeId}`}
