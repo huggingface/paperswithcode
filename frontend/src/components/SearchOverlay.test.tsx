@@ -7,12 +7,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import SearchOverlay from "@/components/SearchOverlay";
 
 const searchPapers = vi.fn();
-vi.mock("@/lib/api/papers", () => ({ papersApi: { search: (...args: unknown[]) => searchPapers(...args) } }));
+const searchAuthors = vi.fn();
+const searchOrganizations = vi.fn();
+vi.mock("@/lib/api/papers", () => ({
+  papersApi: {
+    search: (...args: unknown[]) => searchPapers(...args),
+    searchAuthors: (...args: unknown[]) => searchAuthors(...args),
+  },
+}));
 vi.mock("@/lib/api/catalog", () => ({
   catalogApi: {
     listTasks: vi.fn(async () => ({ results: [] })),
     listMethods: vi.fn(async () => ({ results: [] })),
     listDatasets: vi.fn(async () => ({ results: [] })),
+    searchOrganizations: (...args: unknown[]) => searchOrganizations(...args),
   },
 }));
 vi.mock("@/lib/apiUrl", () => ({ isChatEnabled: () => true }));
@@ -38,6 +46,10 @@ describe("SearchOverlay paper handoff", () => {
   beforeEach(() => {
     searchPapers.mockReset();
     searchPapers.mockResolvedValue({ results: [], next_page: 2, previous_page: null });
+    searchAuthors.mockReset();
+    searchAuthors.mockResolvedValue({ results: [] });
+    searchOrganizations.mockReset();
+    searchOrganizations.mockResolvedValue({ results: [] });
   });
 
   it("consumes Escape before an earlier page shortcut and removes its handler on unmount", () => {
@@ -83,5 +95,26 @@ describe("SearchOverlay paper handoff", () => {
     await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(
       "/papers?search=vision%20%26%20language",
     ));
+  });
+
+  it("lists matching authors and organizations and links to their pages", async () => {
+    searchAuthors.mockResolvedValue({
+      results: [{ id: "420", full_name: "Noam Shazeer", hf_username: null, paper_count: 27 }],
+    });
+    searchOrganizations.mockResolvedValue({
+      results: [{ id: "7", name: "Google", slug: "google", logo_url: null, paper_count: 426 }],
+    });
+    const user = userEvent.setup();
+    renderOverlay();
+    await user.type(screen.getByPlaceholderText(/Search papers/), "noam");
+
+    expect(await screen.findByText("Authors · 1")).toBeInTheDocument();
+    expect(screen.getByText("Organizations · 1")).toBeInTheDocument();
+    expect(searchAuthors).toHaveBeenLastCalledWith("noam", 6);
+    expect(searchOrganizations).toHaveBeenLastCalledWith("noam", 6);
+    expect(screen.getByText("27 papers")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Noam Shazeer"));
+    expect(screen.getByTestId("location")).toHaveTextContent("/authors/420");
   });
 });

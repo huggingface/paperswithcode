@@ -81,6 +81,8 @@
 .search-result-tag:hover,
 .search-result-tag.focused { background: var(--bg-subtle); }
 .search-result-tag .name { font-family: var(--mono); font-size: 12px; }
+.search-result-tag .handle { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
+.search-result-tag .logo { width: 16px; height: 16px; border-radius: 3px; object-fit: contain; flex: none; }
 .search-result-tag .count { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
 .search-view-all-row {
   width: 100%;

@@ -301,6 +301,49 @@ class OrganizationService:
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve organizations: {str(e)}")
 
+    def search_organizations(self, query: str, limit: int) -> Organizations:
+        """Match organizations by name or slug for typeahead search.
+
+        Name prefixes rank before other matches, then larger organizations.
+        """
+        query = query.strip()
+        pattern = f"%{query}%"
+        paper_count_col = func.count(func.distinct(DBPaper.id)).label("paper_count")
+        rows = (
+            self.db.query(DBOrganization, paper_count_col)
+            .outerjoin(
+                PaperOrganization,
+                DBOrganization.id == PaperOrganization.organization_id,
+            )
+            .outerjoin(
+                DBPaper,
+                and_(
+                    DBPaper.id == PaperOrganization.paper_id,
+                    eligible_paper_filter(),
+                ),
+            )
+            .filter(
+                or_(
+                    DBOrganization.name.ilike(pattern),
+                    DBOrganization.slug.ilike(pattern),
+                    DBOrganization.hf_slug.ilike(pattern),
+                )
+            )
+            .group_by(DBOrganization.id)
+            .order_by(
+                desc(DBOrganization.name.ilike(f"{query}%")),
+                desc(paper_count_col),
+                DBOrganization.name,
+            )
+            .limit(limit)
+            .all()
+        )
+        results = [
+            self._organization_to_api(db_org, paper_count or 0)
+            for db_org, paper_count in rows
+        ]
+        return Organizations(count=len(results), results=results)
+
     def _project_organization(self, organization: DBOrganization) -> Organization:
         """Project one organization with the fields its featured card exposes.
 

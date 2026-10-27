@@ -542,3 +542,23 @@ def test_organization_contributions_groups_recent_papers_by_date(org_client):
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_organization_search_matches_name_and_ranks_prefix_first(org_client):
+    db = TestingSessionLocal()
+    try:
+        db.add(Organization(id=2, name="Google DeepMind", slug="deepmind"))
+        db.add(Organization(id=3, name="DeepSeek", slug="deepseek-ai"))
+        db.commit()
+    finally:
+        db.close()
+
+    response = org_client.get("/api/v1/organizations/?q=deep&limit=5")
+    assert response.status_code == 200
+    data = response.json()
+    assert [org["slug"] for org in data["results"]] == ["deepseek-ai", "deepmind"]
+    assert data["count"] == 2
+
+    response = org_client.get("/api/v1/organizations/?q=ACM")
+    assert [org["slug"] for org in response.json()["results"]] == ["acme"]
+    assert response.json()["results"][0]["paper_count"] == 4

@@ -48,9 +48,20 @@ def get_organizations(
     featured_only: bool = Query(
         False, description="Return only the curated featured organizations"
     ),
+    q: Optional[str] = Query(
+        None,
+        max_length=200,
+        description="Search organizations by name, slug, or Hugging Face namespace",
+    ),
+    limit: int = Query(
+        10, ge=1, le=50, description="Maximum matches returned with `q`"
+    ),
     db: Session = Depends(get_database_session),
 ):
-    return OrganizationService(db).get_organizations(featured_only=featured_only)
+    service = OrganizationService(db)
+    if q and q.strip():
+        return service.search_organizations(q, limit)
+    return service.get_organizations(featured_only=featured_only)
 
 
 @router.get(

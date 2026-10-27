@@ -2,7 +2,8 @@ import { paperQueryKeys } from "@/lib/paperQueryKeys";
 /**
  * Global ⌘K search overlay.
  *
- * Debounced server-side search via `/api/v1/papers/?search=…`.
+ * Debounced server-side search across papers, tasks, methods, benchmarks,
+ * authors, and organizations.
  */
 
 import React, { useEffect, useRef } from "react";
@@ -23,7 +24,8 @@ interface SearchOverlayProps {
 }
 
 const PAPER_PAGE_SIZE = 10;
-// Every debounced keystroke fans out to four catalog requests, three of which
+const ENTITY_PAGE_SIZE = 6;
+// Every debounced keystroke fans out to six catalog requests, three of which
 // share nginx's per-IP search limit (60/min, burst 20). A slower debounce, a
 // three-character minimum, and no retries keep a fast typist under it; a 429
 // while typing is not worth a second request for the same prefix.
@@ -90,22 +92,44 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
     retry: false,
   });
 
+  const authorsQ = useQuery({
+    queryKey: ["search-authors", debouncedQuery],
+    queryFn: () => papersApi.searchAuthors(debouncedQuery, ENTITY_PAGE_SIZE),
+    enabled: open && canSearch,
+    staleTime: 60_000,
+    retry: false,
+  });
+
+  const organizationsQ = useQuery({
+    queryKey: ["search-organizations", debouncedQuery],
+    queryFn: () => catalogApi.searchOrganizations(debouncedQuery, ENTITY_PAGE_SIZE),
+    enabled: open && canSearch,
+    staleTime: 60_000,
+    retry: false,
+  });
+
   if (!open) return null;
 
   const matchedTasks = tasksQ.data?.results || [];
   const matchedMethods = methodsQ.data?.results || [];
   const matchedBenchmarks = benchmarksQ.data?.results || [];
+  const matchedAuthors = authorsQ.data?.results || [];
+  const matchedOrganizations = organizationsQ.data?.results || [];
   const matchedPapers = papersQ.data?.results || [];
   const isLoading =
     papersQ.isFetching ||
     tasksQ.isFetching ||
     methodsQ.isFetching ||
-    benchmarksQ.isFetching;
+    benchmarksQ.isFetching ||
+    authorsQ.isFetching ||
+    organizationsQ.isFetching;
   const hasResults =
     matchedTasks.length ||
     matchedPapers.length ||
     matchedMethods.length ||
-    matchedBenchmarks.length;
+    matchedBenchmarks.length ||
+    matchedAuthors.length ||
+    matchedOrganizations.length;
 
   const go = (path: string) => {
     onClose();
@@ -125,7 +149,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
         <input
           ref={inputRef}
           className="search-modal-input"
-          placeholder="Search papers, tasks, methods, or benchmarks…"
+          placeholder="Search papers, tasks, methods, benchmarks, authors, or organizations…"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
@@ -208,6 +232,42 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
                   <span className="name">{d.name}</span>
                   {d.paper_count != null && d.paper_count > 0 && (
                     <span className="count">{d.paper_count} entries</span>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+          {matchedAuthors.length > 0 && (
+            <>
+              <div className="search-section-label">Authors · {matchedAuthors.length}</div>
+              {matchedAuthors.map((a) => (
+                <div
+                  key={a.id}
+                  className="search-result-tag"
+                  onClick={() => go(`/authors/${a.id}`)}
+                >
+                  <span className="name">{a.full_name}</span>
+                  {a.hf_username && <span className="handle">@{a.hf_username}</span>}
+                  {a.paper_count > 0 && <span className="count">{a.paper_count} papers</span>}
+                </div>
+              ))}
+            </>
+          )}
+          {matchedOrganizations.length > 0 && (
+            <>
+              <div className="search-section-label">
+                Organizations · {matchedOrganizations.length}
+              </div>
+              {matchedOrganizations.map((o) => (
+                <div
+                  key={o.id}
+                  className="search-result-tag"
+                  onClick={() => go(`/orgs/${o.slug}`)}
+                >
+                  {o.logo_url && <img className="logo" src={o.logo_url} alt="" loading="lazy" />}
+                  <span className="name">{o.name}</span>
+                  {o.paper_count != null && o.paper_count > 0 && (
+                    <span className="count">{o.paper_count} papers</span>
                   )}
                 </div>
               ))}

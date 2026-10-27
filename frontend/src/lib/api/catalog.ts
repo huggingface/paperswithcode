@@ -228,6 +228,10 @@ export class CatalogApi {
     return this.request(`/organizations/${featuredOnly ? "?featured_only=true" : ""}`);
   }
 
+  searchOrganizations(q: string, limit: number): Promise<Organizations> {
+    return this.request(endpoint("/organizations/", { q, limit }));
+  }
+
   organizationIndex(): Promise<Organizations> {
     return this.request("/organizations/index/cards");
   }

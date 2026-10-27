@@ -208,6 +208,10 @@ export class PapersApi {
     return this.request(`/authors/${id}`);
   }
 
+  searchAuthors(search: string, pageSize: number): Promise<PaginatedResponse<Author>> {
+    return this.request(`/authors/${query({ search, page_size: pageSize })}`);
+  }
+
   primeCurationState(paperId: string, force = false) {
     return paperCuration.primePaper(paperId, force);
   }
