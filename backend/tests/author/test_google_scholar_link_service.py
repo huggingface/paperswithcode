@@ -1,3 +1,4 @@
+from backend.scripts.link_google_scholar_profiles import decide
 from backend.services.google_scholar_link_service import (
     AuthorPaper,
     Evidence,
@@ -108,3 +109,32 @@ def test_borderline_overlap_reads_the_rest_of_a_truncated_profile():
     profile, evidence = full_profile_evidence(FakeScholar(titles), "x", papers, False)
     assert profile["complete"]
     assert len(evidence.matched_paper_ids) == 9
+
+
+def candidate_row(author_id: int, qid: str, scholar_id: str) -> dict:
+    verified = {"verdict": "verified"}
+    return {
+        "author_id": author_id,
+        "qid": qid,
+        "scholar_id": scholar_id,
+        "s2": verified,
+        "serpapi": verified,
+    }
+
+
+def test_decide_allows_two_wikidata_items_with_one_profile_for_one_author():
+    rows = [
+        candidate_row(1, "Q1", "VoxU11IAAAAJ"),
+        candidate_row(1, "Q2", "VoxU11IAAAAJ"),
+    ]
+    decide(rows)
+    assert {r["status"] for r in rows} == {"proposed"}
+
+
+def test_decide_holds_back_a_profile_matched_by_two_authors():
+    rows = [
+        candidate_row(1, "Q1", "VoxU11IAAAAJ"),
+        candidate_row(2, "Q1", "VoxU11IAAAAJ"),
+    ]
+    decide(rows)
+    assert {r["status"] for r in rows} == {"shared_scholar_id"}

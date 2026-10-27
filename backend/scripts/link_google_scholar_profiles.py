@@ -115,7 +115,8 @@ def decide(rows: list[dict]) -> None:
         if row["status"] == "proposed":
             by_scholar[row["scholar_id"]].append(row)
     for scholar_rows in by_scholar.values():
-        if len(scholar_rows) > 1:
+        # Two Wikidata items may carry one Scholar ID; only distinct authors count.
+        if len({r["author_id"] for r in scholar_rows}) > 1:
             # Several PwC rows for one person: likely duplicates to merge first.
             for row in scholar_rows:
                 row["status"] = "shared_scholar_id"
@@ -398,13 +399,16 @@ UPSERT_SQL = text(
 
 def apply_links(out: Path) -> int:
     """Store proposed links whose Scholar profile lists the author's papers."""
-    rows = [
-        r
-        for r in read_jsonl(out / "candidates.jsonl")
-        if r["status"] == "proposed"
-        and r.get("serpapi")
-        and r["serpapi"]["verdict"] == "verified"
-    ]
+    # One row per author: two Wikidata items can share the same Scholar ID.
+    rows = list(
+        {
+            r["author_id"]: r
+            for r in read_jsonl(out / "candidates.jsonl")
+            if r["status"] == "proposed"
+            and r.get("serpapi")
+            and r["serpapi"]["verdict"] == "verified"
+        }.values()
+    )
     with db_manager.session_local() as db:
         existing = dict(
             db.execute(
