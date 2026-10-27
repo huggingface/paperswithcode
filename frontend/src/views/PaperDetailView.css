@@ -760,8 +760,26 @@
   padding: 0;
   list-style: none;
 }
-.tldr-box + .suggested-questions {
-  margin-top: -16px;
+.tldr-details {
+  margin: -16px 0 24px;
+}
+.tldr-details > summary {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  cursor: pointer;
+  list-style: none;
+}
+.tldr-details > summary::-webkit-details-marker { display: none; }
+.tldr-details > summary::before { content: "+ "; }
+.tldr-details[open] > summary::before { content: "− "; }
+.tldr-details > summary:hover { color: var(--accent-text); }
+.tldr-details .tldr-box {
+  margin: 12px 0 0;
+}
+.tldr-details + .suggested-questions {
+  margin-top: 0;
 }
 .suggested-question {
   display: inline-flex;

@@ -9,8 +9,6 @@ import { AbstractText } from "./AbstractText";
 import { PaperSectionRule } from "./PaperSectionRule";
 import { PaperSuggestedQuestions } from "./PaperSuggestedQuestions";
 
-const ABSTRACT_PREVIEW_LENGTH = 360;
-
 export function PaperMetadataSections({
   canEdit,
   onEditMethods,
@@ -24,44 +22,27 @@ export function PaperMetadataSections({
   paper: Paper;
   readerChatRoute: string | null;
 }) {
-  const [abstractExpanded, setAbstractExpanded] = useState(false);
   const abstract = paper.abstract || "";
-  const isLongAbstract = abstract.length > ABSTRACT_PREVIEW_LENGTH;
-  const abstractView = abstractExpanded || !isLongAbstract
-    ? abstract
-    : `${abstract.slice(0, ABSTRACT_PREVIEW_LENGTH)}…`;
+  // Deep links to #tldr open the summary they point at.
+  const [tldrOpen] = useState(() => window.location.hash === "#tldr");
 
   return (
     <>
-      {paper.tldr && (
-        <>
-          <PaperSectionRule id="tldr" label="TL;DR" />
-          <div className="tldr-box">{paper.tldr}</div>
-        </>
-      )}
-      <PaperSuggestedQuestions paper={paper} readerChatRoute={readerChatRoute} />
-
       <PaperSectionRule id="abstract" label="Abstract" />
-      <p className="abstract-text" style={{ marginBottom: 8 }}>
+      <p className="abstract-text">
         {paper.abstract_mentions?.length ? (
-          <AbstractText
-            abstract={abstract}
-            mentions={paper.abstract_mentions}
-            visibleLength={abstractView === abstract ? null : ABSTRACT_PREVIEW_LENGTH}
-          />
+          <AbstractText abstract={abstract} mentions={paper.abstract_mentions} />
         ) : (
-          <LatexText text={abstractView} />
+          <LatexText text={abstract} />
         )}
       </p>
-      {isLongAbstract && (
-        <button
-          type="button"
-          className="read-full"
-          onClick={() => setAbstractExpanded((expanded) => !expanded)}
-        >
-          {abstractExpanded ? "− collapse abstract" : "+ read full abstract"}
-        </button>
+      {paper.tldr && (
+        <details className="tldr-details paper-section-anchor" id="tldr" open={tldrOpen}>
+          <summary>TL;DR</summary>
+          <div className="tldr-box">{paper.tldr}</div>
+        </details>
       )}
+      <PaperSuggestedQuestions paper={paper} readerChatRoute={readerChatRoute} />
 
       <PaperSectionRule
         id="tasks"

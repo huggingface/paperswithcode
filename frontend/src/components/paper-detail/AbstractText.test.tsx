@@ -19,13 +19,13 @@ const mentions: AbstractMention[] = [
   mention("SWE-bench Verified", "benchmark", "swe-bench-verified"),
 ];
 
-function renderAbstract(visibleLength: number | null, items = mentions) {
+function renderAbstract(items = mentions) {
   const client = new QueryClient();
   const { container } = render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
         <p>
-          <AbstractText abstract={abstract} mentions={items} visibleLength={visibleLength} />
+          <AbstractText abstract={abstract} mentions={items} />
         </p>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -35,7 +35,7 @@ function renderAbstract(visibleLength: number | null, items = mentions) {
 
 describe("AbstractText", () => {
   it("links each mention to its catalog page and keeps the rest as text", () => {
-    const container = renderAbstract(null);
+    const container = renderAbstract();
 
     expect(container.textContent).toBe(abstract);
     expect(screen.getByRole("link", { name: "GRPO" }).getAttribute("href")).toBe("/methods/grpo");
@@ -48,14 +48,6 @@ describe("AbstractText", () => {
     expect(screen.getByRole("link", { name: "GRPO" }).getAttribute("target")).toBeNull();
   });
 
-  it("leaves mentions past the collapsed preview unlinked", () => {
-    const container = renderAbstract(abstract.indexOf("GRPO") + 2);
-
-    expect(screen.queryByRole("link", { name: "GRPO" })).toBeNull();
-    expect(screen.getAllByRole("link")).toHaveLength(1);
-    expect(container.textContent).toBe(`${abstract.slice(0, abstract.indexOf("GRPO") + 2)}…`);
-  });
-
   it("shows the preview sent with the paper without fetching on hover", async () => {
     const withPreview = [
       {
@@ -63,7 +55,7 @@ describe("AbstractText", () => {
         preview: { name: "GRPO", description: "Group relative policy optimization.", count: 1401 },
       },
     ];
-    renderAbstract(null, withPreview);
+    renderAbstract(withPreview);
 
     fireEvent.pointerEnter(screen.getByRole("link", { name: "GRPO" }), { pointerType: "mouse" });
     fireEvent.focus(screen.getByRole("link", { name: "GRPO" }));
@@ -73,7 +65,7 @@ describe("AbstractText", () => {
   });
 
   it("ignores a stale mention whose text no longer matches", () => {
-    renderAbstract(null, [{ ...mentions[0], surface: "PPO" }]);
+    renderAbstract([{ ...mentions[0], surface: "PPO" }]);
 
     expect(screen.queryAllByRole("link")).toHaveLength(0);
   });
