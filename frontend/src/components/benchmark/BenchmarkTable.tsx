@@ -72,6 +72,12 @@ export default function BenchmarkTable({
       if (!table) return;
       const availableWidth = tableScrollElement.clientWidth;
       const widths = columnWidths(table);
+      // Pinned columns on both sides would cover the metric column between
+      // them, so let the trailing paper and year columns scroll instead.
+      tableScrollElement.classList.toggle(
+        "unpins-trailing-columns",
+        availableWidth < widths.fixed + widths.metric,
+      );
       const page = document.documentElement;
       const growSlack =
         page.scrollHeight > page.clientHeight ? 0 : SCROLLBAR_ALLOWANCE;
@@ -126,7 +132,10 @@ export default function BenchmarkTable({
           <tr>
             <th className="col-rank">Rank</th>
             <th className="col-model">Model</th>
-            <th className="col-parameters">Parameters</th>
+            <th className="col-parameters">
+              <span className="bm-label-full">Parameters</span>
+              <span className="bm-label-short">Params</span>
+            </th>
             {showHarness && <th className="col-harness">Harness</th>}
             {visibleMetrics.map((m) => {
               const isActive = m === activeMetric;

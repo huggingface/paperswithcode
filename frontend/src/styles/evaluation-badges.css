@@ -15,6 +15,8 @@
   vertical-align: middle;
   cursor: help;
   line-height: 1.4;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .bm-closed-source-tag {

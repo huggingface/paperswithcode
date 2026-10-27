@@ -579,6 +579,8 @@
 }
 .bm-table-scroll.has-horizontal-overflow .col-parameters { box-shadow: 1px 0 var(--hairline); }
 .bm-table-scroll.has-horizontal-overflow .col-paper { box-shadow: -1px 0 var(--hairline); }
+.bm-table-scroll.unpins-trailing-columns :is(.col-paper, .col-year) { position: static; }
+.bm-table .bm-label-short { display: none; }
 .bm-table .col-paper a {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -722,5 +724,12 @@
   .bm-table tbody td { padding: 10px 3px; }
   .bm-table .col-parameters, .bm-table .col-year { font-size: 10px; }
   .bm-table .col-value { font-size: 11px; }
-  .bm-table th.col-parameters { white-space: normal; overflow-wrap: anywhere; }
+  .bm-table .bm-label-full { display: none; }
+  .bm-table .bm-label-short { display: inline; }
+  .bm-table :is(.bm-closed-source-tag, .bm-external-source-tag) {
+    margin-left: 0;
+    padding: 0 4px;
+    font-size: 8px;
+    letter-spacing: 0;
+  }
 }
