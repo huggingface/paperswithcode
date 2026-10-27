@@ -127,7 +127,32 @@ def _fetch_ocr_markdown(
     """Read canonical OCR Markdown from the private Papers with Code bucket."""
 
     base_arxiv_id = re.sub(r"v\d+$", "", arxiv_id.strip())
-    path = urllib.parse.quote(f"{base_arxiv_id[:4]}/{base_arxiv_id}.md", safe="")
+    return _fetch_bucket_markdown(
+        f"{base_arxiv_id[:4]}/{base_arxiv_id}.md",
+        limit,
+        token=token,
+        bucket_id=bucket_id,
+    )
+
+
+def _fetch_external_markdown(
+    paper_id: int,
+    limit: int,
+    *,
+    token: str,
+    bucket_id: str = OCR_MARKDOWN_BUCKET_ID,
+) -> tuple[bytes, str]:
+    """Read an external paper's prepared page or PDF Markdown from the bucket."""
+
+    return _fetch_bucket_markdown(
+        f"external/{int(paper_id)}.md", limit, token=token, bucket_id=bucket_id
+    )
+
+
+def _fetch_bucket_markdown(
+    key: str, limit: int, *, token: str, bucket_id: str
+) -> tuple[bytes, str]:
+    path = urllib.parse.quote(key, safe="")
     bucket = urllib.parse.quote(bucket_id, safe="/")
     url = f"https://huggingface.co/buckets/{bucket}/resolve/{path}"
     request = urllib.request.Request(
@@ -223,6 +248,7 @@ def extract_candidates(
     *,
     fetch=_fetch,
     fetch_ocr_markdown=_fetch_ocr_markdown,
+    fetch_external_markdown=_fetch_external_markdown,
     source_cache_dir: Path | None = None,
 ) -> dict:
     paper = context["paper"]
@@ -244,7 +270,11 @@ def extract_candidates(
                 "sha256": hashlib.sha256(body).hexdigest(),
             }
         )
-        if source_cache_dir is not None and source in {"hf_markdown", "ocr_markdown"}:
+        if source_cache_dir is not None and source in {
+            "hf_markdown",
+            "ocr_markdown",
+            "external_markdown",
+        }:
             source_cache_dir.mkdir(parents=True, exist_ok=True)
             cached = source_cache_dir / f"{hashlib.sha256(body).hexdigest()}.md"
             cached.write_bytes(body)
@@ -361,6 +391,32 @@ def extract_candidates(
                 ocr_markdown_available = True
             except Exception as exc:
                 errors.append({"source": "ocr_markdown", "error": type(exc).__name__})
+            check_liveness()
+    external_markdown_available = False
+    if paper.get("source") == "external" and not arxiv_id and paper.get("id"):
+        # First-party release sites often refuse the runner, so the backend's
+        # prepared copy of the page is the readable source.
+        markdown_attempted = bool(paper.get("markdown_expected"))
+        token = os.environ.get(OCR_MARKDOWN_TOKEN_ENV)
+        if token:
+            try:
+                markdown, final_url = fetch_external_markdown(
+                    paper["id"], MAX_TEXT_BYTES, token=token
+                )
+                validate_paper_text(markdown)
+                fetched(
+                    "external_markdown",
+                    f"hf://buckets/{OCR_MARKDOWN_BUCKET_ID}",
+                    markdown,
+                    final_url,
+                )
+                for raw in _matches(markdown.decode("utf-8", "replace")):
+                    add(raw, "external_markdown")
+                external_markdown_available = True
+            except Exception as exc:
+                errors.append(
+                    {"source": "external_markdown", "error": type(exc).__name__}
+                )
             check_liveness()
     paper_pdf_available = False
     if arxiv_id and not hf_markdown_available and not ocr_markdown_available:
@@ -506,7 +562,13 @@ def extract_candidates(
         if project_page.get("is_official"):
             document("project_page", project_page.get("url"))
     for source in sources:
-        if source.get("source") in {"hf_markdown", "ocr_markdown"}:
+        if source.get("source") == "external_markdown" and source.get("local_path"):
+            # A validated local copy of the paper source page itself.
+            for entry in source_documents:
+                if entry["kind"] == "paper_source":
+                    entry["local_path"] = source["local_path"]
+                    entry["sha256"] = source["sha256"]
+        elif source.get("source") in {"hf_markdown", "ocr_markdown"}:
             document("paper_markdown", source.get("final_url"))
             if source.get("local_path"):
                 for entry in source_documents:
@@ -521,7 +583,9 @@ def extract_candidates(
     if front_matter is not None:
         source_documents.append(front_matter)
 
-    markdown_available = hf_markdown_available or ocr_markdown_available
+    markdown_available = (
+        hf_markdown_available or ocr_markdown_available or external_markdown_available
+    )
     paper_text_available = markdown_available or paper_pdf_available
     official_source_available = has_live("github") or has_live("project_page")
 
@@ -533,6 +597,9 @@ def extract_candidates(
             return paper_text_available or official_source_available
         if source in {"hf_markdown", "ocr_markdown"}:
             return paper_text_available
+        if source == "external_markdown":
+            # The live page remains the fallback when no copy exists.
+            return True
         if source == "paper_pdf":
             return paper_text_available
         if source == "paper_front_matter":

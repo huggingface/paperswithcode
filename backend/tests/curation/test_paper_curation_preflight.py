@@ -584,3 +584,68 @@ def test_add_evals_preflight_skips_front_matter(monkeypatch, tmp_path):
     )
 
     assert result["complete"] is True
+
+
+def _external_context(*, markdown_expected: bool) -> dict:
+    context = _context(project_page=False)
+    context["paper"].update(
+        id=131370,
+        arxiv_id=None,
+        source="external",
+        source_url="https://openai.com/index/introducing-gpt-6-1-terra",
+        repositories=[],
+        markdown_expected=markdown_expected,
+    )
+    return context
+
+
+def _refused(url: str, _limit: int):
+    raise urllib.error.HTTPError(url, 403, "forbidden", {}, None)
+
+
+def test_external_preflight_reads_the_prepared_page_copy(monkeypatch, tmp_path):
+    monkeypatch.setenv(url_preflight.OCR_MARKDOWN_TOKEN_ENV, "hf-test")
+
+    def fetch_external_markdown(paper_id: int, _limit: int, *, token: str):
+        assert (paper_id, token) == (131370, "hf-test")
+        return (
+            PAPER_TEXT,
+            "https://huggingface.co/buckets/x/resolve/external%2F131370.md",
+        )
+
+    result = url_preflight.extract_candidates(
+        _external_context(markdown_expected=True),
+        fetch=_refused,
+        fetch_external_markdown=fetch_external_markdown,
+        source_cache_dir=tmp_path / "paper-sources",
+    )
+
+    assert result["awaiting_markdown"] is False
+    assert result["markdown_available"] is True
+    assert not result["errors"]
+    source = next(
+        item for item in result["source_documents"] if item["kind"] == "paper_source"
+    )
+    # The copy belongs to the release page the curator must cite.
+    assert source["url"] == "https://openai.com/index/introducing-gpt-6-1-terra"
+    assert Path(source["local_path"]).read_bytes() == PAPER_TEXT
+    assert hashlib.sha256(PAPER_TEXT).hexdigest() == source["sha256"]
+    assert "hf-test" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("expected", [True, False])
+def test_external_preflight_waits_only_for_an_expected_copy(monkeypatch, expected):
+    monkeypatch.setenv(url_preflight.OCR_MARKDOWN_TOKEN_ENV, "hf-test")
+
+    def missing(*_args, **_kwargs):
+        raise urllib.error.HTTPError("bucket", 404, "not found", {}, None)
+
+    result = url_preflight.extract_candidates(
+        _external_context(markdown_expected=expected),
+        fetch=_refused,
+        fetch_external_markdown=missing,
+    )
+
+    assert result["awaiting_markdown"] is expected
+    assert result["complete"] is True
+    assert "local_path" not in result["source_documents"][0]

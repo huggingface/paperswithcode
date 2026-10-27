@@ -24,6 +24,7 @@ from backend.models.database import (
     PaperCurationWorkflow,
 )
 from backend.services.codex_add_evals_service import (
+    EXTERNAL_PAPER_POLICY_VERSION,
     CodexPaperJobService,
     codex_paper_job_service,
     deferred_workflows_for_release,
@@ -39,6 +40,7 @@ from backend.services.codex_curation_callback_service import (
 from backend.scripts.generate_missing_paper_markdown import (
     validate_canonical_markdown,
 )
+from backend.services.external_page_markdown_service import web_markdown_pending
 from backend.utils.hf_daily_papers import fetch_hf_daily_papers
 from backend.utils.urls import get_paper_route_identifier
 from jobs.curation_failure_codes import AWAITING_MARKDOWN
@@ -75,7 +77,17 @@ def fetch_hf_daily_cohort(cohort_date: date) -> list[str]:
 
 
 def paper_markdown_available(paper: Paper, settings: Settings) -> bool:
-    """Require bounded canonical Markdown that satisfies the OCR semantic contract."""
+    """Require bounded canonical Markdown that satisfies the OCR semantic contract.
+
+    An external paper is ready once its page Markdown exists or can no longer
+    arrive; curation then reads the copy or the live page.
+    """
+    if getattr(paper, "source", None) == "external" and not paper.arxiv_id:
+        return not web_markdown_pending(
+            paper,
+            bucket_id=settings.paper_markdown_hf_bucket_id,
+            token=settings.hf_token or None,
+        )
     arxiv_id = re.sub(r"v\d+$", "", paper.arxiv_id or "")
     if not arxiv_id or not settings.hf_token:
         return False
@@ -181,19 +193,31 @@ class HFDailyCurationService:
                 # bounded scan so a large backlog cannot starve ready papers.
                 workflow.updated_at = datetime.now(UTC)
                 continue
+            external = workflow.policy_version == EXTERNAL_PAPER_POLICY_VERSION
+            enriched = workflow.enrich_satisfied_by_job_id or (
+                external
+                and self.db.query(PaperCurationJob.id)
+                .filter(
+                    PaperCurationJob.parent_workflow_id == workflow.id,
+                    PaperCurationJob.kind == "enrich-paper",
+                    PaperCurationJob.status == "completed",
+                )
+                .first()
+            )
             self.job_service.enqueue(
                 self.db,
-                kind="add-evals"
-                if workflow.enrich_satisfied_by_job_id
-                else "enrich-paper",
+                kind="add-evals" if enriched else "enrich-paper",
                 paper_id=paper.id,
                 paper_route=get_paper_route_identifier(
                     paper.source, paper.arxiv_id, paper.id
                 ),
                 paper_title=paper.title,
-                requested_by="hf-daily-cron-markdown-ready",
+                # External-paper workflows stay in the admin lane.
+                requested_by="external-paper-markdown-ready"
+                if external
+                else "hf-daily-cron-markdown-ready",
                 settings=self.settings,
-                trigger="hf-daily-cron",
+                trigger="admin" if external else "hf-daily-cron",
                 parent_workflow_id=workflow.id,
                 cohort_date=workflow.cohort_date,
                 policy_version=workflow.policy_version,

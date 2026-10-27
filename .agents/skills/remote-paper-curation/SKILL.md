@@ -20,6 +20,10 @@ Use the supplied `url` for citations and source coverage, and the local file for
 reading. Never request or recover the removed bucket credential. Do not treat a
 401 from re-fetching that URL as missing evidence when the verified local copy
 is available.
+An external paper's `paper_source` entry may carry the `local_path` of the
+page's prepared Markdown copy. First-party release sites often return 403 to
+the runner, so read that copy and cite the entry's `url`. Mark the source
+covered, not `unavailable`, when the copy was read.
 A cached image caption, SVG title, diagram notice, empty wrapper, or successful
 HTTP response alone does not count as reading the paper. The PDF preflight
 checks only the first two pages for readable content and artifact URLs; read

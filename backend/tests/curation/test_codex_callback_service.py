@@ -211,6 +211,7 @@ def test_context_projection_preserves_the_worker_payload():
         "arxiv_id": "2601.00001",
         "source": "arxiv",
         "source_url": None,
+        "markdown_expected": False,
         "date_published": datetime(2026, 1, 1, tzinfo=UTC),
         "urls_extracted": True,
         "thumbnail_url": "/thumbnails/42.jpg",
@@ -1439,3 +1440,64 @@ def test_retry_feedback_is_scoped_and_exposes_only_rejection_details():
     row.paper_id = 43
     assert service._retry_feedback(row) is None
     assert service._retry_feedback(SimpleNamespace()) is None
+
+
+@pytest.mark.parametrize(
+    ("kind", "source", "pending", "expected"),
+    [
+        ("add-evals", "external", True, True),
+        ("add-evals", "external", False, False),
+        ("enrich-paper", "external", True, False),
+        ("add-evals", "arxiv", True, False),
+    ],
+)
+def test_context_expects_page_markdown_only_for_external_add_evals(
+    kind, source, pending, expected
+):
+    paper = SimpleNamespace(
+        id=131370,
+        title="Introducing GPT-6.1 Terra",
+        abstract=None,
+        arxiv_id="2601.00001" if source == "arxiv" else None,
+        source=source,
+        source_url="https://openai.com/index/introducing-gpt-6-1-terra",
+        date_published=None,
+        urls_extracted=False,
+        thumbnail_url=None,
+        tasks=[],
+        methods=[],
+        project_pages=[],
+        evaluations=[],
+    )
+
+    class Database:
+        def get(self, *_args):
+            return paper
+
+        def query(self, *_args):
+            return _ListQuery([])
+
+    class JobService:
+        def serialize(self, row, settings):
+            return SimpleNamespace(model_dump=lambda *, mode: {"kind": row.kind})
+
+    checked = []
+
+    def markdown_pending(checked_paper, *, bucket_id, token):
+        checked.append(checked_paper.id)
+        return pending
+
+    service = CodexCurationCallbackService(
+        Database(),
+        job_service=JobService(),
+        evaluation_service=SimpleNamespace(),
+        association_service=SimpleNamespace(),
+        markdown_pending=markdown_pending,
+    )
+
+    result = service.context(
+        SimpleNamespace(paper_id=131370, kind=kind), get_settings()
+    )
+
+    assert result["paper"]["markdown_expected"] is expected
+    assert checked == ([131370] if kind == "add-evals" and source == "external" else [])

@@ -636,3 +636,49 @@ def test_anonymous_miss_does_not_spend_firecrawl_credits(monkeypatch, reader_cli
     response = client.get("/api/v1/papers/123294/web-markdown")
 
     assert response.status_code == 503
+
+
+@pytest.mark.parametrize(
+    ("source_url", "exists", "status", "pending"),
+    [
+        ("https://openai.com/index/introducing-gpt-6-1-terra", False, {}, True),
+        ("https://openai.com/index/introducing-gpt-6-1-terra", True, {}, False),
+        (
+            "https://openai.com/index/introducing-gpt-6-1-terra",
+            False,
+            {"status": "failed", "retryable": True},
+            True,
+        ),
+        (
+            "https://openai.com/index/introducing-gpt-6-1-terra",
+            False,
+            {"status": "failed", "retryable": False},
+            False,
+        ),
+        ("https://openai.com/index/introducing-gpt-6-1-terra#models", False, {}, False),
+    ],
+)
+def test_web_markdown_pending_never_waits_on_unreadable_pages(
+    monkeypatch, source_url, exists, status, pending
+):
+    checked = []
+
+    class Filesystem:
+        def __init__(self, *, token):
+            assert token == "token"
+
+        def exists(self, path):
+            checked.append(path)
+            return exists
+
+    monkeypatch.setattr(service, "HfFileSystem", Filesystem)
+    monkeypatch.setattr(service, "read_status", lambda *_a, **_kw: status)
+    paper = SimpleNamespace(
+        id=131370, source="external", source_url=source_url, conference_url_pdf=None
+    )
+
+    assert (
+        service.web_markdown_pending(paper, bucket_id="b/c", token="token") is pending
+    )
+    if "#" not in source_url:
+        assert checked == ["hf://buckets/b/c/external/131370.md"]

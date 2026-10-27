@@ -77,6 +77,7 @@ from backend.services.curation_thumbnail_queue_service import (
 )
 from backend.services.curation_autonomy import curation_primary_authorization
 from backend.services.evaluation_service import EvaluationService
+from backend.services.external_page_markdown_service import web_markdown_pending
 from backend.services.leaderboard_ranking_service import parse_metric_value
 from backend.services.leaderboard_sync_ownership import is_sync_managed
 from backend.services.paper_association_service import PaperAssociationService
@@ -152,8 +153,10 @@ class CodexCurationCallbackService:
         evaluation_service: EvaluationService | None = None,
         association_service: PaperAssociationService | None = None,
         autonomous_policy: AutonomousPolicy | None = None,
+        markdown_pending=web_markdown_pending,
     ) -> None:
         self.db = db
+        self.markdown_pending = markdown_pending
         self.job_service = job_service
         self.evaluation_service = evaluation_service or EvaluationService(db)
         self.autonomous_policy = autonomous_policy or AutonomousPolicy()
@@ -462,6 +465,18 @@ class CodexCurationCallbackService:
             .all()
             if hasattr(value, "method_id")
         ]
+        # An external release page is read from its prepared Markdown copy;
+        # first-party sites often refuse the runner's own fetch.
+        markdown_expected = bool(
+            getattr(row, "kind", None) == "add-evals"
+            and paper.source == "external"
+            and not paper.arxiv_id
+            and self.markdown_pending(
+                paper,
+                bucket_id=settings.paper_markdown_hf_bucket_id,
+                token=settings.hf_token or None,
+            )
+        )
         return {
             "job": self.job_service.serialize(row, settings).model_dump(mode="json"),
             "source_candidate": source_candidate,
@@ -473,6 +488,7 @@ class CodexCurationCallbackService:
                 "arxiv_id": paper.arxiv_id,
                 "source": paper.source,
                 "source_url": paper.source_url,
+                "markdown_expected": markdown_expected,
                 "date_published": paper.date_published,
                 "urls_extracted": paper.urls_extracted,
                 "thumbnail_url": paper.thumbnail_url,

@@ -230,6 +230,36 @@ def read_status(paper_id: str, *, bucket_id: str, token: str | None) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def web_markdown_ready(paper, *, bucket_id: str, token: str | None) -> bool:
+    """Whether the page's Markdown exists for curation to read."""
+    path = f"hf://buckets/{bucket_id}/{paper_markdown_bucket_key(str(paper.id), source='external')}"
+    try:
+        return HfFileSystem(token=token).exists(path)
+    except (HfHubHTTPError, OSError):
+        return False
+
+
+def web_markdown_pending(paper, *, bucket_id: str, token: str | None) -> bool:
+    """Whether a readable page still awaits its Markdown.
+
+    Pages that are ineligible, already published, or permanently unreadable
+    are not pending, so curation never waits on them.
+    """
+    page_url = external_page_url(
+        source=paper.source,
+        source_url=paper.source_url,
+        conference_url_pdf=paper.conference_url_pdf,
+    )
+    if page_url is None or web_markdown_ready(paper, bucket_id=bucket_id, token=token):
+        return False
+    try:
+        status = read_status(str(paper.id), bucket_id=bucket_id, token=token)
+    except (HfHubHTTPError, OSError, ValueError):
+        # A storage outage says nothing about the page; keep waiting.
+        return True
+    return status.get("status") != "failed" or bool(status.get("retryable"))
+
+
 def retry_due(status: dict, *, now: datetime | None = None) -> bool:
     """Whether a page with this status record may be scraped again."""
     if not status or status.get("status") == "succeeded":

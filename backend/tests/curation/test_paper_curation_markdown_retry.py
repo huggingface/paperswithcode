@@ -15,6 +15,7 @@ from backend.models.database import (
     PaperCurationWorkflow,
 )
 from backend.services.codex_add_evals_service import (
+    EXTERNAL_PAPER_POLICY_VERSION,
     CodexPaperJobService,
     _is_callback_validation_rejection,
 )
@@ -365,3 +366,79 @@ def test_callback_validation_rejection_is_not_classified_as_transient():
 
     assert _is_callback_validation_rejection(rejected) is True
     assert _is_callback_validation_rejection(transient) is False
+
+
+def test_external_workflow_releases_to_admin_add_evals_after_enrichment():
+    workflow = SimpleNamespace(
+        id=uuid.uuid4(),
+        paper_id=131370,
+        cohort_date=date(2026, 10, 27),
+        policy_version=EXTERNAL_PAPER_POLICY_VERSION,
+        status="deferred",
+        deferred_reason="awaiting_markdown",
+        error=None,
+        enrich_satisfied_by_job_id=None,
+        evals_satisfied_by_job_id=None,
+        cohort_order=0,
+        created_at=datetime.now(UTC),
+    )
+    paper = SimpleNamespace(
+        id=131370, source="external", arxiv_id=None, title="Introducing GPT-6.1 Terra"
+    )
+
+    class Query:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def filter(self, *_args):
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def limit(self, _limit):
+            return self
+
+        def all(self):
+            return self.rows
+
+        def first(self):
+            return self.rows[0] if self.rows else None
+
+    class Database:
+        def query(self, model):
+            if model is PaperCurationWorkflow:
+                return Query([workflow])
+            # The workflow's completed enrich-paper job.
+            return Query([SimpleNamespace(id=uuid.uuid4())])
+
+        def get(self, model, key):
+            return paper
+
+    enqueued = []
+    service = HFDailyCurationService(
+        Database(),
+        SimpleNamespace(),
+        job_service=SimpleNamespace(enqueue=lambda *_a, **kw: enqueued.append(kw)),
+        markdown_available=lambda _paper, _settings: True,
+    )
+
+    assert service.release_awaiting_markdown(1) == 1
+    assert workflow.status == "queued"
+    assert (
+        enqueued[0]["kind"],
+        enqueued[0]["trigger"],
+        enqueued[0]["requested_by"],
+    ) == ("add-evals", "admin", "external-paper-markdown-ready")
+
+
+@pytest.mark.parametrize("pending", [True, False])
+def test_external_markdown_availability_follows_page_markdown(monkeypatch, pending):
+    monkeypatch.setattr(
+        "backend.services.hf_daily_curation_service.web_markdown_pending",
+        lambda paper, *, bucket_id, token: pending,
+    )
+    paper = SimpleNamespace(id=131370, source="external", arxiv_id=None, title="X")
+    settings = SimpleNamespace(hf_token="t", paper_markdown_hf_bucket_id="b/c")
+
+    assert paper_markdown_available(paper, settings) is not pending
