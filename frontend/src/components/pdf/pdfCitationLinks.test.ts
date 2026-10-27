@@ -89,6 +89,8 @@ describe('arXiv PDF links', () => {
       { name: 'cite.right', routeId: '2501.33333', box: [533, 188, 867, 203] },
     ]);
     expect(await resolve.bibliographyLinks(3)).toEqual([]);
+    expect(await resolve.referenceOf('cite.lin2014')).toEqual({ page: 12, bbox: [142, 188, 475, 218] });
+    expect(await resolve.referenceOf('cite.missing')).toBeNull();
   });
 
   it('lists where the text cites each entry, from links to its destination, joining split and wrapped author/year links, past an unreadable page', async () => {

@@ -83,7 +83,10 @@
 /* A chat citation's passage: flashes, then fades out. */
 .pdf-citation-highlight { position: absolute; z-index: 3; border-radius: 3px; pointer-events: none; background: rgb(255 196 0 / .28); box-shadow: 0 0 0 2px rgb(255 170 0 / .7); animation: pdf-citation-flash 4s ease-out forwards; }
 @keyframes pdf-citation-flash { 0%, 10% { opacity: 0; } 18%, 70% { opacity: 1; } 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .pdf-citation-highlight { animation: pdf-citation-flash 4s step-end forwards; } }
+/* Card jumps between a citation and its reference flash for about 1.5 s, starting once the scroll lands. */
+.pdf-citation-highlight.is-brief { animation: pdf-citation-flash-brief 1.8s ease-out forwards; }
+@keyframes pdf-citation-flash-brief { 0% { opacity: 0; } 12%, 65% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pdf-citation-highlight { animation: pdf-citation-flash 4s step-end forwards; } .pdf-citation-highlight.is-brief { animation: pdf-citation-flash-brief 1.8s step-end forwards; } }
 /* Hover table of contents: one tick per section along the right edge; the full outline appears while the rail is hovered, focused, or tapped open. */
 .pdf-outline { position: absolute; z-index: 9; top: 0; right: 14px; bottom: 0; display: flex; align-items: center; pointer-events: none; }
 .pdf-outline-rail { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 5px; max-height: 100%; overflow: hidden; border: 0; width: 56px; padding: 12px 6px 12px 0; background: transparent; cursor: pointer; pointer-events: auto; touch-action: none; }

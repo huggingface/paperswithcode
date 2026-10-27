@@ -22,7 +22,7 @@ export function usePdfPaperLinks(ref: RefObject<HTMLDivElement>, visible: boolea
       const anchor = anchors.get(annotation.id);
       if (!anchor) return null;
       const routeId = await resolveCitation(annotation).catch(() => null);
-      return routeId ? { anchor, routeId, internal: !annotation.url } : null;
+      return routeId ? { anchor, routeId, internal: !annotation.url, dest: typeof annotation.dest === 'string' ? annotation.dest : undefined } : null;
     })).then(links => {
       if (generation.current !== current) return;
       const connected = links.filter((link): link is PdfPaperLinkTarget => link !== null && link.anchor.isConnected);

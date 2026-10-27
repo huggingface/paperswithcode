@@ -133,7 +133,9 @@ function LazyPdfPage({
   warmPreviews,
   highlightBoxes,
   highlightKey,
+  highlightBrief,
   onShowCitation,
+  onShowReference,
 }: {
   page: number;
   width: number;
@@ -144,7 +146,9 @@ function LazyPdfPage({
   warmPreviews?: (routeIds: string[]) => void;
   highlightBoxes?: number[][];
   highlightKey?: string;
+  highlightBrief?: boolean;
   onShowCitation?: (citation: PdfHighlightBox[]) => void;
+  onShowReference?: (dest: string) => Promise<boolean>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
@@ -254,11 +258,11 @@ function LazyPdfPage({
       </div>;
     })}
     {snapshot && !painted && <img className="pdf-page-snapshot" src={snapshot} alt="" aria-hidden="true" />}
-    {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} />)}
+    {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} onShowReference={onShowReference} />)}
     {visible && resolveCitation && bibliographyLinks.map(link => <PdfBibliographyEntryLink key={link.name} {...link} onShowCitation={onShowCitation} />)}
     {highlightBoxes?.map(([x0, y0, x1, y1], index) => <div
       key={`${highlightKey}-${index}`}
-      className="pdf-citation-highlight"
+      className={`pdf-citation-highlight${highlightBrief ? " is-brief" : ""}`}
       aria-hidden="true"
       style={{ left: `${x0 / 10}%`, top: `${y0 / 10}%`, width: `${(x1 - x0) / 10}%`, height: `${(y1 - y0) / 10}%` }}
     />)}
@@ -325,18 +329,28 @@ export function PdfViewer({
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pagesRef = useRef<HTMLDivElement>(null);
-  // A bibliography card's jump to its in-text citation reuses the chat
-  // citation highlight; whichever was requested last is shown.
+  // Preview cards' jumps between in-text citations and bibliography entries
+  // reuse the chat citation highlight, flashed more briefly; whichever was
+  // requested last is shown.
   const [citationJump, setCitationJump] = useState<PdfHighlight>();
   useEffect(() => setCitationJump(undefined), [citedHighlight?.nonce, url]);
   const highlight = citationJump ?? citedHighlight;
   const highlightKey = highlight && `${citationJump ? "jump" : "cited"}-${highlight.nonce}`;
+  // A card jump's short flash waits for the scroll to land, which can cross
+  // many pages; chat citations' longer flash starts at once.
+  const [landedKey, setLandedKey] = useState<string>();
+  const shownHighlight = citationJump && landedKey !== highlightKey ? undefined : highlight;
   const showCitation = useCallback((citation: PdfHighlightBox[]) => {
     setCitationJump((previous) => ({ boxes: citation, nonce: (previous?.nonce ?? 0) + 1 }));
   }, []);
   const documentRef = useRef<PDFDocumentProxy | null>(null);
   const textIndex = useRef<PdfTextIndex>();
   const [resolveCitation, setResolveCitation] = useState<PdfCitationResolver>();
+  const showReference = useCallback(async (dest: string) => {
+    const reference = await resolveCitation?.referenceOf(dest).catch(() => null);
+    if (reference) showCitation([reference]);
+    return Boolean(reference);
+  }, [resolveCitation, showCitation]);
   const queryClient = useQueryClient();
   const previewCache = useMemo(() => createPaperPreviewCache(queryClient), [queryClient]);
   const internalLinkNavigation = useRef<(page: number) => void>(() => {});
@@ -665,6 +679,25 @@ export function PdfViewer({
     setNavigationPage(behavior === "smooth" ? first.page : undefined);
     scroller.scrollTo({ top: Math.max(0, top - CITATION_SCROLL_MARGIN), behavior });
     if (behavior === "instant") setCurrentPage(first.page);
+    // Landed once scrolling settles, as for the reading position, including
+    // browsers without scrollend and jumps that need no scroll.
+    let settleTimer = 0;
+    const land = () => {
+      window.clearTimeout(settleTimer);
+      setLandedKey(highlightKey);
+    };
+    const settle = () => {
+      window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(land, 150);
+    };
+    settle();
+    scroller.addEventListener("scroll", settle, { passive: true });
+    scroller.addEventListener("scrollend", land);
+    return () => {
+      window.clearTimeout(settleTimer);
+      scroller.removeEventListener("scroll", settle);
+      scroller.removeEventListener("scrollend", land);
+    };
     // Re-run per request, once pages exist and once the real page aspect is
     // measured (placeholder heights change then), not on scroll-state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -800,9 +833,11 @@ export function PdfViewer({
             activeSearchPage={matches[activeMatch]}
             resolveCitation={resolveCitation}
             warmPreviews={previewCache.warm}
-            highlightBoxes={highlight?.boxes.filter((box) => box.page === pageNumber).map((box) => box.bbox)}
+            highlightBoxes={shownHighlight?.boxes.filter((box) => box.page === pageNumber).map((box) => box.bbox)}
             highlightKey={highlightKey}
+            highlightBrief={Boolean(citationJump)}
             onShowCitation={showCitation}
+            onShowReference={showReference}
           />)}
         </div>
       </Document>}

@@ -324,6 +324,12 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
   // of its one or more printed lines. Scans the whole document once, so cards
   // never wait for it.
   const citationsOf = async (name: string): Promise<PdfHighlightBox[][]> => (await getCitations()).get(name) ?? [];
-  return Object.assign(resolve, { bibliographyLinks, citationsOf });
+  // The printed bibliography entry an in-text citation points at.
+  const referenceOf = async (name: string): Promise<PdfHighlightBox | null> => {
+    const position = (await getReferences()).find(reference => reference.name === name);
+    const box = position && (await getEntry(name))?.box;
+    return box ? { page: position.page, bbox: box } : null;
+  };
+  return Object.assign(resolve, { bibliographyLinks, citationsOf, referenceOf });
 }
 export type PdfCitationResolver = ReturnType<typeof createPdfCitationResolver>;

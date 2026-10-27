@@ -8,11 +8,17 @@ export interface PdfPaperLinkTarget {
   anchor: HTMLAnchorElement;
   routeId: string;
   internal: boolean;
+  /** Named destination of an in-text citation, e.g. "cite.clark2019". */
+  dest?: string;
 }
 
 // Render in PDF.js's own annotation rectangle so previews stay aligned through
-// zoom, rotation, and resizing, without covering selectable PDF text.
-export function PdfPaperLink({ anchor, routeId, internal }: PdfPaperLinkTarget) {
+// zoom, rotation, and resizing, without covering selectable PDF text. A
+// citation jumps to its bibliography entry and flashes it when the entry's box
+// is known, and otherwise follows the PDF's own link.
+export function PdfPaperLink({ anchor, routeId, internal, dest, onShowReference }: PdfPaperLinkTarget & {
+  onShowReference?: (dest: string) => Promise<boolean>;
+}) {
   useEffect(() => {
     const display = anchor.style.display;
     anchor.style.display = "none";
@@ -20,6 +26,10 @@ export function PdfPaperLink({ anchor, routeId, internal }: PdfPaperLinkTarget) 
   }, [anchor]);
   const container = anchor.parentElement;
   if (!container) return null;
+  const jumpToReference = () => {
+    if (!dest || !onShowReference) return anchor.click();
+    void onShowReference(dest).then(shown => { if (!shown) anchor.click(); });
+  };
   return createPortal(<PaperPreviewLink
     routeId={routeId}
     to={anchor.href}
@@ -31,11 +41,11 @@ export function PdfPaperLink({ anchor, routeId, internal }: PdfPaperLinkTarget) 
     onClick={internal ? (event) => {
       // Keep citation clicks as in-document navigation, including on touch.
       event.preventDefault();
-      anchor.click();
+      jumpToReference();
     } : undefined}
     previewFooter={() => <div className="pdf-paper-preview-actions">
       <a href={`/paper/${encodeURIComponent(routeId)}`} target="_blank" rel="noopener noreferrer">Open paper ↗</a>
-      {internal && <button type="button" onClick={() => anchor.click()}>Jump to reference</button>}
+      {internal && <button type="button" onClick={jumpToReference}>Jump to reference</button>}
     </div>}
   >{null}</PaperPreviewLink>, container);
 }

@@ -9,7 +9,7 @@ const get = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/api/papers', () => ({ papersApi: { get } }));
 
 afterEach(() => { document.querySelectorAll('[data-pdf-test]').forEach(node => node.remove()); get.mockReset(); });
-function setup(internal: boolean) {
+function setup(internal: boolean, onShowReference?: (dest: string) => Promise<boolean>) {
   const section = document.createElement('section');
   section.dataset.pdfTest = 'true';
   const anchor = document.createElement('a');
@@ -20,7 +20,7 @@ function setup(internal: boolean) {
   document.body.append(section);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = render(<QueryClientProvider client={client}><MemoryRouter>
-    <PdfPaperLink anchor={anchor} routeId="1405.0312" internal={internal} />
+    <PdfPaperLink anchor={anchor} routeId="1405.0312" internal={internal} dest="cite.lin2014" onShowReference={onShowReference} />
   </MemoryRouter></QueryClientProvider>);
   return { ...view, anchor, navigate };
 }
@@ -45,6 +45,20 @@ describe('PDF paper previews', () => {
     expect(navigate).toHaveBeenCalledTimes(2);
     unmount();
     expect(anchor.style.display).toBe('');
+  });
+
+  it('jumps to and flashes the bibliography entry, following the PDF link when its box is unknown', async () => {
+    get.mockResolvedValue({ title: 'Microsoft COCO', authors: ['Tsung-Yi Lin'], arxiv_id: '1405.0312', tasks: [] });
+    const onShowReference = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { navigate } = setup(true, onShowReference);
+    const trigger = screen.getByRole('link', { name: 'Citation 1405.0312' });
+    await userEvent.hover(trigger);
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to reference' }));
+    await waitFor(() => expect(onShowReference).toHaveBeenCalledWith('cite.lin2014'));
+    expect(navigate).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    await waitFor(() => expect(navigate).toHaveBeenCalledTimes(1));
+    expect(onShowReference).toHaveBeenCalledTimes(2);
   });
 
   it('keeps external URLs usable when the catalog has no preview', async () => {
