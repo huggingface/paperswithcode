@@ -335,6 +335,32 @@ const PaperDetailView: React.FC = () => {
     && (!isStagingEnvironment() || isAdmin)
     ? readerRoute
     : null;
+  const organizations = paper.organizations || [];
+  const renderTitleOrg = (o: NonNullable<typeof paper.organizations>[number]) => {
+    const orgLabel = organizationShortName(o) ?? o.name;
+    return (
+      <Link
+        key={o.id}
+        to={`/orgs/${o.slug}`}
+        className={`detail-title-org${o.logo_url ? " detail-title-org--logo" : ""}`}
+        title={o.name}
+        aria-label={o.name}
+      >
+        {o.logo_url ? (
+          <img
+            src={o.logo_url}
+            alt=""
+            onError={(e) => {
+              e.currentTarget.parentElement?.classList.remove("detail-title-org--logo");
+              e.currentTarget.replaceWith(orgLabel);
+            }}
+          />
+        ) : (
+          orgLabel
+        )}
+      </Link>
+    );
+  };
   const visibleAuthors = showAllAuthors || authorEntries.length <= authorLimit
     ? authorEntries
     : authorEntries.slice(0, authorLimit);
@@ -365,31 +391,20 @@ const PaperDetailView: React.FC = () => {
             <div className="detail-hero-main">
           <h1 className="detail-title">
             <LatexTitle title={paper.title} />
-            {(paper.organizations || []).map((o) => {
-              const orgLabel = organizationShortName(o) ?? o.name;
-              return (
-                <Link
-                  key={o.id}
-                  to={`/orgs/${o.slug}`}
-                  className={`detail-title-org${o.logo_url ? " detail-title-org--logo" : ""}`}
-                  title={o.name}
-                  aria-label={o.name}
-                >
-                  {o.logo_url ? (
-                    <img
-                      src={o.logo_url}
-                      alt=""
-                      onError={(e) => {
-                        e.currentTarget.parentElement?.classList.remove("detail-title-org--logo");
-                        e.currentTarget.replaceWith(orgLabel);
-                      }}
-                    />
-                  ) : (
-                    orgLabel
-                  )}
-                </Link>
-              );
-            })}
+            {organizations.slice(0, -1).map(renderTitleOrg)}
+            {/* Keep the pencil on the last org's line so it stays pinned to that logo. */}
+            <span className="detail-title-tail">
+              {organizations.slice(-1).map(renderTitleOrg)}
+              <button
+                type="button"
+                className="detail-title-edit"
+                onClick={() => openEdit("organizations")}
+                title="Edit organizations"
+                aria-label="Edit organizations"
+              >
+                <Icon name="pencil" size={11} />
+              </button>
+            </span>
           </h1>
           <div className="detail-meta">
             <span>Submitted {formatLongDate(paper.published)}</span>
@@ -579,13 +594,6 @@ const PaperDetailView: React.FC = () => {
                 <Icon name="external" size={12} /> Conference
               </a>
             )}
-            <button
-              type="button"
-              className="action-btn"
-              onClick={() => openEdit("organizations")}
-            >
-              Edit organizations
-            </button>
             <PaperAgentEdits paperId={Number(paper.id)} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
               <CodexEnrichPaperDialog
