@@ -590,6 +590,8 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     ? { ...session, is_busy: true, title: manualTitleLockRef.current.has(session.id) ? session.title : chat.activeTitle || session.title }
     : session);
   const current = visibleSessions.find((session) => session.id === routeSessionId);
+  // The sidebar loads only recent chats, so older reader chats need the detail.
+  const sessionPrimaryPaper = current?.primary_paper ?? detail?.primary_paper;
   const isEmpty = chat.messages.length === 0;
   const isRouteSessionLoading = Boolean(routeSessionId && (
     authLoading || (user && !routeReady && !routeQuery.isError)
@@ -657,17 +659,17 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             ? current?.title || ""
             : current?.title || detail?.title || (isEmpty ? "" : "New chat")}</span>
           {staging && <span className="chat-staging-badge">Staging</span>}
-          {mode === "general" && current?.primary_paper && (
+          {mode === "general" && routeSessionId && sessionPrimaryPaper && (
             <Link
               className="chat-reader-action"
-              to={`/pdf/${current.primary_paper.route_id}`}
+              to={`/pdf/${sessionPrimaryPaper.route_id}`}
               onClick={(event) => {
                 if (!canNavigateAwayFromArtifact()) {
                   event.preventDefault();
                   return;
                 }
-                const readerRoute = current.primary_paper!.route_id;
-                sessionStorage.setItem(`pwc:reader:session:${readerRoute}`, current.id);
+                const readerRoute = sessionPrimaryPaper.route_id;
+                sessionStorage.setItem(`pwc:reader:session:${readerRoute}`, routeSessionId);
                 if (routeViewerPage) {
                   sessionStorage.setItem(`pwc:reader:page:${readerRoute}`, String(routeViewerPage));
                 }
