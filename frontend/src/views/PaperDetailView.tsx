@@ -386,6 +386,15 @@ const PaperDetailView: React.FC = () => {
                 )}
               </Link>
             ))}
+            <button
+              type="button"
+              className="detail-title-edit"
+              onClick={() => openEdit("organizations")}
+              title="Edit organizations"
+              aria-label="Edit organizations"
+            >
+              <Icon name="pencil" size={11} />
+            </button>
           </h1>
           <div className="detail-meta">
             <span>Submitted {formatLongDate(paper.published)}</span>
@@ -575,13 +584,6 @@ const PaperDetailView: React.FC = () => {
                 <Icon name="external" size={12} /> Conference
               </a>
             )}
-            <button
-              type="button"
-              className="action-btn"
-              onClick={() => openEdit("organizations")}
-            >
-              Edit organizations
-            </button>
             <PaperAgentEdits paperId={Number(paper.id)} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
               <CodexEnrichPaperDialog

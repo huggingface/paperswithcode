@@ -287,7 +287,8 @@ interface IconProps {
     | "user"
     | "globe"
     | "menu"
-    | "close";
+    | "close"
+    | "pencil";
   size?: number;
 }
 
@@ -310,6 +311,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 14 }) => {
     globe: <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM1.5 8h13M8 1.5c1.7 1.9 2.6 4.2 2.6 6.5s-.9 4.6-2.6 6.5M8 1.5C6.3 3.4 5.4 5.7 5.4 8s.9 4.6 2.6 6.5" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" />,
     menu: <path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />,
     close: <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />,
+    pencil: <path d="M10.5 2.5l3 3L6 13H3v-3l7.5-7.5zM9 4l3 3" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />,
   };
   return (
     <svg className={size === 11 ? "icon-sm" : "icon"} viewBox="0 0 16 16" width={size} height={size}>
