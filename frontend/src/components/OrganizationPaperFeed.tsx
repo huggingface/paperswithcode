@@ -18,6 +18,7 @@ import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { useInfiniteOrganizationPapers } from "@/hooks/usePapers";
 import { catalogApi } from "@/lib/api/catalog";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
+import { isLongOrganizationName, organizationShortName } from "@/lib/organizationNames";
 import NotFound from "@/pages/NotFound";
 import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
 
@@ -99,6 +100,7 @@ export const OrganizationPaperFeed: React.FC<{
     [papersQ.data],
   );
   const organization = organizationQ.data ?? taxonomyQ.data?.organization;
+  const shortName = organization ? organizationShortName(organization) : null;
   const totalCount = papersQ.data?.pages[0]?.count ?? 0;
 
   if (
@@ -163,7 +165,13 @@ export const OrganizationPaperFeed: React.FC<{
       <header className="organization-hero">
         <div className="organization-hero-profile">
           <div className="organizations-eyebrow">ORGANIZATION</div>
-          <h1 className="feed-title organization-hero-title">
+          <h1
+            className={`feed-title organization-hero-title${
+              organization && !shortName && isLongOrganizationName(organization.name)
+                ? " organization-hero-title--long"
+                : ""
+            }`}
+          >
             {organization?.logo_url && !logoFailed ? (
               <img
                 src={organization.logo_url}
@@ -173,14 +181,20 @@ export const OrganizationPaperFeed: React.FC<{
                 onError={() => setLogoFailed(true)}
               />
             ) : organization ? (
-              <span
-                className="organization-logo organization-logo--fallback"
-                aria-hidden="true"
-              >
-                {organization.name.slice(0, 1).toUpperCase()}
+              <span className="organization-hero-monogram" aria-hidden="true">
+                {(shortName ?? organization.name).slice(0, 1).toUpperCase()}
               </span>
             ) : null}
-            {organization?.name ?? <Skeleton className="h-12 w-64" />}
+            {organization ? (
+              <span className="organization-hero-name">
+                {shortName ?? organization.name}
+                {shortName && (
+                  <span className="organization-hero-full-name">{organization.name}</span>
+                )}
+              </span>
+            ) : (
+              <Skeleton className="h-12 w-64" />
+            )}
           </h1>
           {organization && <ResearchFollowButton kind="organization" entityId={organization.id} />}
           {organization && (

@@ -18,6 +18,34 @@
   flex: none;
   object-fit: contain;
 }
+.feed-title.organization-hero-title--long {
+  font-size: 30px;
+  line-height: 1.1;
+}
+.organization-hero-name {
+  min-width: 0;
+}
+.organization-hero-full-name {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink-soft);
+  font-size: 18px;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+.organization-hero-monogram {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--accent-text);
+  font-size: 30px;
+  line-height: 1;
+}
 .organization-hero-links {
   display: flex;
   flex-wrap: wrap;
@@ -156,6 +184,13 @@
   .organization-hero {
     margin-bottom: 28px;
   }
+  .feed-title.organization-hero-title--long {
+    font-size: 22px;
+  }
+  .organization-hero-full-name {
+    font-size: 15px;
+  }
+
   .organization-contributions {
     max-width: calc(100vw - 28px);
   }

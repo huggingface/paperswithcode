@@ -478,17 +478,24 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   text-wrap: balance;
 }
 .detail-title-org {
+  display: inline-block;
+  max-width: 24ch;
+  overflow: hidden;
   margin-left: 0.6em;
   font-family: var(--mono);
   font-size: 13px;
+  line-height: 1.4;
   letter-spacing: 0;
   color: var(--accent-text);
+  text-overflow: ellipsis;
   white-space: nowrap;
+  vertical-align: 0.3em;
 }
 .detail-title-org--logo {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  max-width: none;
   margin-left: 0.3em;
   font-size: inherit;
   width: 0.8em;
