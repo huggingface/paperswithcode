@@ -89,7 +89,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe("OrganizationsIndexView", () => {
   it("renders the shared page header and compact cards with canonical full-tile links", async () => {
-    vi.spyOn(catalogApi, "organizations").mockResolvedValue(payload);
+    vi.spyOn(catalogApi, "organizationIndex").mockResolvedValue(payload);
     renderView();
     expect(
       await screen.findByRole("heading", { name: /AI Organizations/i }),
@@ -106,7 +106,7 @@ describe("OrganizationsIndexView", () => {
   });
 
   it("searches HF handles and persists search and sort in the URL", async () => {
-    vi.spyOn(catalogApi, "organizations").mockResolvedValue(payload);
+    vi.spyOn(catalogApi, "organizationIndex").mockResolvedValue(payload);
     const user = userEvent.setup();
     renderView();
     await screen.findByText("Qwen paper");
@@ -127,7 +127,7 @@ describe("OrganizationsIndexView", () => {
   });
 
   it("uses a styled fallback when an image fails", async () => {
-    vi.spyOn(catalogApi, "organizations").mockResolvedValue(payload);
+    vi.spyOn(catalogApi, "organizationIndex").mockResolvedValue(payload);
     const view = renderView();
     await screen.findByRole("link", { name: "Browse 12 Qwen papers" });
     const image = view.container.querySelector(
@@ -138,8 +138,16 @@ describe("OrganizationsIndexView", () => {
     expect(screen.getAllByText("Q", { selector: ".organization-logo--fallback" })).toHaveLength(1);
   });
 
+  it("shows card skeletons and no stale count while the directory loads", () => {
+    vi.spyOn(catalogApi, "organizationIndex").mockReturnValue(new Promise(() => {}));
+    const view = renderView();
+    expect(screen.getByRole("heading", { name: "Organizations" })).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ organizations/)).not.toBeInTheDocument();
+    expect(view.container.querySelectorAll(".organization-card-skeleton")).toHaveLength(12);
+  });
+
   it("shows a retryable error", async () => {
-    vi.spyOn(catalogApi, "organizations").mockRejectedValue(new Error("boom"));
+    vi.spyOn(catalogApi, "organizationIndex").mockRejectedValue(new Error("boom"));
     renderView();
     expect(await screen.findByText(/Failed to load organizations/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();

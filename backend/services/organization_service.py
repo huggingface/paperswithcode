@@ -2,6 +2,7 @@
 Organization service for listing organizations and organization-scoped taxonomy.
 """
 
+import threading
 import time
 from datetime import date, timedelta
 from typing import Optional
@@ -39,10 +40,24 @@ from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.organization_logos import organization_logo_path
 
 
-# The public directory builds ~200 cards with a top paper each, and featuring
-# and trending change once a day, so a short shared cache keeps it current.
+# The public directory builds ~200 cards with a top paper each (~2 s), and
+# featuring and trending change once a day. Each worker keeps its cards and,
+# once they are older than the TTL, serves them while one background thread
+# rebuilds them, so only a worker's very first request waits for the query.
 ORGANIZATION_INDEX_TTL_SECONDS = 600
 _organization_index_cache: dict[str, tuple[float, Organizations]] = {}
+_organization_index_refreshing: set[str] = set()
+_organization_index_lock = threading.Lock()
+
+
+def _refresh_organization_index(bind, key: str) -> None:
+    try:
+        with Session(bind=bind) as db:
+            result = OrganizationService(db).get_organizations(curated_only=True)
+        _organization_index_cache[key] = (time.monotonic(), result)
+    finally:
+        with _organization_index_lock:
+            _organization_index_refreshing.discard(key)
 
 
 class OrganizationService:
@@ -123,18 +138,29 @@ class OrganizationService:
         )
 
     def get_organization_index(self) -> Organizations:
-        """Return the public directory cards, briefly cached on PostgreSQL."""
+        """Return the public directory cards, cached and refreshed on PostgreSQL."""
         bind = self.db.get_bind()
         if bind.dialect.name != "postgresql":
             return self.get_organizations(curated_only=True)
         key = str(bind.url)
         cached = _organization_index_cache.get(key)
         now = time.monotonic()
-        if cached and now - cached[0] < ORGANIZATION_INDEX_TTL_SECONDS:
-            return cached[1]
-        result = self.get_organizations(curated_only=True)
-        _organization_index_cache[key] = (now, result)
-        return result
+        if cached is None:
+            result = self.get_organizations(curated_only=True)
+            _organization_index_cache[key] = (now, result)
+            return result
+        if now - cached[0] >= ORGANIZATION_INDEX_TTL_SECONDS:
+            with _organization_index_lock:
+                start = key not in _organization_index_refreshing
+                _organization_index_refreshing.add(key)
+            if start:
+                threading.Thread(
+                    target=_refresh_organization_index,
+                    args=(bind, key),
+                    name="organization-index-refresh",
+                    daemon=True,
+                ).start()
+        return cached[1]
 
     def get_organizations(
         self,
