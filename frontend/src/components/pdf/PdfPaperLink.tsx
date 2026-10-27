@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
 import type { PdfBibliographyLink } from "./pdfCitationLinks";
+import type { PdfHighlightBox } from "./pdfCitations";
 
 export interface PdfPaperLinkTarget {
   anchor: HTMLAnchorElement;
@@ -40,8 +41,13 @@ export function PdfPaperLink({ anchor, routeId, internal }: PdfPaperLinkTarget) 
 }
 
 // A bibliography entry has no PDF link of its own, so its preview target is
-// positioned over the entry's text on the page's 0–1000 grid.
-export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1] }: PdfBibliographyLink) {
+// positioned over the entry's text on the page's 0–1000 grid. Its card can jump
+// back to where the text cites it, stepping through each citation in turn.
+export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1], citations, onShowCitation }: PdfBibliographyLink & {
+  onShowCitation?: (citation: PdfHighlightBox[]) => void;
+}) {
+  const [next, setNext] = useState(0);
+  const citation = citations[next % citations.length];
   return <div
     className="pdf-bibliography-link"
     style={{ left: `${x0 / 10}%`, top: `${y0 / 10}%`, width: `${(x1 - x0) / 10}%`, height: `${(y1 - y0) / 10}%` }}
@@ -54,6 +60,13 @@ export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1] }: Pdf
       title={/^\d+$/.test(routeId) ? "Preview paper" : `Preview arXiv:${routeId}`}
       ariaLabel={`Reference ${routeId}`}
       cardOpensPaper
+      previewFooter={() => <div className="pdf-paper-preview-actions">
+        <a href={`/paper/${encodeURIComponent(routeId)}`} target="_blank" rel="noopener noreferrer">Open paper ↗</a>
+        {citation && onShowCitation && <button type="button" onClick={() => {
+          onShowCitation(citation);
+          setNext(next + 1);
+        }}>{citations.length > 1 ? `Jump to citation ${next % citations.length + 1} of ${citations.length}` : "Jump to citation"}</button>}
+      </div>}
     >{null}</PaperPreviewLink>
   </div>;
 }

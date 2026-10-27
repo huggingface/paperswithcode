@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PdfPaperLink } from './PdfPaperLink';
+import { PdfBibliographyEntryLink, PdfPaperLink } from './PdfPaperLink';
 
 const get = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/api/papers', () => ({ papersApi: { get } }));
@@ -56,5 +56,31 @@ describe('PDF paper previews', () => {
     await userEvent.hover(trigger);
     await waitFor(() => expect(screen.getByText('Preview unavailable')).toBeInTheDocument());
     expect(screen.queryByRole('link', { name: 'Open paper ↗' })).not.toBeInTheDocument();
+  });
+
+  it('steps a bibliography card through the places the text cites it', async () => {
+    get.mockResolvedValue({ title: 'Microsoft COCO', authors: ['Tsung-Yi Lin'], arxiv_id: '1405.0312', tasks: [] });
+    const citations = [[{ page: 2, bbox: [10, 20, 30, 40] }], [{ page: 5, bbox: [50, 60, 70, 80] }, { page: 5, bbox: [5, 82, 20, 95] }]];
+    const onShowCitation = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><MemoryRouter>
+      <PdfBibliographyEntryLink name="cite.lin2014" routeId="1405.0312" box={[100, 100, 400, 140]} citations={citations} onShowCitation={onShowCitation} />
+    </MemoryRouter></QueryClientProvider>);
+    await userEvent.hover(screen.getByRole('link', { name: 'Reference 1405.0312' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to citation 1 of 2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to citation 2 of 2' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Jump to citation 1 of 2' }));
+    expect(onShowCitation.mock.calls.map(([citation]) => citation)).toEqual([citations[0], citations[1], citations[0]]);
+  });
+
+  it('offers no jump for an entry the text never cites', async () => {
+    get.mockResolvedValue({ title: 'Microsoft COCO', authors: ['Tsung-Yi Lin'], arxiv_id: '1405.0312', tasks: [] });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><MemoryRouter>
+      <PdfBibliographyEntryLink name="cite.lin2014" routeId="1405.0312" box={[100, 100, 400, 140]} citations={[]} onShowCitation={vi.fn()} />
+    </MemoryRouter></QueryClientProvider>);
+    await userEvent.hover(screen.getByRole('link', { name: 'Reference 1405.0312' }));
+    expect(await screen.findByRole('link', { name: 'Open paper ↗' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Jump to citation/ })).not.toBeInTheDocument();
   });
 });

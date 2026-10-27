@@ -18,7 +18,7 @@ import { usePdfPaperLinks } from "./usePdfPaperLinks";
 import { PdfOutline } from "./PdfOutline";
 import { clampZoom, stepZoom } from "./pdfZoom";
 import { activeSectionIndex, loadPdfOutline, pdfSectionFromHash, type PdfOutlineEntry } from "./pdfOutline";
-import type { PdfHighlight } from "./pdfCitations";
+import type { PdfHighlight, PdfHighlightBox } from "./pdfCitations";
 import { countMatches, createPdfTextIndex, type PdfTextIndex } from "./pdfTextIndex";
 
 interface PdfViewerProps {
@@ -132,7 +132,8 @@ function LazyPdfPage({
   resolveCitation,
   warmPreviews,
   highlightBoxes,
-  highlightNonce,
+  highlightKey,
+  onShowCitation,
 }: {
   page: number;
   width: number;
@@ -142,7 +143,8 @@ function LazyPdfPage({
   resolveCitation?: PdfCitationResolver;
   warmPreviews?: (routeIds: string[]) => void;
   highlightBoxes?: number[][];
-  highlightNonce?: number;
+  highlightKey?: string;
+  onShowCitation?: (citation: PdfHighlightBox[]) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
@@ -249,9 +251,9 @@ function LazyPdfPage({
     })}
     {snapshot && !painted && <img className="pdf-page-snapshot" src={snapshot} alt="" aria-hidden="true" />}
     {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} />)}
-    {visible && resolveCitation && bibliographyLinks.map(link => <PdfBibliographyEntryLink key={link.name} {...link} />)}
+    {visible && resolveCitation && bibliographyLinks.map(link => <PdfBibliographyEntryLink key={link.name} {...link} onShowCitation={onShowCitation} />)}
     {highlightBoxes?.map(([x0, y0, x1, y1], index) => <div
-      key={`${highlightNonce}-${index}`}
+      key={`${highlightKey}-${index}`}
       className="pdf-citation-highlight"
       aria-hidden="true"
       style={{ left: `${x0 / 10}%`, top: `${y0 / 10}%`, width: `${(x1 - x0) / 10}%`, height: `${(y1 - y0) / 10}%` }}
@@ -314,11 +316,20 @@ export function PdfViewer({
   onClose,
   loadErrorMessage,
   chrome = "reader",
-  highlight,
+  highlight: citedHighlight,
 }: PdfViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pagesRef = useRef<HTMLDivElement>(null);
+  // A bibliography card's jump to its in-text citation reuses the chat
+  // citation highlight; whichever was requested last is shown.
+  const [citationJump, setCitationJump] = useState<PdfHighlight>();
+  useEffect(() => setCitationJump(undefined), [citedHighlight?.nonce, url]);
+  const highlight = citationJump ?? citedHighlight;
+  const highlightKey = highlight && `${citationJump ? "jump" : "cited"}-${highlight.nonce}`;
+  const showCitation = useCallback((citation: PdfHighlightBox[]) => {
+    setCitationJump((previous) => ({ boxes: citation, nonce: (previous?.nonce ?? 0) + 1 }));
+  }, []);
   const documentRef = useRef<PDFDocumentProxy | null>(null);
   const textIndex = useRef<PdfTextIndex>();
   const [resolveCitation, setResolveCitation] = useState<PdfCitationResolver>();
@@ -653,7 +664,7 @@ export function PdfViewer({
     // Re-run per request, once pages exist and once the real page aspect is
     // measured (placeholder heights change then), not on scroll-state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlight?.nonce, pages, pageAspect]);
+  }, [highlightKey, pages, pageAspect]);
   const jumpToSection = (entry: PdfOutlineEntry, behavior?: ScrollBehavior) => {
     const scroller = scrollRef.current;
     const target = scroller?.querySelector<HTMLElement>(`[data-page="${entry.page}"]`);
@@ -786,7 +797,8 @@ export function PdfViewer({
             resolveCitation={resolveCitation}
             warmPreviews={previewCache.warm}
             highlightBoxes={highlight?.boxes.filter((box) => box.page === pageNumber).map((box) => box.bbox)}
-            highlightNonce={highlight?.nonce}
+            highlightKey={highlightKey}
+            onShowCitation={showCitation}
           />)}
         </div>
       </Document>}

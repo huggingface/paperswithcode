@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
-import { arxivIdFromUrl, createPdfCitationResolver, referenceTitleCandidates } from './pdfCitationLinks';
+import { arxivIdFromUrl, createPdfCitationResolver, numberedCitationBoxes, referenceTitleCandidates } from './pdfCitationLinks';
 
 describe('arXiv PDF links', () => {
   it.each([
@@ -85,10 +85,29 @@ describe('arXiv PDF links', () => {
     const lookup = vi.fn().mockResolvedValue(new Map());
     const resolve = createPdfCitationResolver(pdf, lookup);
     expect(await resolve.bibliographyLinks(12)).toEqual([
-      { name: 'cite.lin2014', routeId: '1405.0312', box: [142, 188, 475, 218] },
-      { name: 'cite.right', routeId: '2501.33333', box: [533, 188, 867, 203] },
+      { name: 'cite.lin2014', routeId: '1405.0312', box: [142, 188, 475, 218], citations: [] },
+      { name: 'cite.right', routeId: '2501.33333', box: [533, 188, 867, 203], citations: [] },
     ]);
     expect(await resolve.bibliographyLinks(3)).toEqual([]);
+  });
+
+  it('lists where the text cites each entry, from links to its destination, joining split and wrapped author/year links', async () => {
+    const { pdf, getPage } = document();
+    const pages: Record<number, unknown[]> = {
+      2: [{ dest: 'cite.lin2014', rect: [120, 700, 132, 710] }, { dest: 'section.2', rect: [60, 600, 80, 610] }, { url: 'https://example.com', rect: [0, 0, 1, 1] }],
+      5: [{ dest: 'cite.right', rect: [300, 400, 312, 410] }, { dest: 'cite.lin2014', rect: [60, 200, 72, 210] }, { dest: 'cite.lin2014', rect: [75, 200, 90, 210] }, { dest: 'cite.lin2014', rect: [30, 190, 42, 200] }],
+    };
+    getPage.mockImplementation(async (page: number) => ({
+      view: [0, 0, 600, 800],
+      getAnnotations: async () => page === 12 ? [{ url: 'https://arxiv.org/abs/1405.0312', rect: [85, 610, 150, 620] }, { url: 'https://arxiv.org/abs/2501.33333', rect: [320, 610, 400, 620] }] : pages[page] ?? [],
+      getTextContent: async () => ({ items: page === 12 ? [{ str: '[1] T. Lin.', transform: [10, 0, 0, 10, 85, 640], width: 200, height: 10 }, { str: '[3] Right.', transform: [10, 0, 0, 10, 320, 640], width: 200, height: 10 }] : [] }),
+    }));
+    Object.assign(pdf, { numPages: 12 });
+    const links = await createPdfCitationResolver(pdf).bibliographyLinks(12);
+    expect(links.map(({ name, citations }) => [name, citations])).toEqual([
+      ['cite.lin2014', [[{ page: 2, bbox: [200, 113, 220, 125] }], [{ page: 5, bbox: [100, 738, 150, 750] }, { page: 5, bbox: [50, 750, 70, 763] }]]],
+      ['cite.right', [[{ page: 5, bbox: [500, 488, 520, 500] }]]],
+    ]);
   });
 });
 
@@ -96,7 +115,7 @@ describe('PDFs without bibliography destinations', () => {
   const item = (str: string, x: number, y: number, hasEOL = false) => ({ str, transform: [8, 0, 0, 8, x, y], width: 100, height: 8, hasEOL });
   function wordExport() {
     const pages: Record<number, unknown[]> = {
-      1: [item('Prior work [7] shows this.', 47, 600, true), item('References', 47, 500, true)],
+      1: [item('Prior work [2, 7] shows this.', 47, 600, true), item('References', 47, 500, true)],
       2: [
         item('', 47, 700, true), item('[', 47, 700), item('1]', 50, 700), item(' A. Author. A first paper.', 60, 700, true),
         item('arXiv:2501.11111', 57, 691, true),
@@ -126,6 +145,32 @@ describe('PDFs without bibliography destinations', () => {
     expect((await resolve.bibliographyLinks(3)).map(({ name, routeId }) => [name, routeId])).toEqual([['text:4', '2501.44444']]);
     expect(await resolve.bibliographyLinks(1)).toEqual([]);
     expect(lookup.mock.calls[0][0].map((query: { key: string }) => query.key)).toEqual(['text:1', 'text:2', 'text:3', 'text:4']);
+  });
+
+  it('finds numbered citations in the text before the bibliography', async () => {
+    const resolve = createPdfCitationResolver(wordExport());
+    const links = await resolve.bibliographyLinks(2);
+    expect(links.find(link => link.name === 'text:1')?.citations).toEqual([]);
+    // The in-text "[2, 7]" cites [2]; "[9]" inside the bibliography is no citation.
+    expect(links.find(link => link.name === 'text:2')?.citations).toEqual([[{ page: 1, bbox: [142, 240, 176, 253] }]]);
+    expect((await resolve.bibliographyLinks(3)).map(link => link.citations)).toEqual([[]]);
+  });
+});
+
+describe('numbered in-text citations', () => {
+  const item = (str: string, x: number, width: number, y = 500, hasEOL = false) => ({ str, dir: 'ltr', fontName: 'f', transform: [10, 0, 0, 10, x, y], width, height: 10, hasEOL });
+  it('boxes single labels, lists, ranges, and labels split across items', () => {
+    const boxes = numberedCitationBoxes([
+      item('Shown in [2] and', 100, 160),
+      item(' [3, 5-7].', 260, 100, 500, true),
+      item('Split [', 100, 70, 480),
+      item('12]', 170, 30, 480),
+      item('Not a citation [abc] or [2023a].', 100, 300, 460),
+    ], [0, 0, 1000, 1000]);
+    expect(boxes.get(2)).toEqual([[190, 490, 220, 503]]);
+    expect([...boxes.keys()].sort((a, b) => a - b)).toEqual([2, 3, 5, 6, 7, 12]);
+    expect(boxes.get(6)).toEqual(boxes.get(3));
+    expect(boxes.get(12)).toEqual([[160, 510, 200, 523]]);
   });
 });
 
