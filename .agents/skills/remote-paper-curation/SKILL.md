@@ -255,6 +255,16 @@ item and report the benchmark as a `not_applicable` outcome with `task_id`,
 `dataset_id`, `metric`, and a `detail` saying the row is managed by that live
 sync. Other models and other leaderboards follow the normal rules.
 
+Never submit results for an unfinished checkpoint. When the source marks the
+evaluated model as still training, under revision, a preview or interim
+checkpoint, or an intermediate training step (check page headers and footers,
+title notes, and model card status; the Avalon-M1 report stamps every page
+"Model still training, under revision"), submit no `evaluations` and no
+`benchmark_gaps` for that model. Report each of its benchmarks as
+`not_paper_native`, with a `detail` that quotes the source's marking. Results
+for a paper's final model stay eligible even if the paper also analyzes
+earlier checkpoints.
+
 For `add-evals`, when a paper-native result is blocked by missing catalog configuration, include
 one structured `benchmark_gaps` entry conforming to
 `jobs/schemas/curation_proposal.schema.json`. Group all introduced-model results

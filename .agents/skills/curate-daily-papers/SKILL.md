@@ -109,6 +109,9 @@ An evaluation is eligible only when all gates pass:
 6. The source is the paper itself. For arXiv papers, use exactly
    `https://arxiv.org/abs/<arxiv_id>` and ensure the resulting row is not marked
    external.
+7. The evaluated model is finished. Skip results from a model that the source
+   marks as still training, under revision, or a preview or interim
+   checkpoint, as `add-evals` describes.
 
 Set a Hugging Face model URL only when the exact evaluated model has an official
 model repository. Set open/closed status from evidence, not from the presence of
