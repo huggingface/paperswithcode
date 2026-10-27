@@ -18,7 +18,7 @@ export function usePdfPaperLinks(ref: RefObject<HTMLDivElement>, visible: boolea
     if (!resolveCitation) return;
     const anchors = new Map(Array.from(ref.current?.querySelectorAll<HTMLAnchorElement>("[data-annotation-id] a:not(.pdf-paper-preview-link)") ?? [])
       .map(anchor => [anchor.parentElement?.dataset.annotationId, anchor]));
-    void Promise.all(annotationsRef.current.map(async annotation => {
+    void Promise.all(annotationsRef.current.map(async (annotation): Promise<PdfPaperLinkTarget | null> => {
       const anchor = anchors.get(annotation.id);
       if (!anchor) return null;
       const routeId = await resolveCitation(annotation).catch(() => null);
