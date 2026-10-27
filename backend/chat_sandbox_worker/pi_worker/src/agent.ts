@@ -9,7 +9,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { fitPaperContext } from "./paper_context_budget.js";
-import { CompactionController } from "./compaction.js";
+import { CompactionController, compactionReserveTokens } from "./compaction.js";
 import { PiEventAdapter, reasoningIsVisible, type PwCEvent } from "./events.js";
 import { createNativeExcalidrawExtension } from "./excalidraw_tools.js";
 import { createWebMcpExtension, WEB_SEARCH_TOOL } from "./mcp.js";
@@ -410,7 +410,7 @@ export class PiWorker {
       ? this.prewarmedProvider
       : coldProvider ?? await createProvider(run.model, protocol, this.gateway);
     const settings = SettingsManager.inMemory({
-      compaction: { enabled: true },
+      compaction: { enabled: true, reserveTokens: compactionReserveTokens(provider.model.contextWindow) },
       retry: { enabled: false },
     });
     const loader = new DefaultResourceLoader({
