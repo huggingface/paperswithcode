@@ -40,6 +40,7 @@ function renderAuthor(path = "/authors/7") {
             path="/authors/:authorId"
             element={<><Link to="/authors/8">Coauthor</Link><AuthorDetailView /></>}
           />
+          <Route path="/orgs/:slug" element={<h1>Organization page</h1>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -109,6 +110,25 @@ describe("AuthorDetailView", () => {
       "href",
       "https://huggingface.co/researcher",
     );
+  });
+
+  it("sends an organization listed as an author to its organization page", async () => {
+    vi.spyOn(papersApi, "getAuthor").mockResolvedValue({
+      id: "7",
+      full_name: "Nvidia",
+      organization_slug: "nvidia",
+      paper_count: 22,
+    });
+    vi.spyOn(papersApi, "list").mockResolvedValue({
+      count: 1,
+      next_page: null,
+      previous_page: null,
+      results: [paper],
+    });
+
+    renderAuthor();
+
+    expect(await screen.findByRole("heading", { name: "Organization page" })).toBeInTheDocument();
   });
 
   it("links a verified Google Scholar profile", async () => {

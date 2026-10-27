@@ -525,6 +525,17 @@ def test_merged_organization_slug_redirects_to_canonical_page(client):
     assert response.headers["location"] == "/orgs/google?q=vision"
 
 
+def test_author_naming_an_organization_redirects_to_its_page(client, monkeypatch):
+    monkeypatch.setattr(
+        discovery_pages,
+        "organization_slug_for_author",
+        lambda db, author_id: "nvidia" if author_id == 92883 else None,
+    )
+    response = client.get("/authors/92883", follow_redirects=False)
+    assert response.status_code == 301
+    assert response.headers["location"] == "/orgs/nvidia"
+
+
 @pytest.mark.parametrize(
     ("path", "method_name"),
     [
@@ -541,6 +552,9 @@ def test_merged_organization_slug_redirects_to_canonical_page(client):
 def test_discovery_page_classes_support_head(client, monkeypatch, path, method_name):
     monkeypatch.setattr(
         DiscoveryPageService, method_name, lambda self, *args, **kwargs: _page()
+    )
+    monkeypatch.setattr(
+        discovery_pages, "organization_slug_for_author", lambda db, author_id: None
     )
     response = client.head(path)
     assert response.status_code == 200

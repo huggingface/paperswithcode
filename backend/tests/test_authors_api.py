@@ -18,6 +18,7 @@ from backend.models.database import (
     Base,
     Author as DBAuthor,
     AuthorGoogleScholarProfile,
+    Organization,
     Paper as DBPaper,
     PaperAuthor,
 )
@@ -181,6 +182,29 @@ def test_get_author_by_id(client, sample_authors):
     assert data["hf_username"] == "johndoe"
     assert data["hf_is_pro"] is True
     assert data["paper_count"] == 2
+
+
+def test_author_naming_an_organization_points_to_it(client, sample_authors):
+    db = TestingSessionLocal()
+    db.add_all(
+        [
+            Organization(id=1, name="NVIDIA", slug="nvidia", hf_slug="nvidia"),
+            Organization(
+                id=2, name="DeepSeek", slug="deepseek-ai", hf_slug="deepseek-ai"
+            ),
+            DBAuthor(id=10, name="Nvidia"),
+            DBAuthor(id=11, name="DeepSeek-AI"),
+            Organization(id=3, name="Huawei", slug="huawei", hf_slug="huawei"),
+            DBAuthor(id=12, name="Hua Wei"),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    assert client.get("/api/v1/authors/10").json()["organization_slug"] == "nvidia"
+    assert client.get("/api/v1/authors/11").json()["organization_slug"] == "deepseek-ai"
+    assert client.get("/api/v1/authors/2").json()["organization_slug"] is None
+    assert client.get("/api/v1/authors/12").json()["organization_slug"] is None
 
 
 def test_author_detail_includes_verified_google_scholar_id(client, sample_authors):

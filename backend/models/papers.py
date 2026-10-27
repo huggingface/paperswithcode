@@ -604,6 +604,14 @@ class Author(BaseModel):
         ),
     )
 
+    organization_slug: Optional[str] = Field(
+        None,
+        description=(
+            "Slug of the organization this author row names, such as an arXiv "
+            "group author; its page lives at /orgs/{slug} (author detail only)"
+        ),
+    )
+
     # Statistics (computed fields)
     paper_count: int = Field(default=0, description="Number of papers by this author")
 

@@ -225,6 +225,7 @@ export interface Author {
   hf_avatar_url?: string | null;
   /** Set only when the Scholar profile was verified against the author's papers. */
   google_scholar_id?: string | null;
+  organization_slug?: string | null;
   paper_count: number;
 }
 

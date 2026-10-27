@@ -15,6 +15,7 @@ from backend.models.database import (
     Author as DBAuthor,
     AuthorAlias,
     AuthorGoogleScholarProfile,
+    Organization,
     Paper as DBPaper,
     PaperAuthor,
 )
@@ -34,6 +35,37 @@ def normalize_arxiv_author_name(full_name: str) -> str:
     name = re.sub(r"\s+", " ", full_name.strip())
     name = re.sub(r"^\(.*?\)\s*", "", name)
     return re.sub(r"\s*\(.*?\)$", "", name)
+
+
+def _org_key(value: Optional[str]) -> str:
+    # Keep word breaks: "Hua Wei" is a person, "Huawei" an organization.
+    return " ".join(re.findall(r"[a-z0-9]+", (value or "").lower()))
+
+
+def organization_slug_for_author_name(db: Session, name: str) -> Optional[str]:
+    """Return the slug of the organization an author name really names.
+
+    arXiv lists group authors such as "NVIDIA: Bo Adler, ..." with the group as
+    an author, so rows like "Nvidia" or "DeepSeek-AI" are organizations. Names
+    match an organization's name or Hugging Face slug ignoring case and
+    punctuation, but not word breaks.
+    """
+    key = _org_key(name)
+    if not key:
+        return None
+    organizations = db.query(
+        Organization.slug, Organization.name, Organization.hf_slug
+    ).order_by(Organization.id)
+    for slug, org_name, hf_slug in organizations:
+        if key in (_org_key(org_name), _org_key(hf_slug)):
+            return slug
+    return None
+
+
+def organization_slug_for_author(db: Session, author_id: int) -> Optional[str]:
+    """Return the organization slug for an author row that names one."""
+    name = db.query(DBAuthor.name).filter(DBAuthor.id == author_id).scalar()
+    return organization_slug_for_author_name(db, name) if name else None
 
 
 def has_hf_account():
@@ -218,6 +250,9 @@ class AuthorService:
                 "hf_is_pro": db_author.hf_is_pro or False,
                 "google_scholar_id": scholar_id,
                 "paper_count": paper_count or 0,
+                "organization_slug": organization_slug_for_author_name(
+                    self.db, db_author.name
+                ),
             }
 
             return Author(**author_dict)

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { PaperCard } from "@/components";
@@ -71,6 +71,10 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
 
   if ((author.error as { status?: number } | null)?.status === 404) {
     return <NotFound />;
+  }
+  // arXiv group authors such as "NVIDIA" are organizations, not people.
+  if (author.data?.organization_slug) {
+    return <Navigate to={`/orgs/${author.data.organization_slug}`} replace />;
   }
 
   return (

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.database.connection import get_database_session
+from backend.services.author_service import organization_slug_for_author
 from backend.services.content_negotiation_service import (
     prefers_markdown,
     public_page_headers,
@@ -215,6 +216,9 @@ def conference_task_page(
 def author_page(
     author_id: int, request: Request, db: Session = Depends(get_database_session)
 ) -> Response:
+    org_slug = organization_slug_for_author(db, author_id)
+    if org_slug:
+        return RedirectResponse(f"/orgs/{org_slug}", status_code=301)
     return _render(DiscoveryPageService(db).author(author_id), request)
 
 
