@@ -172,7 +172,7 @@ export function PdfToolbar({
           <Plus size={15} aria-hidden="true" />
         </button>
       </div>
-      <button type="button" className="pdf-toolbar-search" onClick={onToggleSearch} aria-expanded={searchOpen} aria-controls="pdf-search-controls">
+      <button type="button" className="pdf-toolbar-search" onClick={onToggleSearch} aria-label="Search" aria-expanded={searchOpen} aria-controls="pdf-search-controls">
         <Search size={14} strokeWidth={2} aria-hidden="true" />
         <span>Search</span>
       </button>
