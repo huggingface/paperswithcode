@@ -38,7 +38,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   const [query, setQuery] = React.useState("");
   const debouncedQuery = useDebounce(query, TYPEAHEAD_DEBOUNCE_MS);
   const trimmedQuery = query.trim();
-  const canSearch = debouncedQuery.length >= TYPEAHEAD_MIN_CHARS;
+  const canSearch = debouncedQuery.trim().length >= TYPEAHEAD_MIN_CHARS;
   const chatEnabled = isChatEnabled();
 
   useEffect(() => {

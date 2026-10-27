@@ -307,6 +307,8 @@ class OrganizationService:
         Name prefixes rank before other matches, then larger organizations.
         """
         query = query.strip()
+        if not query:
+            return Organizations(count=0, results=[])
         pattern = f"%{query}%"
         paper_count_col = func.count(func.distinct(DBPaper.id)).label("paper_count")
         rows = (

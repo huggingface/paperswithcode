@@ -59,7 +59,7 @@ def get_organizations(
     db: Session = Depends(get_database_session),
 ):
     service = OrganizationService(db)
-    if q and q.strip():
+    if q is not None:
         return service.search_organizations(q, limit)
     return service.get_organizations(featured_only=featured_only)
 

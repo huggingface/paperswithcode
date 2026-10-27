@@ -559,6 +559,9 @@ def test_organization_search_matches_name_and_ranks_prefix_first(org_client):
     assert [org["slug"] for org in data["results"]] == ["deepseek-ai", "deepmind"]
     assert data["count"] == 2
 
+    response = org_client.get("/api/v1/organizations/?q=%20%20%20")
+    assert response.json() == {"count": 0, "results": []}
+
     response = org_client.get("/api/v1/organizations/?q=ACM")
     assert [org["slug"] for org in response.json()["results"]] == ["acme"]
     assert response.json()["results"][0]["paper_count"] == 4
