@@ -31,6 +31,8 @@ interface PaperPreviewLinkProps {
   ariaLabel?: string;
   onClick?: React.MouseEventHandler<HTMLAnchorElement>;
   previewFooter?: (data: PaperPreviewData) => React.ReactNode;
+  /** Makes the loaded card itself a link that opens the paper in a new tab. */
+  cardOpensPaper?: boolean;
 }
 
 const isCoarsePointer = (): boolean =>
@@ -48,6 +50,7 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
   ariaLabel,
   onClick,
   previewFooter,
+  cardOpensPaper = false,
 }) => {
   const normalizedRouteId = normalizePaperRouteId(routeId);
   const [open, setOpen] = React.useState(false);
@@ -101,7 +104,22 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
         collisionPadding={12}
       >
         {data ? (
-          <><PaperPreviewCard data={data} />{previewFooter?.(data)}</>
+          <>
+            {cardOpensPaper ? (
+              <Link
+                className="paper-preview-card-link"
+                to={`/paper/${encodeURIComponent(normalizedRouteId)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => setOpen(false)}
+              >
+                <PaperPreviewCard data={data} />
+              </Link>
+            ) : (
+              <PaperPreviewCard data={data} />
+            )}
+            {previewFooter?.(data)}
+          </>
         ) : notIndexed ? (
           <PaperIndexRequest arxivId={normalizedRouteId} />
         ) : query.isError ? (

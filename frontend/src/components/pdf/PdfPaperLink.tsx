@@ -26,6 +26,7 @@ export function PdfPaperLink({ anchor, routeId, internal }: PdfPaperLinkTarget) 
     className="pdf-paper-preview-link"
     title={/^\d+$/.test(routeId) ? "Preview paper" : `Preview arXiv:${routeId}`}
     ariaLabel={`${internal ? 'Citation' : 'arXiv paper'} ${routeId}`}
+    cardOpensPaper
     onClick={internal ? (event) => {
       // Keep citation clicks as in-document navigation, including on touch.
       event.preventDefault();
@@ -52,6 +53,7 @@ export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1] }: Pdf
       className="pdf-paper-preview-link"
       title={/^\d+$/.test(routeId) ? "Preview paper" : `Preview arXiv:${routeId}`}
       ariaLabel={`Reference ${routeId}`}
+      cardOpensPaper
     >{null}</PaperPreviewLink>
   </div>;
 }

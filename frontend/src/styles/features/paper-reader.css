@@ -155,6 +155,9 @@
 .pdf-bibliography-link { position: absolute; z-index: 2; border-radius: 3px; }
 .pdf-bibliography-link > .pdf-paper-preview-link { position: absolute; inset: 0; display: block; border-radius: inherit; }
 .pdf-bibliography-link:hover, .pdf-bibliography-link:focus-within { background: rgb(37 99 235 / .08); }
+.paper-preview-card-link { display: block; color: inherit; text-decoration: none; }
+.paper-preview-card-link:hover .paper-preview-title { color: var(--accent); }
+.paper-preview-card-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pdf-paper-preview-actions { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--hairline); font-size: 12px; }
 .pdf-paper-preview-actions a, .pdf-paper-preview-actions button { color: var(--accent); }
 .pdf-paper-preview-actions button { border: 0; background: transparent; cursor: pointer; padding: 0; font: inherit; }

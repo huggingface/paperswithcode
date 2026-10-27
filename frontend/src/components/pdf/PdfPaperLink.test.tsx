@@ -36,6 +36,9 @@ describe('PDF paper previews', () => {
     expect(await screen.findByText('Microsoft COCO')).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith('1405.0312', false);
     expect(screen.getByRole('link', { name: 'Open paper ↗' })).toHaveAttribute('target', '_blank');
+    const card = screen.getByText('Microsoft COCO').closest('a');
+    expect(card).toHaveAttribute('href', '/paper/1405.0312');
+    expect(card).toHaveAttribute('target', '_blank');
     fireEvent.click(screen.getByRole('button', { name: 'Jump to reference' }));
     expect(navigate).toHaveBeenCalledTimes(1);
     fireEvent.click(trigger);
