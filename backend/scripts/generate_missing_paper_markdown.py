@@ -433,10 +433,11 @@ def normalize_external_pdf_url(value: str) -> str:
             raise ValueError("invalid_external_pdf_url")
     parts = parsed.path.split("/")
     if hostname == "github.com" and len(parts) >= 6 and parts[3] == "blob":
-        path = "/".join(["", parts[1], parts[2], *parts[4:]])
-        return urlunsplit(
-            ("https", "raw.githubusercontent.com", path, parsed.query, "")
-        )
+        # github.com/<owner>/<repo>/raw/... redirects to the file itself, also
+        # for Git LFS files, where raw.githubusercontent.com serves only the
+        # LFS pointer.
+        path = "/".join(["", parts[1], parts[2], "raw", *parts[4:]])
+        return urlunsplit(("https", "github.com", path, parsed.query, ""))
     if hostname == "huggingface.co" and "/blob/" in parsed.path:
         return urlunsplit(
             (

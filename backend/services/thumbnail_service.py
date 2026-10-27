@@ -53,6 +53,8 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "github.com",
         "huggingface.co",
         "ieeexplore.ieee.org",
+        # github.com/<owner>/<repo>/raw/... redirects Git LFS files here.
+        "media.githubusercontent.com",
         "medrxiv.org",
         "microsoft.ai",
         "nature.com",

@@ -67,10 +67,7 @@ def test_worker_download_pdf_does_not_fallback_on_rate_limit(monkeypatch):
 def test_worker_resolves_external_repository_pdf_urls():
     assert WORKER.normalize_external_pdf_url(
         "https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/tech_report.pdf"
-    ) == (
-        "https://raw.githubusercontent.com/"
-        "QwenLM/Qwen3.8-Flash-Next/main/tech_report.pdf"
-    )
+    ) == ("https://github.com/QwenLM/Qwen3.8-Flash-Next/raw/main/tech_report.pdf")
     assert (
         WORKER.normalize_external_pdf_url(
             "https://huggingface.co/acme/report/blob/main/report.pdf"
