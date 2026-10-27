@@ -60,6 +60,7 @@ OPENAI_RESPONSES_FIELDS = {
     "tools",
 }
 REQUEST_TOO_LARGE = "request_too_large: Model request is too large"
+REASONING_EFFORT_ORDER = ("low", "high", "max")
 
 
 def opaque_openai_identifier(kind: str, value: str, settings: Settings) -> str:
@@ -69,6 +70,18 @@ def opaque_openai_identifier(kind: str, value: str, settings: Settings) -> str:
         hashlib.sha256,
     ).hexdigest()
     return f"pwc_{digest[:48]}"
+
+
+def granted_reasoning_effort(requested: object, granted: str) -> str:
+    """Honor a worker's lower effort (recovery downgrade), never a higher one."""
+    if (
+        requested in REASONING_EFFORT_ORDER
+        and granted in REASONING_EFFORT_ORDER
+        and REASONING_EFFORT_ORDER.index(requested)
+        < REASONING_EFFORT_ORDER.index(granted)
+    ):
+        return requested
+    return granted
 
 
 def trusted_openai_payload(
@@ -133,7 +146,10 @@ def trusted_openai_payload(
     trusted["store"] = False
     trusted["service_tier"] = "default"
     trusted["include"] = ["reasoning.encrypted_content"]
-    trusted["reasoning"] = {"effort": row.reasoning_effort}
+    requested_effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
+    trusted["reasoning"] = {
+        "effort": granted_reasoning_effort(requested_effort, row.reasoning_effort)
+    }
     if summary is not None:
         trusted["reasoning"]["summary"] = summary
     trusted["safety_identifier"] = opaque_openai_identifier(
@@ -218,6 +234,7 @@ class OpenAIResponsesProtocol:
         except HTTPException:
             self.observe_rejection("request_contract")
             raise
+        reasoning_effort = payload["reasoning"]["effort"]
         raw = json.dumps(payload, separators=(",", ":")).encode()
         if len(raw) > MAX_OPENAI_REQUEST_BYTES:
             self.observe_rejection("trusted_request_size")
@@ -237,7 +254,7 @@ class OpenAIResponsesProtocol:
                 capability_id=row.id,
                 owner_id=owner_id,
                 public_model_id=row.model,
-                reasoning_effort=row.reasoning_effort,
+                reasoning_effort=reasoning_effort,
                 request_bytes=len(raw),
                 maximum_output_tokens=maximum_tokens,
                 qualification_scope_id=qualification_scope_claim(row, db, settings),
@@ -246,7 +263,7 @@ class OpenAIResponsesProtocol:
                 "model": settings.chat_openai_model,
                 "public_model_id": row.model,
                 "provider_mode": "openai_funded",
-                "reasoning_effort": row.reasoning_effort,
+                "reasoning_effort": reasoning_effort,
                 "routing_policy": "direct",
                 "service_tier": "default",
             },

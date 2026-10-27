@@ -119,6 +119,29 @@ def test_trusted_responses_payload_overwrites_every_security_boundary_field():
 
 
 @pytest.mark.parametrize(
+    ("granted", "reasoning", "expected"),
+    [
+        ("max", {"effort": "high"}, "high"),
+        ("max", {"effort": "low"}, "low"),
+        ("high", {"effort": "max"}, "high"),
+        ("max", {"effort": "medium"}, "max"),
+        ("max", None, "max"),
+    ],
+)
+def test_trusted_responses_payload_only_lowers_reasoning_effort(
+    granted, reasoning, expected
+):
+    request = {"model": "gpt-6-luna", "max_output_tokens": 1000}
+    if reasoning is not None:
+        request["reasoning"] = reasoning
+    payload, _ = _trusted_openai_payload(
+        request, _capability(reasoning_effort=granted), _settings()
+    )
+
+    assert payload["reasoning"]["effort"] == expected
+
+
+@pytest.mark.parametrize(
     "payload",
     [
         {"model": "gpt-5.6-terra", "max_output_tokens": 100},
