@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import type { FormEvent, ReactNode } from "react";
-import { ExternalLink, Github, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ExternalLink, Github, Minus, Plus, Search, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { clampZoom } from "./pdfZoom";
 
@@ -60,7 +60,8 @@ export function ReaderToolbar({ paperTitle, paperHref, resources, label, childre
   return <div ref={toolbarRef} className="pdf-toolbar" aria-label={label}>
     <div className="pdf-toolbar-paper">
       <Link className="pdf-toolbar-back" to={paperHref} aria-label="Back">
-        ← Back
+        <ArrowLeft size={15} strokeWidth={1.8} aria-hidden="true" />
+        <span>Back</span>
       </Link>
       <Link className="pdf-toolbar-title" to={paperHref} title={paperTitle} aria-label={`${paperTitle} — open paper page`}>
         {paperTitle}
@@ -139,16 +140,22 @@ export function PdfToolbar({
   return <ReaderToolbar paperTitle={paperTitle} paperHref={paperHref} resources={resources} label="PDF controls">
     <div className="pdf-toolbar-controls">
       <div className="pdf-toolbar-group">
-        <button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1} aria-label="Previous page">←</button>
+        <button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1} aria-label="Previous page">
+          <ChevronLeft size={16} aria-hidden="true" />
+        </button>
         <form onSubmit={submitPage} className="pdf-page-form">
           <label className="sr-only" htmlFor="pdf-current-page">Current page</label>
           <input id="pdf-current-page" name="page" type="number" min={1} max={pages || 1} defaultValue={page} key={page} aria-label={`Page ${page} of ${pages || "unknown"}`} />
           <span aria-hidden="true">/ {pages || "—"}</span>
         </form>
-        <button type="button" onClick={() => onPage(page + 1)} disabled={!pages || page >= pages} aria-label="Next page">→</button>
+        <button type="button" onClick={() => onPage(page + 1)} disabled={!pages || page >= pages} aria-label="Next page">
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
       </div>
       <div className="pdf-toolbar-group">
-        <button type="button" onClick={onZoomOut} aria-label="Zoom out">−</button>
+        <button type="button" onClick={onZoomOut} aria-label="Zoom out">
+          <Minus size={15} aria-hidden="true" />
+        </button>
         <form onSubmit={submitZoom} className="pdf-zoom-form">
           <input
             className="pdf-zoom-value"
@@ -161,9 +168,14 @@ export function PdfToolbar({
             aria-label={`Zoom ${zoomPercent}%`}
           />
         </form>
-        <button type="button" onClick={onZoomIn} aria-label="Zoom in">+</button>
-        <button type="button" onClick={onToggleSearch} aria-expanded={searchOpen} aria-controls="pdf-search-controls">Search</button>
+        <button type="button" onClick={onZoomIn} aria-label="Zoom in">
+          <Plus size={15} aria-hidden="true" />
+        </button>
       </div>
+      <button type="button" className="pdf-toolbar-search" onClick={onToggleSearch} aria-expanded={searchOpen} aria-controls="pdf-search-controls">
+        <Search size={14} strokeWidth={2} aria-hidden="true" />
+        <span>Search</span>
+      </button>
     </div>
     {searchOpen && <div id="pdf-search-controls" className="pdf-search-controls">
       <label className="sr-only" htmlFor="pdf-search-input">Search document</label>
@@ -175,8 +187,12 @@ export function PdfToolbar({
         placeholder="Search document"
       />
       <span role="status">{searching && !searchCount ? "Searching…" : searchQuery ? `${searchCount ? searchMatch + 1 : 0} of ${searchCount}${searching ? "+" : ""}` : ""}</span>
-      <button type="button" onClick={() => onSearch(-1)} disabled={!searchCount} aria-label="Previous match">↑</button>
-      <button type="button" onClick={() => onSearch(1)} disabled={!searchCount} aria-label="Next match">↓</button>
+      <button type="button" onClick={() => onSearch(-1)} disabled={!searchCount} aria-label="Previous match">
+        <ChevronUp size={16} aria-hidden="true" />
+      </button>
+      <button type="button" onClick={() => onSearch(1)} disabled={!searchCount} aria-label="Next match">
+        <ChevronDown size={16} aria-hidden="true" />
+      </button>
       <button type="button" onClick={onCloseSearch} aria-label="Close search" title="Close search">
         <X size={16} aria-hidden="true" />
       </button>
