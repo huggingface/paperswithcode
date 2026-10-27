@@ -83,11 +83,13 @@ MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
     "facebook/hubert-large-ls960-ft": "2106.07447",
     "facebook/mms-1b-all": "2305.13516",
     "facebook/wav2vec2-large-960h-lv60-self": "2006.11477",
+    "FunAudioLLM/Fun-ASR-Nano-2512-hf": "2509.12508",
     "ibm-granite/granite-4.0-1b-speech": "2505.08699",
     "ibm-granite/granite-speech-3.3-2b": "2505.08699",
     "ibm-granite/granite-speech-3.3-8b": "2505.08699",
     "ibm-granite/granite-speech-4.1-2b": "2505.08699",
     "ibm-granite/granite-speech-4.1-2b-nar": "2505.08699",
+    "ibm-granite/granite-speech-5.0-470m-turboctc-nc": "2609.20104",
     "kyutai/stt-2.6b-en": "2410.00037",
     "microsoft/Phi-4-multimodal-instruct": "2503.01743",
     "microsoft/VibeVoice-ASR-HF": "2601.18184",
@@ -116,6 +118,7 @@ MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
     "Qwen/Qwen3-ASR-0.6B-hf": "2601.21337",
     "Qwen/Qwen3-ASR-1.7B": "2601.21337",
     "Qwen/Qwen3-ASR-1.7B-hf": "2601.21337",
+    "sophea/asr-k1 (preview)": "2609.13498",
     "soundsgoodai/Zipformer-cr-ctc-transducer-XL-290M": "2410.05101",
     "soundsgoodai/Zipformer-transducer-XL-290M": "2310.11230",
     "speechbrain/asr-conformer-largescaleasr": "2106.04624",
@@ -125,9 +128,20 @@ MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
     "usefulsensors/moonshine-tiny": "2410.15608",
 }
 
+# Display names for upstream ids whose derived name would drop the vendor.
+MODEL_DISPLAY_NAMES: dict[str, str] = {
+    "sophea/asr-k1 (preview)": "Sophea ASR K1 (preview)",
+}
+
 _TAG_RE = re.compile(r"<[^>]+>")
 _NUMBER_RE = re.compile(r"^-?\d+(?:\.\d+)?")
 _LEGACY_MODEL_RE = re.compile(r"sourced from ([^/]+/[^/]+)/\.eval_results")
+_MANAGED_MODEL_RE = re.compile(
+    rf"^{re.escape(MANAGED_METHODOLOGY_PREFIX)} Upstream model (.+?); rank \d+;"
+)
+# Upstream appends the inference runtime, e.g. "(fast-gpu-asr)", to a Hub id.
+_RUNTIME_SUFFIX_RE = re.compile(r"\s+\([^()]*\)$")
+_HF_SUFFIX_RE = re.compile(r"-hf$", re.IGNORECASE)
 _MODEL_TOKEN_RE = re.compile(r"[a-z][a-z0-9]*")
 _MODEL_SIZE_RE = re.compile(r"(?<![a-z0-9])\d+(?:\.\d+)?[bm](?![a-z0-9])")
 _MODEL_VERSION_RE = re.compile(r"(?<![a-z0-9])v\d+(?:\.\d+)*(?![a-z0-9])")
@@ -264,6 +278,31 @@ def _model_identity_matches_paper(
         is not None
         for marker in markers
     )
+
+
+def hub_model_id(model_id: str) -> str:
+    """Strip an upstream runtime suffix to recover the Hub repository id."""
+    return _RUNTIME_SUFFIX_RE.sub("", model_id)
+
+
+def display_model_names(entries: list[OpenAsrEntry]) -> dict[str, str]:
+    """Name rows like other evaluations: "Qwen3-ASR-1.7B", not "Qwen/...-hf"."""
+    derived: dict[str, str] = {}
+    for entry in entries:
+        name = MODEL_DISPLAY_NAMES.get(entry.model_id)
+        if name is None:
+            hub_id = hub_model_id(entry.model_id)
+            name = _HF_SUFFIX_RE.sub("", hub_id.split("/", 1)[1])
+            name += entry.model_id[len(hub_id) :]
+        derived[entry.model_id] = name
+    counts: dict[str, int] = {}
+    for name in derived.values():
+        counts[name.casefold()] = counts.get(name.casefold(), 0) + 1
+    # Two upstream ids that collapse to one name keep their full ids.
+    return {
+        model_id: name if counts[name.casefold()] == 1 else model_id
+        for model_id, name in derived.items()
+    }
 
 
 def _safetensors_total(model_info: Any) -> int | None:
@@ -513,6 +552,18 @@ class OpenAsrSyncService:
         match = _LEGACY_MODEL_RE.search(row.methodology or "")
         return match.group(1) if match else None
 
+    @staticmethod
+    def _managed_model_id(row: Evaluation) -> str:
+        """Return the upstream id; rows written before display names used it."""
+        match = _MANAGED_MODEL_RE.match(row.methodology or "")
+        return match.group(1) if match else row.model_name
+
+    @staticmethod
+    def _reviewed_arxiv_id(model_id: str) -> str | None:
+        return MODEL_PAPER_ARXIV_IDS.get(model_id) or MODEL_PAPER_ARXIV_IDS.get(
+            hub_model_id(model_id)
+        )
+
     def models_needing_discovery(self, entries: list[OpenAsrEntry]) -> list[str]:
         """Return upstream model ids not already resolvable without Hub lookup."""
         task, dataset = self._leaderboard_identity()
@@ -525,7 +576,7 @@ class OpenAsrSyncService:
             .all()
         )
         resolved_names = {
-            row.model_name.casefold()
+            self._managed_model_id(row).casefold()
             for row in candidate_rows
             if row.external_source_url == SPACE_SOURCE_URL
             and (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
@@ -546,15 +597,13 @@ class OpenAsrSyncService:
             )
             .all()
         }
-        return [
-            entry.model_id
+        needed = [
+            hub_model_id(entry.model_id)
             for entry in entries
             if entry.model_id.casefold() not in resolved_names
-            and (
-                entry.model_id not in MODEL_PAPER_ARXIV_IDS
-                or MODEL_PAPER_ARXIV_IDS[entry.model_id] not in existing_arxiv_ids
-            )
+            and self._reviewed_arxiv_id(entry.model_id) not in existing_arxiv_ids
         ]
+        return list(dict.fromkeys(needed))
 
     def sync(
         self,
@@ -603,7 +652,19 @@ class OpenAsrSyncService:
                 and (row.methodology or "").startswith("Open ASR Leaderboard rank ")
                 and self._legacy_model_id(row) is not None
             ]
-            managed_by_name = {row.model_name.casefold(): row for row in managed_rows}
+            managed_by_id = {
+                self._managed_model_id(row).casefold(): row for row in managed_rows
+            }
+            # A curated row naming an upstream model on the same paper (for
+            # example a paper-reported score from an older board version) is
+            # superseded by the live score instead of shown beside it.
+            owned_ids = {row.id for row in [*managed_rows, *legacy_rows]}
+            other_rows = {
+                (row.paper_id, (row.model_name or "").casefold()): row
+                for row in candidate_rows
+                if row.id not in owned_ids
+            }
+            display_names = display_model_names(entries)
             legacy_papers = {
                 self._legacy_model_id(row).casefold(): row.paper_id
                 for row in legacy_rows
@@ -612,14 +673,22 @@ class OpenAsrSyncService:
 
             for entry in entries:
                 key = entry.model_id.casefold()
-                row = managed_by_name.get(key)
-                paper_id = row.paper_id if row is not None else legacy_papers.get(key)
-                discovered = discovery.resolved.get(key) if discovery else None
+                hub_id = hub_model_id(entry.model_id)
+                display_name = display_names[entry.model_id]
+                row = managed_by_id.get(key)
+                discovered = (
+                    discovery.resolved.get(hub_id.casefold()) if discovery else None
+                )
+                # A reviewed paper corrects rows carried over from the legacy
+                # importer; otherwise keep the row's (possibly curated) paper.
+                arxiv_id = self._reviewed_arxiv_id(entry.model_id)
+                paper_id = papers_by_arxiv.get(arxiv_id) if arxiv_id else None
                 if paper_id is None:
-                    arxiv_id = MODEL_PAPER_ARXIV_IDS.get(entry.model_id)
-                    if arxiv_id is not None:
-                        paper_id = papers_by_arxiv.get(arxiv_id)
-                    if paper_id is None and discovered is not None:
+                    paper_id = (
+                        row.paper_id if row is not None else legacy_papers.get(key)
+                    )
+                if paper_id is None:
+                    if discovered is not None:
                         paper_id = discovered.paper_id
                     if paper_id is None and arxiv_id is None:
                         stats.unmatched_models.append(entry.model_id)
@@ -629,20 +698,25 @@ class OpenAsrSyncService:
                         continue
 
                 methodology = (
-                    f"{MANAGED_METHODOLOGY_PREFIX} Upstream rank {entry.rank}; "
-                    f"default Average WER; fetched {now.isoformat()}."
+                    f"{MANAGED_METHODOLOGY_PREFIX} Upstream model {entry.model_id}; "
+                    f"rank {entry.rank}; default Average WER; "
+                    f"fetched {now.isoformat()}."
                 )
+                if row is None:
+                    row = other_rows.pop(
+                        (paper_id, entry.model_id.casefold()), None
+                    ) or other_rows.pop((paper_id, display_name.casefold()), None)
                 if row is None:
                     row = Evaluation(
                         paper_id=paper_id,
                         task_id=task.id,
                         dataset_id=dataset.id,
-                        model_name=entry.model_id,
                     )
                     self.db.add(row)
                     stats.created += 1
                 else:
                     stats.updated += 1
+                row.model_name = display_name
                 metrics: dict[str, float] = {WER_METRIC: entry.wer}
                 if entry.rtfx is not None:
                     metrics[RTFX_METRIC] = entry.rtfx
@@ -657,6 +731,8 @@ class OpenAsrSyncService:
                 row.source_url = SPACE_SOURCE_URL
                 row.external = True
                 row.updated_at = now
+                if entry.is_open and not row.hf_model_url:
+                    row.hf_model_url = f"https://huggingface.co/{hub_id}"
                 if discovered is not None:
                     row.hf_model_url = discovered.hf_model_url
                     row.num_parameters = discovered.num_parameters
@@ -679,7 +755,7 @@ class OpenAsrSyncService:
                 stats.matched += 1
 
             for row in managed_rows:
-                if row.model_name.casefold() not in upstream_names:
+                if self._managed_model_id(row).casefold() not in upstream_names:
                     self.db.delete(row)
                     stats.deleted += 1
             # These rows came from the retired one-shot importer. Once a valid

@@ -32,6 +32,7 @@ from backend.services.open_asr_sync_service import (
     OpenAsrPaperDiscoveryService,
     OpenAsrSyncService,
     _model_identity_matches_paper,
+    display_model_names,
     fetch_open_asr_leaderboard,
     parse_open_asr_leaderboard,
 )
@@ -344,14 +345,13 @@ def test_sync_replaces_legacy_and_only_deletes_stale_managed_rows(monkeypatch):
         "missing_papers": [],
     }
     rows = {row.model_name: row for row in session.query(Evaluation).all()}
-    assert set(rows) == {
-        "vendor/legacy",
-        "distil-whisper/distil-large-v3.5",
-        "Manual paper result",
-    }
-    assert rows["vendor/legacy"].paper_id == 2
-    assert rows["vendor/legacy"].metrics == {"WER": 5.0}
-    assert rows["distil-whisper/distil-large-v3.5"].metrics == {
+    assert set(rows) == {"legacy", "distil-large-v3.5", "Manual paper result"}
+    assert rows["legacy"].paper_id == 2
+    assert rows["legacy"].metrics == {"WER": 5.0}
+    assert rows["distil-large-v3.5"].hf_model_url == (
+        "https://huggingface.co/distil-whisper/distil-large-v3.5"
+    )
+    assert rows["distil-large-v3.5"].metrics == {
         "WER": 6.0,
         "RTFx": 100.0,
     }
@@ -431,3 +431,92 @@ def test_discovered_paper_creates_managed_row_and_task_link():
     task_link = session.query(PaperTask).filter(PaperTask.paper_id == paper.id).one()
     assert task_link.task_id == 12
     assert task_link.source == "auto"
+
+
+def test_display_names_drop_org_and_hf_suffix_but_keep_runtime_and_collisions():
+    entries = [
+        OpenAsrEntry("Qwen/Qwen3-ASR-1.7B-hf", 1, 5.4, None, True),
+        OpenAsrEntry("microsoft/VibeVoice-ASR-HF", 2, 8.1, None, True),
+        OpenAsrEntry("nvidia/parakeet-tdt-0.6b-v2 (fast-gpu-asr)", 3, 6.0, None, True),
+        OpenAsrEntry("sophea/asr-k1 (preview)", 4, 5.2, None, False),
+        OpenAsrEntry("a/same-model", 5, 7.0, None, True),
+        OpenAsrEntry("b/same-model-hf", 6, 7.1, None, True),
+    ]
+
+    assert display_model_names(entries) == {
+        "Qwen/Qwen3-ASR-1.7B-hf": "Qwen3-ASR-1.7B",
+        "microsoft/VibeVoice-ASR-HF": "VibeVoice-ASR",
+        "nvidia/parakeet-tdt-0.6b-v2 (fast-gpu-asr)": (
+            "parakeet-tdt-0.6b-v2 (fast-gpu-asr)"
+        ),
+        "sophea/asr-k1 (preview)": "Sophea ASR K1 (preview)",
+        "a/same-model": "a/same-model",
+        "b/same-model-hf": "b/same-model-hf",
+    }
+
+
+def test_sync_renames_old_rows_and_supersedes_stale_curated_scores(monkeypatch):
+    session = _session()
+    old_managed = Evaluation(
+        paper_id=1,
+        task_id=12,
+        dataset_id=181,
+        model_name="org/model-hf",
+        methodology=f"{MANAGED_METHODOLOGY_PREFIX} Upstream rank 3; old.",
+        metrics={"WER": 9.0},
+        best_metric="WER",
+        external_source_url=SPACE_SOURCE_URL,
+    )
+    stale_paper_score = Evaluation(
+        paper_id=2,
+        task_id=12,
+        dataset_id=181,
+        model_name="vendor/api (preview)",
+        methodology="Paper reports the board average as of an older version.",
+        metrics={"WER": 4.2},
+        best_metric="WER",
+    )
+    session.add_all([old_managed, stale_paper_score])
+    session.commit()
+    module = __import__(
+        "backend.services.open_asr_sync_service",
+        fromlist=["MODEL_PAPER_ARXIV_IDS"],
+    )
+    monkeypatch.setattr(
+        module,
+        "MODEL_PAPER_ARXIV_IDS",
+        {"org/model-hf": "2311.00430", "org/model": "2311.00430"},
+    )
+    entries = [
+        OpenAsrEntry("org/model-hf", 1, 6.0, 100.0, True),
+        # Runtime variants resolve through their Hub repository id.
+        OpenAsrEntry("org/model (fast-gpu-asr)", 2, 6.1, 900.0, True),
+        OpenAsrEntry("vendor/api (preview)", 3, 5.2, None, False),
+    ]
+    discovery = OpenAsrPaperDiscoveryResult(
+        resolved={"vendor/api": OpenAsrDiscoveredPaper(paper_id=2, arxiv_id="x")}
+    )
+    service = OpenAsrSyncService(session)
+    assert service.models_needing_discovery(entries) == ["vendor/api"]
+
+    stats = service.sync(entries, discovery=discovery)
+
+    assert (stats.created, stats.updated, stats.deleted) == (1, 2, 0)
+    assert old_managed.model_name == "model"
+    assert old_managed.metrics == {"WER": 6.0, "RTFx": 100.0}
+    assert stale_paper_score.model_name == "api (preview)"
+    assert stale_paper_score.metrics == {"WER": 5.2}
+    assert stale_paper_score.methodology.startswith(
+        f"{MANAGED_METHODOLOGY_PREFIX} Upstream model vendor/api (preview); rank 3;"
+    )
+    variant = (
+        session.query(Evaluation)
+        .filter(Evaluation.model_name == "model (fast-gpu-asr)")
+        .one()
+    )
+    assert variant.paper_id == 1
+    assert variant.hf_model_url == "https://huggingface.co/org/model"
+
+    again = service.sync(entries, discovery=discovery)
+    assert (again.created, again.updated, again.deleted) == (0, 3, 0)
+    assert service.models_needing_discovery(entries) == []
