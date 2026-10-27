@@ -503,6 +503,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   object-fit: contain;
 }
 /* Pencil sits at the bottom-right of the last org logo, or after the title. */
+.detail-title-tail { white-space: nowrap; }
 .detail-title-edit {
   display: inline-flex;
   align-items: center;
@@ -520,13 +521,17 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   transition: color 0.15s;
 }
 .detail-title-edit:hover { color: var(--ink); }
+/* Sized in em like the logo, so the badge only covers its corner at every title size. */
 .detail-title-org--logo + .detail-title-edit {
-  margin-left: -10px;
+  position: relative;
+  width: 0.42em;
+  height: 0.42em;
+  margin-left: -0.24em;
   vertical-align: -0.1em;
   border: 1px solid var(--hairline);
   background: var(--bg-elevated);
-  position: relative;
 }
+.detail-title-org--logo + .detail-title-edit .icon-sm { width: 65%; height: 65%; }
 .action-btn {
   display: inline-flex;
   align-items: center;
