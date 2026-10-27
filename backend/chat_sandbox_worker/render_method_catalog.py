@@ -79,8 +79,10 @@ def render(
         "## Representative methods in the catalog",
         "",
         (
-            "Methods are named techniques, architectures, training procedures, or "
-            "model families tracked by Papers With Code. The list below is a "
+            "Methods are general techniques, architectures, and training "
+            "procedures reused across many papers and tracked by Papers With "
+            "Code; a specific model or system is a paper, not a method. The "
+            "list below is a "
             "bounded snapshot, grouped by research area and primarily ordered by "
             "paper coverage; a small number of featured newer methods are retained "
             "for discoverability. It is not exhaustive. Treat names, full names, "

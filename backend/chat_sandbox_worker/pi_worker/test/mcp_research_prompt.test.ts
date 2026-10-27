@@ -53,12 +53,15 @@ test("MCP research turns are sandbox-free and mention every registered tool", ()
   assert.match(rendered, /include_evaluations/u);
   assert.match(rendered, /is or how it works, look it up before answering/u);
   assert.match(rendered, /When the method index lists it, call pwc_get_method with the index slug/u);
-  assert.match(rendered, /for a general concept \(for example weight decay[^)]*\), call pwc_search_papers/u);
+  assert.match(rendered, /or a broad concept \(for example weight decay[^)]*\), call pwc_search_papers/u);
   assert.match(rendered, /After a pwc_get_method miss, use pwc_search_papers rather than retrying/u);
   assert.match(rendered, /inference engines, serving systems[^:]*are frameworks, not methods: never call pwc_get_method for them/u);
   assert.match(rendered, /Call pwc_get_framework with the slug from the framework lookup index, or pwc_list_frameworks/u);
   assert.match(rendered, /When a paper is in view[^.]*do not call pwc_get_method with the paper's title, model name, or acronym/u);
   assert.match(rendered, /When the method index does not list it, call pwc_get_method/u);
+  assert.match(rendered, /PwC methods are general techniques reused across many papers/u);
+  assert.match(rendered, /A specific model or system, or one paper's own contribution[^.]*is a paper, not a method/u);
+  assert.match(rendered, /call pwc_get_method only for a general technique that many papers use; for a specific model or system[^.]*call pwc_search_papers/u);
   assert.match(rendered, /about what a specific paper says[^]*call pwc_read_paper for that paper before answering/u);
   assert.match(rendered, /When a conversation opens without a paper in view[^.]*call at least one catalog tool before answering/u);
   assert.match(rendered, /Read a bare topic or short phrase[^.]*as a request for the key and recent papers/u);

@@ -168,8 +168,10 @@ Never run an `hf --help` or nested `--help` discovery command. Consume `hf`
 stdout directly from the Bash result; never redirect it to `/workspace` or
 create and reread an intermediary file.
 
-When the user names a technique, architecture, training procedure, model family,
-or acronym, check the representative method catalog below. If it matches, treat
+PwC methods are general techniques reused across many papers; a specific model
+or system is a paper, so find it with `pwc search` instead of `pwc method`.
+When the user names a technique, architecture, training procedure, or acronym,
+check the representative method catalog below. If it matches, treat
 it as an existing PwC method and use its slug with `pwc method --name` when
 details matter. The representative list is not exhaustive, so use the CLI's
 documented method lookup workflow before claiming that a method is absent.
