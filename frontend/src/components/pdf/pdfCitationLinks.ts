@@ -1,4 +1,4 @@
-import type { PDFDocumentProxy, TextContent } from "pdfjs-dist/types/src/display/api";
+import type { PDFDocumentProxy, TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
 import type { PaperReferenceQuery } from "@/lib/api/papers.types";
 
 export interface PdfLinkAnnotation {
@@ -42,7 +42,11 @@ export function referenceTitleCandidates(entry: string): string[] {
 }
 
 interface ReferencePosition { name: string; page: number; x: number; y: number }
-interface ReferenceEntry { arxivId: string | null; titles: string[] }
+interface ReferenceEntry { arxivId: string | null; titles: string[]; box: number[] | null }
+interface PageText { view: number[]; content: TextContent }
+
+/** A resolved bibliography entry on one page; box is [x0, y0, x1, y1] on a 0–1000 page grid. */
+export interface PdfBibliographyLink { name: string; routeId: string; box: number[] }
 
 // Named bibliography destinations delimit each entry. An explicit arXiv link or
 // identifier inside the entry wins; otherwise the entry's sentences go to the
@@ -50,7 +54,7 @@ interface ReferenceEntry { arxivId: string | null; titles: string[] }
 export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCitationLookup) {
   let references: Promise<ReferencePosition[]> | undefined;
   const pageLinks = new Map<number, Promise<PdfLinkAnnotation[]>>();
-  const pageText = new Map<number, Promise<TextContent>>();
+  const pageText = new Map<number, Promise<PageText>>();
   const entries = new Map<string, Promise<ReferenceEntry | null>>();
   let catalog: Promise<Map<string, string>> | undefined;
   const getReferences = () => references ??= (async () => {
@@ -90,16 +94,35 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
         }
         let text = pageText.get(start.page);
         if (!text) {
-          text = pdf.getPage(start.page).then(page => page.getTextContent());
+          text = pdf.getPage(start.page).then(async page => ({ view: page.view, content: await page.getTextContent() }));
           pageText.set(start.page, text);
         }
         // Line ends become spaces so sentence boundaries survive; the arXiv
         // scan drops all whitespace to catch identifiers broken across lines.
-        const entryText = (await text).items
-          .filter(item => 'str' in item && insideEntry(item.transform[4], item.transform[5]))
-          .map(item => 'str' in item ? item.str + (item.hasEOL ? ' ' : '') : '').join('');
+        const { view, content } = await text;
+        const items = content.items.filter((item): item is TextItem => 'str' in item && insideEntry(item.transform[4], item.transform[5]));
+        const entryText = items.map(item => item.str + (item.hasEOL ? ' ' : '')).join('');
+        // The last entry of a column runs to the page bottom, so a page footer
+        // can fall inside it; the box stops at the first gap wider than a blank line.
+        const printed = items.filter(item => item.str.trim())
+          .sort((a, b) => b.transform[5] - a.transform[5]);
+        const gap = printed.findIndex((item, index) => index > 0
+          && printed[index - 1].transform[5] - item.transform[5] > 2.5 * Math.max(Math.abs(item.transform[3]), 1));
+        if (gap > 0) printed.length = gap;
+        let box: number[] | null = null;
+        if (printed.length) {
+          const [left, bottomEdge, right, top] = view;
+          const x = (value: number) => Math.round((value - left) / (right - left) * 1000);
+          const y = (value: number) => Math.round((top - value) / (top - bottomEdge) * 1000);
+          box = [
+            x(Math.min(...printed.map(item => item.transform[4]))),
+            y(Math.max(...printed.map(item => item.transform[5] + item.height))),
+            x(Math.max(...printed.map(item => item.transform[4] + item.width))),
+            y(Math.min(...printed.map(item => item.transform[5]))) + 3,
+          ];
+        }
         for (const match of entryText.replace(/\s/g, '').matchAll(/(?:arxiv:|arxiv\.org\/(?:abs|pdf|html)\/)(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?/gi)) ids.add(match[1]);
-        return { arxivId: ids.size === 1 ? [...ids][0] : null, titles: referenceTitleCandidates(entryText) };
+        return { arxivId: ids.size === 1 ? [...ids][0] : null, titles: referenceTitleCandidates(entryText), box };
       })();
       entries.set(name, entry);
     }
@@ -123,12 +146,26 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
   })();
   // Warm every bibliography card as soon as the document opens.
   if (lookup) void getCatalog();
-  return async (annotation: PdfLinkAnnotation): Promise<string | null> => {
+  const routeIdFor = async (name: string) => {
+    const entry = await getEntry(name);
+    if (!entry) return null;
+    return entry.arxivId ?? (await getCatalog()).get(name) ?? null;
+  };
+  const resolve = async (annotation: PdfLinkAnnotation): Promise<string | null> => {
     if (annotation.url) return arxivIdFromUrl(annotation.url);
     if (typeof annotation.dest !== 'string' || !/^cite[.:]/i.test(annotation.dest)) return null;
-    const entry = await getEntry(annotation.dest);
-    if (!entry) return null;
-    return entry.arxivId ?? (await getCatalog()).get(annotation.dest) ?? null;
+    return routeIdFor(annotation.dest);
   };
+  // The bibliography entries themselves carry no links; they get their own
+  // preview targets from the same entries the in-text citations resolve to.
+  const bibliographyLinks = async (page: number): Promise<PdfBibliographyLink[]> => {
+    const onPage = (await getReferences()).filter(position => position.page === page);
+    const links = await Promise.all(onPage.map(async ({ name }) => {
+      const [entry, routeId] = await Promise.all([getEntry(name), routeIdFor(name)]);
+      return entry?.box && routeId ? { name, routeId, box: entry.box } : null;
+    }));
+    return links.filter((link): link is PdfBibliographyLink => link !== null);
+  };
+  return Object.assign(resolve, { bibliographyLinks });
 }
 export type PdfCitationResolver = ReturnType<typeof createPdfCitationResolver>;

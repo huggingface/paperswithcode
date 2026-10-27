@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import type { PdfCitationResolver, PdfLinkAnnotation } from "./pdfCitationLinks";
+import type { PdfLinkAnnotation } from "./pdfCitationLinks";
 import type { PdfPaperLinkTarget } from "./PdfPaperLink";
 
 // onResolved receives every route id about to become hoverable so callers can
 // warm preview cards before the pointer arrives.
-export function usePdfPaperLinks(ref: RefObject<HTMLDivElement>, visible: boolean, resolveCitation?: PdfCitationResolver, onResolved?: (routeIds: string[]) => void) {
+export function usePdfPaperLinks(ref: RefObject<HTMLDivElement>, visible: boolean, resolveCitation?: (annotation: PdfLinkAnnotation) => Promise<string | null>, onResolved?: (routeIds: string[]) => void) {
   const annotationsRef = useRef<PdfLinkAnnotation[]>([]);
   const generation = useRef(0);
   const [paperLinks, setPaperLinks] = useState<PdfPaperLinkTarget[]>([]);

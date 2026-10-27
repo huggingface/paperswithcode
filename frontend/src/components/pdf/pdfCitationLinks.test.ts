@@ -28,7 +28,7 @@ describe('arXiv PDF links', () => {
       'cite.right': destination(315, 650),
       'section.2': destination(83, 700),
     });
-    const getPage = vi.fn().mockResolvedValue({ getAnnotations, getTextContent: vi.fn().mockResolvedValue({ items: [] }) });
+    const getPage = vi.fn().mockResolvedValue({ view: [0, 0, 600, 800], getAnnotations, getTextContent: vi.fn().mockResolvedValue({ items: [] }) });
     return { pdf: { getDestinations, getPage } as unknown as PDFDocumentProxy, getPage, getDestinations };
   }
 
@@ -62,10 +62,33 @@ describe('arXiv PDF links', () => {
     const { pdf, getPage } = document();
     const text = (str: string, y: number) => ({ str, transform: [10, 0, 0, 10, 85, y] });
     getPage.mockResolvedValue({
+      view: [0, 0, 600, 800],
       getAnnotations: async () => [],
       getTextContent: async () => ({ items: [text('arXiv:', 610), text('1405.', 610), text('0312v2', 610), text('arXiv:2501.22222', 460)] }),
     });
     expect(await createPdfCitationResolver(pdf)({ id: '1', dest: 'cite.lin2014' })).toBe('1405.0312');
+  });
+
+  it('places resolved bibliography entries on their page, without the footer below the last one', async () => {
+    const { pdf, getPage } = document();
+    const text = (str: string, x: number, y: number) => ({ str, transform: [10, 0, 0, 10, x, y], width: 200, height: 10 });
+    getPage.mockResolvedValue({
+      view: [0, 0, 600, 800],
+      getAnnotations: async () => [],
+      getTextContent: async () => ({ items: [
+        text('[1] T. Lin. Microsoft COCO.', 85, 640), text('arXiv:1405.0312', 85, 628),
+        text('[2] Unresolved entry without identifiers.', 85, 490),
+        text('[3] Right column. arXiv:2501.33333', 320, 640),
+        text('15', 300, 40),
+      ] }),
+    });
+    const lookup = vi.fn().mockResolvedValue(new Map());
+    const resolve = createPdfCitationResolver(pdf, lookup);
+    expect(await resolve.bibliographyLinks(12)).toEqual([
+      { name: 'cite.lin2014', routeId: '1405.0312', box: [142, 188, 475, 218] },
+      { name: 'cite.right', routeId: '2501.33333', box: [533, 188, 867, 203] },
+    ]);
+    expect(await resolve.bibliographyLinks(3)).toEqual([]);
   });
 });
 
@@ -93,6 +116,7 @@ describe('catalog title lookup', () => {
   const text = (str: string, y: number) => ({ str, hasEOL: true, transform: [10, 0, 0, 10, 85, y] });
   function document() {
     const getPage = vi.fn().mockResolvedValue({
+      view: [0, 0, 600, 800],
       getAnnotations: async () => [{ url: 'https://arxiv.org/abs/2501.22222', rect: [85, 460, 150, 470] }],
       getTextContent: async () => ({ items: [
         text('Tsung-Yi Lin, Michael Maire, et al.', 640),

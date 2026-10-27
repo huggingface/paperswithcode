@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
+import type { PdfBibliographyLink } from "./pdfCitationLinks";
 
 export interface PdfPaperLinkTarget {
   anchor: HTMLAnchorElement;
@@ -35,4 +36,21 @@ export function PdfPaperLink({ anchor, routeId, internal }: PdfPaperLinkTarget) 
       {internal && <button type="button" onClick={() => anchor.click()}>Jump to reference</button>}
     </div>}
   >{null}</PaperPreviewLink>, container);
+}
+
+// A bibliography entry has no PDF link of its own, so its preview target is
+// positioned over the entry's text on the page's 0–1000 grid.
+export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1] }: PdfBibliographyLink) {
+  return <div
+    className="pdf-bibliography-link"
+    style={{ left: `${x0 / 10}%`, top: `${y0 / 10}%`, width: `${(x1 - x0) / 10}%`, height: `${(y1 - y0) / 10}%` }}
+  >
+    <PaperPreviewLink
+      routeId={routeId}
+      target="_blank"
+      className="pdf-paper-preview-link"
+      title={/^\d+$/.test(routeId) ? "Preview paper" : `Preview arXiv:${routeId}`}
+      ariaLabel={`Reference ${routeId}`}
+    >{null}</PaperPreviewLink>
+  </div>;
 }

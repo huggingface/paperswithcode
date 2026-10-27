@@ -12,8 +12,8 @@ import { usePdfSelection } from "@/hooks/usePdfSelection";
 import { createPaperPreviewCache } from "@/components/paper-preview/paperPreviewCache";
 import { PdfToolbar } from "./PdfToolbar";
 import type { PdfToolbarResources } from "./PdfToolbar";
-import { createPdfCitationResolver, type PdfCitationResolver } from "./pdfCitationLinks";
-import { PdfPaperLink } from "./PdfPaperLink";
+import { createPdfCitationResolver, type PdfBibliographyLink, type PdfCitationResolver } from "./pdfCitationLinks";
+import { PdfBibliographyEntryLink, PdfPaperLink } from "./PdfPaperLink";
 import { usePdfPaperLinks } from "./usePdfPaperLinks";
 import { PdfOutline } from "./PdfOutline";
 import { clampZoom, stepZoom } from "./pdfZoom";
@@ -147,6 +147,17 @@ function LazyPdfPage({
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
   const { paperLinks, onAnnotations } = usePdfPaperLinks(ref, visible, resolveCitation, warmPreviews);
+  const [bibliographyLinks, setBibliographyLinks] = useState<PdfBibliographyLink[]>([]);
+  useEffect(() => {
+    if (!visible || !resolveCitation) return;
+    let current = true;
+    void resolveCitation.bibliographyLinks(page).then(links => {
+      if (!current) return;
+      if (links.length) warmPreviews?.([...new Set(links.map(link => link.routeId))]);
+      setBibliographyLinks(links);
+    }).catch(() => undefined);
+    return () => { current = false; };
+  }, [page, resolveCitation, visible, warmPreviews]);
   // A new renderer makes react-pdf rebuild the text layer, so it changes only
   // with the highlighted query, not on every reader re-render.
   const activeSearch = page === activeSearchPage;
@@ -238,6 +249,7 @@ function LazyPdfPage({
     })}
     {snapshot && !painted && <img className="pdf-page-snapshot" src={snapshot} alt="" aria-hidden="true" />}
     {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} />)}
+    {visible && resolveCitation && bibliographyLinks.map(link => <PdfBibliographyEntryLink key={link.name} {...link} />)}
     {highlightBoxes?.map(([x0, y0, x1, y1], index) => <div
       key={`${highlightNonce}-${index}`}
       className="pdf-citation-highlight"
