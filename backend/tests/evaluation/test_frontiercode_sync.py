@@ -17,6 +17,10 @@ from backend.models.database import (
     Evaluation,
     HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
     PaperHfArtifact,
     PaperProjectPage,
@@ -115,6 +119,10 @@ def _session() -> Session:
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
             PaperTask.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -285,13 +293,45 @@ def test_dry_run_rolls_back_all_changes():
     assert session.query(Evaluation).count() == 0
 
 
-def test_parser_rejects_unreviewed_model(monkeypatch):
+def test_unreviewed_models_are_auto_matched_or_handed_to_the_radar(monkeypatch):
     identities = dict(fc.MODEL_PAPER_IDENTITIES)
+    identities.pop("Model 18")
     identities.pop("Model 19")
     monkeypatch.setattr(fc, "MODEL_PAPER_IDENTITIES", identities)
+    session = _session()
+    # Paper 1018 announces "Model 18"; nothing announces "Model 19".
+    session.get(Paper, 1019).title = "Benchmarking Model 19 on Long Tasks"
+    session.commit()
+    payload = _payload()
+    payload["v1_1"]["colors"] = {"Model 18": "#111", "Model 19": "#222"}
+    payload["v1_1"]["lab_colors"] = {"Lab A": "#111", "Lab B": "#222"}
+    leaderboard = parse_frontiercode_leaderboard(payload)
 
-    with pytest.raises(ValueError, match="unreviewed=.*Model 19"):
-        parse_frontiercode_leaderboard(_payload())
+    stats = FrontierCodeSyncService(session).sync(leaderboard, discovery=_discovery())
+
+    assert (stats.auto_matched, stats.unreviewed) == (["Model 18"], ["Model 19"])
+    assert stats.created == 38
+    rows = session.query(Evaluation).filter(Evaluation.model_name == "Model 18").all()
+    assert {(row.paper_id, row.is_open) for row in rows} == {(1018, False)}
+    assert len(rows) == 2
+    assert not session.query(Evaluation).filter_by(model_name="Model 19").count()
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("Lab B", "Model 19")
+    assert signal.lead_url == FRONTIERCODE_SOURCE_URL
+
+    FrontierCodeSyncService(session).sync(leaderboard, discovery=_discovery())
+    assert session.query(ModelReleaseSignal).one().sightings == 2
+
+
+def test_lab_is_unknown_when_its_color_is_shared():
+    payload = _payload()
+    payload["v1_1"]["colors"] = {"Model 0": "#111", "Model 1": "#222"}
+    payload["v1_1"]["lab_colors"] = {"Lab A": "#111", "Lab B": "#111", "Lab C": "#222"}
+    labs = {
+        entry.model: entry.lab
+        for entry in parse_frontiercode_leaderboard(payload).entries
+    }
+    assert (labs["Model 0"], labs["Model 1"], labs["Model 2"]) == ("", "Lab C", "")
 
 
 def test_parser_accepts_reviewed_swe_2_release(monkeypatch):
@@ -313,7 +353,7 @@ def test_parser_accepts_reviewed_swe_2_release(monkeypatch):
     assert identity.is_open is False
 
     revision["models"].remove("SWE-2")
-    with pytest.raises(ValueError, match="missing=.*SWE-2"):
+    with pytest.raises(ValueError, match="missing: .*SWE-2"):
         parse_frontiercode_leaderboard({"v1_1": revision})
 
 

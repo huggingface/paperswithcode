@@ -25,6 +25,10 @@ from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
 )
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.paper_ingestion_service import PaperIngestionService
 
@@ -84,8 +88,9 @@ def external(
 
 
 # Exact, reviewed introducing papers or official release pages for every model
-# currently present on FrontierCode 1.1. New upstream models must be reviewed
-# before the sync will publish them.
+# present on FrontierCode 1.1 when it was last reviewed. Other models are
+# matched automatically when the catalog names them unambiguously, and
+# otherwise handed to the release radar.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "Claude Haiku 5.5": external(
         "https://www.anthropic.com/claude-haiku-5-5",
@@ -325,6 +330,7 @@ class FrontierCodeEntry:
     subset: str
     score: float
     pass_rate: float
+    lab: str = ""
 
 
 @dataclass(frozen=True)
@@ -355,6 +361,10 @@ class FrontierCodeSyncStats:
     deleted: int = 0
     matched: int = 0
     indexed_papers: int = 0
+    # Models outside MODEL_PAPER_IDENTITIES that the catalog matched on its own.
+    auto_matched: list[str] = field(default_factory=list)
+    # Models with no paper yet; each is a release signal for the radar.
+    unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
     datasets: dict[str, int] = field(default_factory=dict)
 
@@ -396,13 +406,19 @@ def parse_frontiercode_leaderboard(payload: Any) -> FrontierCodeLeaderboard:
         raise ValueError(f"FrontierCode subset sizes changed: {subsets!r}")
     if len(set(models)) != len(models):
         raise ValueError("FrontierCode response contains duplicate models")
-    if set(models) != set(MODEL_PAPER_IDENTITIES):
-        missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(models))
-        unreviewed = sorted(set(models) - set(MODEL_PAPER_IDENTITIES))
-        raise ValueError(
-            "FrontierCode reviewed model set changed; "
-            f"missing={missing!r}; unreviewed={unreviewed!r}"
-        )
+    missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(models))
+    if missing:
+        raise ValueError(f"FrontierCode reviewed models are missing: {missing!r}")
+    # The legend colors each model by its lab; a lab is known only when
+    # exactly one lab has the model's color.
+    colors = revision.get("colors")
+    lab_colors = revision.get("lab_colors")
+    if not isinstance(colors, dict) or not isinstance(lab_colors, dict):
+        colors, lab_colors = {}, {}
+    labs_by_color: dict[str, list[str]] = {}
+    for lab, color in lab_colors.items():
+        if isinstance(lab, str) and isinstance(color, str):
+            labs_by_color.setdefault(color, []).append(lab.strip()[:200])
 
     entries: list[FrontierCodeEntry] = []
     for model in models:
@@ -417,6 +433,9 @@ def parse_frontiercode_leaderboard(payload: Any) -> FrontierCodeLeaderboard:
             raise ValueError(f"FrontierCode has an invalid harness for {model}")
         if not isinstance(model_data, dict):
             raise TypeError(f"FrontierCode has no data for {model}")
+        color = colors.get(model)
+        labs = labs_by_color.get(color, []) if isinstance(color, str) else []
+        lab = labs[0] if len(labs) == 1 else ""
         for effort in model_efforts:
             if not isinstance(effort, str) or not effort.strip() or len(effort) > 32:
                 raise ValueError(f"FrontierCode has an invalid effort for {model}")
@@ -441,6 +460,7 @@ def parse_frontiercode_leaderboard(payload: Any) -> FrontierCodeLeaderboard:
                         pass_rate=_finite_rate(
                             result.get("correct"), field_name="pass rate", model=model
                         ),
+                        lab=lab,
                     )
                 )
     return FrontierCodeLeaderboard(entries=entries)
@@ -573,8 +593,33 @@ class FrontierCodeSyncService:
                 .all()
             }
             upstream_keys = {(entry.model, entry.subset) for entry in selected}
+            new_models = list(
+                dict.fromkeys(
+                    LeaderboardModel(entry.model, entry.lab)
+                    for entry in selected
+                    if entry.model not in MODEL_PAPER_IDENTITIES
+                )
+            )
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="frontiercode",
+                leaderboard_name="FrontierCode",
+                leaderboard_url=FRONTIERCODE_SOURCE_URL,
+            )
+            matched = matcher.match(new_models)
+            stats.auto_matched = [m.name for m in new_models if m.name in matched]
+            stats.unreviewed = [m.name for m in new_models if m.name not in matched]
+            matcher.report_unmatched([m for m in new_models if m.name not in matched])
             for entry in selected:
-                paper_id = discovery.papers.get(entry.model)
+                if entry.model in MODEL_PAPER_IDENTITIES:
+                    identity = MODEL_PAPER_IDENTITIES[entry.model]
+                    paper_id = discovery.papers.get(entry.model)
+                    is_open, hf_model_url = identity.is_open, None
+                elif (match := matched.get(entry.model)) is not None:
+                    paper_id = match.paper_id
+                    is_open, hf_model_url = match.is_open, match.hf_model_url
+                else:
+                    continue
                 if paper_id is None:
                     if commit:
                         raise RuntimeError(
@@ -603,14 +648,15 @@ class FrontierCodeSyncService:
                     stats.created += 1
                 else:
                     stats.updated += 1
-                identity = MODEL_PAPER_IDENTITIES[entry.model]
                 row.paper_id = paper_id
                 row.model_name = entry.model
                 row.harness = entry.harness
                 row.methodology = methodology
                 row.metrics = metrics
                 row.uses_additional_data = False
-                row.is_open = identity.is_open
+                row.is_open = is_open
+                if hf_model_url:
+                    row.hf_model_url = hf_model_url
                 row.best_metric = "Score"
                 row.evaluated_on = datetime.now(UTC).date()
                 row.external_source_url = FRONTIERCODE_SOURCE_URL

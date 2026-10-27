@@ -24,9 +24,10 @@ class SyncSurgeChartographyJob(CronJobBase):
             )
             self.logger.info("surge_chartography_sync %s", stats.to_dict())
             self.logger.info("Papers processed: %s", stats.matched)
-            # Scheduled jobs never create papers: unreviewed models wait for a
-            # reviewer to map them in MODEL_IDENTITIES.
+            # Scheduled jobs never create papers: unmatched models become
+            # release signals that scan_model_releases resolves to a paper.
             for name, values in (
+                ("auto_matched", stats.auto_matched),
                 ("unreviewed", stats.unreviewed),
                 ("missing_papers", stats.missing_papers),
                 ("missing_upstream", stats.missing_upstream),

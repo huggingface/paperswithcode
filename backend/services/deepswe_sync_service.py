@@ -18,6 +18,10 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 DEEPSWE_ENDPOINT = "https://deepswe.datacurve.ai/artifacts/v1.1/leaderboard-live.json"
@@ -44,8 +48,9 @@ class PaperIdentity:
             raise ValueError("PaperIdentity requires exactly one stable identity")
 
 
-# Product labels are never fuzzily attached to papers. New upstream models remain
-# unmatched until a curator adds a defensible release identity here.
+# Reviewed release identities for upstream model slugs. Other slugs are matched
+# only when the catalog names them unambiguously (a model release or alias),
+# and otherwise handed to the release radar.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "gpt-6-astra": PaperIdentity(source_url="https://openai.com/index/gpt-6-astra/"),
     "gemini-3-8-flash": PaperIdentity(
@@ -183,6 +188,7 @@ class DeepSweEntry:
     mean_cost_usd: float | None
     mean_output_tokens: float | None
     mean_agent_steps: float | None
+    provider: str = ""
 
 
 @dataclass(frozen=True)
@@ -200,6 +206,9 @@ class DeepSweSyncStats:
     created: int = 0
     updated: int = 0
     deleted: int = 0
+    # Models outside MODEL_PAPER_IDENTITIES that the catalog matched on its own.
+    auto_matched: list[str] = field(default_factory=list)
+    # Models with no paper yet; each is a release signal for the radar.
     unmatched_models: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
 
@@ -211,6 +220,7 @@ class DeepSweSyncStats:
             "created": self.created,
             "updated": self.updated,
             "deleted": self.deleted,
+            "auto_matched": self.auto_matched,
             "unmatched_models": self.unmatched_models,
             "missing_papers": self.missing_papers,
         }
@@ -271,6 +281,9 @@ def parse_deepswe_leaderboard(payload: Any) -> DeepSweLeaderboard:
             raise ValueError(f"DeepSWE reasoning effort is invalid for {model}")
         if not isinstance(config, str) or not config.strip() or len(config) > 255:
             raise ValueError(f"DeepSWE config is invalid for {model}")
+        provider = raw.get("provider")
+        if not isinstance(provider, str) or len(provider) > 200:
+            provider = ""
         if config in configs:
             raise ValueError("DeepSWE response contains duplicate configs")
         configs.add(config)
@@ -323,6 +336,7 @@ def parse_deepswe_leaderboard(payload: Any) -> DeepSweLeaderboard:
                 mean_cost_usd=optional_numbers["mean_cost_usd"],
                 mean_output_tokens=optional_numbers["mean_output_tokens"],
                 mean_agent_steps=optional_numbers["mean_agent_steps"],
+                provider=provider.strip(),
             )
         )
 
@@ -485,13 +499,34 @@ class DeepSweSyncService:
                 if (key := _managed_model_key(row.methodology)) is not None
             }
             upstream_keys = {entry.model for entry in best_entries}
+            new_models = [
+                LeaderboardModel(entry.model, entry.provider)
+                for entry in best_entries
+                if entry.model not in MODEL_PAPER_IDENTITIES
+            ]
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="deepswe",
+                leaderboard_name="DeepSWE",
+                leaderboard_url=DEEPSWE_SOURCE_URL,
+            )
+            matched = matcher.match(new_models)
+            stats.auto_matched = [m.name for m in new_models if m.name in matched]
+            stats.unmatched_models = [
+                m.name for m in new_models if m.name not in matched
+            ]
+            matcher.report_unmatched([m for m in new_models if m.name not in matched])
 
             for entry in best_entries:
                 identity = MODEL_PAPER_IDENTITIES.get(entry.model)
-                if identity is None:
-                    stats.unmatched_models.append(entry.model)
+                if identity is not None:
+                    paper_id = paper_ids.get(entry.model)
+                    is_open, hf_model_url = identity.is_open, None
+                elif (match := matched.get(entry.model)) is not None:
+                    paper_id = match.paper_id
+                    is_open, hf_model_url = match.is_open, match.hf_model_url
+                else:
                     continue
-                paper_id = paper_ids.get(entry.model)
                 if paper_id is None:
                     continue
 
@@ -528,7 +563,9 @@ class DeepSweSyncService:
                 row.methodology = _methodology(entry, leaderboard)
                 row.metrics = {METRIC_NAME: entry.pass_at_1}
                 row.uses_additional_data = False
-                row.is_open = identity.is_open
+                row.is_open = is_open
+                if hf_model_url:
+                    row.hf_model_url = hf_model_url
                 row.best_metric = METRIC_NAME
                 row.evaluated_on = leaderboard.generated_at.date()
                 row.external_source_url = DEEPSWE_SOURCE_URL

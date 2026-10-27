@@ -24,6 +24,12 @@ class SyncDeepSweJob(CronJobBase):
             )
             self.logger.info("deepswe_sync %s", stats.to_dict())
             self.logger.info("Papers processed: %s", stats.matched)
+            # Scheduled jobs never create papers: unmatched models become
+            # release signals that scan_model_releases resolves to a paper.
+            if stats.auto_matched:
+                self.logger.warning(
+                    "deepswe_auto_matched names=%s", ",".join(stats.auto_matched)
+                )
             if stats.unmatched_models:
                 self.logger.warning(
                     "deepswe_unmatched_models names=%s",

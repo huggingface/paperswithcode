@@ -13,8 +13,14 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     Task,
     TaskDataset,
     TaskDatasetMetric,
@@ -65,6 +71,7 @@ def _payload() -> dict:
                 "mean_cost_usd": 2.5,
                 "mean_output_tokens": 50_000,
                 "mean_agent_steps": 80,
+                "provider": f"lab-{rank % 15}",
             }
         )
     return {
@@ -79,6 +86,7 @@ def _entry(
     score: float,
     *,
     effort: str = "max",
+    provider: str = "",
 ) -> DeepSweEntry:
     return DeepSweEntry(
         model=model,
@@ -93,6 +101,7 @@ def _entry(
         mean_cost_usd=2.5,
         mean_output_tokens=50_000,
         mean_agent_steps=80,
+        provider=provider,
     )
 
 
@@ -108,6 +117,12 @@ def _session() -> Session:
             TaskDataset.__table__,
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -163,6 +178,7 @@ def test_parse_fetch_and_best_selection_contract():
     best = select_best_entries(leaderboard.entries)
     assert len(best) == 15
     assert best[0].config == "config-0"
+    assert best[0].provider == "lab-0"
 
 
 def test_parser_rejects_truncated_duplicate_or_wrong_harness_data():
@@ -238,6 +254,62 @@ def test_sync_upserts_known_rows_and_preserves_unmatched_models():
     assert second.updated == 2
     assert session.query(Evaluation).count() == 2
     assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 0.7365}
+    # Without a lab there is nothing to hand to the release radar.
+    assert session.query(ModelReleaseSignal).count() == 0
+
+
+def test_unreviewed_models_match_a_model_release_or_become_signals():
+    session = _session()
+    session.add_all(
+        [
+            Paper(
+                id=3,
+                title="Introducing GPT-6.2 Terra",
+                source="external",
+                source_url="https://openai.com/index/introducing-gpt-6-2-terra",
+                version="v1",
+                is_latest_version=True,
+            ),
+            ModelRelease(
+                id=1,
+                paper_id=3,
+                canonical_name="GPT-6.2 Terra",
+                publisher="OpenAI",
+                aliases=[],
+                is_open=False,
+            ),
+        ]
+    )
+    session.commit()
+    leaderboard = DeepSweLeaderboard(
+        generated_at=datetime(2026, 8, 13, 16, 11, tzinfo=UTC),
+        n_tasks=113,
+        entries=[
+            _entry("claude-opus-5", 0.7365),
+            _entry("gpt-6-2-terra", 0.75, effort="high", provider="openai"),
+            _entry("nova-2", 0.5, provider="newlab"),
+        ],
+    )
+
+    stats = DeepSweSyncService(session).sync(leaderboard)
+    assert (stats.auto_matched, stats.unmatched_models) == (
+        ["gpt-6-2-terra"],
+        ["nova-2"],
+    )
+    terra = (
+        session.query(Evaluation)
+        .filter(Evaluation.model_name == "gpt-6-2-terra (high)")
+        .one()
+    )
+    assert (terra.paper_id, terra.is_open) == (3, False)
+    assert "upstream_model=gpt-6-2-terra" in terra.methodology
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("newlab", "nova-2")
+    assert signal.lead_url == DEEPSWE_SOURCE_URL
+
+    second = DeepSweSyncService(session).sync(leaderboard)
+    assert (second.created, second.updated) == (0, 2)
+    assert session.query(ModelReleaseSignal).one().sightings == 2
 
 
 def test_sync_ranks_fraction_scores_with_paper_native_results():

@@ -13,8 +13,14 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     PaperTask,
     Task,
     TaskDataset,
@@ -126,6 +132,12 @@ def _session() -> Session:
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
             PaperTask.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -222,6 +234,7 @@ def test_parse_and_fetch_the_leaderboard_block():
         "Max reasoning"
     )
     assert str(by_label["GPT 6 Astra"].score) == "71"
+    assert (by_label["Gemini 4 Argon"].lab, by_label["Inkling"].lab) == ("Google", "")
 
     def handler(request):
         assert str(request.url) == SURGE_CHARTOGRAPHY_URL
@@ -341,6 +354,51 @@ def test_new_mapped_rows_are_created_and_new_labels_reported():
     created = _rows(session)["Mistral Large 3 (no tools)"]
     assert created.metrics == {METRIC_NAME: 0.09}
     assert created.is_open and created.external_source_url == SURGE_CHARTOGRAPHY_URL
+    # Its row shows no lab logo, so there is no lab to hand to the radar.
+    assert session.query(ModelReleaseSignal).count() == 0
+
+
+def test_new_labels_are_auto_matched_or_handed_to_the_radar():
+    session = _session()
+    _seed_production(session)
+    session.add(
+        Paper(
+            id=2001,
+            title="Kimi K3.5: Open Agentic Intelligence",
+            source="external",
+            source_url="https://www.kimi.com/blog/kimi-k3-5",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.commit()
+    renamed = HTML.replace(">K2.5 (Thinking on)<", ">K3.5 (Thinking on)<", 1).replace(
+        ">Large 3<", ">Large 4<", 1
+    )
+    stats = SurgeChartographySyncService(session).sync(
+        parse_surge_chartography(renamed)
+    )
+
+    assert (stats.auto_matched, stats.unreviewed) == (
+        ["Kimi K3.5"],
+        ["Mistral Large 4"],
+    )
+    kimi = _rows(session)["Kimi K3.5 (no tools)"]
+    assert (kimi.paper_id, kimi.is_open, kimi.metrics) == (
+        2001,
+        False,
+        {METRIC_NAME: 0.126},
+    )
+    assert '"Kimi K3.5" (Thinking on): 12.6% Pass@1' in kimi.methodology
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("Mistral", "Mistral Large 4")
+    assert signal.lead_url == SURGE_CHARTOGRAPHY_URL
+
+    again = SurgeChartographySyncService(session).sync(
+        parse_surge_chartography(renamed)
+    )
+    assert (again.created, again.changed) == (0, 0)
+    assert session.query(ModelReleaseSignal).one().sightings == 2
 
 
 def test_managed_rows_dropped_upstream_are_reported_not_deleted():

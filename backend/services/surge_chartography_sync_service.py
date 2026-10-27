@@ -22,6 +22,10 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 SURGE_CHARTOGRAPHY_URL = "https://surgehq.ai/benchmarks/chartography"
@@ -78,8 +82,9 @@ _GPT_6 = "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
 # Exact Surge model labels (provider + model, without the reasoning
 # configuration) are the trust boundary between a leaderboard row and its
 # introducing paper. Model names follow the catalog, reviewed against the 41
-# rows hand-imported on 2026-10-17. Unreviewed labels are reported, never
-# imported.
+# rows hand-imported on 2026-10-17. Other labels are matched automatically when
+# the catalog names them unambiguously, and otherwise handed to the release
+# radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Gemini 4 Argon": ModelIdentity(
         "Gemini 4 Argon", source_url=f"{_GEMINI_BLOG}/gemini-4-argon/"
@@ -239,6 +244,7 @@ class SurgeEntry:
     label: str
     configuration: str
     score: Decimal
+    lab: str = ""
 
 
 @dataclass
@@ -249,6 +255,9 @@ class SurgeSyncStats:
     changed: int = 0
     adopted: int = 0
     excluded: list[str] = field(default_factory=list)
+    # Labels outside MODEL_IDENTITIES that the catalog matched on its own.
+    auto_matched: list[str] = field(default_factory=list)
+    # Labels with no paper yet; each is a release signal for the radar.
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
     missing_upstream: list[str] = field(default_factory=list)
@@ -309,6 +318,10 @@ def parse_surge_chartography(html: str) -> list[SurgeEntry]:
         score = row.select_one("[data-score]")
         if brand is None or name is None or score is None:
             raise ValueError(f"Surge AI row {position} layout changed")
+        # The logo's alt text ("Google logo") names the lab, when present.
+        logo = row.select_one(".lead-model-logo img[alt]")
+        alt = " ".join(logo["alt"].split()) if logo is not None else ""
+        lab = alt.removesuffix(" logo") if alt.endswith(" logo") else ""
         label, configuration = _split_label(_text(brand), _text(name))
         if not label or len(label) > 200:
             raise ValueError(f"Surge AI row {position} is malformed: {label!r}")
@@ -325,7 +338,7 @@ def parse_surge_chartography(html: str) -> list[SurgeEntry]:
         if label in seen:
             raise ValueError(f"Surge AI lists {label!r} twice")
         seen.add(label)
-        entries.append(SurgeEntry(position, label, configuration, value))
+        entries.append(SurgeEntry(position, label, configuration, value, lab[:200]))
     if not MIN_EXPECTED_ROWS <= len(entries) <= MAX_EXPECTED_ROWS:
         raise ValueError(
             f"Surge AI Chartography has {len(entries)} rows; expected "
@@ -452,15 +465,57 @@ class SurgeChartographySyncService:
         stats = SurgeSyncStats(
             fetched=len(entries),
             excluded=[e.label for e in entries if e.label in EXCLUDED_LABELS],
-            unreviewed=[
-                e.label
-                for e in entries
-                if e.label not in MODEL_IDENTITIES and e.label not in EXCLUDED_LABELS
-            ],
         )
         try:
             task, dataset = self._leaderboard_identity()
             paper_ids = self._paper_ids()
+            new_entries = [
+                e
+                for e in entries
+                if e.label not in MODEL_IDENTITIES and e.label not in EXCLUDED_LABELS
+            ]
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="surge-chartography",
+                leaderboard_name="Surge AI Chartography",
+                leaderboard_url=SURGE_CHARTOGRAPHY_URL,
+            )
+            matched = matcher.match(
+                [LeaderboardModel(e.label, e.lab) for e in new_entries]
+            )
+            # (paper id, row model name, is_open, HF model URL, entry)
+            published_entries = [
+                (
+                    paper_ids.get(identity.paper_key),
+                    identity.row_model_name,
+                    identity.is_open,
+                    identity.hf_model_url,
+                    entry,
+                )
+                for identity, entry in selected
+            ]
+            for entry in new_entries:
+                if (match := matched.get(entry.label)) is None:
+                    stats.unreviewed.append(entry.label)
+                    continue
+                # Auto-matched rows keep Surge's spelling.
+                published_entries.append(
+                    (
+                        match.paper_id,
+                        f"{entry.label}{MODEL_NAME_SUFFIX}",
+                        match.is_open,
+                        match.hf_model_url,
+                        entry,
+                    )
+                )
+                stats.auto_matched.append(entry.label)
+            matcher.report_unmatched(
+                [
+                    LeaderboardModel(e.label, e.lab)
+                    for e in new_entries
+                    if e.label not in matched
+                ]
+            )
             rows = (
                 self.db.query(Evaluation)
                 .filter(
@@ -482,22 +537,27 @@ class SurgeChartographySyncService:
             }
             now = datetime.now(UTC)
             published: set[int] = set()
-            for identity, entry in selected:
-                paper_id = paper_ids.get(identity.paper_key)
+            for (
+                paper_id,
+                model_name,
+                is_open,
+                hf_model_url,
+                entry,
+            ) in published_entries:
                 if paper_id is None:
                     stats.missing_papers.append(entry.label)
                     continue
                 metrics = {METRIC_NAME: float(_fraction(entry.score))}
-                row = rows_by_identity.get((paper_id, identity.row_model_name))
+                row = rows_by_identity.get((paper_id, model_name))
                 if row is None:
                     row = Evaluation(
                         paper_id=paper_id,
                         task_id=task.id,
                         dataset_id=dataset.id,
-                        model_name=identity.row_model_name,
+                        model_name=model_name,
                         metrics=metrics,
-                        is_open=identity.is_open,
-                        hf_model_url=identity.hf_model_url,
+                        is_open=is_open,
+                        hf_model_url=hf_model_url,
                         external_source_url=SURGE_CHARTOGRAPHY_URL,
                         source_url=SURGE_CHARTOGRAPHY_URL,
                         external=True,
@@ -505,7 +565,7 @@ class SurgeChartographySyncService:
                         evaluated_on=now.date(),
                     )
                     self.db.add(row)
-                    rows_by_identity[(paper_id, identity.row_model_name)] = row
+                    rows_by_identity[(paper_id, model_name)] = row
                     stats.created += 1
                     notes = ""
                 else:
