@@ -17,6 +17,7 @@ from backend.main import create_app
 from backend.models.database import (
     Base,
     Author as DBAuthor,
+    AuthorGoogleScholarProfile,
     Paper as DBPaper,
     PaperAuthor,
 )
@@ -180,6 +181,25 @@ def test_get_author_by_id(client, sample_authors):
     assert data["hf_username"] == "johndoe"
     assert data["hf_is_pro"] is True
     assert data["paper_count"] == 2
+
+
+def test_author_detail_includes_verified_google_scholar_id(client, sample_authors):
+    db = TestingSessionLocal()
+    db.add(
+        AuthorGoogleScholarProfile(
+            author_id=2,
+            scholar_id="VoxU11IAAAAJ",
+            evidence_source="serpapi",
+            matched_papers=1,
+            considered_papers=1,
+            matched_paper_ids=[1],
+        )
+    )
+    db.commit()
+    db.close()
+
+    assert client.get("/api/v1/authors/2").json()["google_scholar_id"] == "VoxU11IAAAAJ"
+    assert client.get("/api/v1/authors/1").json()["google_scholar_id"] is None
 
 
 def test_hf_author_lists_unclaimed_papers(client, sample_authors):

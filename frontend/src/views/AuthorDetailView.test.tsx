@@ -111,6 +111,29 @@ describe("AuthorDetailView", () => {
     );
   });
 
+  it("links a verified Google Scholar profile", async () => {
+    vi.spyOn(papersApi, "getAuthor").mockResolvedValue({
+      id: "7",
+      full_name: "Researcher",
+      hf_username: null,
+      google_scholar_id: "VoxU11IAAAAJ",
+      paper_count: 1,
+    });
+    vi.spyOn(papersApi, "list").mockResolvedValue({
+      count: 1,
+      next_page: null,
+      previous_page: null,
+      results: [paper],
+    });
+
+    renderAuthor();
+
+    expect(await screen.findByRole("link", { name: "Google Scholar ↗" })).toHaveAttribute(
+      "href",
+      "https://scholar.google.com/citations?user=VoxU11IAAAAJ",
+    );
+  });
+
   it("never shows the previous author's papers while another author loads", async () => {
     vi.spyOn(papersApi, "getAuthor").mockImplementation(async (id) => ({
       id,

@@ -223,6 +223,8 @@ export interface Author {
   full_name: string;
   hf_username?: string | null;
   hf_avatar_url?: string | null;
+  /** Set only when the Scholar profile was verified against the author's papers. */
+  google_scholar_id?: string | null;
   paper_count: number;
 }
 

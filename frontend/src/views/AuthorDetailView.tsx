@@ -114,6 +114,18 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
                 </a>
               </>
             )}
+            {author.data.google_scholar_id && (
+              <>
+                {" · "}
+                <a
+                  href={`https://scholar.google.com/citations?user=${encodeURIComponent(author.data.google_scholar_id)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Google Scholar ↗
+                </a>
+              </>
+            )}
           </div>
         )}
         {author.data && <ResearchFollowButton kind="author" entityId={author.data.id} />}

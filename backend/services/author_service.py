@@ -14,6 +14,7 @@ from sqlalchemy import func, desc, asc, or_
 from backend.models.database import (
     Author as DBAuthor,
     AuthorAlias,
+    AuthorGoogleScholarProfile,
     Paper as DBPaper,
     PaperAuthor,
 )
@@ -201,6 +202,11 @@ class AuthorService:
                 raise PaperNotFoundError(f"Author with ID {author_id} not found")
 
             db_author, paper_count = result
+            scholar_id = (
+                self.db.query(AuthorGoogleScholarProfile.scholar_id)
+                .filter(AuthorGoogleScholarProfile.author_id == db_author.id)
+                .scalar()
+            )
 
             author_dict = {
                 "id": str(db_author.id),
@@ -210,6 +216,7 @@ class AuthorService:
                 "hf_avatar_url": db_author.hf_avatar_url,
                 "hf_status": db_author.hf_status,
                 "hf_is_pro": db_author.hf_is_pro or False,
+                "google_scholar_id": scholar_id,
                 "paper_count": paper_count or 0,
             }
 

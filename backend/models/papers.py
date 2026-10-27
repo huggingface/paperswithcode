@@ -596,6 +596,13 @@ class Author(BaseModel):
     hf_is_pro: bool = Field(
         default=False, description="Whether user has Hugging Face Pro"
     )
+    google_scholar_id: Optional[str] = Field(
+        None,
+        description=(
+            "Google Scholar user ID, set only when the profile lists the author's "
+            "papers (author detail only)"
+        ),
+    )
 
     # Statistics (computed fields)
     paper_count: int = Field(default=0, description="Number of papers by this author")

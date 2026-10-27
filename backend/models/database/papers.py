@@ -309,6 +309,27 @@ class AuthorAlias(Base):
     __table_args__ = (Index("idx_author_aliases_author_id", "author_id"),)
 
 
+class AuthorGoogleScholarProfile(Base):
+    """An author's Google Scholar profile, linked only when papers prove it."""
+
+    __tablename__ = "author_google_scholar_profiles"
+
+    author_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("authors.id", ondelete="CASCADE"), primary_key=True
+    )
+    scholar_id: Mapped[str] = mapped_column(String(12), unique=True, nullable=False)
+    wikidata_qid: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    evidence_source: Mapped[str] = mapped_column(String(30), nullable=False)
+    matched_papers: Mapped[int] = mapped_column(Integer, nullable=False)
+    considered_papers: Mapped[int] = mapped_column(Integer, nullable=False)
+    matched_paper_ids: Mapped[List[int]] = mapped_column(
+        ARRAY(BigInteger).with_variant(JSON(), "sqlite"), nullable=False
+    )
+    verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class PaperAuthor(Base):
     """Junction table for papers and authors."""
 
