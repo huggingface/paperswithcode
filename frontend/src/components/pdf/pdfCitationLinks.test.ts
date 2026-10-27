@@ -104,16 +104,17 @@ describe('PDFs without bibliography destinations', () => {
         item('See also [9] in the text.', 57, 673, true),
         item('[3] C. Author. A third paper.', 313, 700, true),
       ],
+      3: [item('References', 47, 760, true), item('[4] D. Author. A fourth paper. arXiv:2501.44444', 47, 700, true)],
     };
     const getPage = vi.fn(async (page: number) => ({
       view: [0, 0, 600, 800],
       getAnnotations: async () => [],
       getTextContent: async () => ({ items: pages[page] }),
     }));
-    return { numPages: 2, getDestinations: vi.fn().mockResolvedValue({}), getPage } as unknown as PDFDocumentProxy;
+    return { numPages: 3, getDestinations: vi.fn().mockResolvedValue({}), getPage } as unknown as PDFDocumentProxy;
   }
 
-  it('finds numbered entries after the References heading, including split labels', async () => {
+  it('finds numbered entries after the References heading, past a running header, including split labels', async () => {
     const lookup = vi.fn().mockResolvedValue(new Map([['text:3', '2501.33333']]));
     const resolve = createPdfCitationResolver(wordExport(), lookup);
     const links = await resolve.bibliographyLinks(2);
@@ -122,8 +123,9 @@ describe('PDFs without bibliography destinations', () => {
       ['text:2', '2501.22222'],
       ['text:3', '2501.33333'],
     ]);
+    expect((await resolve.bibliographyLinks(3)).map(({ name, routeId }) => [name, routeId])).toEqual([['text:4', '2501.44444']]);
     expect(await resolve.bibliographyLinks(1)).toEqual([]);
-    expect(lookup.mock.calls[0][0].map((query: { key: string }) => query.key)).toEqual(['text:1', 'text:2', 'text:3']);
+    expect(lookup.mock.calls[0][0].map((query: { key: string }) => query.key)).toEqual(['text:1', 'text:2', 'text:3', 'text:4']);
   });
 });
 

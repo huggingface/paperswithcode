@@ -98,29 +98,28 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
   // PDFs without hyperref targets (Word exports, for example) still print a
   // "References" heading followed by "[n]" labels at the start of entry lines.
   const numberedReferences = async () => {
-    const pages: { page: number; lines: TextLine[] }[] = [];
-    let heading = -1;
-    for (let page = pdf.numPages; page > Math.max(0, pdf.numPages - REFERENCE_HEADING_SCAN_PAGES) && heading < 0; page--) {
-      const lines = textLines((await getPageText(page)).content.items);
-      pages.unshift({ page, lines });
-      const headings = lines.map((line, index) => /^(?:[\dIVX]+\.?\s*)?(?:references|bibliography)$/i.test(line.text) ? index : -1);
-      heading = Math.max(...headings, -1);
+    const lines: (TextLine & { page: number })[] = [];
+    for (let page = Math.max(1, pdf.numPages - REFERENCE_HEADING_SCAN_PAGES + 1); page <= pdf.numPages; page++) {
+      lines.push(...textLines((await getPageText(page)).content.items).map(line => ({ ...line, page })));
     }
-    if (heading < 0) return [];
-    const positions: ReferencePosition[] = [];
-    let last = 0;
-    pages.forEach(({ page, lines }, index) => {
-      for (const line of index ? lines : lines.slice(heading + 1)) {
+    const headings = lines.flatMap((line, index) => /^(?:[\dIVX]+\.?\s*)?(?:references|bibliography)$/i.test(line.text) ? [index] : []);
+    // A running "References" header on continuation pages is followed by
+    // labels that do not start near [1]; fall back to the heading before it.
+    for (const heading of headings.reverse()) {
+      const positions: ReferencePosition[] = [];
+      let last = 0;
+      for (const line of lines.slice(heading + 1)) {
         const label = Number(line.text.match(/^\[(\d{1,3})\]/)?.[1]);
         // Labels ascend; a skipped number tolerates one the text layer garbled.
         if (!(label > last && label <= last + 3)) continue;
         last = label;
         // The baseline, unlike a hyperref target, leaves no room above the
         // label, so an entry never takes the previous entry's last line.
-        positions.push({ name: `text:${label}`, page, x: line.x, y: line.baseline });
+        positions.push({ name: `text:${label}`, page: line.page, x: line.x, y: line.baseline });
       }
-    });
-    return positions;
+      if (positions.length) return positions;
+    }
+    return [];
   };
   const getEntry = (name: string) => {
     let entry = entries.get(name);
