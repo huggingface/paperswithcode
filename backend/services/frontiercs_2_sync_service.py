@@ -80,6 +80,9 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "GPT-6.1 Sol": ModelIdentity(
         "GPT-6.1 Sol", source_url="https://openai.com/index/introducing-gpt-6-1-sol/"
     ),
+    "GPT-6.1 Terra": ModelIdentity(
+        "GPT-6.1 Terra", source_url="https://openai.com/index/introducing-gpt-6-1-terra"
+    ),
     "GLM 5.3": ModelIdentity(
         "GLM-5.3",
         source_url="https://z.ai/blog/glm-5.3",
@@ -97,6 +100,11 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         arxiv_id="2607.24653",
         is_open=True,
         hf_model_url="https://huggingface.co/moonshotai/Kimi-K3",
+    ),
+    "Kimi K3.1 Pro": ModelIdentity(
+        "Kimi K3.1 Pro",
+        source_url="https://www.kimi.com/blog/kimi-k3-1-pro",
+        is_open=True,
     ),
     "DeepSeek V4.1 Flash": ModelIdentity(
         "DeepSeek-V4.1-Flash",
