@@ -91,13 +91,14 @@ describe('arXiv PDF links', () => {
     expect(await resolve.bibliographyLinks(3)).toEqual([]);
   });
 
-  it('lists where the text cites each entry, from links to its destination, joining split and wrapped author/year links', async () => {
+  it('lists where the text cites each entry, from links to its destination, joining split and wrapped author/year links, past an unreadable page', async () => {
     const { pdf, getPage } = document();
-    const pages: Record<number, unknown[]> = {
+    const pages: Record<number, unknown[] | string> = {
       2: [{ dest: 'cite.lin2014', rect: [120, 700, 132, 710] }, { dest: 'section.2', rect: [60, 600, 80, 610] }, { url: 'https://example.com', rect: [0, 0, 1, 1] }],
+      3: 'unreadable',
       5: [{ dest: 'cite.right', rect: [300, 400, 312, 410] }, { dest: 'cite.lin2014', rect: [60, 200, 72, 210] }, { dest: 'cite.lin2014', rect: [75, 200, 90, 210] }, { dest: 'cite.lin2014', rect: [30, 190, 42, 200] }],
     };
-    getPage.mockImplementation(async (page: number) => ({
+    getPage.mockImplementation(async (page: number) => pages[page] === 'unreadable' ? Promise.reject(new Error('range request failed')) : ({
       view: [0, 0, 600, 800],
       getAnnotations: async () => page === 12 ? [{ url: 'https://arxiv.org/abs/1405.0312', rect: [85, 610, 150, 620] }, { url: 'https://arxiv.org/abs/2501.33333', rect: [320, 610, 400, 620] }] : pages[page] ?? [],
       getTextContent: async () => ({ items: page === 12 ? [{ str: '[1] T. Lin.', transform: [10, 0, 0, 10, 85, 640], width: 200, height: 10 }, { str: '[3] Right.', transform: [10, 0, 0, 10, 320, 640], width: 200, height: 10 }] : [] }),

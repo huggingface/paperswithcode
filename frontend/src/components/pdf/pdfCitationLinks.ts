@@ -24,6 +24,8 @@ export function arxivIdFromUrl(value: string): string | null {
 const MAX_TITLE_CANDIDATES = 8;
 const REFERENCE_HEADING_SCAN_PAGES = 12;
 const MAX_TITLE_LENGTH = 300;
+// Pages whose citations are read ahead of the one being indexed.
+const CITATION_READ_AHEAD = 6;
 
 // Sentences of a bibliography entry that could be its title. The backend only
 // accepts an exact letters-and-digits match, so author lists and venues are
@@ -271,27 +273,28 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
     };
     const positions = await getReferences();
     if (!positions.length) return byName;
-    // Pages load in parallel; citations are then added in page order.
-    const pages = (count: number) => Array.from({ length: count }, (_, index) => index + 1);
-    if (positions[0].name.startsWith('text:')) {
-      const first = positions[0];
-      const texts = await Promise.all(pages(first.page).map(getPageText));
-      texts.forEach(({ view, content }, index) => {
-        const page = index + 1;
+    // Citations of one page as [name, box] pairs; an unreadable page has none.
+    const first = positions[0];
+    const numbered = first.name.startsWith('text:');
+    const pageCitations = async (page: number): Promise<[string, number[]][]> => {
+      if (numbered) {
+        const { view, content } = await getPageText(page);
         const items = page < first.page ? content.items : content.items.filter(item => 'str' in item && item.transform[5] > first.y + 1);
-        for (const [number, boxes] of numberedCitationBoxes(items, view)) {
-          for (const bbox of boxes) add(`text:${number}`, page, bbox);
-        }
-      });
-      return byName;
-    }
-    const links = await Promise.all(pages(pdf.numPages).map(async page => {
-      const annotations = (await getPageLinks(page)).filter(annotation => typeof annotation.dest === 'string' && /^cite[.:]/i.test(annotation.dest) && annotation.rect);
-      return { page, annotations, view: annotations.length ? (await pdf.getPage(page)).view : [] };
-    }));
-    for (const { page, annotations, view } of links) {
-      const { x, y } = pageGrid(view);
-      for (const { dest, rect } of annotations) add(dest as string, page, [x(rect![0]), y(rect![3]), x(rect![2]), y(rect![1])]);
+        return [...numberedCitationBoxes(items, view)].flatMap(([number, boxes]) => boxes.map(box => [`text:${number}`, box] as [string, number[]]));
+      }
+      const annotations = (await getPageLinks(page)).filter(annotation => typeof annotation.dest === 'string' && /^cite[.:]/i.test(annotation.dest));
+      if (!annotations.length) return [];
+      const { x, y } = pageGrid((await pdf.getPage(page)).view);
+      return annotations.flatMap(({ dest, rect }) => rect ? [[dest as string, [x(rect[0]), y(rect[3]), x(rect[2]), y(rect[1])]] as [string, number[]]] : []);
+    };
+    // Like the text search, read a few pages ahead rather than the whole
+    // range-loaded document at once, and add citations in page order.
+    const last = numbered ? first.page : pdf.numPages;
+    const scans: Promise<[string, number[]][]>[] = [];
+    const scan = (page: number) => scans[page] ??= pageCitations(page).catch(() => []);
+    for (let page = 1; page <= last; page++) {
+      for (let ahead = page + 1; ahead <= Math.min(last, page + CITATION_READ_AHEAD); ahead++) void scan(ahead);
+      for (const [name, bbox] of await scan(page)) add(name, page, bbox);
     }
     return byName;
   })();
