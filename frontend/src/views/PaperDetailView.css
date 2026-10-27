@@ -764,17 +764,51 @@
   margin: -16px 0 24px;
 }
 .tldr-details > summary {
-  display: inline-block;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  background: var(--bg-elevated);
   font-family: var(--mono);
-  font-size: 11px;
-  color: var(--ink-faint);
+  font-size: 12px;
+  color: var(--accent-text);
   cursor: pointer;
   list-style: none;
+  transition: border-color 120ms ease;
 }
+.tldr-details > summary:hover,
+.tldr-details > summary:focus-visible { border-color: var(--accent); }
 .tldr-details > summary::-webkit-details-marker { display: none; }
-.tldr-details > summary::before { content: "+ "; }
-.tldr-details[open] > summary::before { content: "− "; }
-.tldr-details > summary:hover { color: var(--accent-text); }
+.tldr-details > summary::before {
+  content: "";
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 120ms ease;
+}
+.tldr-details[open] > summary::before { transform: rotate(45deg); }
+.tldr-details > summary:hover .tldr-toggle-show,
+.tldr-details > summary:hover .tldr-toggle-hide,
+.tldr-details > summary:focus-visible .tldr-toggle-show,
+.tldr-details > summary:focus-visible .tldr-toggle-hide {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.tldr-details .tldr-toggle-hide,
+.tldr-details[open] .tldr-toggle-show,
+.tldr-details[open] .tldr-toggle-hint { display: none; }
+.tldr-details[open] .tldr-toggle-hide { display: inline; }
+.tldr-toggle-hint {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-faint);
+}
 .tldr-details .tldr-box {
   margin: 12px 0 0;
 }

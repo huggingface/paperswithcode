@@ -38,7 +38,11 @@ export function PaperMetadataSections({
       </p>
       {paper.tldr && (
         <details className="tldr-details paper-section-anchor" id="tldr" open={tldrOpen}>
-          <summary>TL;DR</summary>
+          <summary>
+            <span className="tldr-toggle-show">Show TL;DR</span>
+            <span className="tldr-toggle-hide">Hide TL;DR</span>
+            <span className="tldr-toggle-hint">short summary</span>
+          </summary>
           <div className="tldr-box">{paper.tldr}</div>
         </details>
       )}
