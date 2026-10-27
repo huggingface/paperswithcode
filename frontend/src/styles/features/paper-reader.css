@@ -115,19 +115,19 @@
 .pdf-error a, .pdf-error button { color: inherit; }
 .chat-page--reader .chat-main { min-width: 0; }
 /* Mirror the header's right gutter and gaps so Share, ⋮ and × sit under search, bookmark and avatar. */
-.chat-page--reader .chat-topbar { min-height: 48px; gap: 24px; padding: 7px 32px 7px 20px; }
-.chat-reader-icon-btn { flex: none; color: var(--ink); }
+.chat-page--reader .chat-topbar { min-height: 52px; gap: 8px; padding: 9px 32px 9px 20px; }
+.chat-page--reader .chat-share-button { margin-right: 4px; }
 .chat-reader-icon-btn svg { width: 15px; height: 15px; }
 .chat-page--reader .chat-empty-inner { width: min(100%, 560px); padding-inline: 16px; }
 .chat-page--reader .chat-examples { width: min(100%, 300px); margin-inline: auto; flex-direction: column; align-items: stretch; }
 .chat-page--reader .chat-example { width: 100%; }
 .chat-reader-action { border: 0; background: transparent; color: var(--accent-text); text-decoration: none; font-size: 12px; white-space: nowrap; }
 @media (max-width: 880px) {
-  .chat-page--reader .chat-topbar { gap: 12px; padding-right: 16px; }
+  .chat-page--reader .chat-topbar { padding-right: 16px; }
   .pdf-toolbar { padding-left: 16px; }
 }
 @media (max-width: 640px) {
-  .chat-page--reader .chat-topbar { gap: 8px; padding-right: 14px; }
+  .chat-page--reader .chat-topbar { padding-right: 14px; }
   .pdf-zoom-value { display: none; }
   .pdf-toolbar { gap: 8px; overflow-x: auto; padding-left: 14px; }
   .pdf-toolbar-paper { min-width: 150px; }

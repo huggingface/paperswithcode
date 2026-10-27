@@ -19,12 +19,27 @@
   padding: 10px 24px;
   border-bottom: 1px solid var(--hairline);
 }
+/* Icon actions match the site header: borderless until hovered. */
+.chat-topbar .icon-btn {
+  flex: none;
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-soft);
+  transition: background 0.15s, color 0.15s;
+}
+.chat-topbar .icon-btn:hover,
+.chat-topbar .icon-btn[data-state="open"] {
+  background: var(--bg-subtle);
+  color: var(--ink);
+}
 .chat-topbar-title {
   flex: 1;
   min-width: 0;
   font-family: var(--serif);
-  font-size: 14px;
-  color: var(--ink-soft);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
