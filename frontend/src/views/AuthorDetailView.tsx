@@ -74,7 +74,8 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
   }
   // arXiv group authors such as "NVIDIA" are organizations, not people.
   if (author.data?.organization_slug) {
-    return <Navigate to={`/orgs/${author.data.organization_slug}`} replace />;
+    const search = searchParams.toString();
+    return <Navigate to={`/orgs/${author.data.organization_slug}${search ? `?${search}` : ""}`} replace />;
   }
 
   return (

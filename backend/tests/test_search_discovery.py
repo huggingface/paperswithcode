@@ -531,9 +531,9 @@ def test_author_naming_an_organization_redirects_to_its_page(client, monkeypatch
         "organization_slug_for_author",
         lambda db, author_id: "nvidia" if author_id == 92883 else None,
     )
-    response = client.get("/authors/92883", follow_redirects=False)
+    response = client.get("/authors/92883?has_code=true", follow_redirects=False)
     assert response.status_code == 301
-    assert response.headers["location"] == "/orgs/nvidia"
+    assert response.headers["location"] == "/orgs/nvidia?has_code=true"
 
 
 @pytest.mark.parametrize(

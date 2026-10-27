@@ -218,7 +218,10 @@ def author_page(
 ) -> Response:
     org_slug = organization_slug_for_author(db, author_id)
     if org_slug:
-        return RedirectResponse(f"/orgs/{org_slug}", status_code=301)
+        target = f"/orgs/{org_slug}"
+        if request.url.query:
+            target = f"{target}?{request.url.query}"
+        return RedirectResponse(target, status_code=301)
     return _render(DiscoveryPageService(db).author(author_id), request)
 
 
