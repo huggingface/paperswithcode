@@ -33,9 +33,13 @@ from typing import List, Optional
 
 from sqlalchemy.orm import Session
 
+from backend.config import get_settings
 from backend.database.paper_merge import find_arxiv_paper_for_title
 from backend.models.papers import Paper
 from backend.services.author_service import get_or_create_author_by_name
+from backend.services.external_paper_pdf_archive_service import (
+    archive_new_external_paper_pdf,
+)
 from backend.services.external_paper_curation_service import (
     enqueue_external_paper_curation,
 )
@@ -122,6 +126,10 @@ class ExternalResourceService:
         A newly created row also gets a queued enrich-paper -> add-evals
         curation workflow unless `queue_curation` is False (callers that start
         their own workflow, such as trending model resolution).
+
+        A newly created, committed row whose source is a PDF also gets that
+        PDF archived right away, so the reader and chat can open it before
+        the OCR worker runs.
         """
         try:
             source_url = normalize_public_url(payload.source_url)
@@ -234,6 +242,16 @@ class ExternalResourceService:
             logger.exception("Failed to ingest external resource %s", source_url)
             raise DatabaseError(
                 f"Failed to ingest external resource {source_url}: {exc}"
+            )
+
+        # After the commit, so the download never holds a transaction open.
+        if existing is None and commit:
+            settings = get_settings()
+            archive_new_external_paper_pdf(
+                paper_id,
+                source_url,
+                bucket_id=settings.paper_markdown_hf_bucket_id,
+                token=settings.hf_token or None,
             )
 
         paper_api = PaperService(self.db).get_paper_by_id(

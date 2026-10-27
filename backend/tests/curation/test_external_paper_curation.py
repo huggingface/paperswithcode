@@ -279,6 +279,20 @@ def test_ingestion_can_opt_out_for_callers_with_their_own_workflow(db, monkeypat
     assert db.query(Paper).count() == 1
 
 
+def test_ingestion_archives_the_pdf_only_for_newly_created_rows(db, monkeypatch):
+    archive = Mock()
+    monkeypatch.setattr(
+        "backend.services.external_resource_service.archive_new_external_paper_pdf",
+        archive,
+    )
+
+    _ingest(db, monkeypatch, Mock(return_value=True))
+    _ingest(db, monkeypatch, Mock(return_value=True))
+
+    archive.assert_called_once()
+    assert archive.call_args.args == (1, "https://huggingface.co/org/new-model")
+
+
 def test_backfill_queues_recent_uncurated_papers_hf_models_first(db):
     from datetime import timedelta
 
