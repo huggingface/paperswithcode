@@ -9,7 +9,7 @@
 .organizations-sort button { min-height: 38px; padding: 0 .7rem; border: 1px solid var(--hairline); border-radius: 3px; background: var(--bg-subtle); color: var(--ink-soft); font: .68rem var(--mono); }
 .organizations-sort button:hover, .organizations-sort button.active { border-color: var(--accent); color: var(--accent-text); background: var(--accent-subtle, var(--bg-subtle)); }
 .organizations-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .8rem; }
-.organization-card, .organization-card-skeleton { min-height: 230px; }
+.organization-card { min-height: 230px; }
 .organization-card { display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--hairline-strong); border-radius: 4px; background: var(--bg-subtle); color: inherit; text-decoration: none; transition: border-color .15s, transform .15s, box-shadow .15s; }
 .organization-card:hover { transform: translateY(-2px); border-color: var(--accent); box-shadow: 0 10px 30px rgb(0 0 0 / .06); }
 .organization-card:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
@@ -28,6 +28,13 @@
 .organization-highlight span { color: var(--ink-faint); font: .58rem var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 .organization-highlight strong { display: -webkit-box; overflow: hidden; font: 500 .88rem/1.3 var(--serif); -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .organization-card-footer { display: flex; justify-content: space-between; gap: 1rem; padding: .55rem .8rem; border-top: 1px solid var(--hairline); color: var(--ink-faint); font: .6rem var(--mono); }
+.organization-card-skeleton { animation: organization-skeleton-pulse 1.4s ease-in-out infinite; }
+.organization-card-skeleton:hover { transform: none; border-color: var(--hairline-strong); box-shadow: none; }
+.organization-card-header .organization-skeleton-line, .organization-skeleton-line { display: block; width: 9rem; max-width: 100%; height: .7rem; margin: .2rem 0; border-radius: 2px; background: var(--hairline); }
+.organization-card-header .organization-skeleton-line.short, .organization-skeleton-line.short { width: 4.5rem; }
+.organization-card-metrics .organization-skeleton-line { height: 1.4rem; }
+@keyframes organization-skeleton-pulse { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .organization-card-skeleton { animation: none; } }
 .organizations-empty { padding: 4rem 1rem; border: 1px dashed var(--hairline-strong); color: var(--ink-soft); text-align: center; font-family: var(--serif); }
 @media (max-width: 1100px) { .organizations-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 800px) { .organizations-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

@@ -3,7 +3,6 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Skeleton } from "@/components/ui/skeleton";
 import type { Organization } from "@/lib/api/catalog.types";
 import { catalogApi } from "@/lib/api/catalog";
 import "./Organizations.css";
@@ -97,7 +96,9 @@ const OrganizationsIndexView: React.FC = () => {
       <section aria-labelledby="organizations-heading">
         <div className="organizations-section-heading">
           <h2 id="organizations-heading">
-            {organizationsQ.data?.count ?? 21} organizations
+            {organizationsQ.data
+              ? `${organizationsQ.data.count.toLocaleString()} organizations`
+              : "Organizations"}
           </h2>
           <span>
             {sort === "trending"
@@ -139,9 +140,28 @@ const OrganizationsIndexView: React.FC = () => {
         </div>
 
         {organizationsQ.isLoading ? (
-          <div className="organizations-grid" aria-busy="true">
-            {Array.from({ length: 6 }).map((_, index) => (
-              <Skeleton key={index} className="organization-card-skeleton" />
+          <div
+            className="organizations-grid"
+            aria-busy="true"
+            aria-label="Loading organizations"
+          >
+            {Array.from({ length: 12 }).map((_, index) => (
+              <div key={index} className="organization-card organization-card-skeleton">
+                <div className="organization-card-header">
+                  <span className="organization-logo" />
+                  <div>
+                    <span className="organization-skeleton-line" />
+                    <span className="organization-skeleton-line short" />
+                  </div>
+                </div>
+                <div className="organization-card-metrics">
+                  <span className="organization-skeleton-line short" />
+                </div>
+                <div className="organization-highlight">
+                  <span className="organization-skeleton-line" />
+                  <span className="organization-skeleton-line" />
+                </div>
+              </div>
             ))}
           </div>
         ) : organizationsQ.error ? (
