@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { SessionManager, type SessionBeforeCompactEvent } from "@earendil-works/pi-coding-agent";
-import { CompactionController, compactionReserveTokens, omitPaperEvidence, protectedPreparation, splitSummaryInput, summarizeAll } from "../src/compaction.js";
+import { CompactionController, compactionReserveTokens, omitPaperEvidence, protectedPreparation, requestToPin, splitSummaryInput, summarizeAll } from "../src/compaction.js";
 import { boundedGatewayPayload, type createProvider } from "../src/provider.js";
 import type { PwCEvent } from "../src/events.js";
 
@@ -224,6 +224,9 @@ test("synthetic recovery prompts cannot replace the verbatim admitted request", 
   const original = "Compare exact values, preserve 0.000123 and never publish.";
   controller.reset(Infinity, () => {}, original);
   const event = preparation();
+  // The admitted request was summarized away; a recovery prompt is now the latest user message.
+  const first = event.branchEntries[0]!;
+  if (first.type === "message" && first.message.role === "user") first.message.content = original;
   const last = event.branchEntries.at(-1)!;
   if (last.type === "message" && last.message.role === "user") last.message.content = "Your previous response ended without an answer. Continue.";
   const handler = hook(controller, async () => ({ stopReason: "stop", content: [{ type: "text", text: "A concise summary" }] }));
@@ -305,4 +308,33 @@ test("the compaction reserve fits a reader prompt on large windows and keeps Pi'
   assert.equal(compactionReserveTokens(272_000), 90_666);
   assert.equal(compactionReserveTokens(200_000), 66_666);
   assert.equal(compactionReserveTokens(48_000), 16_384);
+});
+
+test("an incoming prompt that Pi has not appended yet is never pinned", () => {
+  const event = preparation();
+  const incoming = readerPrompt("Explain the pivots");
+  assert.equal(requestToPin(event.branchEntries, event.branchEntries[1]!.id, incoming), "");
+  const kept = event.branchEntries[1]!;
+  if (kept.type === "message" && kept.message.role === "user") kept.message.content = incoming;
+  assert.equal(requestToPin(event.branchEntries, event.branchEntries[1]!.id, incoming), "");
+  assert.equal(requestToPin(event.branchEntries, event.branchEntries[2]!.id, incoming), incoming);
+});
+
+test("a failed threshold compaction leaves the overflow retry for recovery", async () => {
+  let attempts = 0;
+  const controller = new CompactionController(() => {});
+  const handler = hook(controller, async () => {
+    attempts++;
+    if (attempts <= 2) throw new Error("unavailable");
+    return attempts === 3
+      ? { stopReason: "error" }
+      : { stopReason: "stop", content: [{ type: "text", text: "Recovered summary" }] };
+  });
+  const threshold = preparation();
+  threshold.reason = "threshold";
+  assert.deepEqual(await handler(threshold), { cancel: true });
+  assert.equal(controller.failed, false);
+  assert.ok((await handler(preparation())).compaction);
+  assert.equal(attempts, 4);
+  controller.finish();
 });

@@ -136,8 +136,20 @@ export function protectedPreparation(event: SessionBeforeCompactEvent) {
   const text = omitPaperEvidence([preparation.previousSummary ?? "", convertToLlm(messages).map((message) => message.role === "toolResult"
     ? `[Tool result ${message.toolCallId}]: ${JSON.stringify(message.content)}`
     : serializeConversation([message])).join("\n\n")].filter(Boolean).join("\n\n"));
-  const keptRequests = branchEntries.slice(cut).flatMap((entry) => userText(entry) ?? []);
-  return { text, firstKeptEntryId: branchEntries[cut]!.id, preservedRequest, keptRequests };
+  return { text, firstKeptEntryId: branchEntries[cut]!.id, preservedRequest };
+}
+
+// Pin the admitted request only when this compaction removes it from context:
+// a kept request is already present, and Pi checks the threshold before it
+// appends an incoming prompt, so a request not yet in the branch is added
+// after compaction. Either way pinning would duplicate a reader's paper.
+export function requestToPin(branchEntries: SessionEntry[], firstKeptEntryId: string, request: string): string {
+  if (!request) return "";
+  const cut = branchEntries.findIndex((entry) => entry.id === firstKeptEntryId);
+  const kept = branchEntries.slice(cut).some((entry) => userText(entry) === request);
+  const present = branchEntries.some((entry) => userText(entry) === request
+    || (entry.type === "compaction" && entry.summary.includes(request)));
+  return present && !kept ? request : "";
 }
 
 export class CompactionController {
@@ -204,6 +216,14 @@ export class CompactionController {
         let outcome = "failed";
         let failureReason: string | undefined;
         let tokensAfter: number | undefined;
+        // Threshold housekeeping gets its own retry so a failure cannot spend
+        // the single retry an overflow recovery later in this turn may need.
+        let thresholdRetryUsed = false;
+        const retryUsed = () => recovery ? this.retryUsed : thresholdRetryUsed;
+        const spendRetry = () => {
+          if (recovery) this.retryUsed = true;
+          else thresholdRetryUsed = true;
+        };
         const deadline = new AbortController();
         const timer = setTimeout(() => deadline.abort(), Math.max(0, deadlineAt - started));
         const signal = AbortSignal.any([event.signal, deadline.signal]);
@@ -226,8 +246,8 @@ export class CompactionController {
                 }, { signal, maxTokens, reasoning: "low" });
               } catch (error) {
                 signal.throwIfAborted();
-                if (this.retryUsed) throw error;
-                this.retryUsed = true;
+                if (retryUsed()) throw error;
+                spendRetry();
                 continue;
               }
               if (response.usage) {
@@ -241,21 +261,20 @@ export class CompactionController {
               if (response.stopReason === "stop") {
                 return response.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
               }
-              if (this.retryUsed) throw new Error("Summarization failed");
+              if (retryUsed()) throw new Error("Summarization failed");
               // A clipped summary may omit constraints or evidence. Spend the
               // single retry on more output room rather than accepting truncation.
               if (response.stopReason === "length") maxTokens = provider.model.maxTokens;
-              this.retryUsed = true;
+              spendRetry();
             }
           }, signal, Math.min(768 * 1024, Math.max(CHUNK_BYTES, provider.model.contextWindow - 32_000)));
           tokensAfter = estimateTokens({ role: "user", content: summary, timestamp: Date.now() });
           outcome = "success";
           // Recovery prompts are persisted as user messages by Pi. Pin the
           // actual admitted request independently of those synthetic messages.
-          const pinned = this.protectedRequest || prepared.preservedRequest;
-          // A kept request is already in context; pinning it again would
-          // duplicate a reader turn's whole paper right after compaction.
-          const request = prepared.keptRequests.includes(pinned) ? "" : pinned;
+          const request = this.protectedRequest
+            ? requestToPin(event.branchEntries, prepared.firstKeptEntryId, this.protectedRequest)
+            : prepared.preservedRequest;
           return { compaction: {
             summary: summary + (request ? `\n\n## Current user request (verbatim)\n${request}` : ""), firstKeptEntryId: prepared.firstKeptEntryId,
             tokensBefore: event.preparation.tokensBefore,
