@@ -59,7 +59,7 @@ def get_organizations(
     summary="List curated organization cards for the public directory",
 )
 def get_organization_index(db: Session = Depends(get_database_session)):
-    return OrganizationService(db).get_organizations(curated_only=True)
+    return OrganizationService(db).get_organization_index()
 
 
 @router.post(

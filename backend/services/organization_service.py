@@ -2,6 +2,7 @@
 Organization service for listing organizations and organization-scoped taxonomy.
 """
 
+import time
 from datetime import date, timedelta
 from typing import Optional
 
@@ -36,6 +37,12 @@ from backend.services.trending_ranking_service import (
 from backend.config import get_settings
 from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.organization_logos import organization_logo_path
+
+
+# The public directory builds ~200 cards with a top paper each, and featuring
+# and trending change once a day, so a short shared cache keeps it current.
+ORGANIZATION_INDEX_TTL_SECONDS = 600
+_organization_index_cache: dict[str, tuple[float, Organizations]] = {}
 
 
 class OrganizationService:
@@ -114,6 +121,20 @@ class OrganizationService:
             created_at=db_org.created_at,
             updated_at=db_org.updated_at,
         )
+
+    def get_organization_index(self) -> Organizations:
+        """Return the public directory cards, briefly cached on PostgreSQL."""
+        bind = self.db.get_bind()
+        if bind.dialect.name != "postgresql":
+            return self.get_organizations(curated_only=True)
+        key = str(bind.url)
+        cached = _organization_index_cache.get(key)
+        now = time.monotonic()
+        if cached and now - cached[0] < ORGANIZATION_INDEX_TTL_SECONDS:
+            return cached[1]
+        result = self.get_organizations(curated_only=True)
+        _organization_index_cache[key] = (now, result)
+        return result
 
     def get_organizations(
         self,
