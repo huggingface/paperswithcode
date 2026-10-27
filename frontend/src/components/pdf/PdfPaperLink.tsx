@@ -43,7 +43,8 @@ export function PdfPaperLink({ anchor, routeId, internal }: PdfPaperLinkTarget) 
 // A bibliography entry has no PDF link of its own, so its preview target is
 // positioned over the entry's text on the page's 0–1000 grid. Its card can jump
 // back to where the text cites it, stepping through each citation in turn.
-export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1], citations, onShowCitation }: PdfBibliographyLink & {
+export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1], citations = [], onShowCitation }: PdfBibliographyLink & {
+  citations?: PdfHighlightBox[][];
   onShowCitation?: (citation: PdfHighlightBox[]) => void;
 }) {
   const [next, setNext] = useState(0);

@@ -66,12 +66,8 @@ function textLines(items: TextContent['items']): TextLine[] {
 interface ReferenceEntry { arxivId: string | null; titles: string[]; box: number[] | null }
 interface PageText { view: number[]; content: TextContent }
 
-/**
- * A resolved bibliography entry on one page; box is [x0, y0, x1, y1] on a
- * 0–1000 page grid, and citations are where the text cites it, in reading
- * order, each as the boxes of its one or more printed lines.
- */
-export interface PdfBibliographyLink { name: string; routeId: string; box: number[]; citations: PdfHighlightBox[][] }
+/** A resolved bibliography entry on one page; box is [x0, y0, x1, y1] on a 0–1000 page grid. */
+export interface PdfBibliographyLink { name: string; routeId: string; box: number[] }
 
 // Converts PDF user-space coordinates to the 0–1000 grid of a page's view box.
 function pageGrid([left, bottom, right, top]: number[]) {
@@ -275,25 +271,27 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
     };
     const positions = await getReferences();
     if (!positions.length) return byName;
+    // Pages load in parallel; citations are then added in page order.
+    const pages = (count: number) => Array.from({ length: count }, (_, index) => index + 1);
     if (positions[0].name.startsWith('text:')) {
       const first = positions[0];
-      for (let page = 1; page <= first.page; page++) {
-        const { view, content } = await getPageText(page);
+      const texts = await Promise.all(pages(first.page).map(getPageText));
+      texts.forEach(({ view, content }, index) => {
+        const page = index + 1;
         const items = page < first.page ? content.items : content.items.filter(item => 'str' in item && item.transform[5] > first.y + 1);
         for (const [number, boxes] of numberedCitationBoxes(items, view)) {
           for (const bbox of boxes) add(`text:${number}`, page, bbox);
         }
-      }
+      });
       return byName;
     }
-    for (let page = 1; page <= pdf.numPages; page++) {
-      const annotations = await getPageLinks(page);
-      if (!annotations.some(annotation => typeof annotation.dest === 'string' && /^cite[.:]/i.test(annotation.dest))) continue;
-      const { x, y } = pageGrid((await pdf.getPage(page)).view);
-      for (const { dest, rect } of annotations) {
-        if (typeof dest !== 'string' || !/^cite[.:]/i.test(dest) || !rect) continue;
-        add(dest, page, [x(rect[0]), y(rect[3]), x(rect[2]), y(rect[1])]);
-      }
+    const links = await Promise.all(pages(pdf.numPages).map(async page => {
+      const annotations = (await getPageLinks(page)).filter(annotation => typeof annotation.dest === 'string' && /^cite[.:]/i.test(annotation.dest) && annotation.rect);
+      return { page, annotations, view: annotations.length ? (await pdf.getPage(page)).view : [] };
+    }));
+    for (const { page, annotations, view } of links) {
+      const { x, y } = pageGrid(view);
+      for (const { dest, rect } of annotations) add(dest as string, page, [x(rect![0]), y(rect![3]), x(rect![2]), y(rect![1])]);
     }
     return byName;
   })();
@@ -313,14 +311,16 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCit
   // preview targets from the same entries the in-text citations resolve to.
   const bibliographyLinks = async (page: number): Promise<PdfBibliographyLink[]> => {
     const onPage = (await getReferences()).filter(position => position.page === page);
-    if (!onPage.length) return [];
-    const cited = await getCitations().catch(() => new Map<string, PdfHighlightBox[][]>());
     const links = await Promise.all(onPage.map(async ({ name }) => {
       const [entry, routeId] = await Promise.all([getEntry(name), routeIdFor(name)]);
-      return entry?.box && routeId ? { name, routeId, box: entry.box, citations: cited.get(name) ?? [] } : null;
+      return entry?.box && routeId ? { name, routeId, box: entry.box } : null;
     }));
     return links.filter((link): link is PdfBibliographyLink => link !== null);
   };
-  return Object.assign(resolve, { bibliographyLinks });
+  // Where the text cites an entry, in reading order, each citation as the boxes
+  // of its one or more printed lines. Scans the whole document once, so cards
+  // never wait for it.
+  const citationsOf = async (name: string): Promise<PdfHighlightBox[][]> => (await getCitations()).get(name) ?? [];
+  return Object.assign(resolve, { bibliographyLinks, citationsOf });
 }
 export type PdfCitationResolver = ReturnType<typeof createPdfCitationResolver>;

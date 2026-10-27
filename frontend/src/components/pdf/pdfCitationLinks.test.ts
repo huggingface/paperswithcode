@@ -85,8 +85,8 @@ describe('arXiv PDF links', () => {
     const lookup = vi.fn().mockResolvedValue(new Map());
     const resolve = createPdfCitationResolver(pdf, lookup);
     expect(await resolve.bibliographyLinks(12)).toEqual([
-      { name: 'cite.lin2014', routeId: '1405.0312', box: [142, 188, 475, 218], citations: [] },
-      { name: 'cite.right', routeId: '2501.33333', box: [533, 188, 867, 203], citations: [] },
+      { name: 'cite.lin2014', routeId: '1405.0312', box: [142, 188, 475, 218] },
+      { name: 'cite.right', routeId: '2501.33333', box: [533, 188, 867, 203] },
     ]);
     expect(await resolve.bibliographyLinks(3)).toEqual([]);
   });
@@ -103,8 +103,9 @@ describe('arXiv PDF links', () => {
       getTextContent: async () => ({ items: page === 12 ? [{ str: '[1] T. Lin.', transform: [10, 0, 0, 10, 85, 640], width: 200, height: 10 }, { str: '[3] Right.', transform: [10, 0, 0, 10, 320, 640], width: 200, height: 10 }] : [] }),
     }));
     Object.assign(pdf, { numPages: 12 });
-    const links = await createPdfCitationResolver(pdf).bibliographyLinks(12);
-    expect(links.map(({ name, citations }) => [name, citations])).toEqual([
+    const resolve = createPdfCitationResolver(pdf);
+    const names = (await resolve.bibliographyLinks(12)).map(link => link.name);
+    expect(await Promise.all(names.map(async name => [name, await resolve.citationsOf(name)]))).toEqual([
       ['cite.lin2014', [[{ page: 2, bbox: [200, 113, 220, 125] }], [{ page: 5, bbox: [100, 738, 150, 750] }, { page: 5, bbox: [50, 750, 70, 763] }]]],
       ['cite.right', [[{ page: 5, bbox: [500, 488, 520, 500] }]]],
     ]);
@@ -149,11 +150,10 @@ describe('PDFs without bibliography destinations', () => {
 
   it('finds numbered citations in the text before the bibliography', async () => {
     const resolve = createPdfCitationResolver(wordExport());
-    const links = await resolve.bibliographyLinks(2);
-    expect(links.find(link => link.name === 'text:1')?.citations).toEqual([]);
+    expect(await resolve.citationsOf('text:1')).toEqual([]);
     // The in-text "[2, 7]" cites [2]; "[9]" inside the bibliography is no citation.
-    expect(links.find(link => link.name === 'text:2')?.citations).toEqual([[{ page: 1, bbox: [142, 240, 176, 253] }]]);
-    expect((await resolve.bibliographyLinks(3)).map(link => link.citations)).toEqual([[]]);
+    expect(await resolve.citationsOf('text:2')).toEqual([[{ page: 1, bbox: [142, 240, 176, 253] }]]);
+    expect(await resolve.citationsOf('text:4')).toEqual([]);
   });
 });
 

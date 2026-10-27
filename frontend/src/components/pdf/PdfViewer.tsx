@@ -149,14 +149,18 @@ function LazyPdfPage({
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
   const { paperLinks, onAnnotations } = usePdfPaperLinks(ref, visible, resolveCitation, warmPreviews);
-  const [bibliographyLinks, setBibliographyLinks] = useState<PdfBibliographyLink[]>([]);
+  const [bibliographyLinks, setBibliographyLinks] = useState<(PdfBibliographyLink & { citations?: PdfHighlightBox[][] })[]>([]);
   useEffect(() => {
     if (!visible || !resolveCitation) return;
     let current = true;
-    void resolveCitation.bibliographyLinks(page).then(links => {
+    void resolveCitation.bibliographyLinks(page).then(async links => {
       if (!current) return;
       if (links.length) warmPreviews?.([...new Set(links.map(link => link.routeId))]);
       setBibliographyLinks(links);
+      if (!links.length) return;
+      // Cards appear first; their jumps to in-text citations follow the scan.
+      const citations = await Promise.all(links.map(link => resolveCitation.citationsOf(link.name)));
+      if (current) setBibliographyLinks(links.map((link, index) => ({ ...link, citations: citations[index] })));
     }).catch(() => undefined);
     return () => { current = false; };
   }, [page, resolveCitation, visible, warmPreviews]);
