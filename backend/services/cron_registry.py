@@ -1728,6 +1728,41 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
+        id="link_google_scholar_profiles",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.weekly(2, 5, 20),),
+        schedule_grace_minutes=180,
+        systemd_timer="pwc-cron-link-google-scholar-profiles.timer",
+        systemd_service="pwc-cron-link-google-scholar-profiles.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Link Google Scholar Profiles",
+        category="weekly",
+        schedule="20 5 * * 3 (Wed 05:20 UTC)",
+        script_path="backend/scripts/link_google_scholar_profiles.py",
+        log_name="link_google_scholar_profiles",
+        process_patterns=("backend.scripts.link_google_scholar_profiles",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "link_google_scholar_profiles.lock"
+        ),
+        expected_runtime_minutes=60,
+        stale_after_minutes=11520,
+        critical=False,
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT count(*) AS candidates,
+                   count(*) FILTER (WHERE serpapi_evidence IS NOT NULL)
+                     AS profiles_read,
+                   (SELECT count(*) FROM author_google_scholar_profiles)
+                     AS linked_authors,
+                   max(s2_checked_at) AS last_s2_check,
+                   max(serpapi_checked_at) AS last_profile_read
+            FROM author_google_scholar_candidates
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="refresh_conference_deadlines",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(720, offset_minutes=460),),

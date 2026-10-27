@@ -150,6 +150,9 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     "link_openalex_organizations": (
         "backend/services/openalex_organization_linking_service.py",
     ),
+    "link_google_scholar_profiles": (
+        "backend/services/google_scholar_link_service.py",
+    ),
     "calculate_organization_trending_scores": (
         "backend/services/organization_trending_service.py",
     ),
@@ -254,6 +257,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     ),
     "link_openalex_organizations": (
         "backend/tests/test_backfill_openalex_organizations.py",
+    ),
+    "link_google_scholar_profiles": (
+        "backend/tests/author/test_google_scholar_link_service.py",
     ),
     "calculate_organization_trending_scores": (
         "backend/tests/test_organization_trending_service.py",

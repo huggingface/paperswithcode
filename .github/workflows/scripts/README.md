@@ -33,6 +33,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-enqueue-benchmark-gap-review.timer` | `*-*-* 06:35:00` | `enqueue_benchmark_gap_review` | `backend/scripts/enqueue_benchmark_gap_review.py` |
 | `pwc-cron-scan-model-releases.timer` | `*-*-* 01/3:48:00` | `scan_model_releases` | `backend/scripts/scan_model_releases.py` |
 | `pwc-cron-sweep-conference-deadlines.timer` | `Sun *-*-* 02:35:00` | `sweep_conference_deadlines` | `backend/scripts/sweep_conference_deadlines.py` |
+| `pwc-cron-link-google-scholar-profiles.timer` | `Wed *-*-* 05:20:00` | `link_google_scholar_profiles` | `backend/scripts/link_google_scholar_profiles.py` |
 | `pwc-cron-refresh-conference-deadlines.timer` | `*-*-* 07:40:00`<br>`*-*-* 19:40:00` | `refresh_conference_deadlines` | `backend/scripts/refresh_conference_deadlines.py` |
 | `pwc-cron-discover-x-threads.timer` | `*-*-* 08,20:22:00` | `discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | `pwc-cron-post-trending-paper-to-x.timer` | `*-*-* 00/4:13:00` | `post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
@@ -450,6 +451,18 @@ OpenAlex adds affiliations days to weeks after a paper appears, so the window is
 wide; existing links are skipped and none are deleted. A refused OpenAlex request
 fails the run. Pass `--days N` for a wider window and `--dry-run` to count
 without writing; `backfill_openalex_organizations.py` handles historical runs.
+
+`backend/scripts/link_google_scholar_profiles.py` (weekly) links authors to
+Google Scholar profiles only when papers prove it. Candidates are Wikidata
+people with a Scholar ID whose name fits an author with 3+ papers; each new
+author is checked once on Semantic Scholar (up to 600 per run, largest first),
+then the SerpAPI searches left this month (`PWC_SERPAPI_API_KEY`, free plan:
+250) read the Scholar profiles of S2-matched candidates. A link is stored when
+the profile lists at least half of the author's papers (70% for names several
+Wikidata researchers share), and no other author claims the profile. Progress
+is kept in `author_google_scholar_candidates`; links are never deleted. Pass
+`--dry-run` to check Semantic Scholar and report without reading profiles or
+writing.
 
 `calculate_organization_trending_scores.py` runs after paper trending and
 organization sync. It upserts one raw snapshot per featured organization and UTC

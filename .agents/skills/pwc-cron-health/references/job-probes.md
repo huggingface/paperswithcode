@@ -185,6 +185,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Open one matched post from the JSON and confirm it is a paper author or the paper's own organization (business-verified account) introducing that paper, never an outside account; with apply on, confirm the paper page's X threads card shows it.
 - **Correctness:** `X search HTTP 401/403` means a bad or unentitled token and `429` an exhausted quota (the run stops at the first one). A zero `papers_scanned` means every recent candidate already has threads or used its three scans.
 
+## `link_google_scholar_profiles`
+
+- **Effect:** Checks Wikidata Scholar-ID candidates (P1960) for authors with 3+ papers: each new author once on Semantic Scholar (ORCID / S2 author ID on 15 sampled papers) into `author_google_scholar_candidates`, then spends the SerpAPI searches left this month (minus 10) reading Scholar profiles of S2-matched candidates, largest authors first, and upserts confirmed links into `author_google_scholar_profiles`; never deletes links.
+- **Independent proof:** Open a recently linked author (`/api/v1/authors/<id>` → `google_scholar_id`) and its Scholar page; most of the author's PwC papers must be on the profile and the name must fit.
+- **Trap:** On the free SerpAPI plan (250 searches/month) most weekly runs read zero profiles: that is healthy, not stalled; `last_profile_read` advances once a month after the quota resets. `PWC_SERPAPI_API_KEY` missing from `production-cron.env` exits 1. Semantic Scholar 429s slow the run (key shared with citations) but are retried.
+
 ## `sweep_conference_deadlines` / `refresh_conference_deadlines`
 
 - **Effect:** Each run first collects finished sweeps (Hugging Face Jobs labelled `workflow=conference-deadlines`), validates every per-conference change set and applies the accepted part to `conferences` / `conference_deadlines` as `deadline_agent_create|update` catalog mutation events by `conference-deadline-agent`; then it launches at most one Job (weekly: up to 30 prioritized conferences with 3 retrieval agents; daily: imminent deadlines and overdue top-tier conferences with 1 agent, skipped when a sweep started in the last 20 h). The ledger is `conference_deadline_sweeps` (`running` → `applied` | `failed`, with per-series `results`, `changes_applied`, `cost_usd`). The research itself never runs on the VPS.

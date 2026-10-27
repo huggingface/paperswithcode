@@ -157,6 +157,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Research AI conference deadlines off-box weekly",
     ),
     TimerSpec(
+        job="link_google_scholar_profiles",
+        on_calendar=("Wed *-*-* 05:20:00",),
+        description="Link authors to Scholar profiles confirmed by their papers weekly",
+    ),
+    TimerSpec(
         job="refresh_conference_deadlines",
         on_calendar=("*-*-* 07:40:00", "*-*-* 19:40:00"),
         description="Collect deadline research and check imminent deadlines daily",

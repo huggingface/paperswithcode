@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Link authors to Scholar profiles confirmed by their papers weekly
+
+[Timer]
+OnCalendar=Wed *-*-* 05:20:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-link-google-scholar-profiles.service
+
+[Install]
+WantedBy=timers.target

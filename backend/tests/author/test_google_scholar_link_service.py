@@ -1,9 +1,9 @@
-from backend.scripts.link_google_scholar_profiles import decide
 from backend.services.google_scholar_link_service import (
     AuthorPaper,
     Evidence,
     WikidataPerson,
     candidate_people,
+    decide,
     full_profile_evidence,
     index_people_by_name,
     names_compatible,

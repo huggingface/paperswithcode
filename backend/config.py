@@ -156,6 +156,13 @@ class Settings(BaseSettings, ChatSettings):
     semantic_scholar_api_key: str = Field(
         default="", description="Semantic Scholar API key for citation data"
     )
+    serpapi_api_key: str = Field(
+        default="",
+        description=(
+            "SerpAPI key for reading Google Scholar author profiles "
+            "(link_google_scholar_profiles)"
+        ),
+    )
     semantic_scholar_api_key_2: str = Field(
         default="",
         description=(

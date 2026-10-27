@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 QLEVER_WIKIDATA_URL = "https://qlever.cs.uni-freiburg.de/api/wikidata"
 S2_BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"
 SERPAPI_URL = "https://serpapi.com/search.json"
+SERPAPI_ACCOUNT_URL = "https://serpapi.com/account.json"
 
 # Scholar user IDs are 12 URL-safe characters; Wikidata also holds junk values.
 SCHOLAR_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12}$")
@@ -284,6 +285,15 @@ class SerpApiScholar:
         self.max_pages = max_pages
         self.requests = 0
 
+    def searches_left(self) -> int:
+        """Searches left this month; reading the account costs none."""
+        response = self.client.get(
+            SERPAPI_ACCOUNT_URL, params={"api_key": self.api_key}, timeout=60
+        )
+        if response.status_code != 200:
+            raise RuntimeError(f"SerpAPI account HTTP {response.status_code}")
+        return int(response.json().get("total_searches_left") or 0)
+
     def profile(
         self, scholar_id: str, start_page: int = 0, max_pages: int | None = None
     ) -> dict:
@@ -355,6 +365,55 @@ def full_profile_evidence(
         profile["complete"] = rest["complete"]
         evidence = serpapi_evidence(papers, profile, common_name)
     return profile, evidence
+
+
+def sample_papers(papers: list[AuthorPaper], size: int) -> list[AuthorPaper]:
+    """An even sample of an author's papers, enough to judge an S2 match."""
+    papers = sorted(papers, key=lambda p: p.paper_id)
+    if len(papers) <= size:
+        return papers
+    step = len(papers) / size
+    return [papers[int(i * step)] for i in range(size)]
+
+
+def evidence_json(evidence: Evidence) -> dict:
+    return {
+        "verdict": evidence.verdict,
+        "considered": evidence.considered,
+        "matched": len(evidence.matched_paper_ids),
+        "share": round(evidence.share, 2),
+        "matched_paper_ids": evidence.matched_paper_ids,
+        "conflicting_paper_ids": evidence.conflicting_paper_ids,
+    }
+
+
+def decide(rows: list[dict]) -> None:
+    """Set each candidate's status; only a sole verified person is proposed.
+
+    Rows carry `author_id`, `scholar_id`, `s2` and `serpapi` evidence (as from
+    `evidence_json`, `serpapi` may be None).
+    """
+    for row in rows:
+        # Scholar's own list is the stronger proof; it decides when present.
+        row["status"] = (row["serpapi"] or row["s2"])["verdict"]
+    by_author = defaultdict(list)
+    for row in rows:
+        by_author[row["author_id"]].append(row)
+    for author_rows in by_author.values():
+        verified = {r["scholar_id"] for r in author_rows if r["status"] == "verified"}
+        for row in author_rows:
+            if row["status"] == "verified":
+                row["status"] = "proposed" if len(verified) == 1 else "ambiguous"
+    by_scholar = defaultdict(list)
+    for row in rows:
+        if row["status"] == "proposed":
+            by_scholar[row["scholar_id"]].append(row)
+    for scholar_rows in by_scholar.values():
+        # Two Wikidata items may carry one Scholar ID; only distinct authors count.
+        if len({r["author_id"] for r in scholar_rows}) > 1:
+            # Several PwC rows for one person: likely duplicates to merge first.
+            for row in scholar_rows:
+                row["status"] = "shared_scholar_id"
 
 
 def iter_chunks(items: list, size: int) -> Iterator[list]:

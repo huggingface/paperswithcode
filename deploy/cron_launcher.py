@@ -588,6 +588,17 @@ COMMANDS: dict[str, Job] = {
             "at most one Hugging Face Job"
         ),
     ),
+    "link_google_scholar_profiles": job(
+        "-m",
+        "backend.scripts.link_google_scholar_profiles",
+        # Up to 600 new authors on the shared, throttled Semantic Scholar key.
+        timeout="3h",
+        idempotency=(
+            "check each Wikidata Scholar candidate once on Semantic Scholar and "
+            "once on its Scholar profile within the monthly SerpAPI quota, then "
+            "upsert confirmed author links; never deletes links"
+        ),
+    ),
     "refresh_conference_deadlines": job(
         "-m",
         "backend.scripts.refresh_conference_deadlines",
