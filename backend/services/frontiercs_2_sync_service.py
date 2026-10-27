@@ -21,6 +21,10 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 FRONTIERCS_2_URL = "https://frontier-cs.org/#leaderboard"
@@ -62,7 +66,8 @@ _DEEPSEEK_V4_1_FLASH = "2609.19969"
 # Exact FrontierCS model names are the trust boundary between a leaderboard
 # entry and its introducing paper; the harness is shown per entry. Catalog
 # model names and papers follow the reviewed Vals AI sync identities.
-# Unreviewed names are reported, never imported.
+# Other names are matched automatically when the catalog names them
+# unambiguously, and otherwise handed to the release radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Claude Opus 5.5": ModelIdentity(
         "Claude Opus 5.5", source_url="https://www.anthropic.com/claude-opus-5-5"
@@ -148,6 +153,7 @@ class FrontierCSEntry:
     fci: float
     fci_low: float
     fci_high: float
+    lab: str = ""
 
     @property
     def label(self) -> str:
@@ -166,6 +172,9 @@ class FrontierCSSyncStats:
     matched: int = 0
     created: int = 0
     changed: int = 0
+    # Names outside MODEL_IDENTITIES that the catalog matched on its own.
+    auto_matched: list[str] = field(default_factory=list)
+    # Names with no paper yet; each is a release signal for the radar.
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
     missing_upstream: list[str] = field(default_factory=list)
@@ -259,8 +268,20 @@ def parse_frontiercs_2(source: str) -> FrontierCSLeaderboard:
             raise ValueError(f"FrontierCS pass rate disagrees for {upstream_id}")
         if not low <= fci <= high:
             raise ValueError(f"FrontierCS FCI interval is invalid for {upstream_id}")
+        lab = model.get("lab")
+        if not isinstance(lab, str) or len(lab) > 200:
+            raise ValueError(f"FrontierCS model is malformed: {model!r}")
         entry = FrontierCSEntry(
-            upstream_id, name, harness, rate, int(passed), int(runs), fci, low, high
+            upstream_id,
+            name,
+            harness,
+            rate,
+            int(passed),
+            int(runs),
+            fci,
+            low,
+            high,
+            lab.strip(),
         )
         if entry.label in seen:
             raise ValueError(f"FrontierCS lists {entry.label!r} twice")
@@ -300,7 +321,7 @@ def _methodology(entry: FrontierCSEntry) -> str:
 
 
 class FrontierCS2SyncService:
-    """Create and revise reviewed FrontierCS 2 rows; never create papers."""
+    """Create and revise FrontierCS 2 rows; never create papers."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -351,23 +372,62 @@ class FrontierCS2SyncService:
         self, leaderboard: FrontierCSLeaderboard, *, commit: bool = True
     ) -> FrontierCSSyncStats:
         entries = leaderboard.entries
-        selected = [
+        reviewed = [
             (MODEL_IDENTITIES[entry.name], entry)
             for entry in entries
             if entry.name in MODEL_IDENTITIES
         ]
-        if len(selected) < MIN_SELECTED_ENTRIES:
+        if len(reviewed) < MIN_SELECTED_ENTRIES:
             raise RuntimeError(
-                f"FrontierCS 2 has only {len(selected)} reviewed entries; "
+                f"FrontierCS 2 has only {len(reviewed)} reviewed entries; "
                 "refusing to update the managed leaderboard"
             )
-        stats = FrontierCSSyncStats(
-            fetched=len(entries),
-            unreviewed=[e.label for e in entries if e.name not in MODEL_IDENTITIES],
-        )
+        stats = FrontierCSSyncStats(fetched=len(entries))
         try:
             task, dataset = self._leaderboard_identity()
             paper_ids = self._paper_ids()
+            new_entries = [e for e in entries if e.name not in MODEL_IDENTITIES]
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="frontiercs-2",
+                leaderboard_name="FrontierCS 2",
+                leaderboard_url=FRONTIERCS_2_URL,
+            )
+            matched = matcher.match(
+                [LeaderboardModel(e.name, e.lab) for e in new_entries]
+            )
+            # (paper id, catalog model name, is_open, HF model URL, entry)
+            selected = [
+                (
+                    paper_ids.get(identity.paper_key),
+                    identity.model_name,
+                    identity.is_open,
+                    identity.hf_model_url,
+                    entry,
+                )
+                for identity, entry in reviewed
+            ]
+            for entry in new_entries:
+                if (match := matched.get(entry.name)) is None:
+                    stats.unreviewed.append(entry.label)
+                    continue
+                selected.append(
+                    (
+                        match.paper_id,
+                        match.model_name,
+                        match.is_open,
+                        match.hf_model_url,
+                        entry,
+                    )
+                )
+                stats.auto_matched.append(entry.label)
+            matcher.report_unmatched(
+                [
+                    LeaderboardModel(e.name, e.lab)
+                    for e in new_entries
+                    if e.name not in matched
+                ]
+            )
             rows = (
                 self.db.query(Evaluation)
                 .filter(
@@ -390,24 +450,23 @@ class FrontierCS2SyncService:
             }
             now = datetime.now(UTC)
             published: set[int] = set()
-            for identity, entry in selected:
-                paper_id = paper_ids.get(identity.paper_key)
+            for paper_id, model_name, is_open, hf_model_url, entry in selected:
                 if paper_id is None:
                     stats.missing_papers.append(entry.label)
                     continue
                 metrics = {PASS_RATE: entry.pass_rate, FCI: entry.fci}
                 methodology = _methodology(entry)
-                key = (paper_id, identity.model_name, entry.harness)
+                key = (paper_id, model_name, entry.harness)
                 row = rows_by_identity.get(key)
                 if row is None:
                     row = Evaluation(
                         paper_id=paper_id,
                         task_id=task.id,
                         dataset_id=dataset.id,
-                        model_name=identity.model_name,
+                        model_name=model_name,
                         harness=entry.harness,
-                        is_open=identity.is_open,
-                        hf_model_url=identity.hf_model_url,
+                        is_open=is_open,
+                        hf_model_url=hf_model_url,
                         external_source_url=FRONTIERCS_2_URL,
                         source_url=FRONTIERCS_2_URL,
                         external=True,

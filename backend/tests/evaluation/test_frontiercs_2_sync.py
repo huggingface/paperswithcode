@@ -1,5 +1,6 @@
 """Parsing and sync tests for the FrontierCS 2 leaderboard."""
 
+import re
 from datetime import date
 from pathlib import Path
 
@@ -14,14 +15,23 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     PaperTask,
     Task,
     TaskDataset,
     TaskDatasetMetric,
 )
 from backend.services import frontiercs_2_sync_service as service
+from backend.services.leaderboard_model_matching_service import (
+    title_announces_model,
+)
 from backend.services.frontiercs_2_sync_service import (
     FCI,
     FRONTIERCS_2_DATA_URL,
@@ -76,6 +86,12 @@ def _session() -> Session:
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
             PaperTask.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -220,8 +236,24 @@ def test_score_updates_revise_the_row_and_unknown_models_are_reported():
     )
     stats = FrontierCS2SyncService(session).sync(parse_frontiercs_2(updated))
     assert (stats.changed, stats.created) == (1, 0)
+    assert stats.auto_matched == []
     assert stats.unreviewed == ["Step 6 (Step Code)"]
     assert stats.missing_upstream == ["Step-5-Preview (Step Code)"]
+    # The unmatched model is handed to the release radar, once per name.
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.signal_key, signal.lab, signal.model_name) == (
+        "stepfun/step6",
+        "StepFun",
+        "Step 6",
+    )
+    assert signal.lead_url == signal.source == FRONTIERCS_2_URL
+    assert (signal.status, signal.sightings, signal.lead_is_official) == (
+        "discovered",
+        1,
+        False,
+    )
+    FrontierCS2SyncService(session).sync(parse_frontiercs_2(updated))
+    assert session.query(ModelReleaseSignal).one().sightings == 2
     rows = _rows(session)
     assert rows["Claude Opus 5.5 (Claude Code)"].metrics == {
         PASS_RATE: 60.4,
@@ -248,3 +280,139 @@ def test_unconfigured_leaderboard_is_refused():
     session.commit()
     with pytest.raises(RuntimeError, match="not linked"):
         FrontierCS2SyncService(session).sync(parse_frontiercs_2(SOURCE))
+
+
+def _new_model(source: str, upstream_id: str, name: str) -> str:
+    """Rename one entry so it falls outside MODEL_IDENTITIES."""
+    old = re.search(rf'{{id:"{upstream_id}",name:"[^"]+"', source).group(0)
+    return source.replace(old, f'{{id:"{upstream_id}",name:"{name}"', 1)
+
+
+def test_new_models_match_an_announcing_title_or_a_model_release():
+    session = _session()
+    session.add_all(
+        [
+            Paper(
+                id=2001,
+                title="Kimi K3.2: Open Agentic Intelligence",
+                source="external",
+                source_url="https://www.kimi.com/blog/kimi-k3-2",
+                version="v1",
+                is_latest_version=True,
+            ),
+            # Same family, other version: never a match for "Kimi K3.2".
+            Paper(
+                id=2002,
+                title="Kimi K3.2 Pro: Advancing Open Intelligence",
+                source="external",
+                source_url="https://www.kimi.com/blog/kimi-k3-2-pro",
+                version="v1",
+                is_latest_version=True,
+            ),
+            Paper(
+                id=2003,
+                title="Introducing GPT-6.2",
+                source="external",
+                source_url="https://openai.com/index/introducing-gpt-6-2",
+                version="v1",
+                is_latest_version=True,
+            ),
+            ModelRelease(
+                id=1,
+                paper_id=2003,
+                canonical_name="GPT-6.2 Terra",
+                publisher="OpenAI",
+                aliases=["gpt-6.2-terra"],
+                is_open=False,
+            ),
+            Paper(
+                id=2004,
+                title="Muse Spark 2",
+                source="external",
+                source_url="https://research.meta.ai/blog/muse-spark-2",
+                version="v1",
+                is_latest_version=True,
+            ),
+            ModelRelease(
+                id=2,
+                paper_id=2004,
+                canonical_name="Muse Spark 2",
+                publisher="Meta",
+                aliases=[],
+                is_open=True,
+            ),
+            HfArtifact(
+                id=1,
+                kind="model",
+                repo_id="moonshotai/Kimi-K3.2",
+                url="https://huggingface.co/moonshotai/Kimi-K3.2",
+            ),
+            PaperHfArtifact(paper_id=2001, hf_artifact_id=1),
+        ]
+    )
+    session.commit()
+    source = _new_model(SOURCE, "k3", "Kimi K3.2")
+    source = _new_model(source, "terra", "GPT-6.2 Terra")
+    source = _new_model(source, "muse", "Muse Spark 2")
+    stats = FrontierCS2SyncService(session).sync(parse_frontiercs_2(source))
+
+    assert stats.auto_matched == [
+        "GPT-6.2 Terra (Codex CLI)",
+        "Muse Spark 2 (Muse Code)",
+        "Kimi K3.2 (Kimi Code)",
+    ]
+    assert stats.unreviewed == stats.missing_papers == []
+    assert session.query(ModelReleaseSignal).count() == 0
+    rows = _rows(session)
+    kimi = rows["Kimi K3.2 (Kimi Code)"]
+    assert (kimi.paper_id, kimi.is_open) == (2001, True)
+    assert kimi.hf_model_url == "https://huggingface.co/moonshotai/Kimi-K3.2"
+    assert not rows["GPT-6.2 Terra (Codex CLI)"].is_open
+    assert rows["GPT-6.2 Terra (Codex CLI)"].paper_id == 2003
+    muse = rows["Muse Spark 2 (Muse Code)"]
+    assert (muse.paper_id, muse.is_open) == (2004, True)
+    assert muse.metrics == {PASS_RATE: 12.5, FCI: 22}
+    assert 2001 in {row.paper_id for row in session.query(PaperTask).all()}
+    # The release match is remembered as a provider alias.
+    assert {alias.alias for alias in session.query(ModelProviderAlias).all()} == {
+        "GPT-6.2 Terra",
+        "Muse Spark 2",
+    }
+
+
+def test_ambiguous_titles_are_not_matched():
+    session = _session()
+    for paper_id, url in ((2001, "https://a.example/x"), (2002, "https://b.example/x")):
+        session.add(
+            Paper(
+                id=paper_id,
+                title="Kimi K3.2: Open Agentic Intelligence",
+                source="external",
+                source_url=url,
+                version="v1",
+                is_latest_version=True,
+            )
+        )
+    session.commit()
+    stats = FrontierCS2SyncService(session).sync(
+        parse_frontiercs_2(_new_model(SOURCE, "k3", "Kimi K3.2"))
+    )
+    assert stats.auto_matched == []
+    assert stats.unreviewed == ["Kimi K3.2 (Kimi Code)"]
+    assert session.query(ModelReleaseSignal).one().model_name == "Kimi K3.2"
+
+
+@pytest.mark.parametrize(
+    ("title", "name", "announces"),
+    [
+        ("Kimi K3.1 Pro: Advancing Open Intelligence", "Kimi K3.1 Pro", True),
+        ("Introducing GPT-6.1 Terra", "GPT-6.1 Terra", True),
+        ("GLM-5.3: From Vibe Coding to Agentic Engineering", "GLM 5.3", True),
+        ("Kimi K3.1 Pro: Advancing Open Intelligence", "Kimi K3", False),
+        ("Kimi K3.1 Pro: Advancing Open Intelligence", "Kimi K3.1", False),
+        ("Evaluating GPT-6.1 Terra on Long Tasks", "GPT-6.1 Terra", False),
+        ("GPT-6.1 Terra Is Not Robust", "GPT-6.1 Terra", False),
+    ],
+)
+def test_title_announces_model(title, name, announces):
+    assert title_announces_model(title, name) is announces
