@@ -125,7 +125,7 @@ class PrimaryPaperProjection(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     route_id: str = Field(min_length=1, max_length=200)
     title: str = Field(min_length=1, max_length=500)
-    arxiv_id: str = Field(min_length=1, max_length=50)
+    arxiv_id: str | None = Field(default=None, min_length=1, max_length=50)
 
 
 def _utf16_slice(value: str, start: int, end: int) -> str:

@@ -165,6 +165,32 @@ def test_hidden_glm_sessions_report_luna_to_the_frontend(monkeypatch):
     assert chat._summary(session).selected_model == "gpt-5.6-luna@openai"
 
 
+def test_external_reader_sessions_expose_the_paper_id_route():
+    import uuid
+    from datetime import UTC, datetime
+
+    from backend.models.database import ChatSession, Paper
+    from backend.routers import chat
+
+    now = datetime.now(UTC)
+    paper = Paper(id=131423, source="external", arxiv_id=None, title="Avalon-M1")
+    session = ChatSession(
+        id=uuid.uuid4(),
+        title="Reader chat",
+        selected_model="gpt-5.6-luna@openai",
+        created_at=now,
+        updated_at=now,
+        message_count=2,
+        web_search_enabled=False,
+        primary_paper=paper,
+    )
+
+    primary = chat._summary(session).primary_paper
+    assert primary is not None
+    assert primary.route_id == "131423"
+    assert primary.arxiv_id is None
+
+
 def test_sponsored_deepseek_is_offered_next_to_luna_in_production_only():
     sponsored = Settings(
         environment="production",

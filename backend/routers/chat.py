@@ -352,10 +352,11 @@ def _busy(session: ChatSession) -> bool:
 def _summary(session: ChatSession) -> ChatSessionSummary:
     primary = getattr(session, "primary_paper", None)
     primary_projection = None
-    if primary is not None and primary.source == "arxiv" and primary.arxiv_id:
+    if primary is not None:
+        # External papers have no arXiv id; their reader route is the paper id.
         primary_projection = {
             "id": str(primary.id),
-            "route_id": primary.arxiv_id,
+            "route_id": primary.arxiv_id or str(primary.id),
             "title": primary.title,
             "arxiv_id": primary.arxiv_id,
         }

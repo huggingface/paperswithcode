@@ -16,7 +16,7 @@ export interface ChatSession {
     id: string;
     route_id: string;
     title: string;
-    arxiv_id: string;
+    arxiv_id: string | null;
   } | null;
 }
 
