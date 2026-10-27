@@ -29,6 +29,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services import frontiercs_2_sync_service as service
+from backend.services import leaderboard_model_matching_service as matching
 from backend.services.leaderboard_model_matching_service import (
     title_announces_model,
 )
@@ -320,9 +321,11 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
             ModelRelease(
                 id=1,
                 paper_id=2003,
-                canonical_name="GPT-6.2 Terra",
+                # A resolution's canonical spelling differs; the leaderboard
+                # spelling is an alias.
+                canonical_name="gpt-6.2-terra-2026-10",
                 publisher="OpenAI",
-                aliases=["gpt-6.2-terra"],
+                aliases=["GPT 6.2 Terra"],
                 is_open=False,
             ),
             Paper(
@@ -367,8 +370,8 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
     kimi = rows["Kimi K3.2 (Kimi Code)"]
     assert (kimi.paper_id, kimi.is_open) == (2001, True)
     assert kimi.hf_model_url == "https://huggingface.co/moonshotai/Kimi-K3.2"
-    assert not rows["GPT-6.2 Terra (Codex CLI)"].is_open
-    assert rows["GPT-6.2 Terra (Codex CLI)"].paper_id == 2003
+    terra = rows["GPT-6.2 Terra (Codex CLI)"]
+    assert (terra.paper_id, terra.is_open) == (2003, False)
     muse = rows["Muse Spark 2 (Muse Code)"]
     assert (muse.paper_id, muse.is_open) == (2004, True)
     assert muse.metrics == {PASS_RATE: 12.5, FCI: 22}
@@ -380,7 +383,7 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
     }
 
 
-def test_ambiguous_titles_are_not_matched():
+def test_ambiguous_titles_are_not_matched(monkeypatch):
     session = _session()
     for paper_id, url in ((2001, "https://a.example/x"), (2002, "https://b.example/x")):
         session.add(
@@ -400,6 +403,28 @@ def test_ambiguous_titles_are_not_matched():
     assert stats.auto_matched == []
     assert stats.unreviewed == ["Kimi K3.2 (Kimi Code)"]
     assert session.query(ModelReleaseSignal).one().model_name == "Kimi K3.2"
+
+    # A candidate window that fills up cannot rule out another announcement.
+    session.get(Paper, 2002).is_latest_version = False
+    session.add(
+        Paper(
+            id=2000,
+            title="Kimi K3.2 Pro Technical Report",
+            source="external",
+            source_url="https://c.example/x",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.commit()
+    source = parse_frontiercs_2(_new_model(SOURCE, "k3", "Kimi K3.2"))
+    assert FrontierCS2SyncService(session).sync(source).auto_matched == [
+        "Kimi K3.2 (Kimi Code)"
+    ]
+    session.query(Evaluation).delete()
+    session.commit()
+    monkeypatch.setattr(matching, "TITLE_CANDIDATE_LIMIT", 1)
+    assert FrontierCS2SyncService(session).sync(source).auto_matched == []
 
 
 @pytest.mark.parametrize(

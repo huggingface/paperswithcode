@@ -22,6 +22,8 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     HfArtifact,
+    ModelProviderAlias,
+    ModelRelease,
     ModelReleaseSignal,
     Paper,
     PaperHfArtifact,
@@ -88,10 +90,13 @@ class LeaderboardModelMatcher:
         releases = ModelReleaseIdentityService(self.db).resolve_many(
             self.provider, [(name, name) for name in names]
         )
+        releases.update(
+            self._alias_matches([name for name in names if name not in releases])
+        )
+        # Rows keep the leaderboard's spelling, so a model matched by title
+        # today and by its release later keeps one row.
         matched = {
-            name: MatchedModel(
-                release.paper_id, release.canonical_name, release.is_open
-            )
+            name: MatchedModel(release.paper_id, name, release.is_open)
             for name, release in releases.items()
         }
         for name in names:
@@ -101,6 +106,41 @@ class LeaderboardModelMatcher:
                 matched[name] = MatchedModel(
                     paper_id, name, hf_model_url is not None, hf_model_url
                 )
+        return matched
+
+    def _alias_matches(self, names: list[str]) -> dict[str, ModelRelease]:
+        """Match names to exactly one release by canonical name or alias.
+
+        A resolve-model-paper job records the leaderboard spelling as an
+        alias, whatever canonical spelling it chooses.
+        """
+        keys = {_identity_key(name): name for name in names}
+        if not keys:
+            return {}
+        candidates: dict[str, dict[int, ModelRelease]] = {}
+        releases = (
+            self.db.query(ModelRelease)
+            .filter(ModelRelease.paper_id.isnot(None))
+            .order_by(ModelRelease.id)
+            .yield_per(200)
+        )
+        for release in releases:
+            for identity in (release.canonical_name, *(release.aliases or [])):
+                if (name := keys.get(_identity_key(identity))) is not None:
+                    candidates.setdefault(name, {})[release.id] = release
+        matched: dict[str, ModelRelease] = {}
+        for name, found in candidates.items():
+            if len(found) == 1:
+                release = next(iter(found.values()))
+                self.db.add(
+                    ModelProviderAlias(
+                        model_release_id=release.id,
+                        provider=self.provider,
+                        alias=name,
+                    )
+                )
+                matched[name] = release
+        self.db.flush()
         return matched
 
     def _weights_url(self, paper_id: int, model_name: str) -> str | None:
@@ -128,9 +168,12 @@ class LeaderboardModelMatcher:
                 Paper.title.ilike(f"%{'%'.join(tokens)}%"),
             )
             .order_by(Paper.id)
-            .limit(TITLE_CANDIDATE_LIMIT)
+            .limit(TITLE_CANDIDATE_LIMIT + 1)
             .all()
         )
+        # Too many candidates to rule out a second announcement.
+        if len(candidates) > TITLE_CANDIDATE_LIMIT:
+            return None
         paper_ids = {
             paper_id
             for paper_id, title in candidates
