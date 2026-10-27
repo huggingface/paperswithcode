@@ -53,7 +53,7 @@
 .pdf-toolbar button[aria-expanded="true"] { border-color: var(--hairline-strong); background: var(--bg-subtle); }
 .pdf-toolbar button:focus-visible, .pdf-toolbar a:focus-visible, .pdf-toolbar input:focus-visible, .pdf-search-controls input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .pdf-toolbar button:disabled { cursor: default; opacity: .35; }
-.pdf-page-form { display: flex; align-items: center; gap: 3px; padding: 0 4px; color: var(--ink-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pdf-page-form { display: flex; align-items: baseline; gap: 3px; padding: 0 4px; color: var(--ink-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pdf-page-form input { width: 30px; height: 22px; appearance: textfield; border: 1px solid transparent; border-radius: 5px; padding: 0 2px; background: var(--bg-subtle); color: var(--ink); font: inherit; font-weight: 500; text-align: center; }
 .pdf-page-form input:hover, .pdf-page-form input:focus { border-color: var(--hairline-strong); background: var(--bg); }
 .pdf-page-form input::-webkit-inner-spin-button, .pdf-page-form input::-webkit-outer-spin-button { margin: 0; appearance: none; }
