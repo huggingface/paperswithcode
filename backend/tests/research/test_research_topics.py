@@ -263,7 +263,12 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
             ),
             {"p": p.id, "t": task.id},
         )
-    for p, score in ((both, 0.9), (topic_only, 0.86), (below, 0.84)):
+    scores = (
+        (both, 0.9),
+        (topic_only, topics.THRESHOLD + 0.01),
+        (below, topics.THRESHOLD - 0.01),
+    )
+    for p, score in scores:
         db.add(
             ResearchTopicVerdict(
                 topic_id=topic_id,

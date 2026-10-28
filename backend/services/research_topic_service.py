@@ -44,7 +44,7 @@ from backend.services.query_embedding_client import (
 )
 
 POLICY_VERSION = "2026-10-28"
-THRESHOLD = 0.85
+THRESHOLD = 0.80
 WINDOW_DAYS = 90
 RECALL_LIMIT = 500
 QUESTIONS_PER_CALL = 10

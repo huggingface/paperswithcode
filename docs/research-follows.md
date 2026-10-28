@@ -29,10 +29,11 @@ one through `research_subscriptions.topic_id`. Jev (`jev-1.14` through
 OpenRouter's `systemone` endpoint) scores each paper's card (title, authors,
 organizations, venue, task/method/benchmark tags, abstract) against the topic,
 and `research_topic_verdicts` keeps the raw score with the card's SHA-256 and
-the prompt version. The feed and digest treat a score of at least 0.85 as a
+the prompt version. The feed and digest treat a score of at least 0.80 as a
 match, applied when reading, so recalibration rewrites nothing. The threshold
 and prompt were calibrated on 299 hand-labelled topic/paper pairs across ten
-topics (about 95% precision; `reports/topic-calibration/` locally).
+topics (about 90% precision and 43% recall; `reports/topic-calibration/`
+locally).
 
 Topic matches join entity matches in one feed, deduplicated by paper and
 ranked by the same trending order; the reason line names the topic in quotes.
