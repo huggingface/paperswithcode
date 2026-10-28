@@ -170,6 +170,16 @@
 .pdf-bibliography-link { position: absolute; z-index: 2; border-radius: 3px; }
 .pdf-bibliography-link > .pdf-paper-preview-link { position: absolute; inset: 0; display: block; border-radius: inherit; }
 .pdf-bibliography-link:hover, .pdf-bibliography-link:focus-within { background: rgb(37 99 235 / .08); }
+/* An author's name on the first page; PDF.js links (e.g. ORCID) stay above it. */
+.pdf-author-link { position: absolute; z-index: 2; border-radius: 3px; }
+.pdf-author-link > a { position: absolute; inset: -1px -2px; display: block; border-radius: inherit; }
+.pdf-author-link:hover, .pdf-author-link:focus-within { background: rgb(37 99 235 / .1); }
+.pdf-author-card { display: flex; align-items: center; gap: 12px; padding: 14px; color: inherit; text-decoration: none; }
+.pdf-author-card:hover .paper-preview-title { color: var(--accent); }
+.pdf-author-card:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pdf-author-card-avatar { width: 44px; height: 44px; flex: none; }
+.pdf-author-card-meta { min-width: 0; }
+.pdf-author-card-meta .paper-preview-title { margin-bottom: 2px; }
 .paper-preview-card-link { display: block; color: inherit; text-decoration: none; }
 .paper-preview-card-link:hover .paper-preview-title { color: var(--accent); }
 .paper-preview-card-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

@@ -14,6 +14,8 @@ import { PdfToolbar } from "./PdfToolbar";
 import type { PdfToolbarResources } from "./PdfToolbar";
 import { createPdfCitationResolver, type PdfBibliographyLink, type PdfCitationResolver } from "./pdfCitationLinks";
 import { PdfBibliographyEntryLink, PdfPaperLink } from "./PdfPaperLink";
+import { PdfAuthorLink, type PdfPaperAuthor } from "./PdfAuthorLink";
+import { pdfAuthorBoxes, type PdfAuthorBox } from "./pdfAuthorLinks";
 import { usePdfPaperLinks } from "./usePdfPaperLinks";
 import { PdfOutline } from "./PdfOutline";
 import { PdfCitationSteps } from "./PdfCitationSteps";
@@ -41,6 +43,8 @@ interface PdfViewerProps {
   chrome?: "reader" | "canvas";
   /** Passage a chat citation points at: scrolled into view and briefly highlighted. */
   highlight?: PdfHighlight;
+  /** The paper's authors; their names on the first page open author cards. */
+  authors?: PdfPaperAuthor[];
 }
 
 // Section jumps leave this much of the previous section visible above the
@@ -137,6 +141,7 @@ function LazyPdfPage({
   highlightBrief,
   onShowCitations,
   onShowReference,
+  authors,
 }: {
   page: number;
   width: number;
@@ -150,6 +155,7 @@ function LazyPdfPage({
   highlightBrief?: boolean;
   onShowCitations?: (citations: PdfHighlightBox[][]) => void;
   onShowReference?: (dest: string) => Promise<boolean>;
+  authors?: PdfPaperAuthor[];
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
@@ -181,6 +187,17 @@ function LazyPdfPage({
   // It replaces the old one only once painted, so zooming never blanks a page.
   const [shownWidth, setShownWidth] = useState(width);
   if (!visible && shownWidth !== width) setShownWidth(width);
+  // Author names are found in the shown text layer each time it renders, and
+  // again when the author list arrives after it.
+  // The callback must keep its identity: react-pdf rebuilds the text layer
+  // whenever it changes.
+  const [textLayerRenders, setTextLayerRenders] = useState(0);
+  const textLayerRendered = useCallback(() => setTextLayerRenders((count) => count + 1), []);
+  const [authorBoxes, setAuthorBoxes] = useState<PdfAuthorBox[]>([]);
+  useEffect(() => {
+    const layer = ref.current?.querySelector(`[data-layer-width="${shownWidth}"]`);
+    setAuthorBoxes(layer && authors?.length ? pdfAuthorBoxes(layer, authors) : []);
+  }, [authors, shownWidth, textLayerRenders]);
   const layerWidths = shownWidth === width ? [width] : [shownWidth, width];
   // A remounted canvas is blank until pdf.js repaints it, so the page's last
   // render stays on top as an image until the fresh canvas has painted.
@@ -253,6 +270,7 @@ function LazyPdfPage({
           onGetAnnotationsSuccess={onAnnotations}
           onRenderSuccess={rendered}
           onRenderError={shown ? undefined : () => setShownWidth(layerWidth)}
+          onRenderTextLayerSuccess={shown && authors ? textLayerRendered : undefined}
           loading={null}
           customTextRenderer={renderSearchText}
         />
@@ -261,6 +279,10 @@ function LazyPdfPage({
     {snapshot && !painted && <img className="pdf-page-snapshot" src={snapshot} alt="" aria-hidden="true" />}
     {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} onShowReference={onShowReference} />)}
     {visible && resolveCitation && bibliographyLinks.map(link => <PdfBibliographyEntryLink key={link.name} {...link} onShowCitations={onShowCitations} />)}
+    {visible && authors && authorBoxes.map(({ authorId, box }) => {
+      const author = authors.find((candidate) => candidate.id === authorId);
+      return author && <PdfAuthorLink key={`${authorId}-${box.join(",")}`} {...author} box={box} />;
+    })}
     {highlightBoxes?.map(([x0, y0, x1, y1], index) => <div
       key={`${highlightKey}-${index}`}
       className={`pdf-citation-highlight${highlightBrief ? " is-brief" : ""}`}
@@ -326,6 +348,7 @@ export function PdfViewer({
   loadErrorMessage,
   chrome = "reader",
   highlight: citedHighlight,
+  authors,
 }: PdfViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -859,6 +882,7 @@ export function PdfViewer({
             highlightBrief={Boolean(citationJump)}
             onShowCitations={showCitations}
             onShowReference={showReference}
+            authors={pageNumber === 1 && chrome === "reader" ? authors : undefined}
           />)}
         </div>
       </Document>}

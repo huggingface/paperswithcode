@@ -1,6 +1,7 @@
 import React from "react";
 import { act, fireEvent, render as renderWithoutQueries, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let observedWidth = 800;
@@ -11,6 +12,7 @@ const reactPdf = vi.hoisted(() => ({
   documentOptions: [] as unknown[],
   renders: [] as Array<() => void>,
   holdRenders: false,
+  pageText: [] as string[],
 }));
 const pageRef = (page: number) => ({ num: page * 10, gen: 0 });
 const outlinePdf = (numPages: number, outline: unknown[] = []) => ({
@@ -68,13 +70,20 @@ vi.mock("react-pdf", () => ({
         {children}
       </div>;
     },
-    Page: ({ width, onRenderSuccess }: { width: number; onRenderSuccess?: () => void }) => {
+    Page: ({ width, onRenderSuccess, onRenderTextLayerSuccess }: {
+      width: number;
+      onRenderSuccess?: () => void;
+      onRenderTextLayerSuccess?: () => void;
+    }) => {
       React.useEffect(() => {
         if (!onRenderSuccess) return;
         if (reactPdf.holdRenders) reactPdf.renders.push(onRenderSuccess);
         else onRenderSuccess();
       }, [onRenderSuccess]);
-      return <div data-testid="pdf-page" data-width={width} />;
+      React.useEffect(() => onRenderTextLayerSuccess?.(), [onRenderTextLayerSuccess]);
+      return <div data-testid="pdf-page" data-width={width}>
+        <div className="textLayer">{reactPdf.pageText.map((text, index) => <span key={index} role="presentation">{text}</span>)}</div>
+      </div>;
     },
 }));
 
@@ -108,6 +117,7 @@ describe("PdfViewer resize rendering", () => {
     reactPdf.documentOptions.length = 0;
     reactPdf.renders.length = 0;
     reactPdf.holdRenders = false;
+    reactPdf.pageText = [];
     Object.defineProperty(HTMLElement.prototype, "clientWidth", {
       configurable: true,
       get: () => observedWidth,
@@ -373,6 +383,27 @@ describe("PdfViewer resize rendering", () => {
     await waitFor(() => expect(onPageChangeSpy()).toBe(5));
     expect(screen.getByRole("link", { name: "System Design" })).toHaveAttribute("aria-current", "location");
     expect(screen.getByRole("link", { name: "SSD Streaming Expert Layers" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("opens author pages from the paper's own authors' names on the first page", async () => {
+    reactPdf.pageText = ["Longformer", "Iz Beltagy", "∗ ", "Matthew E. Peters", "{beltagy}@allenai.org"];
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 500, 1000));
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true,
+      value: () => [new DOMRect(100, 50, 80, 10)],
+    });
+    const authors = [{ id: "6438", name: "Iz Beltagy" }, { id: "9515", name: "Matthew E. Peters" }, { id: "1", name: "Someone Else" }];
+    const view = renderWithoutQueries(<QueryClientProvider client={new QueryClient()}><MemoryRouter>
+      <PdfViewer url="https://arxiv.org/pdf/2004.05150" paperKey="2004.05150" paperTitle="Longformer" paperHref="/paper/2004.05150" authors={authors} />
+    </MemoryRouter></QueryClientProvider>);
+    fireEvent.click(screen.getByRole("button", { name: "Load long PDF" }));
+    const beltagy = await screen.findByRole("link", { name: "Author Iz Beltagy" });
+    expect(beltagy).toHaveAttribute("href", "/authors/6438");
+    expect(beltagy.parentElement).toHaveStyle({ left: "20%", top: "5%", width: "16%", height: "1%" });
+    expect(screen.getByRole("link", { name: "Author Matthew E. Peters" })).toHaveAttribute("href", "/authors/9515");
+    expect(screen.getAllByRole("link", { name: /^Author / })).toHaveLength(2);
+    expect(view.container.querySelectorAll('[data-page="2"] .pdf-author-link')).toHaveLength(0);
+    vi.restoreAllMocks();
   });
 
   it("sizes unrendered page placeholders from the document's page proportions", async () => {

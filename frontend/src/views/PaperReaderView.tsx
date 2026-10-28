@@ -129,6 +129,9 @@ function PaperReaderExperience() {
     ? rangeReadablePdfHref(originalPdfUrl)
     : originalPdfUrl;
   const toolbarResources = readerToolbarResources(paper);
+  const authors = useMemo(() => paper?.author_links?.flatMap((author) => author.id
+    ? [{ id: author.id, name: author.name, avatarUrl: author.hf_avatar_url }]
+    : []), [paper?.author_links]);
   const canonicalRoute = paper?.arxiv_id?.replace(/v\d+$/i, "") || routeId;
   const closeReader = useCallback(() => navigate(`/paper/${canonicalRoute}`), [canonicalRoute, navigate]);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(() => {
@@ -429,6 +432,7 @@ function PaperReaderExperience() {
             resizeActive={resizeActive || chatTransitionActive}
             selectionEnabled={selectionEnabled}
             paperVersion={paper.version}
+            authors={authors}
             loadErrorMessage={paper.source === "external"
               ? "Paper content is still being prepared. Please try again later."
               : undefined}
