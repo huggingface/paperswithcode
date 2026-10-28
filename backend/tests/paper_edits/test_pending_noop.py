@@ -76,6 +76,7 @@ from backend.tests.paper_edits import pending_harness
 
 db_session = pending_harness.db_session
 paper_fixture = pending_harness.paper_fixture
+hf_organizations = pending_harness.hf_organizations
 
 
 def _no_rows_created(db_session) -> None:

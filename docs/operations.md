@@ -405,8 +405,12 @@ a paper-page surface is applied as soon as it is submitted and reviewed
 afterwards: the row is stored as `status = 'approved'`, `reviewed_by_kind =
 'auto'`, and its `catalog_mutation_events` row (`request_id =
 'submission-auto:<id>'`) is attributed to the submitter. Taxonomy suggestions and
-new external papers always stay queued. An edit is held in the queue, with the
-reason in `admin_note`, when it:
+new external papers always stay queued, except a new organization suggested from
+a paper page whose Hugging Face handle resolves to a real HF organization: it is
+created and tagged at once. Approving any organization suggestion with an HF
+handle, automatically or by an admin, takes the canonical handle, website, and
+avatar from the HF profile, overriding submitted ones. An edit is held in the
+queue, with the reason in `admin_note`, when it:
 
 - adds a link to a site that is not trusted (GitHub, Hugging Face, arXiv, X,
   `.edu`/`.ac.*`, `PWC_PAPER_EDIT_AUTO_APPROVE_EXTRA_DOMAINS`, or a host already on

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import logging
 from datetime import date
 from typing import Any, Callable
 
+import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -25,6 +27,11 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.conference_service import ConferenceService
+from backend.services.curation_organization_service import CurationOrganizationService
+from backend.services.hf_organization_service import (
+    HFOrganizationError,
+    HFOrganizationProfile,
+)
 from backend.services.autonomous_capabilities import (
     AUTONOMOUS_PENDING_EDIT_CAPABILITIES,
     HUMAN_ONLY_EDIT_TYPES,
@@ -57,6 +64,8 @@ from backend.services.evaluation_commands import (
     evaluation_command,
     validate_evaluation_scope,
 )
+
+logger = logging.getLogger(__name__)
 
 Mutation = Callable[[int | None, Payload], tuple[str, str]]
 
@@ -410,6 +419,23 @@ class PendingEditMutationService:
         )
         return "conference", str(entity.id)
 
+    @staticmethod
+    def _hf_organization_profile(
+        curation: CurationOrganizationService, hf_slug: str | None
+    ) -> HFOrganizationProfile | None:
+        """Hugging Face profile for a suggestion; None when absent or unreachable."""
+        if not hf_slug:
+            return None
+        try:
+            return curation.hf_client.fetch_profile(hf_slug)
+        except (HFOrganizationError, httpx.HTTPError, ValueError) as exc:
+            logger.warning(
+                "organization_suggestion_profile_failed hf_slug=%s error=%s",
+                hf_slug,
+                exc,
+            )
+            return None
+
     def _new_organization(
         self,
         paper_id: int | None,
@@ -420,28 +446,43 @@ class PendingEditMutationService:
     ) -> tuple[str, str]:
         slug = organization_slug(payload)
         hf_slug = payload.get("hf_slug")
-        duplicate = Organization.slug == slug
-        if hf_slug:
-            duplicate = duplicate | (
-                func.lower(Organization.hf_slug) == hf_slug.lower()
+        website_url = payload.get("website_url")
+        curation = CurationOrganizationService(self.db)
+        try:
+            profile = self._hf_organization_profile(curation, hf_slug)
+            if profile is not None:
+                hf_slug = profile.hf_slug
+                # The profile's website and avatar replace submitted ones below.
+                if profile.website_url:
+                    website_url = None
+            duplicate = Organization.slug == slug
+            if hf_slug:
+                duplicate = duplicate | (
+                    func.lower(Organization.hf_slug) == hf_slug.lower()
+                )
+            existing = self.db.query(Organization.slug).filter(duplicate).first()
+            if existing is not None:
+                raise PendingEditError(
+                    f"Organization already exists as /organizations/{existing.slug}"
+                )
+            logo_data, logo_mime_type = self._decode_image(payload.get("image"))
+            entity = Organization(
+                name=payload["name"],
+                slug=slug,
+                hf_slug=hf_slug,
+                hf_url=f"https://huggingface.co/{hf_slug}" if hf_slug else None,
+                website_url=website_url,
+                description=payload.get("description"),
+                logo_data=logo_data,
+                logo_mime_type=logo_mime_type,
+                logo_sha256=(
+                    hashlib.sha256(logo_data).hexdigest() if logo_data else None
+                ),
             )
-        existing = self.db.query(Organization.slug).filter(duplicate).first()
-        if existing is not None:
-            raise PendingEditError(
-                f"Organization already exists as /organizations/{existing.slug}"
-            )
-        logo_data, logo_mime_type = self._decode_image(payload.get("image"))
-        entity = Organization(
-            name=payload["name"],
-            slug=slug,
-            hf_slug=hf_slug,
-            hf_url=f"https://huggingface.co/{hf_slug}" if hf_slug else None,
-            website_url=payload.get("website_url"),
-            description=payload.get("description"),
-            logo_data=logo_data,
-            logo_mime_type=logo_mime_type,
-            logo_sha256=hashlib.sha256(logo_data).hexdigest() if logo_data else None,
-        )
+            if profile is not None:
+                curation.apply_profile(entity, profile)
+        finally:
+            curation.close()
         self.db.add(entity)
         self.db.flush()
         if paper_id is not None:

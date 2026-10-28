@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getApiErrorMessage } from "@/lib/apiTransport";
 import { submissionsApi } from "@/lib/api/submissions";
 import { pendingEditSubmission } from "@/lib/pendingEdits";
+import { invalidatePaperDetails } from "@/lib/queryInvalidation";
 
 const ACCEPTED_LOGO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
@@ -33,13 +34,18 @@ interface Props {
   initialName: string;
 }
 
-/** Queue a missing organization for admin review; approval also tags the paper. */
+/**
+ * Suggest a missing organization; approval creates it and tags the paper. One
+ * with a real Hugging Face organization is approved at once and takes its
+ * website and logo from Hugging Face.
+ */
 export function SuggestOrganizationForm({ paperId, initialName }: Props) {
   const [name, setName] = useState(initialName);
   const [hfSlug, setHfSlug] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [logo, setLogo] = useState<Logo | null>(null);
   const [logoError, setLogoError] = useState("");
+  const queryClient = useQueryClient();
   const suggest = useMutation({
     mutationFn: () =>
       submissionsApi.submit(
@@ -50,8 +56,16 @@ export function SuggestOrganizationForm({ paperId, initialName }: Props) {
           ...(logo ? { image: logo } : {}),
         }),
       ),
+    onSuccess: (submitted) => {
+      if (submitted.status !== "approved") return;
+      invalidatePaperDetails(queryClient, [paperId]);
+      void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+    },
   });
 
+  if (suggest.data?.status === "approved") {
+    return <p className="rounded border p-3 text-sm">Added "{name.trim()}" to this paper.</p>;
+  }
   if (suggest.isSuccess) {
     return (
       <p className="rounded border p-3 text-sm">
@@ -101,13 +115,15 @@ export function SuggestOrganizationForm({ paperId, initialName }: Props) {
       {logo && <img src={logo.data_url} alt="Selected logo" className="h-12 w-12 rounded border object-contain" />}
       {logoError && <p className="text-sm text-destructive">{logoError}</p>}
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">An admin reviews every new organization.</p>
+        <p className="text-xs text-muted-foreground">
+          With a Hugging Face organization it is added right away; otherwise an admin reviews it.
+        </p>
         <Button
           type="submit"
           variant="outline"
           disabled={!name.trim() || (!hfSlug.trim() && !websiteUrl.trim()) || suggest.isPending}
         >
-          {suggest.isPending ? "Submitting..." : "Submit for review"}
+          {suggest.isPending ? "Submitting..." : "Submit organization"}
         </Button>
       </div>
       {suggest.error && <p className="text-sm text-destructive">{getApiErrorMessage(suggest.error, "Could not submit this organization.")}</p>}

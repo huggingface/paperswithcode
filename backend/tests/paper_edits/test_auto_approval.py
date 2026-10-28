@@ -7,6 +7,8 @@ import pytest
 from backend.config import get_settings
 from backend.models.database import (
     CatalogMutationEvent,
+    Organization,
+    PaperOrganization,
     PaperTask,
 )
 from backend.models.database import Paper as DBPaper
@@ -16,11 +18,13 @@ from backend.services.pending_edit_auto_approval import (
     AutoApprovalPolicy,
     removed_values,
 )
+from backend.services.hf_organization_service import HFOrganizationProfile
 from backend.services.pending_edit_service import PendingEditService
 from backend.tests.paper_edits import pending_harness
 
 db_session = pending_harness.db_session
 paper_fixture = pending_harness.paper_fixture
+hf_organizations = pending_harness.hf_organizations
 
 
 @pytest.fixture(autouse=True)
@@ -84,6 +88,56 @@ def test_taxonomy_suggestions_stay_queued(db_session):
     )
 
     assert row.status == "pending"
+
+
+def test_organization_with_a_real_hf_org_is_created_from_its_profile(
+    db_session, paper_fixture, hf_organizations
+):
+    hf_organizations["generalreasoning"] = HFOrganizationProfile(
+        hf_slug="GeneralReasoning",
+        name="General Reasoning",
+        logo_url="https://cdn-avatars.huggingface.co/gr.jpeg",
+        website_url="https://gr.inc",
+        is_verified=False,
+        followers=88,
+    )
+
+    row = submit(
+        db_session,
+        "new_organization",
+        {
+            "name": "General Reasoning",
+            "hf_slug": "https://huggingface.co/generalreasoning",
+            "website_url": "https://elsewhere.example.com",
+        },
+    )
+
+    assert (row.status, row.reviewed_by_kind) == ("approved", "auto")
+    organization = db_session.get(Organization, int(row.result_entity_id))
+    assert (organization.hf_slug, organization.hf_url, organization.website_url) == (
+        "GeneralReasoning",
+        "https://huggingface.co/GeneralReasoning",
+        "https://gr.inc",
+    )
+    assert organization.logo_data == b"\x89PNG hf avatar"
+    assert db_session.get(PaperOrganization, (1, organization.id)) is not None
+
+
+@pytest.mark.parametrize(
+    ("payload", "reason"),
+    [
+        ({"hf_slug": "nobody-here"}, "organization nobody-here not found"),
+        ({"website_url": "https://lab.example.org"}, "no Hugging Face organization"),
+    ],
+)
+def test_organization_without_a_real_hf_org_is_held(
+    db_session, paper_fixture, payload, reason
+):
+    row = submit(db_session, "new_organization", {"name": "Some Lab", **payload})
+
+    assert row.status == "pending"
+    assert reason in row.admin_note
+    assert db_session.query(Organization).count() == 0
 
 
 def test_unfamiliar_domain_is_held_with_a_reason(db_session, paper_fixture):

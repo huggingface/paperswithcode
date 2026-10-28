@@ -9,6 +9,10 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from backend.services.hf_organization_service import (
+    HFOrganizationClient,
+    HFOrganizationProfile,
+)
 from backend.models.database import (
     Base,
     PaperMethod,
@@ -123,3 +127,20 @@ def paper_fixture(db_session):
         ]
     )
     db_session.commit()
+
+
+@pytest.fixture(autouse=True)
+def hf_organizations(monkeypatch):
+    """Hugging Face organization profiles by lowercase handle; none by default."""
+    profiles: dict[str, HFOrganizationProfile] = {}
+    monkeypatch.setattr(
+        HFOrganizationClient,
+        "fetch_profile",
+        lambda self, hf_slug: profiles.get(hf_slug.lower()),
+    )
+    monkeypatch.setattr(
+        HFOrganizationClient,
+        "fetch_logo",
+        lambda self, url: (b"\x89PNG hf avatar", "image/png"),
+    )
+    return profiles

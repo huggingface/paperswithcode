@@ -3,7 +3,8 @@
 Auto-approved edits are reviewed afterwards on ``/submissions`` and reverted
 through the catalog audit rollback. This policy only holds back the edits that
 are cheap to abuse: links to unfamiliar sites, evaluations on unconfigured
-benchmarks, mass removals, and accounts past their daily paper budget.
+benchmarks, mass removals, accounts past their daily paper budget, and new
+organizations without a real Hugging Face organization behind them.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.models.database import PendingPaperEdit, ProjectPage
+from backend.services.hf_organization_service import HFOrganizationClient
 from backend.services.pending_edit_mutations import PendingEditMutationService
 from backend.services.x_thread_service import parse_x_post_id
 
@@ -33,6 +35,7 @@ AUTO_EDIT_TYPES = frozenset(
         "hf_artifacts",
         "x_threads",
         "evaluations",
+        "new_organization",
     }
 )
 TRUSTED_HOST_SUFFIXES = (
@@ -146,6 +149,7 @@ class AutoApprovalPolicy:
         now = now or datetime.now(timezone.utc)
         reason = (
             self._unverified_link(edit_type, current, proposed)
+            or self._unverified_organization(edit_type, proposed)
             or self._unconfigured_evaluation(edit_type, proposed)
             or self._mass_removal(
                 hf_subject, paper_id, edit_type, current, proposed, now
@@ -160,6 +164,21 @@ class AutoApprovalPolicy:
         for host in sorted(_hosts(edit_type, current, proposed)):
             if not self._host_is_trusted(host):
                 return f"link to unfamiliar site {host or 'with no host'}"
+        return None
+
+    def _unverified_organization(self, edit_type: str, proposed: Payload) -> str | None:
+        if edit_type != "new_organization":
+            return None
+        hf_slug = proposed.get("hf_slug")
+        if not hf_slug:
+            return "new organization has no Hugging Face organization"
+        client = HFOrganizationClient(attempts=2)
+        try:
+            profile = client.fetch_profile(hf_slug)
+        finally:
+            client.close()
+        if profile is None:
+            return f"Hugging Face organization {hf_slug} not found"
         return None
 
     def _host_is_trusted(self, host: str) -> bool:
