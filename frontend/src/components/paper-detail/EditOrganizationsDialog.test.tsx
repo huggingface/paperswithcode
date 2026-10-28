@@ -178,3 +178,20 @@ describe("EditOrganizationsDialog", () => {
    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
    expect(client.getQueryState(["paper", "42"])?.isInvalidated).toBe(true);
  });
+
+ it("holds Save changes until a filled-in suggestion is submitted or cleared", async () => {
+   const user = userEvent.setup();
+   renderDialog();
+   await screen.findByText("NVIDIA");
+   const save = screen.getByRole("button", { name: "Save changes" });
+   await user.type(screen.getByRole("searchbox", { name: "Search organizations" }), "General Reasoning");
+   expect(save).toBeEnabled();
+
+   await user.type(screen.getByRole("textbox", { name: "Hugging Face organization" }), "GeneralReasoning");
+   expect(save).toBeDisabled();
+   expect(screen.getByText(/Submit the organization above/)).toBeInTheDocument();
+
+   await user.click(screen.getByRole("button", { name: "Clear organization search" }));
+   expect(save).toBeEnabled();
+   expect(updatePaperOrganizations).not.toHaveBeenCalled();
+ });

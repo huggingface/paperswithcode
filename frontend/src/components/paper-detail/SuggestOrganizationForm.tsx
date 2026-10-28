@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,8 @@ interface Props {
   initialName: string;
   /** Called when the suggestion was approved at once and the paper now has it. */
   onApplied: (name: string) => void;
+  /** Reports whether the form holds details that have not been submitted yet. */
+  onUnsentChange: (unsent: boolean) => void;
 }
 
 /**
@@ -40,7 +42,7 @@ interface Props {
  * with a real Hugging Face organization is approved at once and takes its
  * website and logo from Hugging Face.
  */
-export function SuggestOrganizationForm({ paperId, initialName, onApplied }: Props) {
+export function SuggestOrganizationForm({ paperId, initialName, onApplied, onUnsentChange }: Props) {
   const [name, setName] = useState(initialName);
   const [hfSlug, setHfSlug] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
@@ -60,6 +62,9 @@ export function SuggestOrganizationForm({ paperId, initialName, onApplied }: Pro
       if (submitted.status === "approved") onApplied(name.trim());
     },
   });
+  const unsent = !suggest.isSuccess && Boolean(hfSlug.trim() || websiteUrl.trim() || logo);
+  useEffect(() => onUnsentChange(unsent), [onUnsentChange, unsent]);
+  useEffect(() => () => onUnsentChange(false), [onUnsentChange]);
 
   if (suggest.isSuccess) {
     return (

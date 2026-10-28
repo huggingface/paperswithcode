@@ -40,6 +40,8 @@ export const EditOrganizationsDialog = ({
 }: Props) => {
   const [selected, setSelected] = useState<number[]>(initialOrganizationIds);
   const [searchQuery, setSearchQuery] = useState("");
+  // "Save changes" only saves the checkboxes, so it waits while a suggestion is unsent.
+  const [suggestionUnsent, setSuggestionUnsent] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
   useEffect(() => {
@@ -176,13 +178,19 @@ export const EditOrganizationsDialog = ({
               invalidatePaperFeeds(queryClient);
               void queryClient.invalidateQueries({ queryKey: ["organizations"] });
             }}
+            onUnsentChange={setSuggestionUnsent}
           />
+        )}
+        {suggestionUnsent && (
+          <p className="text-sm text-muted-foreground">
+            Submit the organization above, or clear the search, before saving.
+          </p>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || suggestionUnsent}>
             {submitMode === "pending" ? "Submit test edit" : "Save changes"}
           </Button>
         </DialogFooter>
