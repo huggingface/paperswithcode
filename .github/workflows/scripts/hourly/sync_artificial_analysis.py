@@ -40,6 +40,11 @@ class SyncArtificialAnalysisJob(CronJobBase):
                 commit=not self.dry_run,
             )
             self.logger.info("artificial_analysis_sync %s", stats.to_dict())
+            if stats.missing_upstream:
+                self.logger.warning(
+                    "artificial_analysis_missing_upstream %s",
+                    ",".join(stats.missing_upstream),
+                )
             tts_entries = fetch_artificial_analysis_tts_leaderboard()
             tts_discovery = run_tts_discovery(session, persist=not self.dry_run)
             self.logger.info(

@@ -30,14 +30,9 @@ TASK_SLUG = "agents"
 DATASET_SLUG = "finance-agent-v2"
 METRIC_NAME = "Accuracy"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Vals AI Finance Agent v2")
-TABLE_HEADER = (
-    "Rank",
-    "Model",
-    "Accuracy",
-    "Cost / Test",
-    "Input / Output Cost",
-    "Duration",
-)
+# Only these leading columns are read; Vals relabels the cost/duration columns
+# after them (2026-10-26: "Tokens / Test", "Duration / Test").
+TABLE_HEADER = ("Rank", "Model", "Accuracy")
 MIN_EXPECTED_ROWS = 40
 MAX_EXPECTED_ROWS = 400
 # Refuse to touch the managed leaderboard when the reviewed subset collapses.
@@ -475,13 +470,13 @@ def parse_vals_finance_agent(html: str) -> list[ValsEntry]:
         raise ValueError(f"Vals AI page has {len(tables)} tables; expected 1")
     rows = tables[0].find_all("tr")
     header = tuple(_text(cell) for cell in rows[0].find_all(["th", "td"]))
-    if header != TABLE_HEADER:
+    if header[: len(TABLE_HEADER)] != TABLE_HEADER:
         raise ValueError(f"Vals AI table header changed: {header!r}")
     entries: list[ValsEntry] = []
     seen: set[str] = set()
     for row in rows[1:]:
         cells = row.find_all(["th", "td"])
-        if len(cells) != len(TABLE_HEADER):
+        if len(cells) != len(header):
             raise ValueError(f"Vals AI row has {len(cells)} columns")
         position, label, accuracy = (_text(cell) for cell in cells[:3])
         link = cells[1].find("a", href=True)

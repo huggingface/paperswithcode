@@ -775,3 +775,118 @@ def test_sync_tags_paper_once_when_reviewed_slugs_share_it(monkeypatch):
     )
     assert result.indexes["intelligence"].created == 2
     assert session.query(PaperTask).filter_by(paper_id=7, task_id=5).count() == 1
+
+
+def _single_page_client(rows):
+    class Client:
+        def get(self, *args, **kwargs):
+            return _Response(
+                {
+                    "intelligence_index_version": "5",
+                    "pagination": {"has_more": False, "total_pages": 1},
+                    "data": rows,
+                }
+            )
+
+    return Client()
+
+
+def test_fetch_reports_a_few_withdrawn_reviewed_models(monkeypatch):
+    identity = aa.PaperIdentity(arxiv_id="2608.00001")
+    reviewed = {f"reviewed-{index}": identity for index in range(8)}
+    monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", reviewed)
+    monkeypatch.setattr(
+        aa,
+        "INDEXES",
+        tuple(
+            replace(index, min_expected_models=1, max_expected_models=10)
+            for index in aa.INDEXES
+        ),
+    )
+    listed = [_api_row(f"reviewed-{index}") for index in range(6)]
+
+    leaderboard = aa.fetch_artificial_analysis_leaderboard(
+        api_key="secret", client=_single_page_client(listed)
+    )
+    assert leaderboard.missing_reviewed == ["reviewed-6", "reviewed-7"]
+
+    with pytest.raises(ValueError, match="missing reviewed models"):
+        aa.fetch_artificial_analysis_leaderboard(
+            api_key="secret", client=_single_page_client(listed[:5])
+        )
+
+
+def test_new_index_version_retires_unlisted_older_intelligence_rows(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(
+        aa,
+        "MODEL_PAPER_IDENTITIES",
+        {
+            "rescored": aa.PaperIdentity(arxiv_id="2608.00001"),
+            "withdrawn": aa.PaperIdentity(arxiv_id="2608.00002"),
+        },
+    )
+    session.add(
+        Paper(
+            id=7,
+            title="Existing",
+            arxiv_id="2608.00001",
+            source="arxiv",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.flush()
+
+    def managed(version: str, index: aa.ArtificialAnalysisIndex) -> str:
+        return (
+            f"{aa.MANAGED_METHODOLOGY_PREFIX} Artificial Analysis Data API v2 "
+            f"{index.label} {version}; fetched 2026-10-27T00:00:00+00:00."
+        )
+
+    for slug, dataset_id, task_id, methodology in [
+        ("rescored", 581, 5, managed("4.3", aa.INTELLIGENCE_INDEX)),
+        ("withdrawn", 581, 5, managed("4.3", aa.INTELLIGENCE_INDEX)),
+        ("current", 581, 5, managed("5", aa.INTELLIGENCE_INDEX)),
+        ("manual", 581, 5, "Manual Intelligence Index 4.3; fetched by hand"),
+        ("withdrawn", 582, 14, managed("4.3", aa.AGENTIC_INDEX)),
+    ]:
+        session.add(
+            Evaluation(
+                paper_id=7,
+                task_id=task_id,
+                dataset_id=dataset_id,
+                model_name=f"{slug}-{dataset_id}",
+                metrics={aa.METRIC_NAME: 30.0},
+                best_metric=aa.METRIC_NAME,
+                external_source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
+                methodology=methodology,
+            )
+        )
+    session.commit()
+    leaderboard = aa.ArtificialAnalysisLeaderboard(
+        "5",
+        [
+            aa.ArtificialAnalysisEntry(
+                "rescored", "Rescored", {"intelligence": 18.5}, date(2026, 8, 1)
+            )
+        ],
+        missing_reviewed=["withdrawn"],
+    )
+
+    stats = aa.ArtificialAnalysisSyncService(session).sync(
+        leaderboard, discovery=aa.ArtificialAnalysisDiscovery(papers={"rescored": 7})
+    )
+
+    rows = {(row.dataset_id, row.model_name): row for row in session.query(Evaluation)}
+    assert set(rows) == {
+        (581, "Rescored"),
+        (581, "current-581"),
+        (581, "manual-581"),
+        (582, "withdrawn-582"),
+    }
+    assert rows[(581, "Rescored")].metrics == {aa.METRIC_NAME: 18.5}
+    assert "Intelligence Index 5;" in rows[(581, "Rescored")].methodology
+    assert stats.indexes["intelligence"].retired == 1
+    assert stats.missing_upstream == ["withdrawn"]
+    assert stats.to_dict()["missing_upstream"] == ["withdrawn"]

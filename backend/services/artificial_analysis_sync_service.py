@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 import os
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -68,7 +69,8 @@ INDEXES: tuple[ArtificialAnalysisIndex, ...] = (
         dataset_slug="artificial-analysis-intelligence-index",
         task_slug="language-modeling",
         label="Intelligence Index",
-        min_expected_models=100,
+        # Index v5 (2026-10-27) re-scored only 77 models.
+        min_expected_models=50,
         max_expected_models=1_000,
     ),
     ArtificialAnalysisIndex(
@@ -88,6 +90,8 @@ DATASET_SLUG = INTELLIGENCE_INDEX.dataset_slug
 TASK_SLUG = INTELLIGENCE_INDEX.task_slug
 MIN_EXPECTED_MODELS = INTELLIGENCE_INDEX.min_expected_models
 MAX_EXPECTED_MODELS = INTELLIGENCE_INDEX.max_expected_models
+# Refuse a response that drops more than a quarter of the reviewed models.
+MAX_MISSING_REVIEWED_DIVISOR = 4
 
 
 @dataclass(frozen=True)
@@ -266,6 +270,8 @@ class ArtificialAnalysisLeaderboard:
     # Daily API budget left after this fetch, from the last page's headers.
     quota_remaining: str | None = None
     quota_limit: str | None = None
+    # Reviewed slugs Artificial Analysis no longer lists.
+    missing_reviewed: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -306,6 +312,7 @@ class ArtificialAnalysisSyncStats:
     retired: int = 0
     indexed_papers: int = 0
     missing_papers: list[str] = field(default_factory=list)
+    missing_upstream: list[str] = field(default_factory=list)
     indexes: dict[str, ArtificialAnalysisIndexStats] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -318,6 +325,7 @@ class ArtificialAnalysisSyncStats:
             "retired": self.retired,
             "indexed_papers": self.indexed_papers,
             "missing_papers": self.missing_papers,
+            "missing_upstream": self.missing_upstream,
         }
         payload.update({key: stats.to_dict() for key, stats in self.indexes.items()})
         return payload
@@ -447,7 +455,8 @@ def fetch_artificial_analysis_leaderboard(
     all_entries = list(unique_entries.values())
     slugs = list(unique_entries)
     missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(slugs))
-    if missing:
+    # A few withdrawn models are normal; a large gap means a broken response.
+    if len(missing) > len(MODEL_PAPER_IDENTITIES) // MAX_MISSING_REVIEWED_DIVISOR:
         raise ValueError(
             "Artificial Analysis is missing reviewed models: " + ",".join(missing)
         )
@@ -463,6 +472,7 @@ def fetch_artificial_analysis_leaderboard(
         all_entries,
         quota_remaining=quota_remaining,
         quota_limit=quota_limit,
+        missing_reviewed=missing,
     )
 
 
@@ -546,6 +556,14 @@ class ArtificialAnalysisPaperDiscoveryService:
         return result
 
 
+def _stale_index_version(
+    methodology: str | None, index: ArtificialAnalysisIndex, version: str
+) -> bool:
+    """Whether a managed row names an index version other than ``version``."""
+    match = re.search(rf"{re.escape(index.label)} (\S+); fetched", methodology or "")
+    return match is not None and match.group(1) != version
+
+
 class ArtificialAnalysisSyncService:
     def __init__(self, db: Session):
         self.db = db
@@ -593,15 +611,14 @@ class ArtificialAnalysisSyncService:
             for entry in leaderboard.entries
             if entry.slug in discovery.papers and index.key in entry.scores
         ]
-        reviewed = set(MODEL_PAPER_IDENTITIES)
+        listed = {entry.slug for entry in leaderboard.entries}
+        reviewed = set(MODEL_PAPER_IDENTITIES) & listed
         scored_reviewed = {
             entry.slug
             for entry in leaderboard.entries
             if entry.slug in reviewed and index.key in entry.scores
         }
-        if not reviewed.issubset(
-            {entry.slug for entry in leaderboard.entries}
-        ) or not scored_reviewed.issubset({entry.slug for entry in selected}):
+        if not scored_reviewed.issubset({entry.slug for entry in selected}):
             raise ValueError(
                 f"Refusing to synchronize an incomplete reviewed model set for "
                 f"{index.label}"
@@ -654,6 +671,13 @@ class ArtificialAnalysisSyncService:
                     rows_by_slug[renamed_slug] = row
                     slug = renamed_slug
             if entry is None:
+                # The index version is the Intelligence Index's; a new version
+                # rescales every score, so unlisted older rows stop comparing.
+                if index is INTELLIGENCE_INDEX and _stale_index_version(
+                    row.methodology, index, leaderboard.index_version
+                ):
+                    self.db.delete(row)
+                    stats.retired += 1
                 continue
             if index.key not in entry.scores:
                 self.db.delete(row)
@@ -755,6 +779,7 @@ class ArtificialAnalysisSyncService:
         stats = ArtificialAnalysisSyncStats(
             fetched=len(leaderboard.entries),
             indexed_papers=len(discovery.indexed_papers),
+            missing_upstream=list(leaderboard.missing_reviewed),
         )
         try:
             for index in INDEXES:

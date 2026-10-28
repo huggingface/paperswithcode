@@ -229,6 +229,13 @@ def test_parse_and_fetch_the_leaderboard_table():
     assert fetch_vals_finance_agent(client) == entries
 
 
+def test_parser_ignores_relabelled_trailing_columns():
+    relabelled = HTML.replace("Input / Output Cost", "Tokens / Test", 1).replace(
+        ">Duration<", ">Duration / Test<", 1
+    )
+    assert parse_vals_finance_agent(relabelled) == parse_vals_finance_agent(HTML)
+
+
 @pytest.mark.parametrize(
     ("old", "new", "message"),
     [
@@ -242,7 +249,7 @@ def test_parser_fails_loudly_on_layout_changes(old, new, message):
     broken = (
         HTML.replace(old, new, 1)
         if old != "<th"
-        else HTML.replace("Cost / Test", "Price", 1)
+        else HTML.replace(">Accuracy<", ">Score<", 1)
     )
     with pytest.raises(ValueError, match=message):
         parse_vals_finance_agent(broken)
