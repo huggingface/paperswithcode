@@ -272,7 +272,7 @@ def _store_bootstrap_bundle(db: Session, revision: str) -> str | None:
 
 def _persisted_bootstrap_bundle(row: PaperCurationJob) -> dict | None:
     if row.bootstrap_bundle_sha256 is None:
-        return row.bootstrap_bundle
+        return None
     bundle = row.stored_bootstrap_bundle.bundle
     if _bootstrap_bundle_key(bundle) != row.bootstrap_bundle_sha256:
         raise ValueError("Persisted bootstrap bundle does not match its key")
@@ -1148,7 +1148,6 @@ class CodexPaperJobService:
         row.repository_sha = revision
         row.skill_sha256 = _curator_skill_digest(row.kind)
         row.bootstrap_bundle_sha256 = _store_bootstrap_bundle(db, revision)
-        row.bootstrap_bundle = None
         row.model = settings.codex_jobs_model
         row.reasoning_effort = settings.codex_jobs_reasoning_effort
         row.codex_cli_version = settings.codex_jobs_cli_version

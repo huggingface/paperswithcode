@@ -544,9 +544,7 @@ def test_bootstrap_bundle_is_allowlisted_hashed_and_release_bound(monkeypatch):
     service = CodexPaperJobService()
 
     bundle = service.bootstrap_bundle(
-        SimpleNamespace(
-            repository_sha=revision, bootstrap_bundle_sha256=None, bootstrap_bundle=None
-        )
+        SimpleNamespace(repository_sha=revision, bootstrap_bundle_sha256=None)
     )
 
     assert bundle["revision"] == revision
@@ -558,11 +556,7 @@ def test_bootstrap_bundle_is_allowlisted_hashed_and_release_bound(monkeypatch):
         assert hashlib.sha256(content).hexdigest() == item["sha256"]
     with pytest.raises(ValueError, match="active immutable release"):
         service.bootstrap_bundle(
-            SimpleNamespace(
-                repository_sha="e" * 40,
-                bootstrap_bundle_sha256=None,
-                bootstrap_bundle=None,
-            )
+            SimpleNamespace(repository_sha="e" * 40, bootstrap_bundle_sha256=None)
         )
 
     engine = create_engine("sqlite+pysqlite:///:memory:")
@@ -580,7 +574,6 @@ def test_bootstrap_bundle_is_allowlisted_hashed_and_release_bound(monkeypatch):
             repository_sha=revision,
             bootstrap_bundle_sha256=key,
             stored_bootstrap_bundle=stored,
-            bootstrap_bundle=None,
         )
         assert service.bootstrap_bundle(bound) == stored.bundle
 
@@ -590,13 +583,8 @@ def test_bootstrap_bundle_is_allowlisted_hashed_and_release_bound(monkeypatch):
     engine.dispose()
 
     persisted = service_module._curator_bootstrap_bundle(revision)
-    legacy = SimpleNamespace(
-        repository_sha=revision,
-        bootstrap_bundle_sha256=None,
-        bootstrap_bundle=persisted,
-    )
-    assert service.bootstrap_bundle(legacy) == persisted
-
     persisted["files"][0]["content_b64"] = base64.b64encode(b"tampered").decode()
     with pytest.raises(ValueError, match="hash mismatch"):
-        service.bootstrap_bundle(legacy)
+        service_module._validated_bootstrap_bundle(
+            SimpleNamespace(repository_sha=revision), persisted
+        )

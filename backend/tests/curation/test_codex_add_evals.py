@@ -324,8 +324,7 @@ def test_unstarted_job_rebinds_to_the_active_bootstrap_release(monkeypatch):
         reasoning_effort="low",
         codex_cli_version="0.74.0",
         validator_version="older-validator",
-        bootstrap_bundle_sha256=None,
-        bootstrap_bundle={"revision": "e" * 40, "files": []},
+        bootstrap_bundle_sha256="a" * 64,
     )
     stored = []
     monkeypatch.setattr(
@@ -345,7 +344,6 @@ def test_unstarted_job_rebinds_to_the_active_bootstrap_release(monkeypatch):
     assert row.validator_version == "scheduled-policy-v1"
     assert stored == [active_revision]
     assert row.bootstrap_bundle_sha256 == "b" * 64
-    assert row.bootstrap_bundle is None
 
 
 def test_remote_callbacks_identify_the_service_to_cloudflare():

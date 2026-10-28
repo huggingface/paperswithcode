@@ -9,9 +9,6 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from backend.models.database import (
-    PaperCurationJob,
-)
 from backend.services.codex_add_evals_service import (
     CodexPaperJobService,
 )
@@ -91,15 +88,8 @@ def test_scheduled_usage_filters_for_completed_jobs(monkeypatch):
     CodexPaperJobService._scheduled_usage_snapshot(Database(), None)
 
     assert any("paper_curation_jobs.status" in predicate for predicate in filters)
-    # Summing tokens must not load whole job rows (each carries a ~100 KB bundle).
+    # Summing tokens must not load whole job rows.
     assert selected == ["finished_at", "input_tokens", "output_tokens"]
-
-
-def test_bootstrap_bundle_column_is_deferred():
-    from sqlalchemy import inspect
-
-    attribute = inspect(PaperCurationJob).column_attrs["bootstrap_bundle"]
-    assert attribute.deferred is True
 
 
 @pytest.mark.parametrize(

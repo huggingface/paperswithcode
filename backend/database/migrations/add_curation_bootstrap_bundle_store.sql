@@ -4,9 +4,8 @@
 -- worker's bootstrap files, although all jobs bound to one release receive the
 -- same bundle. `paper_curation_bootstrap_bundles` stores each distinct bundle
 -- once under the SHA-256 of its canonical JSON, and jobs reference it through
--- `bootstrap_bundle_sha256`. The legacy `bootstrap_bundle` column stays readable
--- until `backend/scripts/backfill_curation_bootstrap_bundles.py` has moved every
--- row; a later migration drops it.
+-- `bootstrap_bundle_sha256`. A one-off backfill moved the legacy per-job
+-- copies; `drop_curation_legacy_bootstrap_bundle.sql` drops that column.
 --
 -- Run as the schema owner (postgres) before deploying the release that maps the
 -- new column. `public` only: the staging job table has no bootstrap bundle.
@@ -31,8 +30,5 @@ COMMENT ON TABLE public.paper_curation_bootstrap_bundles IS
 
 COMMENT ON COLUMN public.paper_curation_jobs.bootstrap_bundle_sha256 IS
 'Key of the hash-validated bootstrap snapshot bound before dispatch.';
-
-COMMENT ON COLUMN public.paper_curation_jobs.bootstrap_bundle IS
-'Legacy per-job bootstrap snapshot; moved to paper_curation_bootstrap_bundles by backfill_curation_bootstrap_bundles.py.';
 
 COMMIT;

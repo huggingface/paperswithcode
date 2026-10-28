@@ -231,30 +231,3 @@ def test_stopped_newer_job_does_not_supersede_a_waiting_one(db, newer_status):
 
     assert service.release_admin_awaiting_markdown() == 1
     assert older.status == "queued"
-
-
-def test_hourly_reconcile_clears_bundles_only_from_finished_jobs(db):
-    statuses = ["completed", "failed", "canceled", "awaiting_markdown", "queued"]
-    rows = []
-    for number, status in enumerate(statuses, start=1):
-        row = _running_job(db, number=number)
-        row.status = status
-        row.bootstrap_bundle = "bundle"
-        rows.append(row)
-    db.commit()
-    service = HFDailyCurationService(
-        db, _settings(), job_service=CodexPaperJobService()
-    )
-
-    assert service.clear_terminal_bootstrap_bundles(limit=2) == 2
-    assert service.clear_terminal_bootstrap_bundles() == 1
-    db.commit()
-    db.expire_all()
-
-    assert [row.bootstrap_bundle for row in rows] == [
-        None,
-        None,
-        None,
-        "bundle",
-        "bundle",
-    ]

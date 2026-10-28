@@ -235,12 +235,6 @@ class PaperCurationJob(Base):
     stored_bootstrap_bundle: Mapped[Optional["PaperCurationBootstrapBundle"]] = (
         relationship()
     )
-    # Legacy per-job copy (~100 KB of base64 skill files), read only for rows
-    # bound before bootstrap_bundle_sha256; deferred so wide job queries do not
-    # drag it into the API worker.
-    bootstrap_bundle: Mapped[Optional[dict]] = mapped_column(
-        JSONB(none_as_null=True), nullable=True, deferred=True
-    )
     validation_summary: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     mutation_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     url_candidates: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)

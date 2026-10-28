@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 from huggingface_hub import HfFileSystem
 from huggingface_hub.errors import HfHubHTTPError
-from sqlalchemy import func, null, select
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
@@ -25,7 +25,6 @@ from backend.models.database import (
 )
 from backend.services.codex_add_evals_service import (
     EXTERNAL_PAPER_POLICY_VERSION,
-    TERMINAL_STATUSES,
     CodexPaperJobService,
     codex_paper_job_service,
     deferred_workflows_for_release,
@@ -50,8 +49,6 @@ FetchCohort = Callable[[date], list[str]]
 MarkdownAvailable = Callable[[Paper, Settings], bool]
 logger = logging.getLogger(__name__)
 _MAX_AUTOMATIC_RETRIES = 3
-# Bounds each hourly UPDATE (~450 MB of TOAST) while the 24k-row backlog drains.
-BOOTSTRAP_BUNDLE_CLEAR_BATCH = 5000
 
 
 class CurationRetryConflict(ValueError):
@@ -471,29 +468,6 @@ class HFDailyCurationService:
         workflow.status = "queued"
         workflow.deferred_reason = None
 
-    def clear_terminal_bootstrap_bundles(
-        self, limit: int = BOOTSTRAP_BUNDLE_CLEAR_BATCH
-    ) -> int:
-        """Drop the ~90 KB curator bundle from finished jobs.
-
-        Only a queued job's runner reads it. Retries create new rows with their own
-        bundle, and parked awaiting-Markdown jobs keep theirs because they requeue
-        in place.
-        """
-        finished = (
-            select(PaperCurationJob.id)
-            .where(
-                PaperCurationJob.status.in_(TERMINAL_STATUSES),
-                PaperCurationJob.bootstrap_bundle.isnot(None),
-            )
-            .limit(limit)
-        )
-        return (
-            self.db.query(PaperCurationJob)
-            .filter(PaperCurationJob.id.in_(finished.scalar_subquery()))
-            .update({"bootstrap_bundle": null()}, synchronize_session=False)
-        )
-
     def release_admin_awaiting_markdown(self) -> int:
         """Requeue parked admin paper jobs once their canonical Markdown exists.
 
@@ -557,9 +531,7 @@ class HFDailyCurationService:
     ) -> dict:
         today = today or datetime.now(UTC).date()
         released_admin = self.release_admin_awaiting_markdown()
-        cleared_bundles = 0
         if not dry_run:
-            cleared_bundles = self.clear_terminal_bootstrap_bundles()
             # Publish releases before the slow cohort fetch rather than holding
             # their row locks against admin cancels.
             self.db.commit()
@@ -650,7 +622,6 @@ class HFDailyCurationService:
             "already_satisfied": 0,
             "released_markdown_ready": 0,
             "released_admin_markdown_ready": released_admin,
-            "cleared_bootstrap_bundles": cleared_bundles,
             "retried": 0,
         }
 
