@@ -72,26 +72,24 @@ describe('PDF paper previews', () => {
     expect(screen.queryByRole('link', { name: 'Open paper ↗' })).not.toBeInTheDocument();
   });
 
-  it('steps a bibliography card through the places the text cites it', async () => {
+  it('hands every place the text cites an entry to the viewer', async () => {
     get.mockResolvedValue({ title: 'Microsoft COCO', authors: ['Tsung-Yi Lin'], arxiv_id: '1405.0312', tasks: [] });
     const citations = [[{ page: 2, bbox: [10, 20, 30, 40] }], [{ page: 5, bbox: [50, 60, 70, 80] }, { page: 5, bbox: [5, 82, 20, 95] }]];
-    const onShowCitation = vi.fn();
+    const onShowCitations = vi.fn();
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={client}><MemoryRouter>
-      <PdfBibliographyEntryLink name="cite.lin2014" routeId="1405.0312" box={[100, 100, 400, 140]} citations={citations} onShowCitation={onShowCitation} />
+      <PdfBibliographyEntryLink name="cite.lin2014" routeId="1405.0312" box={[100, 100, 400, 140]} citations={citations} onShowCitations={onShowCitations} />
     </MemoryRouter></QueryClientProvider>);
     await userEvent.hover(screen.getByRole('link', { name: 'Reference 1405.0312' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Jump to citation 1 of 2' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Jump to citation 2 of 2' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Jump to citation 1 of 2' }));
-    expect(onShowCitation.mock.calls.map(([citation]) => citation)).toEqual([citations[0], citations[1], citations[0]]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Jump to citations (2)' }));
+    expect(onShowCitations).toHaveBeenCalledWith(citations);
   });
 
   it('offers no jump for an entry the text never cites', async () => {
     get.mockResolvedValue({ title: 'Microsoft COCO', authors: ['Tsung-Yi Lin'], arxiv_id: '1405.0312', tasks: [] });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={client}><MemoryRouter>
-      <PdfBibliographyEntryLink name="cite.lin2014" routeId="1405.0312" box={[100, 100, 400, 140]} citations={[]} onShowCitation={vi.fn()} />
+      <PdfBibliographyEntryLink name="cite.lin2014" routeId="1405.0312" box={[100, 100, 400, 140]} citations={[]} onShowCitations={vi.fn()} />
     </MemoryRouter></QueryClientProvider>);
     await userEvent.hover(screen.getByRole('link', { name: 'Reference 1405.0312' }));
     expect(await screen.findByRole('link', { name: 'Open paper ↗' })).toBeInTheDocument();

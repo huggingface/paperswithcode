@@ -16,6 +16,7 @@ import { createPdfCitationResolver, type PdfBibliographyLink, type PdfCitationRe
 import { PdfBibliographyEntryLink, PdfPaperLink } from "./PdfPaperLink";
 import { usePdfPaperLinks } from "./usePdfPaperLinks";
 import { PdfOutline } from "./PdfOutline";
+import { PdfCitationSteps } from "./PdfCitationSteps";
 import { clampZoom, stepZoom } from "./pdfZoom";
 import { activeSectionIndex, loadPdfOutline, pdfSectionFromHash, type PdfOutlineEntry } from "./pdfOutline";
 import type { PdfHighlight, PdfHighlightBox } from "./pdfCitations";
@@ -134,7 +135,7 @@ function LazyPdfPage({
   highlightBoxes,
   highlightKey,
   highlightBrief,
-  onShowCitation,
+  onShowCitations,
   onShowReference,
 }: {
   page: number;
@@ -147,7 +148,7 @@ function LazyPdfPage({
   highlightBoxes?: number[][];
   highlightKey?: string;
   highlightBrief?: boolean;
-  onShowCitation?: (citation: PdfHighlightBox[]) => void;
+  onShowCitations?: (citations: PdfHighlightBox[][]) => void;
   onShowReference?: (dest: string) => Promise<boolean>;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -259,7 +260,7 @@ function LazyPdfPage({
     })}
     {snapshot && !painted && <img className="pdf-page-snapshot" src={snapshot} alt="" aria-hidden="true" />}
     {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} onShowReference={onShowReference} />)}
-    {visible && resolveCitation && bibliographyLinks.map(link => <PdfBibliographyEntryLink key={link.name} {...link} onShowCitation={onShowCitation} />)}
+    {visible && resolveCitation && bibliographyLinks.map(link => <PdfBibliographyEntryLink key={link.name} {...link} onShowCitations={onShowCitations} />)}
     {highlightBoxes?.map(([x0, y0, x1, y1], index) => <div
       key={`${highlightKey}-${index}`}
       className={`pdf-citation-highlight${highlightBrief ? " is-brief" : ""}`}
@@ -333,7 +334,12 @@ export function PdfViewer({
   // reuse the chat citation highlight, flashed more briefly; whichever was
   // requested last is shown.
   const [citationJump, setCitationJump] = useState<PdfHighlight>();
-  useEffect(() => setCitationJump(undefined), [citedHighlight?.nonce, url]);
+  // The citations of the bibliography entry last jumped from, and which one is shown.
+  const [citationSteps, setCitationSteps] = useState<{ citations: PdfHighlightBox[][]; index: number }>();
+  useEffect(() => {
+    setCitationJump(undefined);
+    setCitationSteps(undefined);
+  }, [citedHighlight?.nonce, url]);
   const highlight = citationJump ?? citedHighlight;
   const highlightKey = highlight && `${citationJump ? "jump" : "cited"}-${highlight.nonce}`;
   // A card jump's short flash waits for the scroll to land, which can cross
@@ -343,6 +349,17 @@ export function PdfViewer({
   const showCitation = useCallback((citation: PdfHighlightBox[]) => {
     setCitationJump((previous) => ({ boxes: citation, nonce: (previous?.nonce ?? 0) + 1 }));
   }, []);
+  const showCitations = useCallback((citations: PdfHighlightBox[][]) => {
+    setCitationSteps({ citations, index: 0 });
+    showCitation(citations[0]);
+  }, [showCitation]);
+  const stepCitation = (direction: 1 | -1) => {
+    if (!citationSteps) return;
+    const { citations } = citationSteps;
+    const index = (citationSteps.index + direction + citations.length) % citations.length;
+    setCitationSteps({ citations, index });
+    showCitation(citations[index]);
+  };
   const documentRef = useRef<PDFDocumentProxy | null>(null);
   const textIndex = useRef<PdfTextIndex>();
   const [resolveCitation, setResolveCitation] = useState<PdfCitationResolver>();
@@ -836,12 +853,18 @@ export function PdfViewer({
             highlightBoxes={shownHighlight?.boxes.filter((box) => box.page === pageNumber).map((box) => box.bbox)}
             highlightKey={highlightKey}
             highlightBrief={Boolean(citationJump)}
-            onShowCitation={showCitation}
+            onShowCitations={showCitations}
             onShowReference={showReference}
           />)}
         </div>
       </Document>}
     </div>
+    {citationSteps && citationSteps.citations.length > 1 && <PdfCitationSteps
+      index={citationSteps.index}
+      count={citationSteps.citations.length}
+      onStep={stepCitation}
+      onClose={() => setCitationSteps(undefined)}
+    />}
     <PdfOutline
       entries={outline}
       activeIndex={navigationSection ?? activeSection}

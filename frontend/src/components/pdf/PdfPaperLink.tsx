@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
 import type { PdfBibliographyLink } from "./pdfCitationLinks";
@@ -51,14 +51,12 @@ export function PdfPaperLink({ anchor, routeId, internal, dest, onShowReference 
 }
 
 // A bibliography entry has no PDF link of its own, so its preview target is
-// positioned over the entry's text on the page's 0–1000 grid. Its card can jump
-// back to where the text cites it, stepping through each citation in turn.
-export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1], citations = [], onShowCitation }: PdfBibliographyLink & {
+// positioned over the entry's text on the page's 0–1000 grid. Its card jumps
+// back to where the text cites it; the viewer steps through the rest.
+export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1], citations = [], onShowCitations }: PdfBibliographyLink & {
   citations?: PdfHighlightBox[][];
-  onShowCitation?: (citation: PdfHighlightBox[]) => void;
+  onShowCitations?: (citations: PdfHighlightBox[][]) => void;
 }) {
-  const [next, setNext] = useState(0);
-  const citation = citations[next % citations.length];
   return <div
     className="pdf-bibliography-link"
     style={{ left: `${x0 / 10}%`, top: `${y0 / 10}%`, width: `${(x1 - x0) / 10}%`, height: `${(y1 - y0) / 10}%` }}
@@ -73,10 +71,9 @@ export function PdfBibliographyEntryLink({ routeId, box: [x0, y0, x1, y1], citat
       cardOpensPaper
       previewFooter={() => <div className="pdf-paper-preview-actions">
         <a href={`/paper/${encodeURIComponent(routeId)}`} target="_blank" rel="noopener noreferrer">Open paper ↗</a>
-        {citation && onShowCitation && <button type="button" onClick={() => {
-          onShowCitation(citation);
-          setNext(next + 1);
-        }}>{citations.length > 1 ? `Jump to citation ${next % citations.length + 1} of ${citations.length}` : "Jump to citation"}</button>}
+        {citations.length > 0 && onShowCitations && <button type="button" onClick={() => onShowCitations(citations)}>
+          {citations.length > 1 ? `Jump to citations (${citations.length})` : "Jump to citation"}
+        </button>}
       </div>}
     >{null}</PaperPreviewLink>
   </div>;

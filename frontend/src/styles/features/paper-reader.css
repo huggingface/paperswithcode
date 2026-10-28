@@ -63,6 +63,14 @@
 .pdf-search-controls input { width: min(260px, 45vw); min-height: 30px; border: 1px solid var(--hairline); border-radius: 4px; padding: 4px 7px; background: var(--bg); color: var(--ink); }
 .pdf-search-controls span { min-width: 70px; color: var(--ink-soft); text-align: center; }
 .pdf-search-controls button { display: inline-flex; align-items: center; justify-content: center; }
+/* Steps through a bibliography entry's in-text citations, dropped over the top of the PDF. */
+.pdf-citation-steps { position: absolute; z-index: 10; top: 8px; left: 50%; display: flex; align-items: center; gap: 4px; padding: 5px 5px 5px 12px; border: 1px solid var(--hairline); border-radius: 8px; background: var(--bg-elevated); color: var(--ink); box-shadow: 0 5px 20px #0003; font-size: 13px; transform: translateX(-50%); animation: pdf-citation-steps-in 140ms ease-out; }
+.pdf-citation-steps span { margin-right: 4px; color: var(--ink-soft); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pdf-citation-steps button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 5px; background: transparent; color: var(--ink); cursor: pointer; }
+.pdf-citation-steps button:hover { background: var(--hairline); }
+.pdf-citation-steps button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@keyframes pdf-citation-steps-in { from { opacity: 0; transform: translate(-50%, -6px); } }
+@media (prefers-reduced-motion: reduce) { .pdf-citation-steps { animation: none; } }
 .pdf-scroll-frame { position: relative; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .pdf-scroll { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; background: #fff; scrollbar-color: var(--ink-faint) var(--bg-subtle); scrollbar-gutter: stable; }
 .pdf-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
