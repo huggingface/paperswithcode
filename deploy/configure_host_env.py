@@ -1634,8 +1634,8 @@ def production_codex_values(
 def production_codex_image_values() -> dict[str, str]:
     return {
         "PWC_CODEX_JOBS_IMAGE": (
-            f"{OPERATOR.curator_image_repository}:runner-8fc62f3ce865"
-            "@sha256:93d70eb1c02345d37a099182e322463b47f4480a472720376c1b98068fe075a9"
+            f"{OPERATOR.curator_image_repository}:runner-f165a0e4c56a"
+            "@sha256:3c4c6b16737946f69a0390f3c014ffea5a46be8b7e63633e804c21d3e0046496"
         ),
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",
     }

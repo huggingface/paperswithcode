@@ -677,7 +677,7 @@ the active release, apply the protected environment through the same qualified
 path with `--refresh-environment` instead.
 
 The current image probe is recorded at
-`https://huggingface.co/jobs/nielsr/6acf2858c6628814522382f0`; its command
+`https://huggingface.co/jobs/nielsr/6ae241f73fb22a235dd46a82`; its command
 checks the Codex version, PyPDF2 version, full runner SHA-256, exact model, and
 scoped callback-token inheritance. The image is public, so Jobs pull it without
 registry credentials.
