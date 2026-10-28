@@ -1,9 +1,7 @@
 # Papers With Code database schema
 
-Live structure audited against PostgreSQL on 2026-08-28. The table inventory
-was refreshed against the ORM in `backend/models/database/` and the migrations
-in `backend/database/migrations/` on 2026-10-20; tables added since the live
-audit are named here but their live placement was not re-audited.
+Live structure, the ORM in `backend/models/database/`, and the migrations in
+`backend/database/migrations/` were audited together on 2026-10-28.
 
 ## Authority and topology
 
@@ -21,8 +19,9 @@ Production and staging share one PostgreSQL database:
   production equivalents while catalog reads fall through to `public`.
 - Production uses `search_path=public`.
 
-At the audit point there were 100 base tables in `public`, 49 in `staging`, and
-108 tables declared by the ORM. Counts include operational and transitional
+At the audit point there were 139 tables in `public` (including the
+partitioned `paper_embeddings` parent and its partition), 83 in `staging`, and
+144 tables declared by the ORM. Counts include operational and transitional
 tables, not views.
 
 ## Core entity relationships
@@ -38,6 +37,8 @@ erDiagram
 
     PAPERS ||--o{ PAPER_AUTHORS : has
     AUTHORS ||--o{ PAPER_AUTHORS : writes
+    AUTHORS ||--o| AUTHOR_GOOGLE_SCHOLAR_PROFILES : links
+    PAPERS ||--o{ PAPER_ABSTRACT_MENTIONS : mentions
     PAPERS ||--o{ PAPER_TASKS : addresses
     TASKS ||--o{ PAPER_TASKS : tags
     PAPERS ||--o{ PAPER_METHODS : uses
@@ -67,6 +68,7 @@ erDiagram
     MODEL_RELEASES ||--o{ MODEL_RELEASE_ARTIFACTS : publishes
     HF_ARTIFACTS ||--o{ MODEL_RELEASE_ARTIFACTS : realizes
     MODEL_RELEASES ||--o{ MODEL_PROVIDER_ALIASES : aliases
+    PAPERS ||--o{ MODEL_RELEASE_SIGNALS : resolves
 
     PAPERS ||--o{ PAPER_CONFERENCES : appears_at
     CONFERENCES ||--o{ PAPER_CONFERENCES : accepts
@@ -94,6 +96,13 @@ erDiagram
 - `evaluations.metrics` is JSONB and `evaluations.best_metric` is a metric name,
   not a foreign key to `metrics`. The service layer validates the leaderboard
   triple.
+- A `(dataset, best_metric)` leaderboard lives on exactly one task. The
+  deferred `evaluations_single_benchmark_board` constraint trigger rejects a
+  second task at commit time, except for pairs listed in
+  `benchmark_task_board_exceptions`.
+- `paper_abstract_mentions` stores judged method, dataset, and framework spans
+  in a paper abstract as polymorphic `(entity_type, entity_id)` references,
+  stamped with the abstract's SHA so stale spans can be detected.
 - Paper lineage is directed: `paper_relations.source_paper_id` is the
   predecessor and `target_paper_id` is the successor. Self-edges are rejected.
 - `paper_method_evidence` records why a method link exists;
@@ -117,9 +126,9 @@ keys unless they have an explicit `id`.
 | Domain | Tables |
 | --- | --- |
 | Research taxonomy | `areas`, `tasks`, `methods`, `datasets`, `metrics` |
-| Papers and results | `papers`, `authors`, `author_aliases`, `paper_suggested_questions`, `evaluations`, `evaluation_badge_tombstones` |
+| Papers and results | `papers`, `authors`, `author_aliases`, `author_google_scholar_profiles`, `paper_suggested_questions`, `evaluations`, `evaluation_badge_tombstones` |
 | Code and project links | `repositories`, `repository_star_history`, `project_pages` |
-| Hugging Face and model identity | `hf_artifacts`, `model_releases`, `model_release_artifacts`, `model_provider_aliases`, `trending_model_candidates`, `trending_model_curation_state` |
+| Hugging Face and model identity | `hf_artifacts`, `model_releases`, `model_release_artifacts`, `model_provider_aliases`, `model_release_signals`, `trending_model_candidates`, `trending_model_curation_state` |
 | Venues and organizations | `conferences`, `conference_deadlines`, `conference_deadline_sweeps`, `organizations`, `organization_trending_history` |
 | X (Twitter) | `paper_x_threads`, `paper_x_thread_scans`, `paper_x_posts`, `x_insight_posts` |
 | Framework catalogue | `framework_domains`, `framework_categories`, `frameworks` |
@@ -130,10 +139,11 @@ keys unless they have an explicit `id`.
 | --- | --- |
 | Paper tagging | `paper_authors`, `paper_tasks`, `paper_methods`, `paper_datasets` |
 | Method provenance | `paper_method_evidence`, `paper_method_exclusions`, `method_reference_backfill_months`, `method_keyword_backfill_runs` |
+| Abstract entity linking | `paper_abstract_mentions` |
 | External resources | `paper_repositories`, `paper_project_pages`, `paper_hf_artifacts` |
 | Venues and organizations | `paper_conferences`, `paper_organizations` |
 | Paper and task graph | `paper_relations`, `task_sister_tasks` |
-| Leaderboards | `task_datasets`, `task_dataset_metrics` |
+| Leaderboards | `task_datasets`, `task_dataset_metrics`, `benchmark_task_board_exceptions` |
 | Frameworks | `framework_platforms`, `task_frameworks`, `task_recommended_frameworks` |
 
 `task_recommended_frameworks` is the legacy repository-based compatibility
@@ -156,6 +166,8 @@ These state tables exist in `public`; most also have staging-owned shadows in
 `user_bookmarks`, `user_preferences`, `user_profiles`, and
 `user_profile_aliases` exist in both environment schemas. The staging-only
 `staging_access_requests` table records contributor access requests.
+`auth_sessions` (revocable login sessions) exists only in `public`: production
+is its authority and staging has read-only access through `search_path`.
 
 Research follows (`research_follows`, `research_subscriptions`,
 `research_suppressions`, `research_digests`) are created in both schemas by
@@ -182,16 +194,14 @@ Chat tables are environment-owned state. Most exist in both `public` and
 | Direct OpenAI | `chat_openai_monthly_usage`, `chat_openai_provider_calls` |
 | Harness transcripts | `chat_sdk_transcript_entries`, `chat_sdk_session_summaries`, `chat_pi_sessions`, `chat_pi_transcript_entries`, `chat_pi_prepared_forks` |
 
-At the audit point, `chat_turn_jobs`, `chat_external_workers`, and the three
-LaTeX figure/storage tables existed only in `staging`. The ORM also declared
-`chat_reliability_baseline` and `chat_provider_runtime_state`, but neither had
-been created in either live schema.
+At the audit point, the ten `chat_executor_*` tables,
+`chat_turn_reservations`, `chat_turn_admission_budgets`, and the three LaTeX
+figure/storage tables existed only in `staging`. Every other chat table existed
+in both schemas.
 
 ### Autonomous operations
 
-The checkout declares the following tables (`backend/models/database/autonomous.py`).
-The `add_autonomous_operations.sql` migration had not been applied to either
-live schema at the audit point, and `autonomous_alert_delivery` was added later:
+The checkout declares the following tables (`backend/models/database/autonomous.py`):
 
 `autonomous_submission_claim`, `autonomous_operator_state`,
 `autonomous_execution_intent`, `autonomous_run`,
@@ -200,7 +210,10 @@ live schema at the audit point, and `autonomous_alert_delivery` was added later:
 `autonomous_repair_lease`, `autonomous_incident_attempt`, and
 `autonomous_alert_delivery`.
 
-Verify that these tables exist in the target schema before relying on them.
+At the audit point `autonomous_submission_claim` existed in neither live
+schema, and `autonomous_release_consumption` existed only in `public`; the
+others existed in both. Verify that a table exists in the target schema before
+relying on it.
 
 ### Migration-managed tables not mapped by the ORM
 
@@ -212,7 +225,12 @@ The embedding pipeline is intentionally managed by SQL because
 - `embedding_pipeline_runs`
 - `paper_lexeme_document_frequencies`
 
-`paper_redirects` is also live and migration-managed without an ORM model.
+These are also live and migration-managed without an ORM model:
+
+- `paper_redirects`
+- `author_google_scholar_candidates`, the weekly Google Scholar sync's
+  per-candidate evidence
+- `benchmark_task_board_exceptions`, the allowlist for the single-board guard
 
 ## Views
 
@@ -237,6 +255,8 @@ includes:
 - Search-vector update functions and triggers for papers, tasks, methods, and
   datasets.
 - Evaluation badge tombstone triggers on evaluations, tasks, and datasets.
+- `check_single_benchmark_board()`, the deferred single-task leaderboard guard
+  on `evaluations`.
 - Append-only enforcement for `catalog_mutation_events` in both environment
   schemas.
 - `project_pages_api_{insert,update,delete}()` view triggers.
@@ -248,11 +268,11 @@ includes:
 
 This section records observed differences, not desired end state.
 
-| Difference at 2026-08-28 | Status |
+| Difference at 2026-10-28 | Status |
 | --- | --- |
-| 12 ORM tables were absent from both live schemas | Ten autonomous-operation tables plus `chat_reliability_baseline` and `chat_provider_runtime_state`; migrations must be applied before use. |
-| Six ORM tables were present only in `staging` | `chat_turn_jobs`, `chat_external_workers`, three LaTeX figure/storage tables, and `staging_access_requests`; this is partly feature rollout and partly schema ownership. |
-| Six operational tables were live but not ORM-mapped | Five embedding-pipeline relations (including the active partition) plus `paper_redirects`; intentional if SQL remains their owner. |
+| One ORM table was absent from both live schemas | `autonomous_submission_claim`; its migration must be applied before use. |
+| 16 ORM tables were present only in `staging` | Ten `chat_executor_*` tables, `chat_turn_reservations`, `chat_turn_admission_budgets`, three LaTeX figure/storage tables, and `staging_access_requests`; this is partly feature rollout and partly schema ownership. |
+| Eight operational tables were live but not ORM-mapped | Five embedding-pipeline relations (including the active partition), `paper_redirects`, `author_google_scholar_candidates`, and `benchmark_task_board_exceptions`; intentional while SQL remains their owner. |
 | Four backup-like tables remained in `public` | `evaluations_backup`, `project_pages_original_final_backup`, `repositories_backup`, and `repositorybackup`; none is ORM-mapped. |
 | `public.tasks.is_visible` remained live but was absent from the ORM | The checked-in removal migration had not been applied. |
 
@@ -264,7 +284,8 @@ This section records observed differences, not desired end state.
   name can resolve to different physical tables through `search_path`.
 - Preserve foreign keys and deletion behavior when consolidating tables.
 - Keep large history and embedding data bounded or partitioned. At the audit
-  point `repository_star_history` was about 2.1 GiB and was the largest table.
+  point the largest tables were `repository_star_history` (about 3.3 GiB),
+  `paper_curation_jobs` (2.9 GiB), and `chat_pi_transcript_entries` (2.1 GiB).
 - Before dropping a compatibility or backup object, verify application, CRON,
   admin, and rollback references and take a recoverable backup.
 
