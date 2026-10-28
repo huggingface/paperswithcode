@@ -1848,16 +1848,17 @@ class CodexPaperJobService:
             if not _is_source_evidence_failure(item.error)
             and not _is_transport_failure(item.error)
         ]
-        if len(recent) == 25 and len(counted_failures) / 25 > 0.20:
-            condition = "terminal_failure_rate"
-            reason = "More than 20% of the latest 25 scheduled stages failed"
-        elif len(recent) == 25 and len(transport_failures) / 25 > 0.50:
+        if len(recent) == 25 and len(transport_failures) / 25 > 0.50:
             # Retried transport failures are noise, but a run of them means the
-            # runners cannot reach the site at all.
+            # runners cannot reach the site at all, so this pause holds every
+            # scheduled lane and takes precedence over the daily-only breakers.
             condition = "runner_transport_failures"
             reason = (
                 "More than half of the latest 25 scheduled stages lost their callbacks"
             )
+        elif len(recent) == 25 and len(counted_failures) / 25 > 0.20:
+            condition = "terminal_failure_rate"
+            reason = "More than 20% of the latest 25 scheduled stages failed"
         if condition and state.paused_at is None:
             state.paused_at = _now()
             state.pause_condition = condition

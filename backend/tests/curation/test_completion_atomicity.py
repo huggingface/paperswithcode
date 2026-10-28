@@ -318,6 +318,22 @@ def test_health_window_pauses_when_most_runners_lose_their_callbacks(completion)
     assert state.paused_at is not None
 
 
+def test_transport_outage_pause_outranks_the_daily_breaker(completion):
+    db, service, settings, job = completion
+    job.parent_workflow_id = None
+    state = db.get(PaperCurationSchedulerState, 1)
+    state.consecutive_apply_failures = 0
+    _add_history(
+        db,
+        job,
+        ["Remote runner failed (URLError)."] * 13 + ["apply failure"] * 6 + [None] * 5,
+    )
+
+    service.complete(db, job, report="done", error=None, settings=settings)
+
+    assert state.pause_condition == "runner_transport_failures"
+
+
 def test_runner_exception_names_outside_transport_still_count(completion):
     db, service, settings, job = completion
     job.parent_workflow_id = None
