@@ -133,7 +133,7 @@ def test_reasoning_effort_request_contract_accepts_native_values_only():
         ChatRequest(
             message="hello",
             client_message_id="request-3",
-            reasoning_effort="medium",
+            reasoning_effort="xhigh",
         )
 
 

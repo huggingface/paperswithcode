@@ -318,8 +318,8 @@ class ChatRuntimeSettings(BaseModel):
     chat_system_prompt_sha256: str = Field(default="", pattern=r"^(?:[0-9a-f]{64})?$")
     chat_pi_prewarm_enabled: bool = Field(default=False)
     chat_pi_prewarm_model: str = Field(default="", max_length=255)
-    chat_pi_prewarm_reasoning_effort: Literal["low", "high", "max"] = Field(
-        default="low"
+    chat_pi_prewarm_reasoning_effort: Literal["low", "medium", "high", "max"] = Field(
+        default="medium"
     )
     chat_pi_provider_adapter_contract: str = Field(default="1", max_length=64)
 

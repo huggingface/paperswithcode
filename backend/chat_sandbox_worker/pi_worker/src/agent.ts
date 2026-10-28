@@ -45,7 +45,7 @@ export interface RunTurn {
   poster_mode: boolean;
   paper_artifacts_enabled: boolean;
   paper_descriptor?: Record<string, unknown>;
-  reasoning_effort: "low" | "high" | "max";
+  reasoning_effort: "low" | "medium" | "high" | "max";
   hf_username: string;
 }
 

@@ -138,7 +138,7 @@ class ChatSession(Base):
             name="chat_sessions_agent_harness_check",
         ),
         CheckConstraint(
-            "reasoning_effort IN ('low','high','max')",
+            "reasoning_effort IN ('low','medium','high','max')",
             name="chat_sessions_reasoning_effort_check",
         ),
         Index(
@@ -519,7 +519,7 @@ class ChatMessageRecord(Base):
             name="chat_messages_agent_harness_check",
         ),
         CheckConstraint(
-            "reasoning_effort IN ('low','high','max')",
+            "reasoning_effort IN ('low','medium','high','max')",
             name="chat_messages_reasoning_effort_check",
         ),
         CheckConstraint(
@@ -930,7 +930,7 @@ class ChatTurnCapability(Base):
             name="chat_turn_capabilities_provider_mode_check",
         ),
         CheckConstraint(
-            "reasoning_effort IN ('low','high','max')",
+            "reasoning_effort IN ('low','medium','high','max')",
             name="chat_turn_capabilities_reasoning_effort_check",
         ),
         Index(

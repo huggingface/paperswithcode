@@ -204,7 +204,7 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
     (frame.poster_mode !== undefined && typeof frame.poster_mode !== "boolean") ||
     (frame.paper_artifacts_enabled !== undefined && typeof frame.paper_artifacts_enabled !== "boolean") ||
     (frame.paper_descriptor !== undefined && (!frame.paper_descriptor || typeof frame.paper_descriptor !== "object" || Array.isArray(frame.paper_descriptor))) ||
-    !new Set(["low", "high", "max"]).has(String(frame.reasoning_effort)) ||
+    !new Set(["low", "medium", "high", "max"]).has(String(frame.reasoning_effort)) ||
     typeof frame.hf_username !== "string" || !Array.isArray(frame.fetchable_urls) ||
     (external && (
       typeof frame.turn_id !== "string" || !frame.turn_id ||

@@ -459,7 +459,7 @@ def main() -> int:
     parser.add_argument("--new-chat-spacing-seconds", type=float, default=30)
     parser.add_argument("--model")
     parser.add_argument(
-        "--reasoning-effort", choices=("low", "high", "max"), default="low"
+        "--reasoning-effort", choices=("low", "medium", "high", "max"), default="low"
     )
     parser.add_argument("--confirm", required=True)
     args = parser.parse_args()

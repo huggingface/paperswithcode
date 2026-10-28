@@ -26,7 +26,7 @@ import { useChatArchive } from "@/components/chat/useChatArchive";
 import { PanelIcon, Spinner } from "@/components/chat/icons";
 import { hfLoginUrl } from "@/components/HfSignInButton";
 import { useChat } from "@/hooks/useChat";
-import { isChatLive, type ChatDraft, type PaperSelectionDraft, type ReasoningEffort } from "@/lib/chat";
+import { DEFAULT_REASONING_EFFORT, isChatLive, type ChatDraft, type PaperSelectionDraft } from "@/lib/chat";
 import {
   CHAT_AUTO_SEND_KEY,
   CHAT_AUTH_ATTEMPTED_KEY,
@@ -160,7 +160,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   };
   const queuedLaunchRef = useRef(readQueuedChatLaunch());
   // Queued launch controls belong to the chat the launch returns to.
-  const queuedLaunchRouteRef = useRef(routeSessionId ?? null);
   const requestedModelRef = useRef(searchParams.get("model") || queuedLaunchRef.current?.model);
   const [models, setModels] = useState<ChatModelChoice[]>(
     staging ? STAGING_FALLBACK_CHAT_MODELS : PRODUCTION_FALLBACK_CHAT_MODELS,
@@ -186,9 +185,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     dismissedCreditsNotice,
   );
   const [draft, setDraft] = useState<ChatDraft>(() => emptyDraft());
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
-    () => queuedLaunchRef.current?.reasoningEffort ?? "low",
-  );
+  const reasoningEffort = DEFAULT_REASONING_EFFORT;
   // Web search has no user control: every turn uses it whenever the deployment offers it.
   const webSearchEnabled = Boolean(availabilityQuery.data?.web_search_available);
   const [pendingAutoDraft, setPendingAutoDraft] = useState<ChatDraft>(() => {
@@ -417,13 +414,11 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       const configuration = activeConfiguration;
       if (configuration) {
         if (configuration.model) setSelectedModel(configuration.model);
-        setReasoningEffort(configuration.reasoningEffort);
       }
       return;
     }
     if (!selectedId) {
       loadChat([], null);
-      if (initializedRoute !== undefined) setReasoningEffort("low");
       setInitializedRoute(null);
       return;
     }
@@ -436,8 +431,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     });
     setSessionError("");
     setSelectedModel(detail.selected_model);
-    const queued = selectedId === queuedLaunchRouteRef.current ? queuedLaunchRef.current : null;
-    setReasoningEffort(queued ? queued.reasoningEffort : detail.reasoning_effort ?? "high");
   }, [routeSessionId, selectedTurn, detail, loadChat, activeConfiguration, routeQuery.isFetching, initializedRoute]);
 
   useEffect(() => {
@@ -498,7 +491,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     setInitializedRoute(null);
     setDraft(emptyDraft());
     onPaperSelectionChange?.(undefined);
-    setReasoningEffort("low");
     if (mode === "paper") onReaderNewChat?.();
     else navigate("/chat");
   };
@@ -558,22 +550,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     if (await changeModel(DEFAULT_CHAT_MODEL)) chat.retryLatest();
   };
 
-  const changeReasoningEffort = async (effort: ReasoningEffort) => {
-    const previousEffort = reasoningEffort;
-    setReasoningEffort(effort);
-    if (!routeSessionId) return;
-    try {
-      const updated = await updateSession(routeSessionId, {
-        reasoning_effort: effort,
-      });
-      patchSession(routeSessionId, updated);
-    } catch (error) {
-      setReasoningEffort(previousEffort);
-      setSessionError(
-        error instanceof Error ? error.message : "Effort change failed",
-      );
-    }
-  };
   const viewportHeight = useChatViewportHeight(mode === "general");
   const visibleSessions = sessions.map((session) => session.id === chat.activeSessionId && chat.busy
     ? { ...session, is_busy: true, title: manualTitleLockRef.current.has(session.id) ? session.title : chat.activeTitle || session.title }
@@ -614,8 +590,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     paperMentionsEnabled: Boolean(availabilityQuery.data?.paper_mentions_enabled),
     paperSelectionEnabled: availabilityQuery.data?.paper_reader_selection_enabled === true,
     paperArtifactsEnabled: mode === "general" && availabilityQuery.data?.paper_artifacts_enabled === true,
-    reasoningEffort,
-    onReasoningEffortChange: (effort: ReasoningEffort) => void changeReasoningEffort(effort),
   };
 
   return (

@@ -124,7 +124,10 @@ def test_trusted_responses_payload_overwrites_every_security_boundary_field():
         ("max", {"effort": "high"}, "high"),
         ("max", {"effort": "low"}, "low"),
         ("high", {"effort": "max"}, "high"),
-        ("max", {"effort": "medium"}, "max"),
+        ("max", {"effort": "medium"}, "medium"),
+        ("high", {"effort": "medium"}, "medium"),
+        ("medium", {"effort": "high"}, "medium"),
+        ("max", {"effort": "xhigh"}, "max"),
         ("max", None, "max"),
     ],
 )

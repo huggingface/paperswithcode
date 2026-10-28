@@ -1,6 +1,6 @@
 import { chatApi } from "@/lib/api/chat";
 import { ApiError } from "@/lib/apiTransport";
-import type { ChatBlock, ChatCitation, ChatMessage, PaperMentionDraft, PaperSelectionDraft, ReasoningEffort } from "@/lib/chat";
+import { DEFAULT_REASONING_EFFORT, type ChatBlock, type ChatCitation, type ChatMessage, type PaperMentionDraft, type PaperSelectionDraft, type ReasoningEffort } from "@/lib/chat";
 
 export interface ChatSession {
   id: string;
@@ -243,7 +243,7 @@ export async function listSessions(): Promise<ChatSession[]> {
 
 export function createSession(
   selectedModel?: string,
-  reasoningEffort: ReasoningEffort = "low",
+  reasoningEffort: ReasoningEffort = DEFAULT_REASONING_EFFORT,
 ): Promise<ChatSession> {
   return chatApi.createSession(selectedModel, reasoningEffort);
 }

@@ -1,4 +1,4 @@
-import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
+import { DEFAULT_REASONING_EFFORT, type ChatDraft, type ReasoningEffort } from "@/lib/chat";
 import { emptyChatDraft, parseChatDraft } from "@/lib/paperSelection";
 
 export const CHAT_DRAFT_KEY = "pwc:chat-oauth-draft";
@@ -53,7 +53,7 @@ export function queueChatLaunch(
   else sessionStorage.removeItem(CHAT_MODEL_KEY);
   sessionStorage.setItem(
     CHAT_REASONING_EFFORT_KEY,
-    options.reasoningEffort ?? "low",
+    options.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
   );
 }
 
@@ -73,7 +73,7 @@ export function readQueuedChatLaunch(): QueuedChatLaunch | null {
     draft: { ...draft, text: prompt },
     model: sessionStorage.getItem(CHAT_MODEL_KEY),
     reasoningEffort: (
-      ["low", "high", "max"].includes(
+      ["low", "medium", "high", "max"].includes(
         sessionStorage.getItem(CHAT_REASONING_EFFORT_KEY) ?? "",
       )
         ? sessionStorage.getItem(CHAT_REASONING_EFFORT_KEY)

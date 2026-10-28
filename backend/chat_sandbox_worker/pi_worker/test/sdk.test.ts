@@ -13,7 +13,7 @@ import {
 import { CompactionController } from "../src/compaction.js";
 import { PiWorker, type RunTurn } from "../src/agent.js";
 import type { PwCEvent } from "../src/events.js";
-import { createProvider } from "../src/provider.js";
+import { createProvider, thinkingLevel } from "../src/provider.js";
 
 function openAITextResponse(text: string, sequence: number): Response {
   const item = {
@@ -513,4 +513,11 @@ test("Stop aborts native compaction and discards its unfinished summary", async 
     assert.equal(JSON.stringify(manager.getEntries()), before);
     assert.equal(events.at(-1)?.outcome, "cancelled");
   } finally { controller.finish(); session.dispose(); }
+});
+
+test("each PwC reasoning effort keeps its own Pi thinking level", () => {
+  assert.deepEqual(
+    ["low", "medium", "high", "max"].map(thinkingLevel),
+    ["low", "medium", "high", "max"],
+  );
 });

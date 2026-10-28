@@ -70,7 +70,7 @@ class ChatCapabilityService:
         }
         if not scopes or not scopes <= allowed:
             raise ValueError("Capability scopes are invalid")
-        if reasoning_effort not in {"low", "high", "max"}:
+        if reasoning_effort not in {"low", "medium", "high", "max"}:
             raise ValueError("Capability reasoning effort is invalid")
         if agent_harness not in {"claude", "pi"}:
             raise ValueError("Capability agent harness is invalid")

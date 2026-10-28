@@ -276,7 +276,7 @@ def test_gateway_enforces_reasoning_effort_and_hides_reasoning():
 
     assert payload["reasoning"] == {"effort": "low", "exclude": True}
     with pytest.raises(ValueError):
-        _apply_openrouter_reasoning_policy(payload, "medium", show_reasoning=False)
+        _apply_openrouter_reasoning_policy(payload, "xhigh", show_reasoning=False)
 
 
 def test_gateway_rejects_shared_openrouter_when_preview_is_disabled():

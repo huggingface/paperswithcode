@@ -602,7 +602,7 @@ def _validate_run_frame(
     ):
         raise ValueError("Invalid paper authorization")
     reasoning_effort = str(frame.get("reasoning_effort") or "high")
-    if reasoning_effort not in {"low", "high", "max"}:
+    if reasoning_effort not in {"low", "medium", "high", "max"}:
         raise ValueError("Invalid reasoning effort")
     fetchable_urls = validate_url_seed(frame.get("fetchable_urls", []))
     hf_username = str(frame.get("hf_username") or "unknown")

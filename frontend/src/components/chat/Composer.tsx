@@ -7,9 +7,8 @@ import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights
 import { PaperSelectionCard } from "@/components/chat/PaperSelectionCard";
 import { ArrowUpIcon, Spinner } from "@/components/chat/icons";
 import ModelPicker, { type ModelPickerOption } from "@/components/chat/ModelPicker";
-import ReasoningEffortPicker from "@/components/chat/ReasoningEffortPicker";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
-import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
+import type { ChatDraft } from "@/lib/chat";
 import { emptyChatDraft } from "@/lib/paperSelection";
 
 interface ComposerProps {
@@ -27,8 +26,6 @@ interface ComposerProps {
   describedBy?: string;
   paperMentionsEnabled?: boolean;
   paperSelectionEnabled?: boolean;
-  reasoningEffort?: ReasoningEffort;
-  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   paperArtifactsEnabled?: boolean;
 }
 
@@ -39,8 +36,6 @@ const Composer: React.FC<ComposerProps> = ({
   models = [], selectedModel, onModelChange, disabled = false, describedBy,
   paperMentionsEnabled = false,
   paperSelectionEnabled = true,
-  reasoningEffort = "low",
-  onReasoningEffortChange,
   paperArtifactsEnabled = false,
 }) => {
   const [localDraft, setLocalDraft] = useState<ChatDraft>(EMPTY_DRAFT);
@@ -171,13 +166,6 @@ const Composer: React.FC<ComposerProps> = ({
       <div className="chat-composer-row">
         <div className="chat-composer-tools">
           {models.length > 0 && selectedModel && onModelChange && <ModelPicker models={models} selectedModel={selectedModel} onModelChange={onModelChange} disabled={busy} />}
-          {onReasoningEffortChange && (
-            <ReasoningEffortPicker
-              value={reasoningEffort}
-              onChange={onReasoningEffortChange}
-              disabled={busy}
-            />
-          )}
           <span className="chat-composer-hint">Enter to send · Shift+Enter for newline</span>
         </div>
         <button type="button" className={`chat-send${(busy || canSend) ? " chat-send-on" : ""}`} onClick={busy ? onStop : submit} disabled={disabled || (busy ? !onStop : !canSend)} aria-label={busy ? "Stop generating" : "Send message"}>

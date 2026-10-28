@@ -175,7 +175,7 @@ def main() -> int:
     parser.add_argument("--release-dir", type=Path, required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument(
-        "--reasoning-effort", choices=("low", "high", "max"), default="low"
+        "--reasoning-effort", choices=("low", "medium", "high", "max"), default="low"
     )
     parser.add_argument("--confirm", required=True)
     args = parser.parse_args()

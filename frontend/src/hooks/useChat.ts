@@ -5,7 +5,9 @@ import {
   type ChatEvent,
   type ChatMessage,
   type ChatPaperHit,
+  type ReasoningEffort,
   ChatStreamError,
+  DEFAULT_REASONING_EFFORT,
   isChatLive,
   isChatSmoothStreamingEnabled,
   resumeChat,
@@ -50,7 +52,7 @@ interface UseChatOptions {
   sessionId: string | null;
   initialModel?: string;
   webSearchEnabled?: boolean;
-  reasoningEffort?: "low" | "high" | "max";
+  reasoningEffort?: ReasoningEffort;
   onSessionId: (id: string, originSessionId: string | null, configuration: ChatTurn["configuration"]) => void;
   onTitle: (title: string, sessionId: string | null) => void;
   onSettled: (sessionId: string | null) => void;
@@ -339,7 +341,7 @@ export function useChat(options: UseChatOptions) {
     turn.start(optimistic, request.session_id, configuration ?? {
       model: optionsRef.current.initialModel,
       webSearchEnabled: Boolean(request.web_search_enabled),
-      reasoningEffort: request.reasoning_effort ?? "low",
+      reasoningEffort: request.reasoning_effort ?? DEFAULT_REASONING_EFFORT,
     });
     setBusy(true);
     latencyRef.current = resumeSessionId ? null : {
@@ -615,7 +617,7 @@ export function useChat(options: UseChatOptions) {
       session_id: optionsRef.current.sessionId,
       client_message_id: crypto.randomUUID(),
       web_search_enabled: Boolean(optionsRef.current.webSearchEnabled),
-      reasoning_effort: optionsRef.current.reasoningEffort ?? "low",
+      reasoning_effort: optionsRef.current.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
       ...(optionsRef.current.primaryPaperRouteId
         ? { primary_paper_route_id: optionsRef.current.primaryPaperRouteId }
         : {}),
@@ -660,7 +662,7 @@ export function useChat(options: UseChatOptions) {
       session_id: optionsRef.current.sessionId,
       client_message_id: crypto.randomUUID(),
       web_search_enabled: Boolean(optionsRef.current.webSearchEnabled),
-      reasoning_effort: optionsRef.current.reasoningEffort ?? "low",
+      reasoning_effort: optionsRef.current.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
       ...(optionsRef.current.primaryPaperRouteId
         ? { primary_paper_route_id: optionsRef.current.primaryPaperRouteId }
         : {}),
@@ -690,7 +692,7 @@ export function useChat(options: UseChatOptions) {
       retry_message_id: latestUser.id,
       ...(optionsRef.current.primaryPaperRouteId ? { primary_paper_route_id: optionsRef.current.primaryPaperRouteId } : {}),
       web_search_enabled: Boolean(optionsRef.current.webSearchEnabled),
-      reasoning_effort: optionsRef.current.reasoningEffort ?? "low",
+      reasoning_effort: optionsRef.current.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
     }, optimistic, snapshot);
   });
 
@@ -854,7 +856,7 @@ export function useChat(options: UseChatOptions) {
           session_id: sessionId,
           client_message_id: "reconnect",
           web_search_enabled: Boolean(optionsRef.current.webSearchEnabled),
-          reasoning_effort: optionsRef.current.reasoningEffort ?? "low",
+          reasoning_effort: optionsRef.current.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
         }, optimistic, restored, undefined, sessionId, configuration);
         return;
       }

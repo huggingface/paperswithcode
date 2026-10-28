@@ -60,7 +60,7 @@ OPENAI_RESPONSES_FIELDS = {
     "tools",
 }
 REQUEST_TOO_LARGE = "request_too_large: Model request is too large"
-REASONING_EFFORT_ORDER = ("low", "high", "max")
+REASONING_EFFORT_ORDER = ("low", "medium", "high", "max")
 
 
 def opaque_openai_identifier(kind: str, value: str, settings: Settings) -> str:

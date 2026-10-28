@@ -457,7 +457,7 @@ def test_staging_openai_direct_configuration_is_isolated_and_exact():
         "PWC_OPENAI_API_KEY": "staging-secret",
         "PWC_CHAT_OPENAI_DIRECT_ENABLED": "true",
         "PWC_CHAT_PI_PREWARM_MODEL": "gpt-5.6-luna@openai",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
         "PWC_CHAT_BLANK_POOL_ENABLED": "true",
         "PWC_CHAT_BLANK_POOL_MIN": "1",
         "PWC_CHAT_BLANK_POOL_MAX": "1",
@@ -475,7 +475,7 @@ def test_staging_openai_direct_rollback_restores_legacy_openrouter_profile():
     assert configure_host_env.staging_openai_direct_disable_values() == {
         "PWC_CHAT_OPENAI_DIRECT_ENABLED": "false",
         "PWC_CHAT_PI_PREWARM_MODEL": "openai/gpt-5.6-luna",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
     }
 
 
