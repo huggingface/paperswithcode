@@ -150,6 +150,20 @@ describe("selected conversation and active turn ownership", () => {
     await waitFor(() => expect(screen.queryByText("Stop selected turn")).not.toBeInTheDocument());
   });
 
+  it("reloads an open paper panel once a turn settles", async () => {
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "a", request_id: "r1" };
+      yield { type: "answer_delta", text: "Repaired after a lost reply" };
+      yield { type: "done", followups: [], finish_reason: "success" };
+    });
+    render(element("/chat/a"));
+    await screen.findByText("a saved question");
+    client.setQueryData(["chat-latex-paper", "artifact-a"], { artifact_id: "artifact-a" });
+    fireEvent.click(screen.getByText("Send test prompt"));
+
+    await waitFor(() => expect(client.getQueryState(["chat-latex-paper", "artifact-a"])?.isInvalidated).toBe(true));
+  });
+
   it("a failed route load leaves the background turn alive and allows retry", async () => {
     const next = deferred<void>();
     mocks.stream.mockImplementation(async function* () {

@@ -252,6 +252,9 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     },
     onSettled: (sessionId) => {
       if (sessionId) patchSession(sessionId, { is_busy: false });
+      // A turn can publish paper versions without a receipt reaching the
+      // browser, so an open paper panel reloads its server descriptor.
+      void queryClient.invalidateQueries({ queryKey: ["chat-latex-paper"] });
       void queryClient.invalidateQueries({ queryKey: OPENAI_USAGE_QUERY_KEY });
       void refreshSessions();
     },
