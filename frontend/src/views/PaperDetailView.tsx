@@ -14,6 +14,7 @@ import {
 } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 import { paperEditSubmitMode } from "@/lib/contributorCapabilities";
+import { toSotaRanks } from "@/lib/transform";
 import { leaderboardBadgeMarkdown } from "@/lib/leaderboardBadges";
 import { paperReaderRoute, resetReaderSession } from "@/lib/paperReader";
 import { usePaperDetailPageModel } from "@/hooks/usePaperDetailPageModel";
@@ -609,13 +610,7 @@ const PaperDetailView: React.FC = () => {
             <SotaBadges
               wrap
               paperHref={`/paper/${paper.arxiv_id || paper.id}`}
-              ranks={paper.leaderboard_ranks
-                .filter((r) => r.best_rank >= 1 && r.best_rank <= 3)
-                .map((r) => ({
-                  name: r.dataset_name,
-                  slug: r.dataset_slug || null,
-                  rank: r.best_rank,
-                }))}
+              ranks={toSotaRanks(paper.leaderboard_ranks)}
             />
           )}
             </div>

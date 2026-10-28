@@ -11,7 +11,7 @@
 
 import { format, parseISO } from "date-fns";
 
-import type { Paper, Repository } from "./api/papers.types";
+import type { LeaderboardRankSummary, Paper, Repository } from "./api/papers.types";
 import { assetUrl } from "./apiUrl";
 
 export interface PaperCardProps {
@@ -61,7 +61,7 @@ export interface PaperCardProps {
   hfUrl: string | null;
   /** Top-3 leaderboard placements, deduped by benchmark and sorted by rank.
    *  Powers the SOTA/#2/#3 badges between the abstract and the tags. */
-  sotaRanks: { name: string; slug: string | null; rank: number }[];
+  sotaRanks: SotaRank[];
 }
 
 const HF_KIND_LABELS: Record<string, "models" | "datasets" | "spaces"> = {
@@ -131,6 +131,30 @@ function isoYear(iso: string | null | undefined): number | null {
 /**
  * Turn a backend `Paper` into the props the `PaperCard` component needs.
  */
+
+/** A top-3 leaderboard placement rendered as a SOTA / #2 / #3 badge. */
+export interface SotaRank {
+  name: string;
+  /** Benchmark leaderboard with this paper's evaluation row highlighted. */
+  href: string | null;
+  rank: number;
+}
+
+export function toSotaRanks(ranks: LeaderboardRankSummary[] | null | undefined): SotaRank[] {
+  return (ranks || [])
+    .filter((r) => r.best_rank >= 1 && r.best_rank <= 3)
+    .map((r) => {
+      let href: string | null = null;
+      if (r.dataset_slug) {
+        const query = new URLSearchParams();
+        if (r.task_slug) query.set("task", r.task_slug);
+        query.set("eval", r.evaluation_id);
+        href = `/benchmark/${r.dataset_slug}?${query}`;
+      }
+      return { name: r.dataset_name, href, rank: r.best_rank };
+    });
+}
+
 export function transformPaperForCard(paper: Paper): PaperCardProps {
   const { github, githubUrl, velocity24h } = summarizeRepos(paper.repositories);
   const { hfKind, hfCount, hfUrl } = summarizeHfArtifacts(paper);
@@ -140,13 +164,7 @@ export function transformPaperForCard(paper: Paper): PaperCardProps {
     name: m.name,
     slug: m.slug,
   }));
-  const sotaRanks = (paper.leaderboard_ranks || [])
-    .filter((r) => r.best_rank >= 1 && r.best_rank <= 3)
-    .map((r) => ({
-      name: r.dataset_name,
-      slug: r.dataset_slug || null,
-      rank: r.best_rank,
-    }));
+  const sotaRanks = toSotaRanks(paper.leaderboard_ranks);
   return {
     id: paper.arxiv_id || paper.id,
     dbId: paper.id,

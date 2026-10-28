@@ -15,7 +15,7 @@ import LatexTitle, { LatexText } from "@/components/LatexTitle";
 import { chipColors, hueFromSlug } from "@/lib/colors";
 import type { Method } from "@/lib/api/catalog.types";
 import { papersApi } from "@/lib/api/papers";
-import type { PaperCardProps } from "@/lib/transform";
+import type { PaperCardProps, SotaRank } from "@/lib/transform";
 import { displayTaskName, humanizeSlug } from "@/lib/transform";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 
@@ -85,7 +85,7 @@ export const MethodChip: React.FC<MethodChipProps> = ({ method, onClick }) => {
 const SOTA_RANK_LABELS: Record<number, string> = { 1: "SOTA 🏆", 2: "#2", 3: "#3" };
 
 interface SotaBadgesProps {
-  ranks: { name: string; slug: string | null; rank: number }[];
+  ranks: SotaRank[];
   /** Paper detail href; the "+N more" suffix links to its results section. */
   paperHref: string;
   /** When set, render one truncated line per rank group (SOTA / #2 / #3),
@@ -96,7 +96,7 @@ interface SotaBadgesProps {
 /** One benchmark placement, annotated for single-line rendering + measurement. */
 interface SotaUnit {
   name: string;
-  slug: string | null;
+  href: string | null;
   rank: number;
   /** First benchmark of its rank group (gets the "· #N on" prefix). */
   isGroupStart: boolean;
@@ -166,7 +166,7 @@ const SotaLine: React.FC<{ units: SotaUnit[]; paperHref: string }> = ({ units, p
     <div className="paper-sota" ref={containerRef}>
       <span ref={measureRef} className="paper-sota-measure" aria-hidden="true" />
       {shown.map((u, i) => (
-        <React.Fragment key={`${u.slug || u.name}-${i}`}>
+        <React.Fragment key={`${u.href || u.name}-${i}`}>
           {u.isGroupStart ? (
             <>
               {i > 0 && <span className="paper-sota-sep"> · </span>}
@@ -180,9 +180,9 @@ const SotaLine: React.FC<{ units: SotaUnit[]; paperHref: string }> = ({ units, p
           ) : (
             <span className="paper-sota-sep">, </span>
           )}
-          {u.slug ? (
+          {u.href ? (
             <Link
-              to={`/benchmark/${u.slug}`}
+              to={u.href}
               className="paper-sota-name"
               onClick={(e) => e.stopPropagation()}
             >
@@ -222,7 +222,7 @@ export const SotaBadges: React.FC<SotaBadgesProps> = ({ ranks, paperHref, wrap =
           : ", ";
         result.push({
           name: b.name,
-          slug: b.slug,
+          href: b.href,
           rank,
           isGroupStart,
           measureText: prefix + b.name,
@@ -241,7 +241,7 @@ export const SotaBadges: React.FC<SotaBadgesProps> = ({ ranks, paperHref, wrap =
         const items = ranks.filter((r) => r.rank === rank);
         return items.map((b, idx) => ({
           name: b.name,
-          slug: b.slug,
+          href: b.href,
           rank,
           isGroupStart: idx === 0,
           measureText: (idx === 0 ? `${SOTA_RANK_LABELS[rank]} on ` : ", ") + b.name,
