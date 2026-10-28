@@ -49,6 +49,9 @@ export default function TopicSettings() {
   const saved = topic.data?.text ?? '';
   const value = draft ?? saved;
   const trimmed = value.trim().replace(/\s+/g, ' ');
+  // Saving the same text again restarts a backfill that gave up.
+  const retry = topic.data?.status === 'failed' && trimmed === saved;
+  const savable = trimmed.length >= 3 && (trimmed !== saved || retry);
   return <div className="research-topic" id="topic">
     <h3 className="research-follow-group-title"><Sparkles aria-hidden="true" />Topic</h3>
     <p className="settings-row-desc">
@@ -60,7 +63,7 @@ export default function TopicSettings() {
       : topic.error ? <p className="settings-token-error" role="alert">Could not load your topic.</p>
       : <form className="research-topic-form" onSubmit={event => {
           event.preventDefault();
-          if (trimmed.length >= 3 && trimmed !== saved) save.mutate(trimmed);
+          if (savable) save.mutate(trimmed);
         }}>
         <textarea ref={input} className="research-topic-input" rows={2} maxLength={TOPIC_MAX_LENGTH}
           aria-label="Research topic" placeholder="What research do you want to follow?"
@@ -70,8 +73,8 @@ export default function TopicSettings() {
           {saved && <button type="button" className="research-follow-action" disabled={save.isPending}
             onClick={() => save.mutate(null)}>Remove</button>}
           <button type="submit" className="research-topic-save"
-            disabled={save.isPending || trimmed.length < 3 || trimmed === saved}>
-            {saved ? 'Update topic' : 'Follow topic'}
+            disabled={save.isPending || !savable}>
+            {retry ? 'Retry' : saved ? 'Update topic' : 'Follow topic'}
           </button>
         </div>
       </form>}

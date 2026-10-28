@@ -45,6 +45,15 @@ describe('research topic', () => {
     expect(await screen.findByRole('button', { name: 'Follow topic' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Research topic' })).toHaveValue('');
   });
+  it('lets a failed topic be saved again unchanged to retry', async () => {
+    vi.mocked(researchApi.topic).mockResolvedValue({ ...saved, status: 'failed' });
+    vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
+    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true });
+    const set = vi.spyOn(researchApi, 'setTopic').mockResolvedValue(saved);
+    render(<ResearchSettings />, { wrapper });
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(set).toHaveBeenCalledWith('real-time video generation'));
+  });
 });
 describe('research follows', () => {
   it('shows the verified destination, disabled-delivery status, and explicit opt-in', async () => {

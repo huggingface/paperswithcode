@@ -1941,7 +1941,8 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
               WHERE t.backfill_status = 'done'
             ), recent AS (
               SELECT id, created_at FROM papers
-              WHERE is_latest_version AND date_published >= current_date - 90
+              WHERE is_latest_version
+                AND date_published BETWEEN current_date - 90 AND current_date
             )
             SELECT (SELECT max(judged_at) FROM research_topic_verdicts) AS last_write,
                    (SELECT count(*) FROM research_topic_verdicts
