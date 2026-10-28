@@ -55,6 +55,8 @@ RESERVED_TOP_LEVEL_PREFIXES = frozenset(
         "admin-dashboard",
         "cron-dashboard",
         "submissions",
+        "rate-limits",
+        "autonomous-operations",
         "ai-deadlines",
         "astra-for-robotics",
         "sitemaps",
@@ -85,6 +87,8 @@ KNOWN_CLIENT_TOP_LEVEL_PREFIXES = frozenset(
         "admin-dashboard",
         "cron-dashboard",
         "submissions",
+        "rate-limits",
+        "autonomous-operations",
         "ai-deadlines",
         "astra-for-robotics",
     }
