@@ -214,6 +214,12 @@ const SubmitView: React.FC = () => {
           href="https://huggingface.co/papers/submit"
           target="_blank"
           rel="noopener noreferrer"
+          style={{
+            color: "var(--accent-text)",
+            fontWeight: 600,
+            textDecoration: "underline",
+            textUnderlineOffset: 2,
+          }}
         >
           Hugging Face
         </a>
