@@ -254,13 +254,6 @@
   text-underline-offset: 2px;
 }
 @media (max-width: 880px) {
-  .sidebar-section-follows {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px 18px;
-  }
-  .sidebar-section-follows .sidebar-label {
-    flex-basis: 100%;
-    margin-bottom: 4px;
-  }
+  .sidebar-follow-link { gap: 8px; }
+  .sidebar-follow-kind { flex: none; padding: 1px 6px; }
 }

@@ -971,9 +971,33 @@
     justify-content: center;
   }
 
-  .results-table { font-size: 12px; }
-  .results-table th,
-  .results-table td { padding: 10px 4px; }
+  /* Results rows become two-column cards: what was measured on the left,
+   * the score and its metric on the right. */
+  .results-table,
+  .results-table tbody { display: block; }
+  .results-table colgroup,
+  .results-table thead { display: none; }
+  .results-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 16px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .results-table tr:last-child { border-bottom: none; }
+  .results-table td {
+    padding: 0;
+    border-bottom: none;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .results-table td.benchmark { grid-area: 1 / 1; font-size: 15px; }
+  .results-table td.model { grid-area: 2 / 1; color: var(--ink-soft); }
+  .results-table td.value { grid-area: 1 / 2; text-align: right; font-size: 15px; }
+  .results-table td.metric { grid-area: 2 / 2; text-align: right; }
+  .results-table td.rank { grid-area: 3 / 1; }
+  .results-table td.rank::before { content: "Rank "; color: var(--ink-faint); }
+  .results-table td.compare { grid-area: 3 / 2; }
 }
 .action-row {
   display: flex;

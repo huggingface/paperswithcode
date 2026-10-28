@@ -479,12 +479,14 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               {follows.isError && (
                 <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>Couldn't load your follows.</div>
               )}
-              {followedEntities.map((follow) => (
-                <Link key={`${follow.kind}-${follow.entity_id}`} to={follow.url} className="sidebar-link sidebar-follow-link">
-                  <span className="sidebar-follow-kind">{FOLLOW_KIND_LABELS[follow.kind]}</span>
-                  <span className="sidebar-follow-name">{follow.name}</span>
-                </Link>
-              ))}
+              <div className="sidebar-links">
+                {followedEntities.map((follow) => (
+                  <Link key={`${follow.kind}-${follow.entity_id}`} to={follow.url} className="sidebar-link sidebar-follow-link">
+                    <span className="sidebar-follow-kind">{FOLLOW_KIND_LABELS[follow.kind]}</span>
+                    <span className="sidebar-follow-name">{follow.name}</span>
+                  </Link>
+                ))}
+              </div>
             </div>
           ) : (
             <>
@@ -497,15 +499,17 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                     ))}
                   </div>
                 )}
-                {topTasks.data?.map((task) => (
-                  <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
-                    {displayTaskName(task.name, task.slug)}
-                    {task.paper_count != null && <span className="count">{task.paper_count}</span>}
+                <div className="sidebar-links">
+                  {topTasks.data?.map((task) => (
+                    <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
+                      {displayTaskName(task.name, task.slug)}
+                      {task.paper_count != null && <span className="count">{task.paper_count}</span>}
+                    </Link>
+                  ))}
+                  <Link to="/tasks" className="sidebar-link sidebar-link-more">
+                    all domains →
                   </Link>
-                ))}
-                <Link to="/tasks" className="sidebar-link" style={{ marginTop: 8, fontStyle: "italic" }}>
-                  all domains →
-                </Link>
+                </div>
               </div>
 
               <div className="sidebar-section sidebar-section-trending-domains">
@@ -522,12 +526,14 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                     No domains gaining momentum right now.
                   </div>
                 )}
-                {trendingTasks.data?.results?.map((task) => (
-                  <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
-                    {displayTaskName(task.name, task.slug)}
-                    <span className="count">{task.share_lift.toFixed(1)}x</span>
-                  </Link>
-                ))}
+                <div className="sidebar-links">
+                  {trendingTasks.data?.results?.map((task) => (
+                    <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
+                      {displayTaskName(task.name, task.slug)}
+                      <span className="count">{task.share_lift.toFixed(1)}x</span>
+                    </Link>
+                  ))}
+                </div>
               </div>
             </>
           )}

@@ -461,6 +461,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   color: var(--ink-faint);
   margin-left: 6px;
 }
+.sidebar-link-more { margin-top: 8px; font-style: italic; }
 
 .breadcrumb {
   display: flex;
@@ -725,12 +726,33 @@ html { scroll-behavior: smooth; }
   .page { padding: 24px 16px; }
 
   .layout-with-sidebar {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 24px;
   }
   .layout-with-sidebar .sidebar {
     position: static;
     top: auto;
+  }
+  /* Sidebar link lists become one swipeable row of chips above the feed. */
+  .layout-with-sidebar .sidebar-section { min-width: 0; margin-bottom: 0; }
+  .layout-with-sidebar .sidebar-links {
+    display: flex;
+    gap: 8px;
+    margin: 0 -16px;
+    padding: 0 16px 2px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  .layout-with-sidebar .sidebar-links::-webkit-scrollbar { display: none; }
+  .layout-with-sidebar .sidebar-links .sidebar-link {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 6px 12px;
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    white-space: nowrap;
   }
   .detail-title { font-size: 28px; }
 }
@@ -741,6 +763,10 @@ html { scroll-behavior: smooth; }
     gap: 8px;
   }
   .page { padding: 20px 14px; }
+  .layout-with-sidebar .sidebar-links {
+    margin: 0 -14px;
+    padding: 0 14px 2px;
+  }
   .detail-title { font-size: 24px; }
 
   .brand-name { font-size: 17px; }

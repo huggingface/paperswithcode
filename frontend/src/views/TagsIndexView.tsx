@@ -153,7 +153,8 @@ const TagsIndexView: React.FC = () => {
                   display: "flex",
                   alignItems: "baseline",
                   justifyContent: "space-between",
-                  gap: 24,
+                  flexWrap: "wrap",
+                  gap: "6px 24px",
                   paddingBottom: 12,
                   borderBottom: "1px solid var(--hairline-strong)",
                 }}

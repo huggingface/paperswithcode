@@ -7,7 +7,7 @@ const globalStyles = source("src/styles.css");
 
 describe("global stylesheet contract", () => {
   it("contains only documented cross-feature foundations", () => {
-    const allowedClasses = /^(?:dark|app-header(?:-inner)?|site-announcement(?:-close)?|brand(?:-mark|-name)?|nav|nav-item(?:-with-badge)?|nav-indicator(?:-ready)?|nav-new-badge|active|header-spacer|header-bookmark-btn|header-feedback-link|search-trigger|icon-btn|hf-signin-btn|user-avatar-btn|page|site-footer(?:-inner)?|layout-with-sidebar|sidebar|sidebar-section|sidebar-label|sidebar-link|count|breadcrumb|sep|detail-title|action-btn|primary|no-results|icon|icon-sm|mobile-menu-btn|mobile-search-btn|mobile-nav-drawer|mobile-nav-panel|mobile-nav-link(?:-with-badge)?|mobile-nav-search|mobile-nav-close)$/;
+    const allowedClasses = /^(?:dark|app-header(?:-inner)?|site-announcement(?:-close)?|brand(?:-mark|-name)?|nav|nav-item(?:-with-badge)?|nav-indicator(?:-ready)?|nav-new-badge|active|header-spacer|header-bookmark-btn|header-github-btn|header-feedback-link|search-trigger|icon-btn|hf-signin-btn|user-avatar-btn|page|site-footer(?:-inner)?|layout-with-sidebar|sidebar|sidebar-section|sidebar-label|sidebar-links?|sidebar-link-more|count|breadcrumb(?:-external)?|sep|detail-title(?:-org(?:--logo)?|-tail|-edit)?|action-btn|primary|no-results|icon|icon-sm|mobile-menu-btn|mobile-search-btn|mobile-nav-drawer|mobile-nav-panel|mobile-nav-link(?:-with-badge)?|mobile-nav-search|mobile-nav-close)$/;
     const selectors = globalStyles.replace(/@import[^;]+;/g, "");
     const classNames = new Set(
       [...selectors.matchAll(/\.([a-zA-Z][\w-]*)/g)].map((match) => match[1]),

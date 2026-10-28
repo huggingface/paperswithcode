@@ -623,6 +623,7 @@ a.paper-resource.is-link:focus-visible {
 @media (min-width: 641px) and (max-width: 880px) {
   .paper-thumb-wrap {
     min-width: 0;
+    align-items: flex-start;
   }
   .paper-thumb-wrap > div {
     width: 100% !important;
@@ -660,6 +661,48 @@ a.paper-resource.is-link:focus-visible {
   }
   .paper-thumb-wrap {
     align-self: flex-start;
+  }
+  /* Phone cards: a small thumbnail beside the title and authors, with the
+   * abstract, badges, tags, and resources spanning the full width below. */
+  .paper-card:has(> .paper-thumb-wrap) {
+    grid-template-columns: 84px minmax(0, 1fr);
+    grid-template-rows: auto auto 1fr;
+    column-gap: 14px;
+    row-gap: 0;
+  }
+  .paper-card:has(> .paper-thumb-wrap) > .paper-body,
+  .paper-card:has(> .paper-thumb-wrap) .paper-body-main {
+    display: contents;
+  }
+  .paper-card > .paper-thumb-wrap {
+    grid-column: 1;
+    grid-row: 1 / 4;
+    margin-bottom: 12px;
+  }
+  .paper-card > .paper-thumb-wrap > div {
+    width: 84px !important;
+    height: auto !important;
+    aspect-ratio: 160 / 220;
+  }
+  .paper-card > .paper-thumb-wrap > div > img,
+  .paper-card > .paper-thumb-wrap > div > svg {
+    width: 100% !important;
+    height: 100% !important;
+  }
+  .paper-card:has(> .paper-thumb-wrap) .paper-follow-reason,
+  .paper-card:has(> .paper-thumb-wrap) .paper-title,
+  .paper-card:has(> .paper-thumb-wrap) .paper-authors {
+    grid-column: 2;
+    align-self: start;
+  }
+  .paper-card:has(> .paper-thumb-wrap) .paper-abstract,
+  .paper-card:has(> .paper-thumb-wrap) .paper-sota,
+  .paper-card:has(> .paper-thumb-wrap) .paper-tags,
+  .paper-card:has(> .paper-thumb-wrap) .paper-resources {
+    grid-column: 1 / -1;
+  }
+  .paper-card:has(> .paper-thumb-wrap) .paper-resources {
+    margin-top: 12px;
   }
   .paper-title { font-size: 19px; }
   .paper-abstract {

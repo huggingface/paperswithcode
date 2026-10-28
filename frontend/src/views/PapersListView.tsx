@@ -261,12 +261,14 @@ const PapersListView: React.FC = () => {
                 ))}
               </div>
             )}
-            {topTasks.data?.map((task) => (
-              <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
-                {displayTaskName(task.name, task.slug)}
-                {task.paper_count != null && <span className="count">{task.paper_count}</span>}
-              </Link>
-            ))}
+            <div className="sidebar-links">
+              {topTasks.data?.map((task) => (
+                <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
+                  {displayTaskName(task.name, task.slug)}
+                  {task.paper_count != null && <span className="count">{task.paper_count}</span>}
+                </Link>
+              ))}
+            </div>
           </div>
         </aside>}
 
