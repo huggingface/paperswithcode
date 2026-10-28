@@ -759,8 +759,12 @@ retry, cancel, pause/resume, URL-candidate provenance, proposals, validator
 findings, usage, reports, and private trace URIs. It warns at a three-hour queue
 age and becomes critical at five hours. Scheduled dispatch automatically pauses
 after a server invariant breach, three consecutive trace/apply/verification
-failures, a greater-than-20% non-source failure rate in the latest 25 stages, or
-the post-baseline daily token guardrail. Resuming is an explicit acknowledgement
+failures, a greater-than-20% failure rate in the latest 25 stages, or the
+post-baseline daily token guardrail. Neither failure counter includes
+source-evidence failures or runner transport failures (`Remote runner failed
+(URLError|RemoteDisconnected|TimeoutError|…)`, a callback that never got a
+response), since neither says anything about the curation; more than half of the latest 25
+stages failing that way pauses as `runner_transport_failures` instead. Resuming is an explicit acknowledgement
 that resets the consecutive counters and starts a fresh 25-stage failure-rate
 window; a recurring invariant breach still pauses immediately.
 

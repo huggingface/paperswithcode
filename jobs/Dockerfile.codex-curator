@@ -9,4 +9,4 @@ RUN apt-get update && apt-get install -y --no-install-recommends git python3 pyt
 WORKDIR /runner
 COPY jobs/run_paper_curation.py /runner/run_paper_curation.py
 RUN test "$(sha256sum /runner/run_paper_curation.py | cut -d' ' -f1)" = \
-    "8fc62f3ce8651dceb811c46ee62a35e97f35d0738d43fdcfa1faba5dada5bc4a"
+    "f165a0e4c56a82c9ac80ce8cd29bce7e6e3cf2100ca519de2fe835f105c34271"

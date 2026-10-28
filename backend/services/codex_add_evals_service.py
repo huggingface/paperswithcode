@@ -7,6 +7,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import subprocess
 import threading
@@ -204,6 +205,18 @@ def _now() -> datetime:
 
 def _is_callback_validation_rejection(row: PaperCurationJob) -> bool:
     return (getattr(row, "validation_summary", None) or {}).get("status") == "rejected"
+
+
+# The runner's generic failure for a callback that never got a response: the
+# HF Job could not reach the site, which says nothing about the curation itself.
+_TRANSPORT_FAILURE = re.compile(
+    r"^Remote runner failed \((URLError|RemoteDisconnected|TimeoutError|"
+    r"ConnectionResetError|IncompleteRead)\)\.$"
+)
+
+
+def _is_transport_failure(error: str | None) -> bool:
+    return _TRANSPORT_FAILURE.match(error or "") is not None
 
 
 def _is_source_evidence_failure(error: str | None) -> bool:
@@ -1798,8 +1811,10 @@ class CodexPaperJobService:
         state = db.get(PaperCurationSchedulerState, 1)
         if state is None:
             return
-        source_failure = _is_source_evidence_failure(row.error)
-        if row.status == "failed" and not source_failure:
+        uncounted = _is_source_evidence_failure(row.error) or _is_transport_failure(
+            row.error
+        )
+        if row.status == "failed" and not uncounted:
             state.consecutive_apply_failures += 1
         elif row.status == "completed":
             state.consecutive_apply_failures = 0
@@ -1823,14 +1838,26 @@ class CodexPaperJobService:
             .limit(25)
             .all()
         )
+        failed = [item for item in recent if item.status == "failed"]
+        transport_failures = [
+            item for item in failed if _is_transport_failure(item.error)
+        ]
         counted_failures = [
             item
-            for item in recent
-            if item.status == "failed" and not _is_source_evidence_failure(item.error)
+            for item in failed
+            if not _is_source_evidence_failure(item.error)
+            and not _is_transport_failure(item.error)
         ]
         if len(recent) == 25 and len(counted_failures) / 25 > 0.20:
             condition = "terminal_failure_rate"
             reason = "More than 20% of the latest 25 scheduled stages failed"
+        elif len(recent) == 25 and len(transport_failures) / 25 > 0.50:
+            # Retried transport failures are noise, but a run of them means the
+            # runners cannot reach the site at all.
+            condition = "runner_transport_failures"
+            reason = (
+                "More than half of the latest 25 scheduled stages lost their callbacks"
+            )
         if condition and state.paused_at is None:
             state.paused_at = _now()
             state.pause_condition = condition

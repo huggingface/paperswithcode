@@ -258,6 +258,84 @@ def test_health_window_includes_current_terminal_job_without_autoflush(completio
     assert state.paused_at is not None
 
 
+def _add_history(db, job, errors):
+    for index, error in enumerate(errors):
+        db.add(
+            PaperCurationJob(
+                id=uuid.uuid4(),
+                kind="enrich-paper",
+                paper_id=job.paper_id,
+                paper_route=job.paper_route,
+                paper_title=job.paper_title,
+                policy_version=f"history-{index}",
+                requested_by="test",
+                trigger="hf-daily-cron",
+                status="failed" if error else "completed",
+                error=error,
+                finished_at=datetime.now(UTC) - timedelta(minutes=index + 1),
+            )
+        )
+    db.commit()
+
+
+def test_health_window_ignores_runner_transport_failures(completion):
+    db, service, settings, job = completion
+    job.parent_workflow_id = None
+    state = db.get(PaperCurationSchedulerState, 1)
+    state.consecutive_apply_failures = 2
+    transport = [
+        "Remote runner failed (URLError).",
+        "Remote runner failed (RemoteDisconnected).",
+        "Remote runner failed (TimeoutError).",
+    ]
+    _add_history(db, job, transport * 3 + ["apply failure"] * 3 + [None] * 18)
+
+    service.complete(
+        db,
+        job,
+        report="",
+        error="Remote runner failed (TimeoutError).",
+        settings=settings,
+    )
+
+    assert state.consecutive_apply_failures == 2
+    assert state.paused_at is None
+
+
+def test_health_window_pauses_when_most_runners_lose_their_callbacks(completion):
+    db, service, settings, job = completion
+    job.parent_workflow_id = None
+    state = db.get(PaperCurationSchedulerState, 1)
+    state.consecutive_apply_failures = 0
+    _add_history(db, job, ["Remote runner failed (URLError)."] * 12 + [None] * 12)
+
+    service.complete(
+        db, job, report="", error="Remote runner failed (URLError).", settings=settings
+    )
+
+    assert state.consecutive_apply_failures == 0
+    assert state.pause_condition == "runner_transport_failures"
+    assert state.paused_at is not None
+
+
+def test_runner_exception_names_outside_transport_still_count(completion):
+    db, service, settings, job = completion
+    job.parent_workflow_id = None
+    state = db.get(PaperCurationSchedulerState, 1)
+    state.consecutive_apply_failures = 0
+    db.commit()
+
+    service.complete(
+        db,
+        job,
+        report="",
+        error="Remote runner failed (JSONDecodeError).",
+        settings=settings,
+    )
+
+    assert state.consecutive_apply_failures == 1
+
+
 def test_last_canary_completion_releases_backlog_without_autoflush(completion):
     db, service, settings, job = completion
     job.kind = "add-evals"

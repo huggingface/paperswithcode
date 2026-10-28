@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import gzip
 import hashlib
+import http.client
 import json
 import os
 import shutil
@@ -45,7 +46,7 @@ class SourceEvidenceIncomplete(RuntimeError):
     pass
 
 
-def api_request(path: str, payload: dict | None = None, method: str = "GET") -> dict:
+def _send(path: str, payload: dict | None, method: str, timeout: int) -> dict:
     request = urllib.request.Request(
         f"{API_URL}/admin/codex-curation/jobs/{JOB_ID}/{path}",
         data=json.dumps(payload).encode() if payload is not None else None,
@@ -56,12 +57,50 @@ def api_request(path: str, payload: dict | None = None, method: str = "GET") -> 
         },
         method=method,
     )
-    with urllib.request.urlopen(request, timeout=300) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.loads(response.read().decode())
 
 
+def api_request(path: str, timeout: int = 60) -> dict:
+    """GET a read-only callback, retrying when the connection drops or hangs.
+
+    HF Jobs intermittently lose a request on its way to the site; a GET is
+    safe to repeat, and one lost request must not fail the whole stage.
+    """
+    for attempt in range(4):
+        try:
+            return _send(path, None, "GET", timeout)
+        except urllib.error.HTTPError:
+            raise
+        except (OSError, http.client.HTTPException):
+            if attempt == 3:
+                raise
+            time.sleep(5 * 2**attempt)
+    raise AssertionError("unreachable")
+
+
 def callback(path: str, payload: dict) -> dict:
-    return api_request(path, payload, "POST")
+    return _send(path, payload, "POST", 300)
+
+
+def complete(payload: dict) -> dict:
+    """Report the stage outcome, retrying a lost request or response.
+
+    The server refuses every callback once the job is terminal, so a 401 after
+    a lost response means an earlier attempt already recorded the outcome.
+    """
+    for attempt in range(4):
+        try:
+            return callback("complete", payload)
+        except urllib.error.HTTPError as error:
+            if attempt and error.code == 401:
+                return {}
+            raise
+        except (OSError, http.client.HTTPException):
+            if attempt == 3:
+                raise
+            time.sleep(5 * 2**attempt)
+    raise AssertionError("unreachable")
 
 
 def trace_callback(path: str, payload: dict) -> dict:
@@ -392,15 +431,12 @@ def main() -> int:
             if completed.returncode
             else trace_error
         )
-        completion = callback("complete", {"report": report, "error": error})
+        completion = complete({"report": report, "error": error})
         return 1 if completion.get("status") == "failed" else 0
     except subprocess.TimeoutExpired:
         try:
-            callback(
-                "complete",
-                {"report": "", "error": f"{KIND} timed out at its stage limit."},
-            )
-        except urllib.error.URLError:
+            complete({"report": "", "error": f"{KIND} timed out at its stage limit."})
+        except (OSError, http.client.HTTPException):
             pass
         return 1
     except Exception as exc:
@@ -410,14 +446,8 @@ def main() -> int:
                 if isinstance(exc, SourceEvidenceIncomplete)
                 else f"Remote runner failed ({type(exc).__name__})."
             )
-            callback(
-                "complete",
-                {
-                    "report": "",
-                    "error": error,
-                },
-            )
-        except urllib.error.URLError:
+            complete({"report": "", "error": error})
+        except (OSError, http.client.HTTPException):
             pass
         return 1
     finally:
