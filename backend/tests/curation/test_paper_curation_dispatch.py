@@ -247,10 +247,12 @@ def test_dispatch_does_not_append_registry_tag_to_verified_space(monkeypatch):
     assert row.hf_job_id == "hf-job"
 
 
-def test_one_shot_dispatch_calls_only_the_selected_scheduled_row(monkeypatch):
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "benchmark-gap-cron"])
+def test_one_shot_dispatch_calls_only_the_selected_scheduled_row(monkeypatch, trigger):
     selected = SimpleNamespace(
         id=uuid.uuid4(),
-        trigger="hf-daily-cron",
+        trigger=trigger,
+        kind="add-evals",
         status="queued",
     )
     other = SimpleNamespace(
@@ -309,13 +311,26 @@ def test_one_shot_dispatch_calls_only_the_selected_scheduled_row(monkeypatch):
     assert scheduler.paused_at is not None
 
 
-def test_one_shot_dispatch_refuses_to_exceed_scheduled_capacity(monkeypatch):
+@pytest.mark.parametrize(
+    ("trigger", "active_triggers"),
+    [
+        ("hf-daily-cron", ["hf-trending-cron"]),
+        # The benchmark-gap lane has its own cap, separate from daily work.
+        ("benchmark-gap-cron", ["benchmark-gap-cron", "benchmark-gap-cron"]),
+    ],
+)
+def test_one_shot_dispatch_refuses_to_exceed_scheduled_capacity(
+    monkeypatch, trigger, active_triggers
+):
     selected = SimpleNamespace(
         id=uuid.uuid4(),
-        trigger="hf-daily-cron",
+        trigger=trigger,
+        kind="add-evals",
         status="queued",
     )
-    active = SimpleNamespace(trigger="hf-trending-cron", status="running")
+    active = [
+        SimpleNamespace(trigger=item, status="running") for item in active_triggers
+    ]
     scheduler = SimpleNamespace(
         dispatch_enabled=False,
         paused_at=datetime.now(UTC),
@@ -328,7 +343,7 @@ def test_one_shot_dispatch_refuses_to_exceed_scheduled_capacity(monkeypatch):
             return self
 
         def all(self):
-            return [active]
+            return active
 
     class Database:
         def query(self, _model):

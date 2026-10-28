@@ -69,6 +69,19 @@ SCHEDULED_TRIGGERS = frozenset(
     {"hf-daily-cron", "hf-trending-cron", BENCHMARK_GAP_TRIGGER, RADAR_TRIGGER}
 )
 BENCHMARK_GAP_MAX_ACTIVE = 2
+
+
+def operator_retryable(row: PaperCurationJob) -> bool:
+    """Scheduled stages an operator may retry or canary-dispatch by job id.
+
+    Benchmark-promotion add-evals rows re-score one paper on the scheduled
+    benchmark-gap lane, so they qualify alongside daily and trending stages.
+    """
+    return row.trigger in {"hf-daily-cron", "hf-trending-cron"} or (
+        row.trigger == BENCHMARK_GAP_TRIGGER and row.kind == "add-evals"
+    )
+
+
 # Health breakers that count only daily/trending paper stages. The daily
 # benchmark-gap overseer is unrelated to them, so they must not hold it back.
 SCHEDULED_HEALTH_PAUSES = frozenset(
@@ -809,7 +822,7 @@ class CodexPaperJobService:
         bind = get_bind() if get_bind is not None else None
         if bind is not None and bind.dialect.name == "postgresql":
             db.refresh(row, with_for_update=True)
-        if row.trigger not in {"hf-daily-cron", "hf-trending-cron"}:
+        if not operator_retryable(row):
             raise ValueError("Only scheduled curation jobs may be canary-dispatched")
         if row.status != "queued":
             raise ValueError("Canary dispatch requires a queued curation job")
@@ -830,10 +843,15 @@ class CodexPaperJobService:
         )
         if len(active) >= settings.codex_jobs_max_active:
             raise RuntimeError("No Codex Job capacity is available")
-        scheduled_active = sum(
-            item.trigger in {"hf-daily-cron", "hf-trending-cron"} for item in active
-        )
-        if scheduled_active >= settings.codex_jobs_max_scheduled_active:
+        if row.trigger == BENCHMARK_GAP_TRIGGER:
+            lane_active = sum(item.trigger == BENCHMARK_GAP_TRIGGER for item in active)
+            lane_limit = BENCHMARK_GAP_MAX_ACTIVE
+        else:
+            lane_active = sum(
+                item.trigger in {"hf-daily-cron", "hf-trending-cron"} for item in active
+            )
+            lane_limit = settings.codex_jobs_max_scheduled_active
+        if lane_active >= lane_limit:
             raise RuntimeError("No scheduled curation capacity is available")
         self._dispatch_row(db, settings, row)
         if row.status != "running" or not row.hf_job_id:

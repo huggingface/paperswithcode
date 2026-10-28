@@ -28,6 +28,7 @@ from backend.services.codex_add_evals_service import (
     CodexPaperJobService,
     codex_paper_job_service,
     deferred_workflows_for_release,
+    operator_retryable,
 )
 from backend.services.curation_priority_service import (
     has_pending_daily_papers,
@@ -267,9 +268,10 @@ class HFDailyCurationService:
         row = self.db.get(PaperCurationJob, job_id)
         if row is None:
             raise LookupError("Curation job not found")
-        if row.trigger not in {"hf-daily-cron", "hf-trending-cron"}:
+        if not operator_retryable(row):
             raise ValueError(
-                "Only scheduled HF daily or trending curation jobs may be retried"
+                "Only scheduled HF daily, trending, or benchmark-gap add-evals "
+                "curation jobs may be retried"
             )
         if getattr(row, "parent_workflow_id", None) is not None:
             current_workflow = (
@@ -328,7 +330,7 @@ class HFDailyCurationService:
         row = self.db.get(PaperCurationJob, job_id)
         if row is None:
             raise LookupError("Curation job not found")
-        if row.trigger not in {"hf-daily-cron", "hf-trending-cron"}:
+        if not operator_retryable(row):
             raise ValueError("Only scheduled curation jobs may be canary-dispatched")
         if row.status != "queued":
             raise ValueError("Canary dispatch requires a queued curation job")

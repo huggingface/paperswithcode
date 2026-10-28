@@ -100,12 +100,20 @@ def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch, reject
     }
 
 
-@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
-def test_queued_operator_retry_is_prioritized_without_duplication(trigger):
+@pytest.mark.parametrize(
+    ("trigger", "kind"),
+    [
+        ("hf-daily-cron", "add-evals"),
+        ("hf-trending-cron", "enrich-paper"),
+        ("benchmark-gap-cron", "add-evals"),
+    ],
+)
+def test_queued_operator_retry_is_prioritized_without_duplication(trigger, kind):
     job_id = uuid.uuid4()
     row = SimpleNamespace(
         id=job_id,
         trigger=trigger,
+        kind=kind,
         status="queued",
         priority=100,
     )
@@ -377,12 +385,19 @@ def test_repeating_operator_retry_returns_active_child_attempt(trigger):
     assert jobs.dispatched is True
 
 
-def test_operator_retry_rejects_admin_jobs():
+@pytest.mark.parametrize(
+    "row",
+    [
+        SimpleNamespace(trigger="admin", kind="add-evals"),
+        SimpleNamespace(trigger="benchmark-gap-cron", kind="add-benchmark"),
+    ],
+)
+def test_operator_retry_rejects_admin_and_benchmark_creation_jobs(row):
     job_id = uuid.uuid4()
 
     class Database:
         def get(self, _model, _key):
-            return SimpleNamespace(trigger="admin")
+            return row
 
     with pytest.raises(ValueError, match="Only scheduled HF daily"):
         HFDailyCurationService(
