@@ -194,10 +194,13 @@ function LazyPdfPage({
   const [textLayerRenders, setTextLayerRenders] = useState(0);
   const textLayerRendered = useCallback(() => setTextLayerRenders((count) => count + 1), []);
   const [authorBoxes, setAuthorBoxes] = useState<PdfAuthorBox[]>([]);
+  // Boxes are page fractions, so they stay valid through a zoom until the new
+  // text layer replaces them.
   useEffect(() => {
-    const layer = ref.current?.querySelector(`[data-layer-width="${shownWidth}"]`);
-    setAuthorBoxes(layer && authors?.length ? pdfAuthorBoxes(layer, authors) : []);
-  }, [authors, shownWidth, textLayerRenders]);
+    if (!authors?.length) return setAuthorBoxes([]);
+    const layer = ref.current?.querySelector(".pdf-page-layer:not(.is-pending)");
+    if (layer?.querySelector(".textLayer")) setAuthorBoxes(pdfAuthorBoxes(layer, authors));
+  }, [authors, textLayerRenders]);
   const layerWidths = shownWidth === width ? [width] : [shownWidth, width];
   // A remounted canvas is blank until pdf.js repaints it, so the page's last
   // render stays on top as an image until the fresh canvas has painted.
