@@ -23,6 +23,7 @@ from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
@@ -32,6 +33,7 @@ from backend.models.database import (
     ModelRelease,
     ModelReleaseSignal,
     Paper,
+    PaperCurationBootstrapBundle,
     PaperCurationJob,
     PaperCurationSchedulerState,
     PaperCurationWorkflow,
@@ -245,8 +247,39 @@ def _curator_bootstrap_bundle(revision: str) -> dict:
     return {"revision": revision, "files": files}
 
 
-def _validated_bootstrap_bundle(row: PaperCurationJob) -> dict:
-    bundle = row.bootstrap_bundle
+def _bootstrap_bundle_key(bundle: dict) -> str:
+    canonical = json.dumps(bundle, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def _store_bootstrap_bundle(db: Session, revision: str) -> str | None:
+    """Store the release's bootstrap snapshot once and return its content key."""
+    if len(revision) != 40:
+        return None
+    bundle = _curator_bootstrap_bundle(revision)
+    key = _bootstrap_bundle_key(bundle)
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(
+            pg_insert(PaperCurationBootstrapBundle)
+            .values(sha256=key, bundle=bundle)
+            .on_conflict_do_nothing()
+        )
+    elif db.get(PaperCurationBootstrapBundle, key) is None:
+        db.add(PaperCurationBootstrapBundle(sha256=key, bundle=bundle))
+        db.flush()
+    return key
+
+
+def _persisted_bootstrap_bundle(row: PaperCurationJob) -> dict | None:
+    if row.bootstrap_bundle_sha256 is None:
+        return row.bootstrap_bundle
+    bundle = row.stored_bootstrap_bundle.bundle
+    if _bootstrap_bundle_key(bundle) != row.bootstrap_bundle_sha256:
+        raise ValueError("Persisted bootstrap bundle does not match its key")
+    return bundle
+
+
+def _validated_bootstrap_bundle(row: PaperCurationJob, bundle: dict) -> dict:
     if not isinstance(bundle, dict) or bundle.get("revision") != row.repository_sha:
         raise ValueError("Persisted bootstrap revision does not match the job")
     files = bundle.get("files")
@@ -432,11 +465,7 @@ class CodexPaperJobService:
         commit: bool = True,
     ) -> CodexPaperJob:
         repository_sha = _git_revision()
-        bootstrap_bundle = (
-            _curator_bootstrap_bundle(repository_sha)
-            if len(repository_sha) == 40
-            else None
-        )
+        bootstrap_bundle_sha256 = _store_bootstrap_bundle(db, repository_sha)
         row = PaperCurationJob(
             id=uuid.uuid4(),
             kind=kind,
@@ -459,7 +488,7 @@ class CodexPaperJobService:
             else (0 if trigger == "admin" else 100),
             repository_sha=repository_sha if len(repository_sha) == 40 else None,
             skill_sha256=_curator_skill_digest(kind),
-            bootstrap_bundle=bootstrap_bundle,
+            bootstrap_bundle_sha256=bootstrap_bundle_sha256,
             model=settings.codex_jobs_model,
             reasoning_effort=settings.codex_jobs_reasoning_effort,
             codex_cli_version=settings.codex_jobs_cli_version,
@@ -506,11 +535,7 @@ class CodexPaperJobService:
             priority=25,
             repository_sha=repository_sha if len(repository_sha) == 40 else None,
             skill_sha256=_curator_skill_digest("resolve-model-paper"),
-            bootstrap_bundle=(
-                _curator_bootstrap_bundle(repository_sha)
-                if len(repository_sha) == 40
-                else None
-            ),
+            bootstrap_bundle_sha256=_store_bootstrap_bundle(db, repository_sha),
             model=settings.codex_jobs_model,
             reasoning_effort=settings.codex_jobs_reasoning_effort,
             codex_cli_version=settings.codex_jobs_cli_version,
@@ -558,11 +583,7 @@ class CodexPaperJobService:
             priority=25,
             repository_sha=repository_sha if len(repository_sha) == 40 else None,
             skill_sha256=_curator_skill_digest("resolve-model-paper"),
-            bootstrap_bundle=(
-                _curator_bootstrap_bundle(repository_sha)
-                if len(repository_sha) == 40
-                else None
-            ),
+            bootstrap_bundle_sha256=_store_bootstrap_bundle(db, repository_sha),
             model=settings.codex_jobs_model,
             reasoning_effort=settings.codex_jobs_reasoning_effort,
             codex_cli_version=settings.codex_jobs_cli_version,
@@ -612,11 +633,7 @@ class CodexPaperJobService:
             priority=priority,
             repository_sha=repository_sha if len(repository_sha) == 40 else None,
             skill_sha256=_curator_skill_digest(kind),
-            bootstrap_bundle=(
-                _curator_bootstrap_bundle(repository_sha)
-                if len(repository_sha) == 40
-                else None
-            ),
+            bootstrap_bundle_sha256=_store_bootstrap_bundle(db, repository_sha),
             model=settings.codex_jobs_model,
             reasoning_effort=settings.codex_jobs_reasoning_effort,
             codex_cli_version=settings.codex_jobs_cli_version,
@@ -1070,7 +1087,7 @@ class CodexPaperJobService:
             return
 
         try:
-            self._bind_active_release(row, settings)
+            self._bind_active_release(db, row, settings)
             callback_token = secrets.token_urlsafe(32)
             row.status = "dispatching"
             row.callback_token_hash = hashlib.sha256(
@@ -1118,7 +1135,9 @@ class CodexPaperJobService:
             db.commit()
 
     @staticmethod
-    def _bind_active_release(row: PaperCurationJob, settings: Settings) -> None:
+    def _bind_active_release(
+        db: Session, row: PaperCurationJob, settings: Settings
+    ) -> None:
         """Bind an unstarted queue row to the release that will serve bootstrap."""
         revision = _git_revision()
         if len(revision) != 40:
@@ -1128,7 +1147,8 @@ class CodexPaperJobService:
         previous = row.repository_sha
         row.repository_sha = revision
         row.skill_sha256 = _curator_skill_digest(row.kind)
-        row.bootstrap_bundle = _curator_bootstrap_bundle(revision)
+        row.bootstrap_bundle_sha256 = _store_bootstrap_bundle(db, revision)
+        row.bootstrap_bundle = None
         row.model = settings.codex_jobs_model
         row.reasoning_effort = settings.codex_jobs_reasoning_effort
         row.codex_cli_version = settings.codex_jobs_cli_version
@@ -1613,8 +1633,9 @@ class CodexPaperJobService:
 
     def bootstrap_bundle(self, row: PaperCurationJob) -> dict:
         """Return the job's hash-validated minimal curation worktree."""
-        if getattr(row, "bootstrap_bundle", None) is not None:
-            return _validated_bootstrap_bundle(row)
+        bundle = _persisted_bootstrap_bundle(row)
+        if bundle is not None:
+            return _validated_bootstrap_bundle(row, bundle)
         revision = _git_revision()
         if row.repository_sha != revision:
             raise ValueError("Job revision does not match the active immutable release")

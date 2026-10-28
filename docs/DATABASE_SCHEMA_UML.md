@@ -153,7 +153,7 @@ table. New framework recommendations use `task_frameworks`.
 
 | Domain | Tables |
 | --- | --- |
-| Remote paper curation | `paper_curation_jobs`, `paper_curation_workflows`, `paper_curation_scheduler_state` |
+| Remote paper curation | `paper_curation_jobs`, `paper_curation_bootstrap_bundles`, `paper_curation_workflows`, `paper_curation_scheduler_state` |
 | Benchmark discovery | `benchmark_curation_candidates`, `benchmark_curation_evidence` |
 | Catalog audit | `catalog_mutation_events`, `catalog_mutation_idempotency`, `catalog_audit_read_progress` |
 | User proposals and agent edits | `pending_paper_edits`, `paper_edit_accounts`, `paper_edit_authorizations` |

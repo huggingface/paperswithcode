@@ -324,10 +324,17 @@ def test_unstarted_job_rebinds_to_the_active_bootstrap_release(monkeypatch):
         reasoning_effort="low",
         codex_cli_version="0.74.0",
         validator_version="older-validator",
-        bootstrap_bundle=None,
+        bootstrap_bundle_sha256=None,
+        bootstrap_bundle={"revision": "e" * 40, "files": []},
+    )
+    stored = []
+    monkeypatch.setattr(
+        codex_add_evals_service,
+        "_store_bootstrap_bundle",
+        lambda db, revision: stored.append(revision) or "b" * 64,
     )
 
-    CodexPaperJobService._bind_active_release(row, settings)
+    CodexPaperJobService._bind_active_release(object(), row, settings)
 
     assert row.repository_sha == active_revision
     assert row.skill_sha256 != "d" * 64
@@ -336,7 +343,9 @@ def test_unstarted_job_rebinds_to_the_active_bootstrap_release(monkeypatch):
     assert row.reasoning_effort == "medium"
     assert row.codex_cli_version == "0.75.0"
     assert row.validator_version == "scheduled-policy-v1"
-    assert row.bootstrap_bundle["revision"] == active_revision
+    assert stored == [active_revision]
+    assert row.bootstrap_bundle_sha256 == "b" * 64
+    assert row.bootstrap_bundle is None
 
 
 def test_remote_callbacks_identify_the_service_to_cloudflare():

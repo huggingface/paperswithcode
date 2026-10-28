@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     Paper,
+    PaperCurationBootstrapBundle,
     PaperCurationJob,
     PaperCurationSchedulerState,
     PaperCurationWorkflow,
@@ -42,6 +43,7 @@ def db():
     # Only storage is simplified; service queries and ORM mappings are real.
     for model in (
         Paper,
+        PaperCurationBootstrapBundle,
         PaperCurationJob,
         PaperCurationWorkflow,
         PaperCurationSchedulerState,

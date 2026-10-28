@@ -26,6 +26,7 @@ from backend.models.database import (
     Paper,
     PaperAuthor,
     PaperConference,
+    PaperCurationBootstrapBundle,
     PaperCurationJob,
     PaperCurationWorkflow,
     PaperDataset,
@@ -358,6 +359,7 @@ def _resolution_session() -> Session:
             PaperOrganization.__table__,
             Evaluation.__table__,
             PaperRelation.__table__,
+            PaperCurationBootstrapBundle.__table__,
             PaperCurationJob.__table__,
         ],
     )
@@ -919,6 +921,7 @@ def test_enqueue_resolution_creates_scoped_high_priority_job(monkeypatch):
             ModelRelease.__table__,
             TrendingModelCandidate.__table__,
             PaperCurationWorkflow.__table__,
+            PaperCurationBootstrapBundle.__table__,
             PaperCurationJob.__table__,
         ],
     )
@@ -1185,6 +1188,7 @@ def test_callback_applies_resolution_and_records_job_result():
             ModelRelease.__table__,
             TrendingModelCandidate.__table__,
             PaperCurationWorkflow.__table__,
+            PaperCurationBootstrapBundle.__table__,
             PaperCurationJob.__table__,
         ],
     )
@@ -1314,6 +1318,7 @@ def test_hourly_reconcile_queues_new_release_rejects_conversion_and_skips_unchan
             ModelRelease.__table__,
             TrendingModelCandidate.__table__,
             PaperCurationWorkflow.__table__,
+            PaperCurationBootstrapBundle.__table__,
             PaperCurationJob.__table__,
         ],
     )
@@ -1400,6 +1405,7 @@ def test_hourly_reconcile_retries_substantive_rejection_after_family_paper_exist
             ModelRelease.__table__,
             TrendingModelCandidate.__table__,
             PaperCurationWorkflow.__table__,
+            PaperCurationBootstrapBundle.__table__,
             PaperCurationJob.__table__,
         ],
     )
@@ -1533,6 +1539,7 @@ def test_rollout_freezes_canary_until_full_workflow_succeeds(monkeypatch):
             TrendingModelCandidate.__table__,
             TrendingModelCurationState.__table__,
             PaperCurationWorkflow.__table__,
+            PaperCurationBootstrapBundle.__table__,
             PaperCurationJob.__table__,
         ],
     )
@@ -1617,6 +1624,7 @@ def test_resolved_candidate_enqueues_workflow_and_missing_thumbnail(monkeypatch)
             ModelReleaseArtifact.__table__,
             TrendingModelCandidate.__table__,
             PaperCurationWorkflow.__table__,
+            PaperCurationBootstrapBundle.__table__,
             PaperCurationJob.__table__,
         ],
     )

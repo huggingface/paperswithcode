@@ -153,6 +153,19 @@ class ModelReleaseSignal(Base):
     )
 
 
+class PaperCurationBootstrapBundle(Base):
+    """One immutable remote-worker bootstrap snapshot, shared by every job bound to it."""
+
+    __tablename__ = "paper_curation_bootstrap_bundles"
+
+    # SHA-256 of the bundle's canonical JSON (sorted keys, compact separators).
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    bundle: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class PaperCurationJob(Base):
     """Durable request for a remote Codex paper-curation Job."""
 
@@ -214,10 +227,19 @@ class PaperCurationJob(Base):
     trace_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     trace_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     proposal: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    # ~100 KB of base64 skill files per job; deferred so wide job queries (dispatch
-    # gate, reconcile, listings) do not drag every bundle into the API worker.
+    bootstrap_bundle_sha256: Mapped[Optional[str]] = mapped_column(
+        String(64),
+        ForeignKey("paper_curation_bootstrap_bundles.sha256"),
+        nullable=True,
+    )
+    stored_bootstrap_bundle: Mapped[Optional["PaperCurationBootstrapBundle"]] = (
+        relationship()
+    )
+    # Legacy per-job copy (~100 KB of base64 skill files), read only for rows
+    # bound before bootstrap_bundle_sha256; deferred so wide job queries do not
+    # drag it into the API worker.
     bootstrap_bundle: Mapped[Optional[dict]] = mapped_column(
-        JSONB, nullable=True, deferred=True
+        JSONB(none_as_null=True), nullable=True, deferred=True
     )
     validation_summary: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     mutation_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
