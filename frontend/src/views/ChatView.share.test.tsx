@@ -10,7 +10,6 @@ import {
   CHAT_AUTO_SEND_KEY,
   CHAT_DRAFT_KEY,
   CHAT_MODEL_KEY,
-  CHAT_WEB_SEARCH_KEY,
 } from "@/lib/chatLaunch";
 
 const mocks = vi.hoisted(() => ({
@@ -346,7 +345,6 @@ describe("ChatView inference authorization", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(mocks.hfLoginUrl).toHaveBeenCalledWith("/chat", true));
-    expect(sessionStorage.getItem(CHAT_WEB_SEARCH_KEY)).toBe("1");
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/me/inference-billing"),
       expect.objectContaining({ credentials: "include" }),
@@ -707,65 +705,29 @@ describe("ChatView web search", () => {
     ));
   });
 
-  it("keeps default-on web search enabled when a new session starts generating", async () => {
-    const rendered = renderChat("/chat");
-    const toggle = await screen.findByRole("switch", { name: "Web search" });
+  it("offers no web search switch on a new chat", async () => {
+    renderChat("/chat");
 
-    expect(toggle).toHaveAttribute("aria-checked", "true");
-
-    mocks.busy = true;
-    rendered.rerender(chatElement("/chat"));
-
-    expect(screen.getByRole("switch", { name: "Web search" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
+    await screen.findByRole("combobox");
+    expect(screen.queryByRole("switch", { name: "Web search" })).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.chatOptions?.webSearchEnabled).toBe(true));
   });
 
-  it("resets web search to on when the user starts a new chat", async () => {
+  it("enables web search for a session saved with it off", async () => {
     mocks.getSession.mockResolvedValueOnce({
       ...session,
       web_search_enabled: false,
       transcript_status: "ready",
       messages: [],
     });
-    const user = userEvent.setup();
-    renderChat();
-    const toggle = await screen.findByRole("switch", { name: "Web search" });
-    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
-
-    await user.click(screen.getByRole("button", { name: "New chat" }));
-
-    expect(screen.getByTestId("chat-location")).toHaveTextContent("/chat");
-    expect(screen.getByRole("switch", { name: "Web search" })).toHaveAttribute(
-      "aria-checked",
-      "true",
-    );
-  });
-
-  it("carries an enabled homepage launch into its reserved session", async () => {
-    sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
-    sessionStorage.setItem(CHAT_MODEL_KEY, session.selected_model);
-    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
-    sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, "1");
-    mocks.getSession.mockResolvedValueOnce({
-      ...session,
-      transcript_status: "ready",
-      messages: [],
-    });
 
     renderChat();
 
-    const toggle = await screen.findByRole("switch", { name: "Web search" });
-    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    await waitFor(() => expect(mocks.getSession).toHaveBeenCalled());
     await waitFor(() => expect(mocks.chatOptions?.webSearchEnabled).toBe(true));
-    await waitFor(() => expect(mocks.send).toHaveBeenCalledWith({
-      text: "Find recent multimodal model releases",
-      paperMentions: [],
-    }));
   });
 
-  it("enables web search for a queued launch that stored no choice", async () => {
+  it("enables web search for a queued homepage launch", async () => {
     sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
     sessionStorage.setItem(CHAT_MODEL_KEY, session.selected_model);
     sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
@@ -773,77 +735,11 @@ describe("ChatView web search", () => {
       ...session,
       transcript_status: "ready",
       messages: [],
-    });
-
-    renderChat();
-
-    await waitFor(() => expect(mocks.chatOptions?.webSearchEnabled).toBe(true));
-    await waitFor(() => expect(mocks.send).toHaveBeenCalled());
-  });
-
-  it("keeps an explicit web search opt-out for a queued launch", async () => {
-    sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
-    sessionStorage.setItem(CHAT_MODEL_KEY, session.selected_model);
-    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
-    sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, "0");
-    mocks.getSession.mockResolvedValueOnce({
-      ...session,
-      transcript_status: "ready",
-      messages: [],
-    });
-
-    renderChat();
-
-    await waitFor(() => expect(mocks.send).toHaveBeenCalled());
-    expect(mocks.chatOptions?.webSearchEnabled).toBe(false);
-  });
-
-  it("applies the toggle saved before login when returning to an existing chat", async () => {
-    sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
-    sessionStorage.setItem(CHAT_MODEL_KEY, session.selected_model);
-    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
-    sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, "1");
-    mocks.getSession.mockResolvedValueOnce({
-      ...session,
-      web_search_enabled: false,
-      transcript_status: "ready",
-      messages: [{
-        id: "earlier-user", turn_id: "earlier-turn", sequence: 1, role: "user",
-        content: "Earlier question", revision: 1, status: "complete",
-        display_blocks: [], citations: [], followups: [], error_code: null,
-      }],
     });
 
     renderChat();
 
     await waitFor(() => expect(mocks.send).toHaveBeenCalled());
     expect(mocks.chatOptions?.webSearchEnabled).toBe(true);
-  });
-
-  it("keeps a pending queued launch's controls off other conversations", async () => {
-    const earlierSession = {
-      ...session,
-      id: "33333333-3333-4333-8333-333333333333",
-      title: "Earlier chat",
-      updated_at: "2026-07-27T20:00:00Z",
-    };
-    sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
-    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
-    sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, "1");
-    mocks.busy = true;
-    mocks.listSessions.mockResolvedValue([session, earlierSession]);
-    mocks.getSession.mockImplementation(async (id: string) => ({
-      ...(id === earlierSession.id ? earlierSession : session),
-      transcript_status: "ready",
-      messages: [],
-    }));
-    const user = userEvent.setup();
-    renderChat();
-    await waitFor(() => expect(mocks.chatOptions?.webSearchEnabled).toBe(true));
-
-    await user.click(await screen.findByText("Earlier chat", { selector: ".chat-session-title" }));
-
-    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledWith(earlierSession.id));
-    await waitFor(() => expect(mocks.chatOptions?.webSearchEnabled).toBe(false));
   });
 });

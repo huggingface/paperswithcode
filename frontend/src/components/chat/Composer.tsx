@@ -9,7 +9,6 @@ import { ArrowUpIcon, Spinner } from "@/components/chat/icons";
 import ModelPicker, { type ModelPickerOption } from "@/components/chat/ModelPicker";
 import ReasoningEffortPicker from "@/components/chat/ReasoningEffortPicker";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
-import WebSearchToggle from "@/components/chat/WebSearchToggle";
 import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
 import { emptyChatDraft } from "@/lib/paperSelection";
 
@@ -28,9 +27,6 @@ interface ComposerProps {
   describedBy?: string;
   paperMentionsEnabled?: boolean;
   paperSelectionEnabled?: boolean;
-  webSearchAvailable?: boolean;
-  webSearchEnabled?: boolean;
-  onWebSearchChange?: (enabled: boolean) => void;
   reasoningEffort?: ReasoningEffort;
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   paperArtifactsEnabled?: boolean;
@@ -43,9 +39,6 @@ const Composer: React.FC<ComposerProps> = ({
   models = [], selectedModel, onModelChange, disabled = false, describedBy,
   paperMentionsEnabled = false,
   paperSelectionEnabled = true,
-  webSearchAvailable = false,
-  webSearchEnabled = false,
-  onWebSearchChange,
   reasoningEffort = "low",
   onReasoningEffortChange,
   paperArtifactsEnabled = false,
@@ -182,13 +175,6 @@ const Composer: React.FC<ComposerProps> = ({
             <ReasoningEffortPicker
               value={reasoningEffort}
               onChange={onReasoningEffortChange}
-              disabled={busy}
-            />
-          )}
-          {webSearchAvailable && onWebSearchChange && (
-            <WebSearchToggle
-              enabled={webSearchEnabled}
-              onChange={onWebSearchChange}
               disabled={busy}
             />
           )}

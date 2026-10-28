@@ -9,7 +9,6 @@ import {
   CHAT_DRAFT_KEY,
   CHAT_MODEL_KEY,
   CHAT_REASONING_EFFORT_KEY,
-  CHAT_WEB_SEARCH_KEY,
   readQueuedChatLaunch,
 } from "@/lib/chatLaunch";
 import { chatApi } from "@/lib/api/chat";
@@ -406,7 +405,7 @@ describe("AskAssistant", () => {
     });
   });
 
-  it("enables available web search by default and carries it into the new chat", async () => {
+  it("launches a new chat from the homepage composer", async () => {
     vi.stubEnv("VITE_CHAT_ENABLED", "1");
     vi.spyOn(chatApi, "getAvailability").mockResolvedValue({
       status: "available",
@@ -428,10 +427,9 @@ describe("AskAssistant", () => {
     const user = userEvent.setup();
     renderAskAssistant();
 
-    const toggle = await screen.findByRole("switch", { name: "Web search" });
-    expect(screen.getByLabelText("Research model"))
+    expect(await screen.findByLabelText("Research model"))
       .toHaveValue("gpt-5.6-luna@openai");
-    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("switch", { name: "Web search" })).not.toBeInTheDocument();
     await user.type(
       screen.getByRole("combobox", { name: "Ask the assistant" }),
       "Find the latest vision-language model release",
@@ -439,22 +437,5 @@ describe("AskAssistant", () => {
     await user.click(screen.getByRole("button", { name: "Ask the assistant" }));
 
     expect(await screen.findByText("Dedicated chat launched")).toBeInTheDocument();
-    expect(sessionStorage.getItem(CHAT_WEB_SEARCH_KEY)).toBe("1");
-  });
-
-  it("hides web search when the feature is unavailable", async () => {
-    vi.stubEnv("VITE_CHAT_ENABLED", "1");
-    const availability = vi.spyOn(chatApi, "getAvailability").mockResolvedValue({
-      status: "available",
-      reason: null,
-      expected_recovery_at: null,
-      paper_mentions_enabled: true,
-      web_search_available: false,
-    });
-    renderAskAssistant();
-
-    await waitFor(() => expect(availability).toHaveBeenCalledTimes(1));
-
-    expect(screen.queryByRole("switch", { name: "Web search" })).not.toBeInTheDocument();
   });
 });

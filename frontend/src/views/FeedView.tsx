@@ -15,7 +15,6 @@ import ReasoningEffortPicker from "@/components/chat/ReasoningEffortPicker";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
 import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
-import WebSearchToggle from "@/components/chat/WebSearchToggle";
 import { chatApi } from "@/lib/api/chat";
 import { catalogApi } from "@/lib/api/catalog";
 import {
@@ -145,7 +144,6 @@ export const AskAssistant: React.FC = () => {
   const question = draft.text;
   const [scrollTop, setScrollTop] = useState(0);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_CHAT_MODEL);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(true);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("low");
   const [launching, setLaunching] = useState(false);
   // Set when the browser blocks the mirror's new tab, so the question survives
@@ -162,7 +160,6 @@ export const AskAssistant: React.FC = () => {
     retry: false,
     enabled: isChatEnabled(),
   });
-  const webSearchAvailable = Boolean(availabilityQuery.data?.web_search_available);
   const paperMentionsEnabled = isChatEnabled()
     && availabilityQuery.data?.paper_mentions_enabled !== false;
   const mentions = usePaperMentions({
@@ -217,11 +214,7 @@ export const AskAssistant: React.FC = () => {
       return;
     }
     setLaunching(true);
-    queueChatLaunch(nextDraft, selectedModel, {
-      // The chat page gates this on availability, which may still be loading here.
-      webSearchEnabled,
-      reasoningEffort,
-    });
+    queueChatLaunch(nextDraft, selectedModel, { reasoningEffort });
     try {
       const session = await createSession(selectedModel, reasoningEffort);
       navigate(`/chat/${session.id}`);
@@ -309,13 +302,6 @@ export const AskAssistant: React.FC = () => {
               <ReasoningEffortPicker
                 value={reasoningEffort}
                 onChange={setReasoningEffort}
-                disabled={launching}
-              />
-            )}
-            {webSearchAvailable && (
-              <WebSearchToggle
-                enabled={webSearchEnabled}
-                onChange={setWebSearchEnabled}
                 disabled={launching}
               />
             )}

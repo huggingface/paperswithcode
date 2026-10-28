@@ -5,14 +5,12 @@ export const CHAT_DRAFT_KEY = "pwc:chat-oauth-draft";
 export const CHAT_MODEL_KEY = "pwc:chat-oauth-model";
 export const CHAT_AUTO_SEND_KEY = "pwc:chat-oauth-auto-send";
 export const CHAT_AUTH_ATTEMPTED_KEY = "pwc:chat-oauth-attempted";
-export const CHAT_WEB_SEARCH_KEY = "pwc:chat-web-search-enabled";
 export const CHAT_REASONING_EFFORT_KEY = "pwc:chat-reasoning-effort";
 
 export interface QueuedChatLaunch {
   prompt: string;
   draft: ChatDraft;
   model: string | null;
-  webSearchEnabled: boolean;
   reasoningEffort: ReasoningEffort;
 }
 
@@ -25,7 +23,6 @@ export function queueChatLaunch(
   model?: string,
   options: {
     autoSend?: boolean;
-    webSearchEnabled?: boolean;
     reasoningEffort?: ReasoningEffort;
   } = {},
 ): void {
@@ -54,8 +51,6 @@ export function queueChatLaunch(
   else sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
   if (model) sessionStorage.setItem(CHAT_MODEL_KEY, model);
   else sessionStorage.removeItem(CHAT_MODEL_KEY);
-  if (options.webSearchEnabled === undefined) sessionStorage.removeItem(CHAT_WEB_SEARCH_KEY);
-  else sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, options.webSearchEnabled ? "1" : "0");
   sessionStorage.setItem(
     CHAT_REASONING_EFFORT_KEY,
     options.reasoningEffort ?? "low",
@@ -77,8 +72,6 @@ export function readQueuedChatLaunch(): QueuedChatLaunch | null {
     prompt,
     draft: { ...draft, text: prompt },
     model: sessionStorage.getItem(CHAT_MODEL_KEY),
-    // Web search is on by default; only an explicit opt-out disables it.
-    webSearchEnabled: sessionStorage.getItem(CHAT_WEB_SEARCH_KEY) !== "0",
     reasoningEffort: (
       ["low", "high", "max"].includes(
         sessionStorage.getItem(CHAT_REASONING_EFFORT_KEY) ?? "",
@@ -94,6 +87,5 @@ export function clearQueuedChatLaunch(): void {
   sessionStorage.removeItem(CHAT_MODEL_KEY);
   sessionStorage.removeItem(CHAT_AUTO_SEND_KEY);
   sessionStorage.removeItem(CHAT_AUTH_ATTEMPTED_KEY);
-  sessionStorage.removeItem(CHAT_WEB_SEARCH_KEY);
   sessionStorage.removeItem(CHAT_REASONING_EFFORT_KEY);
 }

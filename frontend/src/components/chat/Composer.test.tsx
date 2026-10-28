@@ -65,39 +65,6 @@ describe("Composer paper mentions", () => {
     await waitFor(() => expect((textarea as HTMLTextAreaElement).selectionStart).toBe(19));
   });
 
-  it("shows a directly accessible sticky web-search switch when available", () => {
-    const onWebSearchChange = vi.fn();
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const { rerender } = render(
-      <QueryClientProvider client={client}>
-        <Composer
-          onSend={vi.fn()}
-          webSearchAvailable
-          webSearchEnabled={false}
-          onWebSearchChange={onWebSearchChange}
-        />
-      </QueryClientProvider>,
-    );
-    const toggle = screen.getByRole("switch", { name: "Web search" });
-    expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(toggle).toHaveAttribute("title", expect.stringContaining("Exa"));
-    fireEvent.click(toggle);
-    expect(onWebSearchChange).toHaveBeenCalledWith(true);
-
-    rerender(
-      <QueryClientProvider client={client}>
-        <Composer
-          onSend={vi.fn()}
-          busy
-          webSearchAvailable
-          webSearchEnabled
-          onWebSearchChange={onWebSearchChange}
-        />
-      </QueryClientProvider>,
-    );
-    expect(screen.getByRole("switch", { name: "Web search" })).toBeDisabled();
-  });
-
   it("highlights multiple selected papers in place inside a sentence", async () => {
     vi.mocked(papersApi.search).mockImplementation(async (query) => ({
       next_page: null,
