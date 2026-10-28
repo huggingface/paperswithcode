@@ -46,6 +46,7 @@ export interface FollowingFilters {
   endDate?: string;
   hasCode?: boolean;
   hasHfArtifacts?: boolean;
+  topicOnly?: boolean;
 }
 export const researchApi = {
   follows: () => apiRequest<ResearchFollow[]>('/me/follows'),
@@ -58,6 +59,7 @@ export const researchApi = {
     if (!filters.startDate && !filters.endDate) params.set('all_time', 'true');
     if (filters.hasCode) params.set('has_code', 'true');
     if (filters.hasHfArtifacts) params.set('has_hf_artifacts', 'true');
+    if (filters.topicOnly) params.set('topic_only', 'true');
     return apiRequest<ResearchEntry[]>(`/me/following?${params}`);
   },
   topic: () => apiRequest<ResearchTopic | null>('/me/topic'),

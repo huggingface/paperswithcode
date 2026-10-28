@@ -257,11 +257,23 @@
   .sidebar-follow-link { gap: 8px; }
   .sidebar-follow-kind { flex: none; padding: 1px 6px; }
 }
+.sidebar-follow-topic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sidebar-follow-topic .sidebar-follow-link { flex: 1; min-width: 0; }
+.sidebar-follow-topic.active .sidebar-follow-kind {
+  color: var(--accent-soft);
+  background: var(--accent-text);
+}
+.sidebar-follow-topic.active .sidebar-follow-name { font-weight: 600; }
 .sidebar-follow-edit {
   margin-left: auto;
   color: var(--ink-faint);
   font-size: 12px;
 }
+.sidebar-follow-edit:hover { color: var(--ink); }
 .sidebar-follow-manage {
   display: inline-block;
   margin-top: 8px;

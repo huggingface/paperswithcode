@@ -6,7 +6,7 @@ import secrets
 from typing import NamedTuple
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, column, select, text
+from sqlalchemy import Integer, String, column, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -372,6 +372,7 @@ def feed_entries(
     all_time: bool = False,
     has_code: bool = False,
     has_hf_artifacts: bool = False,
+    topic_only: bool = False,
 ) -> list[ResearchFeedEntry]:
     """Filter and rank matches like the home feed, then explain only the returned page."""
     from backend.services.paper_service import PaperService
@@ -386,11 +387,14 @@ def feed_entries(
             cutoff=cutoff,
             topic_threshold=TOPIC_THRESHOLD,
         )
-        .columns(column("id", Integer))
+        .columns(column("id", Integer), column("kind", String))
         .subquery("matches")
     )
+    matched_ids = select(matches.c.id)
+    if topic_only:
+        matched_ids = matched_ids.where(matches.c.kind == "topic")
     service = PaperService(db)
-    query = db.query(DBPaper).filter(DBPaper.id.in_(select(matches.c.id)))
+    query = db.query(DBPaper).filter(DBPaper.id.in_(matched_ids))
     if has_code:
         query = service.apply_has_code_filter(query)
     if has_hf_artifacts:

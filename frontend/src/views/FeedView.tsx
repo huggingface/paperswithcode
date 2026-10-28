@@ -380,6 +380,14 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     setSearchParams(next);
   };
 
+  const topicFilterHref = (active: boolean) => {
+    const next = new URLSearchParams(searchParams);
+    if (active) next.set("only", "topic");
+    else next.delete("only");
+    const query = next.toString();
+    return query ? `/following?${query}` : "/following";
+  };
+
   const setHasHfArtifacts = (active: boolean) => {
     const next = new URLSearchParams(searchParams);
     if (active) next.set("has_hf_artifacts", "true");
@@ -415,7 +423,8 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     has_hf_artifacts: hasHfArtifacts,
   });
 
-  const followingFilters = { ...dateRange, hasCode, hasHfArtifacts };
+  const topicOnly = following && searchParams.get("only") === "topic";
+  const followingFilters = { ...dateRange, hasCode, hasHfArtifacts, topicOnly };
   const followedFeed = useInfiniteQuery({
     queryKey: ["research-feed", user?.hf_subject, followingFilters],
     queryFn: ({ pageParam }) => researchApi.following(pageParam, followingFilters),
@@ -498,11 +507,18 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               )}
               <div className="sidebar-links">
                 {topic.data && (
-                  <Link to="/settings#topic" className="sidebar-link sidebar-follow-link" title={topic.data.text}>
-                    <span className="sidebar-follow-kind">Topic</span>
-                    <span className="sidebar-follow-name">{topic.data.text}</span>
-                    <span className="sidebar-follow-edit">edit</span>
-                  </Link>
+                  <div className={`sidebar-follow-topic ${topicOnly ? "active" : ""}`}>
+                    <Link
+                      to={topicFilterHref(!topicOnly)}
+                      className="sidebar-link sidebar-follow-link"
+                      title={topicOnly ? "Show papers from everything you follow" : `Show only papers about “${topic.data.text}”`}
+                      aria-current={topicOnly ? "true" : undefined}
+                    >
+                      <span className="sidebar-follow-kind">Topic</span>
+                      <span className="sidebar-follow-name">{topic.data.text}</span>
+                    </Link>
+                    <Link to="/settings#topic" className="sidebar-follow-edit" aria-label="Edit topic">edit</Link>
+                  </div>
                 )}
                 {followedEntities.map((follow) => (
                   <Link key={`${follow.kind}-${follow.entity_id}`} to={follow.url} className="sidebar-link sidebar-follow-link">
@@ -625,6 +641,13 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </div>
             ) : null)}
 
+            {topicOnly && topic.data && (
+              <div className="following-topic-note following-topic-filter" role="status">
+                Showing only papers about “{topic.data.text}”.{" "}
+                <Link to={topicFilterHref(false)}>Show everything you follow</Link>
+              </div>
+            )}
+
             {following && !auth?.isLoading && !user ? (
               <FollowingIntro signedIn={false} popularTasks={popularTasks} />
             ) : noFollows ? (
@@ -645,7 +668,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                 ))}
               </div>
             ) : cards.length === 0 ? (error ? null :
-              <div className="no-results">{following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
+              <div className="no-results">{topicOnly ? <>No papers about your topic match these filters. Widen the date range or <Link to="/settings#topic">edit your topic</Link>.</> : following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
             ) : (
               <>
                 <div className="paper-list">

@@ -105,6 +105,7 @@ def following(
     has_hf_artifacts: bool = Query(
         False, description="Only papers with Hugging Face artifacts"
     ),
+    topic_only: bool = Query(False, description="Only papers matching the topic"),
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
@@ -119,6 +120,7 @@ def following(
         all_time=all_time,
         has_code=has_code,
         has_hf_artifacts=has_hf_artifacts,
+        topic_only=topic_only,
     )
 
 

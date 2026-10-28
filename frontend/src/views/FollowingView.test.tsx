@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { researchApi } from '@/lib/api/research';
@@ -120,7 +120,7 @@ it('offers the home feed filters on Following and sends them to the feed', async
   fireEvent.click(screen.getByRole('button', { name: /Has code/ }));
   fireEvent.click(screen.getByRole('button', { name: 'All Time' }));
   await vi.waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0, {
-    startDate: undefined, endDate: undefined, hasCode: true, hasHfArtifacts: false,
+    startDate: undefined, endDate: undefined, hasCode: true, hasHfArtifacts: false, topicOnly: false,
   }));
   expect(screen.getByRole('button', { name: /Has code/ })).toHaveAttribute('aria-pressed', 'true');
 });
@@ -131,7 +131,7 @@ it('keeps filters when switching from the public feed to Following', async () =>
   fireEvent.click(screen.getByRole('button', { name: 'following' }));
   await screen.findByText('A paper');
   expect(researchApi.following).toHaveBeenLastCalledWith(0, {
-    startDate: '2026-09-01', endDate: '2026-09-30', hasCode: false, hasHfArtifacts: true,
+    startDate: '2026-09-01', endDate: '2026-09-30', hasCode: false, hasHfArtifacts: true, topicOnly: false,
   });
 });
 
@@ -154,13 +154,24 @@ it('keeps domain lists out of the Following sidebar while follows load', () => {
   expect(container.querySelector('.sidebar-section-top-domains')).toBeNull();
 });
 
-it('lists the topic first in the sidebar with an edit link and links Settings below', async () => {
+it('lists the topic first in the sidebar as a filter with an edit link, and links Settings below', async () => {
   vi.mocked(researchApi.topic).mockResolvedValue(topic);
   renderFeed();
-  const row = await screen.findByRole('link', { name: /Topic real-time video generation edit/ });
-  expect(row).toHaveAttribute('href', '/settings#topic');
+  const row = await screen.findByRole('link', { name: /^Topic real-time video generation$/ });
+  expect(row).toHaveAttribute('href', '/following?only=topic');
+  expect(screen.getByRole('link', { name: 'Edit topic' })).toHaveAttribute('href', '/settings#topic');
   expect(screen.getByRole('link', { name: 'Manage in Settings' })).toHaveAttribute('href', '/settings');
   expect(screen.queryByRole('textbox', { name: 'Research topic' })).not.toBeInTheDocument();
+});
+it('filters the feed to topic matches from the sidebar and back', async () => {
+  vi.mocked(researchApi.topic).mockResolvedValue(topic);
+  renderFeed('/following?only=topic');
+  await waitFor(() => expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ topicOnly: true })));
+  expect(await screen.findByText(/Showing only papers about \u201creal-time video generation\u201d/)).toBeInTheDocument();
+  const row = screen.getByRole('link', { name: /^Topic real-time video generation$/ });
+  expect(row).toHaveAttribute('aria-current', 'true');
+  expect(row).toHaveAttribute('href', '/following');
+  expect(screen.getByRole('link', { name: 'Show everything you follow' })).toHaveAttribute('href', '/following');
 });
 it('prompts accounts without a topic to describe one above their follows feed', async () => {
   renderFeed();

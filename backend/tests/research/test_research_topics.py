@@ -287,3 +287,12 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
     }
     assert entries["Video only"].reasons == ["“video generation”"]
     assert entries["Robot only"].reasons == ["Robotics"]
+    topic_only = {
+        e.title: e
+        for e in follows.feed_entries(db, "alice", now, 0, 40, topic_only=True)
+    }
+    assert set(topic_only) == {"Video robots", "Video only"}
+    assert set(topic_only["Video robots"].reasons) == {
+        "Robotics",
+        "“video generation”",
+    }
