@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { PdfCitationSteps } from './PdfCitationSteps';
 
 describe('PDF citation steps', () => {
-  it('steps through citations and closes from the button or Escape', () => {
+  it('steps through citations and closes', () => {
     const onStep = vi.fn();
     const onClose = vi.fn();
     render(<PdfCitationSteps index={1} count={3} onStep={onStep} onClose={onClose} />);
@@ -11,8 +11,7 @@ describe('PDF citation steps', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Previous citation' }));
     fireEvent.click(screen.getByRole('button', { name: 'Next citation' }));
     expect(onStep.mock.calls).toEqual([[-1], [1]]);
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Next citation' }), { key: 'Escape' });
     fireEvent.click(screen.getByRole('button', { name: 'Close citations' }));
-    expect(onClose).toHaveBeenCalledTimes(2);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

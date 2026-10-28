@@ -353,6 +353,7 @@ export function PdfViewer({
     setCitationSteps({ citations, index: 0 });
     showCitation(citations[0]);
   }, [showCitation]);
+  const citationStepsOpen = Boolean(citationSteps && citationSteps.citations.length > 1);
   const stepCitation = (direction: 1 | -1) => {
     if (!citationSteps) return;
     const { citations } = citationSteps;
@@ -620,6 +621,9 @@ export function PdfViewer({
       } else if (event.key === "Escape" && searchOpen) {
         event.preventDefault();
         closeSearch();
+      } else if (event.key === "Escape" && citationStepsOpen) {
+        event.preventDefault();
+        setCitationSteps(undefined);
       } else if (event.key === "Escape" && !event.repeat && onClose) {
         event.preventDefault();
         onClose();
@@ -627,7 +631,7 @@ export function PdfViewer({
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [closeSearch, onClose, searchOpen]);
+  }, [citationStepsOpen, closeSearch, onClose, searchOpen]);
 
   // Extract the document's text as soon as search opens, so the first query
   // does not wait for every page to be fetched and parsed.
@@ -859,7 +863,7 @@ export function PdfViewer({
         </div>
       </Document>}
     </div>
-    {citationSteps && citationSteps.citations.length > 1 && <PdfCitationSteps
+    {citationSteps && citationStepsOpen && <PdfCitationSteps
       index={citationSteps.index}
       count={citationSteps.citations.length}
       onStep={stepCitation}

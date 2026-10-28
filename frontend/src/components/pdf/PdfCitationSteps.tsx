@@ -1,7 +1,8 @@
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 
 // Floats over the PDF after a bibliography card's jump so readers can step
-// through every place the text cites that entry.
+// through every place the text cites that entry. The reader's Escape handler
+// closes it before leaving the reader.
 export function PdfCitationSteps({ index, count, onStep, onClose }: {
   index: number;
   count: number;
@@ -12,7 +13,6 @@ export function PdfCitationSteps({ index, count, onStep, onClose }: {
     className="pdf-citation-steps"
     role="group"
     aria-label="Citations of this reference"
-    onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}
   >
     <span role="status">Citation {index + 1} of {count}</span>
     <button type="button" onClick={() => onStep(-1)} aria-label="Previous citation" title="Previous citation">
