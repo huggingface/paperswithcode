@@ -6,7 +6,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EditOrganizationsDialog } from "./EditOrganizationsDialog";
 
-const { getOrganizations, updatePaperOrganizations, submit } = vi.hoisted(() => ({
+const { getOrganizations, updatePaperOrganizations, submit, onOpenChange } = vi.hoisted(() => ({
+  onOpenChange: vi.fn(),
   submit: vi.fn(),
   getOrganizations: vi.fn(),
   updatePaperOrganizations: vi.fn(),
@@ -42,7 +43,7 @@ function renderDialog(initialOrganizationIds: number[] = [], submitMode: "direct
       <MemoryRouter>
       <EditOrganizationsDialog
         open
-        onOpenChange={vi.fn()}
+        onOpenChange={onOpenChange}
         paperId="42"
         initialOrganizationIds={initialOrganizationIds}
         submitMode={submitMode}
@@ -59,6 +60,7 @@ beforeEach(() => {
   updatePaperOrganizations.mockReset();
   updatePaperOrganizations.mockResolvedValue({ id: "42", title: "Updated" });
   submit.mockReset();
+  onOpenChange.mockReset();
   submit.mockResolvedValue({ id: "pending-1" });
 });
 
@@ -173,6 +175,6 @@ describe("EditOrganizationsDialog", () => {
    await user.type(screen.getByRole("textbox", { name: "Hugging Face organization" }), "GeneralReasoning");
    await user.click(screen.getByRole("button", { name: "Submit organization" }));
 
-   await screen.findByText('Added "General Reasoning" to this paper.');
+   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
    expect(client.getQueryState(["paper", "42"])?.isInvalidated).toBe(true);
  });

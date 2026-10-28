@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { getApiErrorMessage } from "@/lib/apiTransport";
 import { submissionsApi } from "@/lib/api/submissions";
 import { pendingEditSubmission } from "@/lib/pendingEdits";
-import { invalidatePaperDetails } from "@/lib/queryInvalidation";
 
 const ACCEPTED_LOGO_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const LOGO_MAX_BYTES = 2 * 1024 * 1024;
@@ -32,6 +31,8 @@ function readLogo(file: File): Promise<Logo> {
 interface Props {
   paperId: string;
   initialName: string;
+  /** Called when the suggestion was approved at once and the paper now has it. */
+  onApplied: (name: string) => void;
 }
 
 /**
@@ -39,13 +40,12 @@ interface Props {
  * with a real Hugging Face organization is approved at once and takes its
  * website and logo from Hugging Face.
  */
-export function SuggestOrganizationForm({ paperId, initialName }: Props) {
+export function SuggestOrganizationForm({ paperId, initialName, onApplied }: Props) {
   const [name, setName] = useState(initialName);
   const [hfSlug, setHfSlug] = useState("");
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [logo, setLogo] = useState<Logo | null>(null);
   const [logoError, setLogoError] = useState("");
-  const queryClient = useQueryClient();
   const suggest = useMutation({
     mutationFn: () =>
       submissionsApi.submit(
@@ -57,15 +57,10 @@ export function SuggestOrganizationForm({ paperId, initialName }: Props) {
         }),
       ),
     onSuccess: (submitted) => {
-      if (submitted.status !== "approved") return;
-      invalidatePaperDetails(queryClient, [paperId]);
-      void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      if (submitted.status === "approved") onApplied(name.trim());
     },
   });
 
-  if (suggest.data?.status === "approved") {
-    return <p className="rounded border p-3 text-sm">Added "{name.trim()}" to this paper.</p>;
-  }
   if (suggest.isSuccess) {
     return (
       <p className="rounded border p-3 text-sm">

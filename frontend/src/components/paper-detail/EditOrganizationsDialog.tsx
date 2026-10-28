@@ -1,4 +1,4 @@
-import { refreshPaperQueries } from "@/lib/queryInvalidation";
+import { invalidatePaperDetails, invalidatePaperFeeds, refreshPaperQueries } from "@/lib/queryInvalidation";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
@@ -163,7 +163,20 @@ export const EditOrganizationsDialog = ({
           )}
         </div>
         {!organizations.isLoading && displayedOrganizations.length === 0 && searchQuery.trim() && (
-          <SuggestOrganizationForm key={searchQuery.trim()} paperId={paperId} initialName={searchQuery.trim()} />
+          <SuggestOrganizationForm
+            key={searchQuery.trim()}
+            paperId={paperId}
+            initialName={searchQuery.trim()}
+            onApplied={(name) => {
+              // Close first: the refetched paper would otherwise reset this dialog
+              // and show the new organization unchecked, so saving would drop it.
+              onOpenChange(false);
+              toast({ title: "Organization added", description: `Added "${name}" to this paper.` });
+              invalidatePaperDetails(queryClient, [paperId]);
+              invalidatePaperFeeds(queryClient);
+              void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+            }}
+          />
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
