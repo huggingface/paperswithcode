@@ -6,6 +6,7 @@ import { researchApi, type FollowKind, type ResearchFollow } from '@/lib/api/res
 import { useAuth } from '@/lib/authContext';
 import HfSignInButton, { hfLoginUrl } from './HfSignInButton';
 import { Switch } from './ui/switch';
+import TopicSettings from './TopicSettings';
 
 const KINDS: { kind: FollowKind; label: string; icon: LucideIcon; browse?: string }[] = [
   { kind: 'task', label: 'Tasks', icon: ListChecks, browse: '/tasks' },
@@ -70,7 +71,7 @@ function FollowList({ follows }: { follows: ResearchFollow[] }) {
 
 function EmptyFollows() {
   return <div className="research-follow-empty">
-    <p><strong>You are not following anything yet.</strong></p>
+    <p><strong>You are not following any tasks, methods, benchmarks, authors, or organizations yet.</strong></p>
     <p>Use the Follow button on any task, method, benchmark, author, or organization page.</p>
     <div className="research-follow-browse">
       {KINDS.filter(k => k.browse).map(({ kind, label, icon: Icon, browse }) =>
@@ -98,15 +99,15 @@ export default function ResearchSettings() {
         {user && <Link className="research-feed-link" to="/following">Open Following feed <ArrowRight aria-hidden="true" /></Link>}
       </div>
       <p className="settings-row-desc research-section-intro">
-        New papers and benchmark results from what you follow appear in your Following
-        feed. Your follows are private.
+        New papers and benchmark results from your topic and what you follow appear in your
+        Following feed. Your topic and follows are private.
       </p>
       {!user ? <div className="settings-note">
         <span>Sign in to follow research and build your personal feed.</span>
         <div className="settings-note-action"><HfSignInButton returnTo="/settings" /></div>
       </div> : follows.isLoading ? <p className="settings-billing-loading">Loading follows…</p>
         : follows.error ? <p className="settings-token-error" role="alert">Could not load your follows.</p>
-        : <FollowList follows={follows.data ?? []} />}
+        : <><TopicSettings /><FollowList follows={follows.data ?? []} /></>}
     </section>
 
     {user && <section className="settings-section" aria-labelledby="research-email-heading">

@@ -3,6 +3,7 @@
 from datetime import date, datetime, timedelta
 import re
 import secrets
+from typing import NamedTuple
 
 from fastapi import HTTPException
 from sqlalchemy import Integer, column, select, text
@@ -23,6 +24,8 @@ from backend.models.database.research import (
     ResearchSuppression,
 )
 from backend.models.research import FollowView, ResearchEntry, ResearchFeedEntry
+from backend.models.database.research import ResearchTopic
+from backend.services.research_topic_service import THRESHOLD as TOPIC_THRESHOLD
 
 ENTITIES = {
     "task": (Task, "tasks"),
@@ -66,6 +69,26 @@ def follows(db: Session, subject: str) -> list[FollowView]:
                     )
                 )
     return result
+
+
+class Interest(NamedTuple):
+    kind: str
+    entity_id: int
+    name: str
+
+
+def interests(db: Session, subject: str) -> dict[tuple[str, int], Interest]:
+    """Entity follows plus the account's free-text topic, named as reasons show them."""
+    found = {
+        (f.kind, f.entity_id): Interest(f.kind, f.entity_id, f.name)
+        for f in follows(db, subject)
+    }
+    sub = db.get(ResearchSubscription, subject)
+    topic = sub and sub.topic_id and db.get(ResearchTopic, sub.topic_id)
+    if topic:
+        short = topic.text if len(topic.text) <= 80 else topic.text[:79].rstrip() + "…"
+        found["topic", topic.id] = Interest("topic", topic.id, f"\u201c{short}\u201d")
+    return found
 
 
 def set_follow(
@@ -176,6 +199,9 @@ def diverse(
 MATCH_SQL = """
 WITH RECURSIVE interests AS (
  SELECT kind,entity_id,created_at FROM research_follows WHERE hf_subject=:subject
+ UNION ALL
+ SELECT 'topic',topic_id,topic_set_at FROM research_subscriptions
+ WHERE hf_subject=:subject AND topic_id IS NOT NULL
 ), descendants(root,id) AS (
  SELECT entity_id,entity_id FROM interests WHERE kind='task'
  UNION SELECT d.root,t.id FROM tasks t JOIN descendants d ON t.parent_id=d.id
@@ -195,6 +221,10 @@ WITH RECURSIVE interests AS (
  UNION ALL
  SELECT 'benchmark',i.entity_id,e.paper_id,2 FROM interests i
  JOIN evaluations e ON e.dataset_id=i.entity_id WHERE i.kind='benchmark'
+ UNION ALL
+ SELECT 'topic',i.entity_id,v.paper_id,2 FROM interests i
+ JOIN research_topic_verdicts v ON v.topic_id=i.entity_id AND v.score>=:topic_threshold
+ WHERE i.kind='topic'
 )
 SELECT DISTINCT h.kind,h.entity_id,h.strength,i.created_at followed_at,
  p.id,p.arxiv_id,p.title,p.abstract,p.tldr,
@@ -225,7 +255,7 @@ def matching_entries(
     """Match follows to papers published from ``cutoff`` (default 30 days ago) to ``until``."""
     cutoff = cutoff or (now - timedelta(days=30)).date()
     until = until or now.date()
-    interest_map = {(f.kind, f.entity_id): f for f in follows(db, subject)}
+    interest_map = interests(db, subject)
     if not interest_map:
         return []
     entries, strengths = {}, {}
@@ -246,7 +276,13 @@ def matching_entries(
     )
     for row in db.execute(
         text(match_sql),
-        {"subject": subject, "today": until, "cutoff": cutoff, "paper_ids": paper_ids},
+        {
+            "subject": subject,
+            "today": until,
+            "cutoff": cutoff,
+            "paper_ids": paper_ids,
+            "topic_threshold": TOPIC_THRESHOLD,
+        },
     ).mappings():
         interest = interest_map.get((row["kind"], row["entity_id"]))
         if interest is None:
@@ -344,7 +380,12 @@ def feed_entries(
     until = min(end_date or now.date(), now.date())
     matches = (
         text(MATCH_SQL)
-        .bindparams(subject=subject, today=until, cutoff=cutoff)
+        .bindparams(
+            subject=subject,
+            today=until,
+            cutoff=cutoff,
+            topic_threshold=TOPIC_THRESHOLD,
+        )
         .columns(column("id", Integer))
         .subquery("matches")
     )

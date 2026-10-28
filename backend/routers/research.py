@@ -16,9 +16,12 @@ from backend.models.research import (
     ResearchFeedEntry,
     SubscriptionUpdate,
     SubscriptionView,
+    TopicUpdate,
+    TopicView,
 )
 from backend.routers.auth import decode_request_session
 from backend.services import research_follow_service as service
+from backend.services import research_topic_service
 from backend.services.research_delivery_service import (
     delivery_ready,
     verify_webhook,
@@ -54,6 +57,37 @@ def unfollow(
     db: Session = Depends(get_database_session),
 ):
     service.set_follow(db, user["hf_subject"], kind, entity_id, False)
+
+
+@router.get("/me/topic", response_model=TopicView | None)
+def topic(
+    user: dict = Depends(require_user), db: Session = Depends(get_database_session)
+):
+    return research_topic_service.topic_view(db, user["hf_subject"])
+
+
+@router.put("/me/topic", response_model=TopicView)
+def set_topic(
+    body: TopicUpdate,
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+):
+    text = research_topic_service.display_text(body.text)
+    if len(research_topic_service.normalize(text)) < 3:
+        raise HTTPException(422, "Describe the topic in a few words")
+    research_topic_service.set_topic(
+        db, user["hf_subject"], text, datetime.now(timezone.utc)
+    )
+    return research_topic_service.topic_view(db, user["hf_subject"])
+
+
+@router.delete("/me/topic", status_code=204)
+def clear_topic(
+    user: dict = Depends(require_user), db: Session = Depends(get_database_session)
+):
+    research_topic_service.set_topic(
+        db, user["hf_subject"], None, datetime.now(timezone.utc)
+    )
 
 
 @router.get("/me/following", response_model=list[ResearchFeedEntry])

@@ -85,16 +85,34 @@ def _period(start: datetime | None, end: datetime | None) -> str:
     return f"{start:%b} {start.day} – {last:%b} {last.day}, {last:%Y}"
 
 
+def digest_sections(entries, rotation: int | None = None) -> tuple[list, list]:
+    """New papers on the account's topic first, then entity follows, 20 at most."""
+    on_topic = [e for e in entries if any(i.startswith("topic:") for i in e.interests)]
+    topic_entries = diverse(on_topic, 10)
+    seen = {e.paper_key for e in topic_entries}
+    rest = diverse(
+        [e for e in entries if e.paper_key not in seen],
+        20 - len(topic_entries),
+        rotation=rotation,
+    )
+    return topic_entries, rest
+
+
 def render_digest(
     entries,
     token: str,
     start: datetime | None = None,
     end: datetime | None = None,
+    topic_entries=(),
 ) -> dict:
-    """Email-safe digest: table layout and inline styles only; all catalog text escaped."""
+    """Email-safe digest: table layout and inline styles only; all catalog text escaped.
+
+    ``topic_entries`` lead under "New on your topic"; ``entries`` follow under
+    "From what you follow" when both are present.
+    """
     esc = html.escape
     unsubscribe = f"{ORIGIN}/api/v1/research/unsubscribe/{token}"
-    count = len(entries)
+    count = len(entries) + len(topic_entries)
     noun = "paper" if count == 1 else "papers"
     period = _period(start, end)
     intro = f"{count} new {noun} from what you follow" + (
@@ -102,7 +120,22 @@ def render_digest(
     )
     lines = ["Papers with Code · Weekly research digest", intro, ""]
     rows = []
-    for e in entries:
+    sections = [
+        ("New on your topic", list(topic_entries)),
+        ("From what you follow", list(entries)),
+    ]
+    labelled = all(section for _, section in sections)
+    for e in [e for _, section in sections for e in section]:
+        heading = next(
+            (name for name, section in sections if section and section[0] is e), None
+        )
+        if labelled and heading:
+            lines.extend([heading.upper(), ""])
+            rows.append(
+                f'<tr><td style="padding:22px 0 0;font-family:{SANS};font-size:12px;'
+                f'letter-spacing:.08em;text-transform:uppercase;color:{FAINT};">'
+                f"{esc(heading)}</td></tr>"
+            )
         url = ORIGIN + e.url
         reasons = ", ".join(e.reasons)
         scores = [_score_text(s) for s in e.scores]
@@ -186,15 +219,19 @@ def prepare_digest(db: Session, subject: str, now: datetime) -> ResearchDigest |
         window_end=end,
         opted_in_at=sub.opted_in_at,
     )
-    selected = diverse(entries, 20, rotation=(end.date().toordinal() // 7) * 20)
-    payload = render_digest(selected, sub.unsubscribe_token, start, end)
+    topic_entries, selected = digest_sections(
+        entries, rotation=(end.date().toordinal() // 7) * 20
+    )
+    payload = render_digest(
+        selected, sub.unsubscribe_token, start, end, topic_entries=topic_entries
+    )
     payload.update({"to": [sub.email], "from": get_settings().resend_from})
     db.execute(
         insert(ResearchDigest)
         .values(
             hf_subject=subject,
             window_end=end,
-            status="pending" if selected else "empty",
+            status="pending" if selected or topic_entries else "empty",
             payload=payload,
         )
         .on_conflict_do_nothing()
@@ -221,8 +258,13 @@ def sample_digest(db: Session, subject: str, now: datetime) -> dict | None:
     # The last seven days including today; render_digest treats ``end`` as exclusive.
     start = now - timedelta(days=6)
     entries = matching_entries(db, subject, now, cutoff=start.date())
+    topic_entries, selected = digest_sections(entries)
     payload = render_digest(
-        diverse(entries, 20), sub.unsubscribe_token, start, now + timedelta(days=1)
+        selected,
+        sub.unsubscribe_token,
+        start,
+        now + timedelta(days=1),
+        topic_entries=topic_entries,
     )
     payload.update(
         {"to": [sub.email] if sub.email else [], "from": get_settings().resend_from}

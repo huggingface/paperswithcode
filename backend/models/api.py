@@ -205,4 +205,7 @@ from backend.models.research import (
     ResearchFeedEntry as ResearchFeedEntry,
     SubscriptionUpdate as SubscriptionUpdate,
     SubscriptionView as SubscriptionView,
+    TopicSuggestion as TopicSuggestion,
+    TopicUpdate as TopicUpdate,
+    TopicView as TopicView,
 )

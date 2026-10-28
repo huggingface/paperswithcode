@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Judge new and changed papers against followed research topics
+
+[Timer]
+OnCalendar=*-*-* *:54:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-judge-research-topics.service
+
+[Install]
+WantedBy=timers.target

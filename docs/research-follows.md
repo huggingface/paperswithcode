@@ -19,6 +19,38 @@ strength, publication date, popularity, then canonical ID; round-robin
 selection balances coverage and counts each paper once. Up to 100 interests
 may be followed. Feed pages contain 40 entries.
 
+## Free-text topic
+
+Each account may also describe one topic in its own words (up to 300
+characters, edited in `/settings` or from the Following feed). Topics are
+shared rows in `research_topics`, keyed by normalized text (lowercase,
+collapsed whitespace, trailing punctuation stripped); subscriptions point at
+one through `research_subscriptions.topic_id`. Jev (`jev-1.14` through
+OpenRouter's `systemone` endpoint) scores each paper's card (title, authors,
+organizations, venue, task/method/benchmark tags, abstract) against the topic,
+and `research_topic_verdicts` keeps the raw score with the card's SHA-256 and
+the prompt version. The feed and digest treat a score of at least 0.85 as a
+match, applied when reading, so recalibration rewrites nothing. The threshold
+and prompt were calibrated on 299 hand-labelled topic/paper pairs across ten
+topics (about 95% precision; `reports/topic-calibration/` locally).
+
+Topic matches join entity matches in one feed, deduplicated by paper and
+ranked by the same trending order; the reason line names the topic in quotes.
+A new topic is backfilled by the per-minute `backfill_research_topics` job:
+every paper from the last 90 days plus the 500 best older matches by dense +
+lexical reciprocal rank fusion, judged once. The hourly
+`judge_research_topics` job (:54) judges papers in the 90-day window that are
+new or whose card changed, against every followed topic. There is no fallback:
+failed Jev calls leave pairs unjudged for the next run, a failed backfill
+retries up to five times, and CRON health flags papers left unjudged for six
+hours. Staging has its own topic tables and no topic CRON, so staging topics
+stay pending.
+
+Digests list up to 10 topic matches first under "New on your topic", then
+entity follows. Topic matches use the same paper discovery events as entity
+follows, so only papers discovered after the topic was set can be emailed;
+backfilled papers are feed-only.
+
 Production insert triggers capture discovery independently of mutable
 `updated_at`. Paper revisions do not create another paper event. Result
 identity is canonical paper + task + dataset + model + harness, excluding
@@ -49,6 +81,7 @@ the raw payload and reject timestamps outside five minutes. Bounce/complaint
 suppression is address-wide and idempotent.
 
 Code: `backend/services/research_follow_service.py` (follows and feed),
+`backend/services/research_topic_service.py` (topics, Jev judging, backfill),
 `backend/services/research_delivery_service.py` (digest selection, outbox,
 Resend), and `backend/routers/research.py` (API and
 `POST /api/v1/research/resend-webhook`).
@@ -58,7 +91,8 @@ Resend), and `backend/routers/research.py` (API and
 Schema: `backend/database/migrations/add_research_follows.sql` (production:
 shared catalog event triggers plus private tables; rerunnable and additive) and
 `add_research_follows_staging.sql` (staging private state only, no event
-triggers). Production and staging interests and preferences stay separate, and
+triggers), then `add_research_topics.sql` (topics, verdicts, and the
+subscription topic columns, with staging copies). Production and staging interests and preferences stay separate, and
 delivery is always disabled in staging.
 
 Production sends through `send_research_digests` (`pwc-cron`). The hourly

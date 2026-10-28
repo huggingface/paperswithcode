@@ -1,4 +1,5 @@
 import FollowingIntro from "@/components/FollowingIntro";
+import TopicSettings from "@/components/TopicSettings";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi, type FollowKind } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -38,7 +39,7 @@ import { useInfinitePapers } from "@/hooks/usePapers";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   readHomepagePaperDateRange,
   withHomepagePaperDateRange,
@@ -427,7 +428,23 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     queryFn: researchApi.follows,
     enabled: following && !!user,
   });
-  const noFollows = following && !!user && follows.data?.length === 0;
+  const topic = useQuery({
+    queryKey: ["research-topic", user?.hf_subject],
+    queryFn: researchApi.topic,
+    enabled: following && !!user,
+    refetchInterval: query => query.state.data && ["pending", "running"].includes(query.state.data.status) ? 10000 : false,
+  });
+  const topicBuilding = !!topic.data && ["pending", "running"].includes(topic.data.status);
+  // Refresh the feed once a new topic's backfill finishes.
+  const queryClient = useQueryClient();
+  const wasBuilding = useRef(false);
+  useEffect(() => {
+    if (wasBuilding.current && !topicBuilding) {
+      void queryClient.invalidateQueries({ queryKey: ["research-feed", user?.hf_subject] });
+    }
+    wasBuilding.current = topicBuilding;
+  }, [topicBuilding, queryClient, user?.hf_subject]);
+  const noFollows = following && !!user && follows.data?.length === 0 && topic.isSuccess && !topic.data;
   const followedEntities = useMemo(
     () => following && follows.data
       ? [...follows.data].sort((a, b) => FOLLOW_KIND_ORDER.indexOf(a.kind) - FOLLOW_KIND_ORDER.indexOf(b.kind))
@@ -480,6 +497,13 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                 <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>Couldn't load your follows.</div>
               )}
               <div className="sidebar-links">
+                {topic.data && (
+                  <Link to="/settings#topic" className="sidebar-link sidebar-follow-link" title={topic.data.text}>
+                    <span className="sidebar-follow-kind">Topic</span>
+                    <span className="sidebar-follow-name">{topic.data.text}</span>
+                    <span className="sidebar-follow-edit">edit</span>
+                  </Link>
+                )}
                 {followedEntities.map((follow) => (
                   <Link key={`${follow.kind}-${follow.entity_id}`} to={follow.url} className="sidebar-link sidebar-follow-link">
                     <span className="sidebar-follow-kind">{FOLLOW_KIND_LABELS[follow.kind]}</span>
@@ -487,6 +511,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                   </Link>
                 ))}
               </div>
+              <Link to="/settings" className="sidebar-follow-manage">Manage in Settings</Link>
             </div>
           ) : (
             <>
@@ -590,6 +615,16 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </Alert>
             )}
 
+            {following && !!user && !noFollows && topic.isSuccess && (!topic.data ? (
+              <section className="following-topic-card" aria-label="Follow a topic">
+                <TopicSettings />
+              </section>
+            ) : topicBuilding ? (
+              <div className="following-topic-note" role="status">
+                Finding papers about “{topic.data.text}”. They appear here as they are found.
+              </div>
+            ) : null)}
+
             {following && !auth?.isLoading && !user ? (
               <FollowingIntro signedIn={false} popularTasks={popularTasks} />
             ) : noFollows ? (
@@ -610,7 +645,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                 ))}
               </div>
             ) : cards.length === 0 ? (error ? null :
-              <div className="no-results">{following ? <>No papers from your follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
+              <div className="no-results">{following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
             ) : (
               <>
                 <div className="paper-list">

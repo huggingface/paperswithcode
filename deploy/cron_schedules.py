@@ -192,6 +192,16 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Re-link every abstract after catalog changes",
     ),
     TimerSpec(
+        job="judge_research_topics",
+        on_calendar=("*-*-* *:54:00",),
+        description="Judge new and changed papers against followed research topics",
+    ),
+    TimerSpec(
+        job="backfill_research_topics",
+        on_calendar=("*-*-* *:*:00",),
+        description="Backfill newly followed research topics",
+    ),
+    TimerSpec(
         job="warm_paper_suggested_questions",
         on_calendar=("*-*-* *:33:00",),
         description="Pre-generate suggested questions for the papers visitors see first",

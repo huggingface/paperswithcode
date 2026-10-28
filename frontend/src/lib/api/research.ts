@@ -9,6 +9,22 @@ export interface ResearchFollow {
   url: string;
   created_at: string;
 }
+export interface ResearchTopicSuggestion {
+  kind: FollowKind;
+  entity_id: number;
+  name: string;
+  url: string;
+}
+export interface ResearchTopic {
+  text: string;
+  set_at: string | null;
+  /** pending/running while the last 90 days and older matches are judged. */
+  status: 'pending' | 'running' | 'done' | 'failed';
+  judged: number;
+  total: number | null;
+  suggestions: ResearchTopicSuggestion[];
+}
+export const TOPIC_MAX_LENGTH = 300;
 export interface ResearchEmail {
   enabled: boolean;
   email: string | null;
@@ -44,6 +60,11 @@ export const researchApi = {
     if (filters.hasHfArtifacts) params.set('has_hf_artifacts', 'true');
     return apiRequest<ResearchEntry[]>(`/me/following?${params}`);
   },
+  topic: () => apiRequest<ResearchTopic | null>('/me/topic'),
+  setTopic: (text: string) => apiRequest<ResearchTopic>('/me/topic', {
+    method: 'PUT', body: JSON.stringify({ text }),
+  }),
+  clearTopic: () => apiRequest<void>('/me/topic', { method: 'DELETE' }),
   email: () => apiRequest<ResearchEmail>('/me/research-email'),
   setEmail: (enabled: boolean) => apiRequest<ResearchEmail>('/me/research-email', {
     method: 'PUT', body: JSON.stringify({ enabled }),

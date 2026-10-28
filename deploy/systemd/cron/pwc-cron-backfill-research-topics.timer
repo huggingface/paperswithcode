@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Backfill newly followed research topics
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-backfill-research-topics.service
+
+[Install]
+WantedBy=timers.target

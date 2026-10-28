@@ -27,8 +27,8 @@ def test_registry_covers_workflows_systemd_and_allowlist_exactly():
     summary = _dashboard_job_summary(
         [{"category": job.category, "status": "healthy"} for job in jobs]
     )
-    assert summary["total_jobs"] == 63
-    assert summary["scheduled_jobs"] == 62
+    assert summary["total_jobs"] == 65
+    assert summary["scheduled_jobs"] == 64
     assert summary["manual_jobs"] == 1
     assert len(by_id) == len(jobs), "duplicate dashboard job IDs"
 

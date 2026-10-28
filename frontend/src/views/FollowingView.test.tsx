@@ -32,7 +32,10 @@ beforeEach(() => {
   vi.spyOn(researchApi, 'following').mockResolvedValue([{ paper, paper_key: 'arxiv:2610.12345',
     title: paper.title, url: '/paper/2610.12345', summary: 'Short summary.', published: paper.published,
     reasons: ['Task'], scores: [] }]);
+  vi.spyOn(researchApi, 'topic').mockResolvedValue(null);
 });
+const topic = { text: 'real-time video generation', set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
+  judged: 10, total: 10, suggestions: [] };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 it('renders following in the existing tab row with standard paper cards and thumbnails', async () => {
   const { container } = renderFeed();
@@ -92,7 +95,7 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
 it('keeps the filter hint when follows exist but nothing matches', async () => {
   vi.mocked(researchApi.following).mockResolvedValue([]);
   renderFeed();
-  expect(await screen.findByText(/No papers from your follows match these filters/)).toBeInTheDocument();
+  expect(await screen.findByText(/No papers from your topic or follows match these filters/)).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Build your personal research feed' })).not.toBeInTheDocument();
 });
 
@@ -149,4 +152,26 @@ it('keeps domain lists out of the Following sidebar while follows load', () => {
   const { container } = renderFeed();
   expect(screen.getByText('You follow')).toBeInTheDocument();
   expect(container.querySelector('.sidebar-section-top-domains')).toBeNull();
+});
+
+it('lists the topic first in the sidebar with an edit link and links Settings below', async () => {
+  vi.mocked(researchApi.topic).mockResolvedValue(topic);
+  renderFeed();
+  const row = await screen.findByRole('link', { name: /Topic real-time video generation edit/ });
+  expect(row).toHaveAttribute('href', '/settings#topic');
+  expect(screen.getByRole('link', { name: 'Manage in Settings' })).toHaveAttribute('href', '/settings');
+  expect(screen.queryByRole('textbox', { name: 'Research topic' })).not.toBeInTheDocument();
+});
+it('prompts accounts without a topic to describe one above their follows feed', async () => {
+  renderFeed();
+  expect(await screen.findByRole('textbox', { name: 'Research topic' })).toBeInTheDocument();
+  expect(await screen.findByText('A paper')).toBeInTheDocument();
+});
+it('shows the feed for an account that follows only a topic', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(researchApi.topic).mockResolvedValue({ ...topic, status: 'running', judged: 200, total: 4700 });
+  renderFeed();
+  expect(await screen.findByText(/Finding papers about \u201creal-time video generation\u201d/)).toBeInTheDocument();
+  expect(await screen.findByText('A paper')).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Build your personal research feed' })).not.toBeInTheDocument();
 });

@@ -17,6 +17,29 @@ class FollowView(BaseModel):
     created_at: datetime
 
 
+class TopicUpdate(BaseModel):
+    text: str = Field(min_length=3, max_length=300)
+
+
+class TopicSuggestion(BaseModel):
+    """A catalog entity named exactly like the topic, which matches papers exactly."""
+
+    kind: FollowKind
+    entity_id: int
+    name: str
+    url: str
+
+
+class TopicView(BaseModel):
+    text: str
+    set_at: datetime | None
+    # pending/running while the last 90 days and older recall are judged.
+    status: Literal["pending", "running", "done", "failed"]
+    judged: int
+    total: int | None
+    suggestions: list[TopicSuggestion] = Field(default_factory=list)
+
+
 class SubscriptionUpdate(BaseModel):
     enabled: bool
 

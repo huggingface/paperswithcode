@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { researchApi } from '@/lib/api/research';
 import ResearchSettings from './ResearchSettings';
 import ResearchFollowButton from './ResearchFollowButton';
@@ -12,7 +12,40 @@ function wrapper({ children }: { children: React.ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return <QueryClientProvider client={client}><MemoryRouter>{children}</MemoryRouter></QueryClientProvider>;
 }
+beforeEach(() => { vi.spyOn(researchApi, 'topic').mockResolvedValue(null); });
 afterEach(() => vi.restoreAllMocks());
+describe('research topic', () => {
+  const saved = { text: 'real-time video generation', set_at: '2026-10-28T10:00:00Z', status: 'pending' as const,
+    judged: 0, total: null, suggestions: [] };
+  it('saves a trimmed topic and reports backfill progress', async () => {
+    vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
+    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true });
+    const set = vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...saved, status: 'running', judged: 200, total: 4700 });
+    render(<ResearchSettings />, { wrapper });
+    const input = await screen.findByRole('textbox', { name: 'Research topic' });
+    expect(screen.getByRole('button', { name: 'Follow topic' })).toBeDisabled();
+    fireEvent.change(input, { target: { value: '  real-time   video generation ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Follow topic' }));
+    await waitFor(() => expect(set).toHaveBeenCalledWith('real-time video generation'));
+    expect(await screen.findByText('Finding matching papers: 200 of 4,700 checked…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Update topic' })).toBeDisabled();
+  });
+  it('removes the topic and names exact catalog matches', async () => {
+    vi.mocked(researchApi.topic).mockResolvedValue({ ...saved, status: 'done', suggestions: [
+      { kind: 'task', entity_id: 3, name: 'Video Generation', url: '/tasks/video-generation' },
+    ] });
+    vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
+    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true });
+    const clear = vi.spyOn(researchApi, 'clearTopic').mockResolvedValue();
+    render(<ResearchSettings />, { wrapper });
+    expect(await screen.findByRole('link', { name: 'Video Generation' })).toHaveAttribute('href', '/tasks/video-generation');
+    expect(screen.getByText(/new ones are added every hour/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(clear).toHaveBeenCalled());
+    expect(await screen.findByRole('button', { name: 'Follow topic' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Research topic' })).toHaveValue('');
+  });
+});
 describe('research follows', () => {
   it('shows the verified destination, disabled-delivery status, and explicit opt-in', async () => {
     vi.spyOn(researchApi, 'follows').mockResolvedValue([]);

@@ -1913,6 +1913,32 @@ def _trending_curation_contract(
     return status, reasons
 
 
+def _research_topics_contract(
+    status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    """Topic feeds go stale when Jev keeps failing; no fallback hides it."""
+    db = context.db
+    age = db.get("oldest_unjudged_age_minutes")
+    if age is not None and float(age) > 360:
+        status = _worse_output(status, "broken")
+        reasons.append(
+            f"a paper has waited {int(float(age))}m for a verdict on a followed topic"
+        )
+    pending = db.get("oldest_pending_backfill_minutes")
+    if pending is not None and float(pending) > 60:
+        status = _worse_output(status, "degraded")
+        reasons.append(
+            f"a new topic has waited {int(float(pending))}m for its backfill"
+        )
+    failed = int(db.get("failed_backfills", 0) or 0)
+    if failed:
+        status = _worse_output(status, "degraded")
+        reasons.append(f"{failed} followed topic backfill(s) gave up after retries")
+    return status, reasons
+
+
 def _curation_thumbnail_contract(
     status: str,
     reasons: List[str],
@@ -2137,6 +2163,7 @@ OUTPUT_POLICIES = {
         accept_systemd_completion=True,
     ),
     "curation_thumbnails": OutputPolicy(_curation_thumbnail_contract),
+    "research_topics": OutputPolicy(_research_topics_contract),
     "chat_alert_monitor": OutputPolicy(_chat_alert_contract),
     "suggested_questions": OutputPolicy(_suggested_questions_contract),
     "report_only": OutputPolicy(

@@ -8,16 +8,19 @@ import HfSignInButton from './HfSignInButton';
 export default function FollowingIntro({ signedIn, popularTasks = [] }: { signedIn: boolean; popularTasks?: Task[] }) {
   const steps = [
     ...(signedIn ? [] : [<>Sign in with your Hugging Face account. Your follows stay private.</>]),
-    <>Open any task, method, benchmark, author, or organization page and click{' '}
+    <>Describe the research you care about in your own words in{' '}
+      {signedIn ? <Link to="/settings#topic">Settings</Link> : 'Settings'}, or open any task, method,
+      benchmark, author, or organization page and click{' '}
       <span className="following-intro-pill"><Plus aria-hidden="true" />Follow</span>.</>,
-    <>New papers and benchmark results from everything you follow appear here, ranked like the
+    <>New papers matching your topic and everything you follow appear here, ranked like the
       trending feed. You can also get them as a weekly email from <Link to="/settings">Settings</Link>.</>,
   ];
   return <section className="following-intro" aria-labelledby="following-intro-title">
     <h2 id="following-intro-title">Build your personal research feed</h2>
     <p className="following-intro-lead">
-      Follow the tasks, benchmarks, authors, and organizations you care about, and this page
-      collects their latest papers and results in one place.
+      Describe a topic in your own words, or follow the tasks, benchmarks, authors, and
+      organizations you care about, and this page collects their latest papers and results in
+      one place.
     </p>
     <ol className="following-intro-steps">
       {steps.map((step, index) => <li key={index}><span aria-hidden="true">{index + 1}</span><p>{step}</p></li>)}

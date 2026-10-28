@@ -569,6 +569,26 @@ COMMANDS: dict[str, Job] = {
         ),
         health_job="link_abstract_mentions",
     ),
+    "judge_research_topics": job(
+        "-m",
+        "backend.scripts.judge_research_topics",
+        timeout="45m",
+        idempotency=(
+            "judge only topic/paper pairs without a verdict for the current paper "
+            "card and prompt; each verdict is an upsert"
+        ),
+    ),
+    "backfill_research_topics": job(
+        "-m",
+        "backend.scripts.judge_research_topics",
+        "--backfill",
+        timeout="2h",
+        idempotency=(
+            "claim topics with skip-locked semantics; pairs already judged for the "
+            "current card are skipped on retries"
+        ),
+        health_job="backfill_research_topics",
+    ),
     "warm_paper_suggested_questions": job(
         "-m",
         "backend.scripts.warm_paper_suggested_questions",

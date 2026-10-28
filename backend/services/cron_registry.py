@@ -1912,6 +1912,86 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
+        id="judge_research_topics",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=54),),
+        schedule_grace_minutes=30,
+        systemd_timer="pwc-cron-judge-research-topics.timer",
+        systemd_service="pwc-cron-judge-research-topics.service",
+        systemd_extra_units=(),
+        output_evaluator="research_topics",
+        display_name="Judge Research Topics",
+        category="hourly",
+        schedule="54 * * * * (hourly)",
+        script_path="backend/scripts/judge_research_topics.py",
+        log_name="judge_research_topics",
+        process_patterns=("backend.scripts.judge_research_topics",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/judge_research_topics.lock"
+        ),
+        expected_runtime_minutes=15,
+        stale_after_minutes=180,
+        critical=False,
+        # Hours without new papers or followed topics judge nothing.
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            WITH followed AS (
+              SELECT DISTINCT s.topic_id FROM research_subscriptions s
+              JOIN research_topics t ON t.id = s.topic_id
+              WHERE t.backfill_status = 'done'
+            ), recent AS (
+              SELECT id, created_at FROM papers
+              WHERE is_latest_version AND date_published >= current_date - 90
+            )
+            SELECT (SELECT max(judged_at) FROM research_topic_verdicts) AS last_write,
+                   (SELECT count(*) FROM research_topic_verdicts
+                    WHERE judged_at > now() - interval '3 hours') AS recent_writes,
+                   (SELECT extract(epoch FROM now() - min(r.created_at)) / 60
+                    FROM recent r CROSS JOIN followed f
+                    WHERE NOT EXISTS (
+                      SELECT 1 FROM research_topic_verdicts v
+                      WHERE v.topic_id = f.topic_id AND v.paper_id = r.id
+                    )) AS oldest_unjudged_age_minutes,
+                   (SELECT extract(epoch FROM now() - min(t.created_at)) / 60
+                    FROM research_topics t
+                    WHERE t.backfill_status IN ('pending', 'running')
+                      AND t.id IN (SELECT topic_id FROM research_subscriptions))
+                       AS oldest_pending_backfill_minutes,
+                   (SELECT count(*) FROM research_topics t
+                    WHERE t.backfill_status = 'failed'
+                      AND t.id IN (SELECT topic_id FROM research_subscriptions))
+                       AS failed_backfills
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
+        id="backfill_research_topics",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(1),),
+        schedule_grace_minutes=3,
+        systemd_timer="pwc-cron-backfill-research-topics.timer",
+        systemd_service="pwc-cron-backfill-research-topics.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Backfill Research Topics",
+        category="systemd",
+        schedule="every minute (systemd)",
+        script_path="backend/scripts/judge_research_topics.py",
+        log_name="backfill_research_topics",
+        process_patterns=("backend.scripts.judge_research_topics --backfill",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "backfill_research_topics.lock"
+        ),
+        expected_runtime_minutes=30,
+        stale_after_minutes=60,
+        critical=False,
+        # Minutes without a new topic claim nothing.
+        healthy_no_work_allowed=True,
+        db_freshness_query=None,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="rescan_abstract_mentions",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.daily(3, 21),),
