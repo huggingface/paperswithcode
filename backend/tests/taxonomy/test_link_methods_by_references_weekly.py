@@ -472,6 +472,27 @@ def test_failed_or_partial_lookup_is_left_unscanned_without_links():
     assert db.get(PaperMethod, (10, 101)) is None
 
 
+def test_no_transaction_is_open_during_reference_lookups():
+    db = _build_in_memory_session()
+    _seed_corpus(db)
+    db.commit()
+
+    class TransactionCheckingClient(FakeReferencesClient):
+        def iter_references(self, paper_id, page_size=1000, max_references=None):
+            assert not db.in_transaction()
+            yield from super().iter_references(paper_id, page_size, max_references)
+
+    stats = link_methods_by_references(
+        db,
+        TransactionCheckingClient(references_by_paper={}),
+        limit=10,
+        write=True,
+        log=_no_log,
+    )
+
+    assert stats.papers_processed > 0
+
+
 def test_paper_with_only_arxiv_id_uses_arxiv_form_for_lookup():
     db = _build_in_memory_session()
     _seed_corpus(db)

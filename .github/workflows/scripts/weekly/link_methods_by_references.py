@@ -211,6 +211,10 @@ def link_methods_by_references(
         rescan=rescan,
     )
     stats.papers_eligible = len(papers)
+    # End the read transaction before the slow Semantic Scholar lookups:
+    # Postgres drops sessions idle in a transaction for 10 minutes, which killed
+    # the 2026-10-25 and 2026-10-28 runs at their first flush.
+    db.commit()
     log(f"Selected {len(papers):,} eligible papers (newest first).")
     if not papers:
         return stats
