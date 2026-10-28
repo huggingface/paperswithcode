@@ -795,7 +795,7 @@ class ChatSessionService:
 
     @staticmethod
     def _validate_reasoning_effort(effort: str) -> str:
-        if effort not in {"low", "high", "max"}:
+        if effort not in {"low", "medium", "high", "max"}:
             raise ChatServiceError(
                 "invalid_reasoning_effort", 422, "Unsupported reasoning effort"
             )
@@ -805,7 +805,7 @@ class ChatSessionService:
         self,
         owner: ChatOwner,
         selected_model: str | None = None,
-        reasoning_effort: str = "low",
+        reasoning_effort: str = "medium",
         *,
         primary_paper_id: int | None = None,
         agent_harness_override: Literal["claude", "pi"] | None = None,

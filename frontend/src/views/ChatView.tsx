@@ -26,7 +26,7 @@ import { useChatArchive } from "@/components/chat/useChatArchive";
 import { PanelIcon, Spinner } from "@/components/chat/icons";
 import { hfLoginUrl } from "@/components/HfSignInButton";
 import { useChat } from "@/hooks/useChat";
-import { isChatLive, type ChatDraft, type PaperSelectionDraft, type ReasoningEffort } from "@/lib/chat";
+import { DEFAULT_REASONING_EFFORT, isChatLive, type ChatDraft, type PaperSelectionDraft } from "@/lib/chat";
 import {
   CHAT_AUTO_SEND_KEY,
   CHAT_AUTH_ATTEMPTED_KEY,
@@ -190,9 +190,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   const [webSearchEnabled, setWebSearchEnabled] = useState(
     () => queuedLaunchRef.current?.webSearchEnabled ?? true,
   );
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
-    () => queuedLaunchRef.current?.reasoningEffort ?? "low",
-  );
+  const reasoningEffort = DEFAULT_REASONING_EFFORT;
   const webSearchAvailable = Boolean(availabilityQuery.data?.web_search_available);
   const [pendingAutoDraft, setPendingAutoDraft] = useState<ChatDraft>(() => {
     const queryPrompt = searchParams.get("q")?.trim();
@@ -422,7 +420,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       if (configuration) {
         if (configuration.model) setSelectedModel(configuration.model);
         setWebSearchEnabled(configuration.webSearchEnabled);
-        setReasoningEffort(configuration.reasoningEffort);
       }
       return;
     }
@@ -430,7 +427,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       loadChat([], null);
       if (initializedRoute !== undefined) {
         setWebSearchEnabled(true);
-        setReasoningEffort("low");
       }
       setInitializedRoute(null);
       return;
@@ -446,7 +442,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     setSelectedModel(detail.selected_model);
     const queued = selectedId === queuedLaunchRouteRef.current ? queuedLaunchRef.current : null;
     setWebSearchEnabled(queued ? queued.webSearchEnabled : detail.web_search_enabled);
-    setReasoningEffort(queued ? queued.reasoningEffort : detail.reasoning_effort ?? "high");
   }, [routeSessionId, selectedTurn, detail, loadChat, activeConfiguration, routeQuery.isFetching, initializedRoute]);
 
   useEffect(() => {
@@ -509,7 +504,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     setDraft(emptyDraft());
     onPaperSelectionChange?.(undefined);
     setWebSearchEnabled(true);
-    setReasoningEffort("low");
     if (mode === "paper") onReaderNewChat?.();
     else navigate("/chat");
   };
@@ -569,22 +563,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     if (await changeModel(DEFAULT_CHAT_MODEL)) chat.retryLatest();
   };
 
-  const changeReasoningEffort = async (effort: ReasoningEffort) => {
-    const previousEffort = reasoningEffort;
-    setReasoningEffort(effort);
-    if (!routeSessionId) return;
-    try {
-      const updated = await updateSession(routeSessionId, {
-        reasoning_effort: effort,
-      });
-      patchSession(routeSessionId, updated);
-    } catch (error) {
-      setReasoningEffort(previousEffort);
-      setSessionError(
-        error instanceof Error ? error.message : "Effort change failed",
-      );
-    }
-  };
   const viewportHeight = useChatViewportHeight(mode === "general");
   const visibleSessions = sessions.map((session) => session.id === chat.activeSessionId && chat.busy
     ? { ...session, is_busy: true, title: manualTitleLockRef.current.has(session.id) ? session.title : chat.activeTitle || session.title }
@@ -628,8 +606,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     webSearchAvailable,
     webSearchEnabled,
     onWebSearchChange: setWebSearchEnabled,
-    reasoningEffort,
-    onReasoningEffortChange: (effort: ReasoningEffort) => void changeReasoningEffort(effort),
   };
 
   return (

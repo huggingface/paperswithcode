@@ -27,7 +27,10 @@ import { notifyStaleAuth } from "@/lib/apiAuth";
 import { ApiError } from "@/lib/apiTransport";
 import { mockChatStream } from "@/lib/chatMock";
 
-export type ReasoningEffort = "low" | "high" | "max";
+export type ReasoningEffort = "low" | "medium" | "high" | "max";
+
+/** Every chat runs at this effort; the picker is no longer user-facing. */
+export const DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 
 /** Structured metadata for one search hit.
  * Keys are always present; unavailable values are null / empty lists. */

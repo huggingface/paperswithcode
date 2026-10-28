@@ -353,7 +353,7 @@ class ChatOpenRouterProviderCall(Base):
             name="chat_openrouter_provider_calls_state_check",
         ),
         CheckConstraint(
-            "reasoning_effort IN ('low','high','max')",
+            "reasoning_effort IN ('low','medium','high','max')",
             name="chat_openrouter_provider_calls_reasoning_effort_check",
         ),
         CheckConstraint(
@@ -453,7 +453,7 @@ class ChatOpenAIProviderCall(Base):
             name="chat_openai_provider_calls_state_check",
         ),
         CheckConstraint(
-            "reasoning_effort IN ('low','high','max')",
+            "reasoning_effort IN ('low','medium','high','max')",
             name="chat_openai_provider_calls_reasoning_effort_check",
         ),
         CheckConstraint(

@@ -431,7 +431,7 @@ def staging_openai_direct_values(
         "PWC_OPENAI_API_KEY": credential,
         "PWC_CHAT_OPENAI_DIRECT_ENABLED": "true",
         "PWC_CHAT_PI_PREWARM_MODEL": "gpt-5.6-luna@openai",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
         "PWC_CHAT_BLANK_POOL_ENABLED": "true",
         "PWC_CHAT_BLANK_POOL_MIN": "1",
         "PWC_CHAT_BLANK_POOL_MAX": "1",
@@ -444,7 +444,7 @@ def staging_openai_direct_disable_values() -> dict[str, str]:
     return {
         "PWC_CHAT_OPENAI_DIRECT_ENABLED": "false",
         "PWC_CHAT_PI_PREWARM_MODEL": "openai/gpt-5.6-luna",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
     }
 
 
@@ -601,7 +601,7 @@ def production_openai_direct_values(current: dict[str, str]) -> dict[str, str]:
         "PWC_CHAT_OPENAI_DIRECT_ENABLED": "true",
         "PWC_CHAT_PI_PREWARM_ENABLED": "true",
         "PWC_CHAT_PI_PREWARM_MODEL": "gpt-5.6-luna@openai",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
         "PWC_CHAT_BLANK_POOL_ENABLED": "true",
         "PWC_CHAT_BLANK_POOL_MIN": "1",
         "PWC_CHAT_BLANK_POOL_MAX": "1",
@@ -1239,7 +1239,7 @@ def staging_chat_pi_prewarm_values(*, enabled: bool) -> dict[str, str]:
         values.update(
             {
                 "PWC_CHAT_PI_PREWARM_MODEL": STAGING_DEEPSEEK_PREWARM_MODEL,
-                "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+                "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
             }
         )
     return values
@@ -1343,7 +1343,7 @@ def staging_chat_payload_values(*, enabled: bool, candidate: str) -> dict[str, s
 
 
 def staging_chat_alternative_model_values(
-    *, enabled: bool, candidate: str, reasoning_effort: str = "low"
+    *, enabled: bool, candidate: str, reasoning_effort: str = "medium"
 ) -> dict[str, str]:
     """Toggle one reviewed staging model and its compatible prewarm profile."""
 
@@ -1353,7 +1353,7 @@ def staging_chat_alternative_model_values(
     }
     if candidate not in reviewed:
         raise ValueError("alternative model candidate is not reviewed")
-    if reasoning_effort not in {"low", "high", "max"}:
+    if reasoning_effort not in {"low", "medium", "high", "max"}:
         raise ValueError("alternative model reasoning effort is not reviewed")
     values = {
         "PWC_CHAT_ALTERNATIVE_MODEL_ENABLED": str(enabled).lower(),
@@ -1361,7 +1361,7 @@ def staging_chat_alternative_model_values(
             candidate if enabled else STAGING_DEEPSEEK_PREWARM_MODEL
         ),
         "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": (
-            reasoning_effort if enabled else "low"
+            reasoning_effort if enabled else "medium"
         ),
     }
     if enabled:
@@ -1725,8 +1725,8 @@ def main() -> int:
     )
     parser.add_argument(
         "--staging-chat-alternative-reasoning-effort",
-        choices=("low", "high", "max"),
-        default="low",
+        choices=("low", "medium", "high", "max"),
+        default="medium",
     )
     parser.add_argument("--staging-web-search-only", action="store_true")
     parser.add_argument("--production-web-search-only", action="store_true")

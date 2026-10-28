@@ -275,7 +275,7 @@ def keep_anthropic_request_fields(payload: dict[str, Any]) -> list[str]:
 def apply_openrouter_reasoning_policy(
     payload: dict[str, Any], effort: str, *, show_reasoning: bool
 ) -> None:
-    if effort not in {"low", "high", "max"}:
+    if effort not in {"low", "medium", "high", "max"}:
         raise ValueError("Unsupported reasoning effort")
     payload["reasoning"] = {
         "effort": effort,

@@ -415,7 +415,7 @@ class OpenRouterUserBudgetService:
         *,
         reasoning_effort: str = "high",
     ) -> ReservedCall:
-        if reasoning_effort not in {"low", "high", "max"}:
+        if reasoning_effort not in {"low", "medium", "high", "max"}:
             raise OpenRouterAccountingInvariantError(
                 "Provider-call reasoning effort is invalid"
             )

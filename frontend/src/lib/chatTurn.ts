@@ -1,10 +1,10 @@
-import { type ChatDraft, type ChatEvent, type ChatMessage, type ChatStreamRequest, ChatStreamError } from "./chat";
+import { type ChatDraft, type ChatEvent, type ChatMessage, type ChatStreamRequest, type ReasoningEffort, ChatStreamError } from "./chat";
 import { chatLifecycleReducer, initialChatLifecycle, type ChatLifecycleAction } from "./chatLifecycle";
 
 export interface ChatTurnConfiguration {
   model?: string;
   webSearchEnabled: boolean;
-  reasoningEffort: "low" | "high" | "max";
+  reasoningEffort: ReasoningEffort;
 }
 
 export interface EditRequest {

@@ -161,7 +161,7 @@ export async function createProvider(
         thinkingLevelMap: {
           off: null,
           low: "low",
-          medium: "high",
+          medium: "medium",
           high: "high",
           xhigh: "max",
           max: "max",
@@ -187,8 +187,9 @@ export async function createProvider(
   return { runtime, model };
 }
 
-export function thinkingLevel(effort: string): "low" | "high" | "max" {
+export function thinkingLevel(effort: string): "low" | "medium" | "high" | "max" {
   if (effort === "low") return "low";
+  if (effort === "medium") return "medium";
   if (effort === "max") return "max";
   return "high";
 }

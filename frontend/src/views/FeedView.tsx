@@ -11,7 +11,6 @@ import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 import { ArrowUpIcon } from "@/components/chat/icons";
 import ModelPicker from "@/components/chat/ModelPicker";
-import ReasoningEffortPicker from "@/components/chat/ReasoningEffortPicker";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
 import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
@@ -24,7 +23,7 @@ import {
   isChatMirror,
   isStagingEnvironment,
 } from "@/lib/apiUrl";
-import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
+import type { ChatDraft } from "@/lib/chat";
 import { queueChatLaunch } from "@/lib/chatLaunch";
 import { SUGGESTED_CHAT_PROMPTS, completeSuggestedChatPrompt } from "@/lib/chatPrompts";
 import {
@@ -146,7 +145,6 @@ export const AskAssistant: React.FC = () => {
   const [scrollTop, setScrollTop] = useState(0);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_CHAT_MODEL);
   const [webSearchEnabled, setWebSearchEnabled] = useState(true);
-  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("low");
   const [launching, setLaunching] = useState(false);
   // Set when the browser blocks the mirror's new tab, so the question survives
   // as a link the visitor can open themselves.
@@ -220,10 +218,9 @@ export const AskAssistant: React.FC = () => {
     queueChatLaunch(nextDraft, selectedModel, {
       // The chat page gates this on availability, which may still be loading here.
       webSearchEnabled,
-      reasoningEffort,
     });
     try {
-      const session = await createSession(selectedModel, reasoningEffort);
+      const session = await createSession(selectedModel);
       navigate(`/chat/${session.id}`);
     } catch {
       // Anonymous users still need the chat route to begin OAuth. Network and
@@ -305,13 +302,6 @@ export const AskAssistant: React.FC = () => {
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
             />
-            {!mirror && (
-              <ReasoningEffortPicker
-                value={reasoningEffort}
-                onChange={setReasoningEffort}
-                disabled={launching}
-              />
-            )}
             {webSearchAvailable && (
               <WebSearchToggle
                 enabled={webSearchEnabled}

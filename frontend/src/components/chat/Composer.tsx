@@ -7,10 +7,9 @@ import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights
 import { PaperSelectionCard } from "@/components/chat/PaperSelectionCard";
 import { ArrowUpIcon, Spinner } from "@/components/chat/icons";
 import ModelPicker, { type ModelPickerOption } from "@/components/chat/ModelPicker";
-import ReasoningEffortPicker from "@/components/chat/ReasoningEffortPicker";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import WebSearchToggle from "@/components/chat/WebSearchToggle";
-import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
+import type { ChatDraft } from "@/lib/chat";
 import { emptyChatDraft } from "@/lib/paperSelection";
 
 interface ComposerProps {
@@ -31,8 +30,6 @@ interface ComposerProps {
   webSearchAvailable?: boolean;
   webSearchEnabled?: boolean;
   onWebSearchChange?: (enabled: boolean) => void;
-  reasoningEffort?: ReasoningEffort;
-  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   paperArtifactsEnabled?: boolean;
 }
 
@@ -46,8 +43,6 @@ const Composer: React.FC<ComposerProps> = ({
   webSearchAvailable = false,
   webSearchEnabled = false,
   onWebSearchChange,
-  reasoningEffort = "low",
-  onReasoningEffortChange,
   paperArtifactsEnabled = false,
 }) => {
   const [localDraft, setLocalDraft] = useState<ChatDraft>(EMPTY_DRAFT);
@@ -178,13 +173,6 @@ const Composer: React.FC<ComposerProps> = ({
       <div className="chat-composer-row">
         <div className="chat-composer-tools">
           {models.length > 0 && selectedModel && onModelChange && <ModelPicker models={models} selectedModel={selectedModel} onModelChange={onModelChange} disabled={busy} />}
-          {onReasoningEffortChange && (
-            <ReasoningEffortPicker
-              value={reasoningEffort}
-              onChange={onReasoningEffortChange}
-              disabled={busy}
-            />
-          )}
           {webSearchAvailable && onWebSearchChange && (
             <WebSearchToggle
               enabled={webSearchEnabled}

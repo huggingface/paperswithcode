@@ -21,7 +21,7 @@ from pydantic import (
 StrictText = Annotated[str, StringConstraints(max_length=8000)]
 AuthorName = Annotated[str, StringConstraints(max_length=300)]
 FinishReason = Literal["success", "max_turns", "tool_limit", "scope_blocked"]
-ReasoningEffort = Literal["low", "high", "max"]
+ReasoningEffort = Literal["low", "medium", "high", "max"]
 
 
 class PaperMentionRequest(BaseModel):
@@ -907,7 +907,7 @@ class ArchiveOldChatsResponse(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     selected_model: str | None = None
-    reasoning_effort: ReasoningEffort = "low"
+    reasoning_effort: ReasoningEffort = "medium"
 
 
 class UpdateSessionRequest(BaseModel):

@@ -229,3 +229,27 @@ def test_warm_assignment_migration_is_guarded_additive_and_role_isolated():
     assert "OWNER TO paperswithcode_user" in migration
     assert "REVOKE ALL ON chat_sandbox_pool FROM paperswithcode_user" in migration
     assert "REVOKE ALL ON chat_sandbox_pool FROM pwc_staging" in migration
+
+
+def test_medium_reasoning_effort_migrations_widen_every_chat_check():
+    repository = Path(__file__).resolve().parents[3]
+    migrations = repository / "backend/database/migrations"
+    for name, schema in (
+        ("add_chat_medium_reasoning_effort.sql", "staging"),
+        ("add_chat_medium_reasoning_effort_production.sql", "public"),
+    ):
+        migration = (migrations / name).read_text()
+
+        assert f"current_schema() <> '{schema}'" in migration
+        for table in (
+            "chat_sessions",
+            "chat_messages",
+            "chat_turn_capabilities",
+            "chat_openrouter_provider_calls",
+            "chat_openai_provider_calls",
+        ):
+            assert f"DROP CONSTRAINT IF EXISTS {table}_reasoning_effort_check" in (
+                migration
+            )
+            assert f"VALIDATE CONSTRAINT {table}_reasoning_effort_check" in migration
+        assert migration.count("('low','medium','high','max')") == 5

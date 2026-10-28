@@ -253,7 +253,7 @@ class AdminCreateHarnessSession(BaseModel):
     model_config = ConfigDict(extra="forbid")
     agent_harness: Literal["claude", "pi"]
     selected_model: str | None = None
-    reasoning_effort: Literal["low", "high", "max"] = "low"
+    reasoning_effort: Literal["low", "medium", "high", "max"] = "medium"
 
 
 def _durable_qualification_scope(
@@ -412,7 +412,7 @@ def list_models(
                 "label": choice["label"],
                 "provider": choice["provider"],
                 "sponsored": choice["funding_mode"] == "hf_org_funded",
-                "reasoning_efforts": ["low", "high", "max"],
+                "reasoning_efforts": ["low", "medium", "high", "max"],
             }
             for choice in settings.chat_model_choices
         ],

@@ -670,7 +670,7 @@ describe("useChat editAndResend", () => {
     });
     await waitFor(() => expect(result.current.busy).toBe(false));
     expect(onSessionId).toHaveBeenCalledWith("session-1", "session-1", {
-      model: "zai-org/GLM-5.2", webSearchEnabled: false, reasoningEffort: "low",
+      model: "zai-org/GLM-5.2", webSearchEnabled: false, reasoningEffort: "medium",
     });
     expect(result.current.messages[0]).toMatchObject({
       id: "new-user",

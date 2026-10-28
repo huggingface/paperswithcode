@@ -1,4 +1,4 @@
-import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
+import { DEFAULT_REASONING_EFFORT, type ChatDraft, type ReasoningEffort } from "@/lib/chat";
 import { emptyChatDraft, parseChatDraft } from "@/lib/paperSelection";
 
 export const CHAT_DRAFT_KEY = "pwc:chat-oauth-draft";
@@ -58,7 +58,7 @@ export function queueChatLaunch(
   else sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, options.webSearchEnabled ? "1" : "0");
   sessionStorage.setItem(
     CHAT_REASONING_EFFORT_KEY,
-    options.reasoningEffort ?? "low",
+    options.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
   );
 }
 
@@ -80,7 +80,7 @@ export function readQueuedChatLaunch(): QueuedChatLaunch | null {
     // Web search is on by default; only an explicit opt-out disables it.
     webSearchEnabled: sessionStorage.getItem(CHAT_WEB_SEARCH_KEY) !== "0",
     reasoningEffort: (
-      ["low", "high", "max"].includes(
+      ["low", "medium", "high", "max"].includes(
         sessionStorage.getItem(CHAT_REASONING_EFFORT_KEY) ?? "",
       )
         ? sessionStorage.getItem(CHAT_REASONING_EFFORT_KEY)

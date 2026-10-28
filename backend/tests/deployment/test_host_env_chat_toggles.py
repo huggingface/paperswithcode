@@ -16,7 +16,7 @@ def test_staging_chat_pi_prewarm_toggle_is_narrow_and_profiled():
     assert configure_host_env.staging_chat_pi_prewarm_values(enabled=True) == {
         "PWC_CHAT_PI_PREWARM_ENABLED": "true",
         "PWC_CHAT_PI_PREWARM_MODEL": "deepseek-ai/DeepSeek-V4-Flash-0731:baseten",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
     }
     assert configure_host_env.staging_chat_pi_prewarm_values(enabled=False) == {
         "PWC_CHAT_PI_PREWARM_ENABLED": "false"
@@ -311,7 +311,7 @@ def test_production_openai_direct_configuration_reuses_protected_key_exactly():
         "PWC_CHAT_OPENAI_DIRECT_ENABLED": "true",
         "PWC_CHAT_PI_PREWARM_ENABLED": "true",
         "PWC_CHAT_PI_PREWARM_MODEL": "gpt-5.6-luna@openai",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
         "PWC_CHAT_BLANK_POOL_ENABLED": "true",
         "PWC_CHAT_BLANK_POOL_MIN": "1",
         "PWC_CHAT_BLANK_POOL_MAX": "1",
@@ -454,14 +454,14 @@ def test_staging_chat_alternative_model_toggle_is_reviewed_and_reversible():
         "PWC_CHAT_ALTERNATIVE_MODEL_ENABLED": "true",
         "PWC_CHAT_ALTERNATIVE_MODEL": "openai/gpt-5.6-luna",
         "PWC_CHAT_PI_PREWARM_MODEL": "openai/gpt-5.6-luna",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
     }
     assert configure_host_env.staging_chat_alternative_model_values(
         enabled=False, candidate="openai/gpt-5.6-luna"
     ) == {
         "PWC_CHAT_ALTERNATIVE_MODEL_ENABLED": "false",
         "PWC_CHAT_PI_PREWARM_MODEL": "deepseek-ai/DeepSeek-V4-Flash-0731:baseten",
-        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
+        "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "medium",
     }
     assert (
         configure_host_env.staging_chat_alternative_model_values(
@@ -479,7 +479,7 @@ def test_staging_chat_alternative_model_toggle_is_reviewed_and_reversible():
         configure_host_env.staging_chat_alternative_model_values(
             enabled=True,
             candidate="openai/gpt-5.6-luna",
-            reasoning_effort="medium",
+            reasoning_effort="xhigh",
         )
 
 
@@ -717,7 +717,7 @@ def test_production_chat_pi_prewarm_mode_preserves_other_configuration(
             configure_host_env.decoded_value(
                 written["lines"]["PWC_CHAT_PI_PREWARM_REASONING_EFFORT"]
             )
-            == "low"
+            == "medium"
         )
 
 
