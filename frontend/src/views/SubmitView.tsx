@@ -209,9 +209,27 @@ const SubmitView: React.FC = () => {
           lineHeight: 1.55,
         }}
       >
-        Index an arXiv paper or propose a non-arXiv paper (blog post, technical
-        report, model release page). External papers enter the submission queue
-        and appear only after review.
+        If your paper is on arXiv, submit it on{" "}
+        <a
+          href="https://huggingface.co/papers/submit"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Hugging Face
+        </a>
+        , which will automatically index it on Papers with Code.
+      </p>
+      <p
+        style={{
+          fontFamily: "var(--serif)",
+          color: "var(--ink-soft)",
+          marginTop: 12,
+          lineHeight: 1.55,
+        }}
+      >
+        If your paper is not on arXiv, submit it here. Non-arXiv papers (blog
+        posts, technical reports, model release pages) enter the submission
+        queue and appear only after review.
         {" "}<a href="/rate-limits">Read the submission and rate-limit policy.</a>
       </p>
 
