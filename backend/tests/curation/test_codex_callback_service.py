@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -1050,7 +1051,34 @@ def test_scheduled_evaluation_checks_sub_one_percent_against_leaderboard(
     assert result == {"policy": "scheduled-add-evals-v1", "evaluations": 1}
 
 
-def test_scheduled_evaluation_canonicalizes_noncanonical_arxiv_source_url():
+@pytest.mark.parametrize(
+    "proposal",
+    [
+        {
+            "evaluations": [_evaluation(model_name="Useful Model")],
+            "score_evidence": [_score_evidence()],
+        },
+        # Curators often nest each row's source cell inside that row.
+        {
+            "evaluations": [
+                {
+                    **_evaluation(model_name="Useful Model").model_dump(),
+                    "score_evidence": [_score_evidence()],
+                }
+            ],
+        },
+        # Identical repeats and cells for rows the curator dropped are harmless.
+        {
+            "evaluations": [_evaluation(model_name="Useful Model")],
+            "score_evidence": [
+                _score_evidence(),
+                _score_evidence(),
+                _score_evidence(dataset_id=999),
+            ],
+        },
+    ],
+)
+def test_scheduled_evaluation_canonicalizes_noncanonical_arxiv_source_url(proposal):
     from backend.models.database import Evaluation, Paper
 
     paper = SimpleNamespace(
@@ -1092,13 +1120,7 @@ def test_scheduled_evaluation_canonicalizes_noncanonical_arxiv_source_url():
         trace_status="preapply_stored",
     )
 
-    body = ApplyMutationRequest(
-        evaluations=[_evaluation(model_name="Useful Model")],
-        evaluation_removals=[],
-        benchmark_gaps=[],
-        validation_evidence=[],
-        score_evidence=[_score_evidence()],
-    )
+    body = ApplyMutationRequest(**proposal)
 
     result = _scheduled_policy(_service(Database(), SimpleNamespace()), row, body)
 
@@ -1112,19 +1134,25 @@ def test_scheduled_evaluation_canonicalizes_noncanonical_arxiv_source_url():
 
 
 @pytest.mark.parametrize(
-    "bad_evidence",
+    ("bad_evidence", "detail"),
     [
-        [_score_evidence(), _score_evidence()],
-        [_score_evidence(dataset_id=999)],
+        (
+            [_score_evidence(), _score_evidence(source_value=91)],
+            r"conflicting entries for \[19, 340, 'GenEval Score'\]",
+        ),
+        (
+            [_score_evidence(dataset_id=999)],
+            r"Missing \[task_id, dataset_id, metric\]: \[\[19, 340, 'GenEval Score'\]\]",
+        ),
     ],
 )
-def test_scheduled_score_evidence_cannot_be_duplicated_or_reused_for_another_leaderboard(
-    bad_evidence,
+def test_scheduled_score_evidence_cannot_conflict_or_be_reused_for_another_leaderboard(
+    bad_evidence, detail
 ):
     paper = SimpleNamespace(source="arxiv", arxiv_id="2601.00001")
     service = _service(SimpleNamespace(get=lambda *_: paper), SimpleNamespace())
     service._validate_scheduled_capability_boundary = lambda *_: None
-    with pytest.raises(ValueError, match="exactly one score_evidence"):
+    with pytest.raises(ValueError, match="exactly one score_evidence") as error:
         _scheduled_policy(
             service,
             SimpleNamespace(
@@ -1138,6 +1166,7 @@ def test_scheduled_score_evidence_cannot_be_duplicated_or_reused_for_another_lea
                 score_evidence=bad_evidence,
             ),
         )
+    assert re.search(detail, str(error.value))
 
 
 def test_scheduled_source_canonicalization_is_recorded_in_existing_row_diff():

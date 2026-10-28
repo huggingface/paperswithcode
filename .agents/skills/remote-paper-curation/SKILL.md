@@ -91,7 +91,11 @@ For each submitted metric, include one `score_evidence` entry keyed by
 `task_id`, `dataset_id`, and `metric`, with the original `source_value`,
 `source_scale` (`0-100` for percentages, `0-1` for fractions, `native` for
 other units), primary `source_url`, and `table_reference` identifying the
-table, model row, column, and protocol. For example:
+table, model row, column, and protocol. Put these entries in the proposal's
+top-level `score_evidence` array, next to `evaluations`, not inside each
+evaluation. Every metric key in every evaluation's `metrics` needs its own
+entry, so a row with `MAE` and `Acc-2` needs two. When you drop an evaluation,
+drop its entries too. For example:
 
 ```json
 {"task_id": 11, "dataset_id": 792, "metric": "Success Rate",

@@ -307,6 +307,33 @@ class ApplyMutationRequest(BaseModel):
     review_benchmark_gaps: ReviewBenchmarkGapsMutation | None = None
     add_benchmark: AddBenchmarkMutation | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def lift_nested_score_evidence(cls, data):
+        """Accept score evidence nested in its evaluation as if it were top-level.
+
+        Curators often attach each row's source cells to that row. The
+        evaluation model would silently drop the key, so move it to the
+        proposal-level list the scheduled validator reads.
+        """
+        if not isinstance(data, dict) or not isinstance(data.get("evaluations"), list):
+            return data
+        lifted = []
+        evaluations = []
+        for item in data["evaluations"]:
+            if isinstance(item, dict) and "score_evidence" in item:
+                item = dict(item)
+                nested = item.pop("score_evidence")
+                lifted.extend(nested if isinstance(nested, list) else [nested])
+            evaluations.append(item)
+        if not lifted:
+            return data
+        return {
+            **data,
+            "evaluations": evaluations,
+            "score_evidence": [*(data.get("score_evidence") or []), *lifted],
+        }
+
 
 class PromoteBenchmarkCandidateRequest(BaseModel):
     dataset_id: int = Field(gt=0)

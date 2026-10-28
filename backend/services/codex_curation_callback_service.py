@@ -1698,23 +1698,31 @@ class CodexCurationCallbackService:
             for item in body.validation_evidence
             if isinstance(item, dict) and str(item.get("evaluation_id", "")).isdigit()
         }
-        score_evidence = {
-            (entry.task_id, entry.dataset_id, entry.metric): entry
-            for entry in body.score_evidence
-        }
-        expected_score_keys = {
-            (item.task_id, item.dataset_id, metric)
-            for item in body.evaluations
-            for metric in item.metrics
-        }
-        if (
-            len(score_evidence) != len(body.score_evidence)
-            or set(score_evidence) != expected_score_keys
-        ):
+        # Identical repeats and entries for rows the curator dropped are
+        # harmless; only conflicting or missing source cells are rejected.
+        score_evidence = {}
+        for entry in body.score_evidence:
+            key = (entry.task_id, entry.dataset_id, entry.metric)
+            if score_evidence.setdefault(key, entry) != entry:
+                raise ValueError(
+                    "Scheduled evaluations require exactly one score_evidence entry "
+                    f"per task/dataset/metric; conflicting entries for {list(key)}"
+                )
+        missing_score_keys = sorted(
+            {
+                (item.task_id, item.dataset_id, metric)
+                for item in body.evaluations
+                for metric in item.metrics
+            }
+            - set(score_evidence)
+        )
+        if missing_score_keys:
             raise ValueError(
                 "Scheduled evaluations require exactly one score_evidence entry "
                 "per task/dataset/metric with source_value, source_scale, source_url, "
-                "and table_reference; copy the original source cell before conversion"
+                "and table_reference in the top-level score_evidence array; copy the "
+                "original source cell before conversion. Missing [task_id, "
+                f"dataset_id, metric]: {[list(key) for key in missing_score_keys]}"
             )
         for item in body.evaluations:
             leaderboard = (
