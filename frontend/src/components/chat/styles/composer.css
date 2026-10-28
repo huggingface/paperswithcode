@@ -183,6 +183,15 @@
   text-underline-offset: 2px;
 }
 .chat-inline-paper-link:hover { text-decoration-color: var(--accent-text); }
+.chat-user-link {
+  cursor: pointer;
+  color: var(--accent-text);
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in oklch, var(--accent) 40%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.chat-user-link:hover { text-decoration-color: var(--accent-text); }
 .chat-composer textarea {
   position: relative;
   z-index: 1;

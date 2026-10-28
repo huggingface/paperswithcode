@@ -81,6 +81,37 @@ const selectDoubleClickedWord = (event: React.MouseEvent<HTMLDivElement>) => {
   selection.addRange(range);
 };
 
+const URL_PATTERN = /\bhttps?:\/\/[^\s<>"]+/gi;
+// Sentence punctuation that usually ends a sentence rather than the URL.
+const URL_TRAILING_PUNCTUATION = /[.,;:!?'"\]}>*_]+$/;
+
+const trimUrl = (url: string) => {
+  let trimmed = url.replace(URL_TRAILING_PUNCTUATION, "");
+  // Keep a closing parenthesis only when the URL itself opened one.
+  while (trimmed.endsWith(")") && trimmed.split("(").length < trimmed.split(")").length) {
+    trimmed = trimmed.slice(0, -1).replace(URL_TRAILING_PUNCTUATION, "");
+  }
+  return trimmed;
+};
+
+const linkifyText = (text: string, keyPrefix: string): React.ReactNode[] => {
+  const pieces: React.ReactNode[] = [];
+  let cursor = 0;
+  for (const match of text.matchAll(URL_PATTERN)) {
+    const url = trimUrl(match[0]);
+    if (url.endsWith("://")) continue;
+    pieces.push(text.slice(cursor, match.index));
+    pieces.push(
+      <a className="chat-user-link" href={url} target="_blank" rel="noopener noreferrer" key={`${keyPrefix}-${match.index}`}>
+        {url}
+      </a>,
+    );
+    cursor = match.index + url.length;
+  }
+  pieces.push(text.slice(cursor));
+  return pieces;
+};
+
 const InlinePaperMentions: React.FC<{
   text: string;
   mentions: PaperMentionDraft[];
@@ -94,7 +125,7 @@ const InlinePaperMentions: React.FC<{
       || mention.end > text.length
       || (marker !== mention.title && marker !== `@${mention.title}`)
     ) continue;
-    pieces.push(text.slice(cursor, mention.start));
+    pieces.push(...linkifyText(text.slice(cursor, mention.start), `text-${cursor}`));
     pieces.push(
       <span className="chat-inline-paper-mention" key={mention.key}>
         <FileText size={13} aria-hidden="true" />
@@ -105,7 +136,7 @@ const InlinePaperMentions: React.FC<{
     );
     cursor = mention.end;
   }
-  pieces.push(text.slice(cursor));
+  pieces.push(...linkifyText(text.slice(cursor), `text-${cursor}`));
   return <>{pieces}</>;
 };
 

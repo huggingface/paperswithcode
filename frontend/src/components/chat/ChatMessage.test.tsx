@@ -39,6 +39,33 @@ describe("UserMessage", () => {
     expect(screen.getByText(/Compare/)).toHaveTextContent("Compare Attention Is All You Need today");
   });
 
+  it("links URLs the user typed without swallowing sentence punctuation", () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter><UserMessage
+          text={"Similar to https://deepmind.google/blog/genie-4/? See (https://en.wikipedia.org/wiki/Genie_(model)) and @Attention Is All You Need."}
+          paperMentions={[{
+            key: "mention-1",
+            route_id: "1706.03762",
+            title: "Attention Is All You Need",
+            source: "arxiv",
+            start: 104,
+            end: 130,
+          }]}
+        /></MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const genie = screen.getByRole("link", { name: "https://deepmind.google/blog/genie-4/" });
+    expect(genie).toHaveAttribute("href", "https://deepmind.google/blog/genie-4/");
+    expect(genie).toHaveAttribute("target", "_blank");
+    expect(genie).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByRole("link", { name: "https://en.wikipedia.org/wiki/Genie_(model)" }))
+      .toHaveAttribute("href", "https://en.wikipedia.org/wiki/Genie_(model)");
+    expect(screen.getByRole("link", { name: "Attention Is All You Need" }))
+      .toHaveAttribute("href", "/paper/1706.03762");
+  });
+
   it("renders a historical selection card without a remove control", () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
