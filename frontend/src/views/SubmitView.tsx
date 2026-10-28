@@ -24,6 +24,14 @@ import { useAuth } from "@/lib/authContext";
 
 const SUBMIT_DRAFT_KEY = "pwc:paper-submit-draft";
 
+// Site links inherit text color with no underline; make intro links visible.
+const INLINE_LINK_STYLE: React.CSSProperties = {
+  color: "var(--accent-text)",
+  fontWeight: 600,
+  textDecoration: "underline",
+  textUnderlineOffset: 2,
+};
+
 const ARXIV_BARE_ID = /^\d{4}\.\d{4,5}(v\d+)?$/i;
 const ARXIV_LEGACY_ID = /^[a-z-]+(\.[A-Z]{2})?\/\d{7}$/;
 const ARXIV_URL_HOST = /^https?:\/\/(?:www\.)?arxiv\.org\//i;
@@ -214,12 +222,7 @@ const SubmitView: React.FC = () => {
           href="https://huggingface.co/papers/submit"
           target="_blank"
           rel="noopener noreferrer"
-          style={{
-            color: "var(--accent-text)",
-            fontWeight: 600,
-            textDecoration: "underline",
-            textUnderlineOffset: 2,
-          }}
+          style={INLINE_LINK_STYLE}
         >
           Hugging Face
         </a>
@@ -236,7 +239,10 @@ const SubmitView: React.FC = () => {
         If your paper is not on arXiv, submit it here. Non-arXiv papers (blog
         posts, technical reports, model release pages) enter the submission
         queue and appear only after review.
-        {" "}<a href="/rate-limits">Read the submission and rate-limit policy.</a>
+        {" "}
+        <a href="/rate-limits" style={INLINE_LINK_STYLE}>
+          Read the submission and rate-limit policy.
+        </a>
       </p>
 
       <form
