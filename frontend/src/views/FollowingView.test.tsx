@@ -94,7 +94,19 @@ it('saves the topic a visitor submitted before signing in', async () => {
   renderFeed();
   await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledTimes(1));
   expect(researchApi.setTopic).toHaveBeenCalledWith('speculative decoding');
-  expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull();
+  await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull());
+});
+
+it('keeps a pre-sign-in topic and offers a retry when saving it fails', async () => {
+  sessionStorage.setItem('pwc:following-pending-topic', 'speculative decoding');
+  vi.spyOn(researchApi, 'setTopic').mockRejectedValueOnce(new Error('down'))
+    .mockResolvedValueOnce({ ...topic, text: 'speculative decoding', status: 'pending' });
+  renderFeed();
+  expect(await screen.findByText(/Could not follow “speculative decoding”/)).toBeInTheDocument();
+  expect(sessionStorage.getItem('pwc:following-pending-topic')).toBe('speculative decoding');
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull());
+  expect(researchApi.setTopic).toHaveBeenCalledTimes(2);
 });
 
 it('explains how to follow when a signed-in account follows nothing yet', async () => {

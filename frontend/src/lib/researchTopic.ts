@@ -22,13 +22,15 @@ export function useSaveTopic(onSaved?: () => void) {
 const PENDING_TOPIC_KEY = 'pwc:following-pending-topic';
 
 /** Keeps a guest's topic until /following can save it after sign-in. */
-export function savePendingTopic(text: string) {
+export function stashPendingTopic(text: string) {
   sessionStorage.setItem(PENDING_TOPIC_KEY, text);
 }
 
-/** Returns and forgets the topic a guest submitted before signing in. */
-export function takePendingTopic(): string | null {
-  const text = sessionStorage.getItem(PENDING_TOPIC_KEY);
+/** The topic a guest submitted before signing in, kept until it is saved. */
+export function readPendingTopic(): string | null {
+  return sessionStorage.getItem(PENDING_TOPIC_KEY);
+}
+
+export function clearPendingTopic() {
   sessionStorage.removeItem(PENDING_TOPIC_KEY);
-  return text;
 }

@@ -5,7 +5,8 @@ import type { Task } from '@/lib/api/catalog.types';
 import { TOPIC_MAX_LENGTH } from '@/lib/api/research';
 import { displayTaskName } from '@/lib/transform';
 import { hfLoginUrl } from './HfSignInButton';
-import { savePendingTopic, useSaveTopic } from '@/lib/researchTopic';
+import { isAuthDisabled } from '@/lib/apiUrl';
+import { stashPendingTopic, useSaveTopic } from '@/lib/researchTopic';
 
 /** Asks for a topic on /following, shown to guests and to accounts without follows.
  * Guests sign in on submit, and /following saves the topic when they return. */
@@ -20,7 +21,7 @@ export default function FollowingIntro({ signedIn, popularTasks = [] }: { signed
       save.mutate(trimmed);
       return;
     }
-    savePendingTopic(trimmed);
+    stashPendingTopic(trimmed);
     window.location.href = hfLoginUrl('/following');
   };
   return <section className="following-intro" aria-labelledby="following-intro-title">
@@ -30,7 +31,7 @@ export default function FollowingIntro({ signedIn, popularTasks = [] }: { signed
       organizations you care about, and this page collects their latest papers and results in
       one place.
     </p>
-    <form className="following-intro-topic" onSubmit={event => { event.preventDefault(); submit(); }}>
+    {(signedIn || !isAuthDisabled()) && <form className="following-intro-topic" onSubmit={event => { event.preventDefault(); submit(); }}>
       <textarea rows={3} maxLength={TOPIC_MAX_LENGTH} aria-label="Research topic"
         placeholder="e.g. speculative decoding for LLM inference"
         value={draft} onChange={event => setDraft(event.target.value)}
@@ -41,7 +42,7 @@ export default function FollowingIntro({ signedIn, popularTasks = [] }: { signed
           }
         }} />
       <button type="submit" disabled={!submittable}>Follow topic<ArrowRight aria-hidden="true" /></button>
-    </form>
+    </form>}
     {save.error && <p className="settings-token-error" role="alert">Could not save your topic. Please try again.</p>}
     <p className="following-intro-note">
       Matching papers appear here and in a weekly email, which you can turn off in{' '}
