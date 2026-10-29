@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { researchApi } from '@/lib/api/research';
+import { researchApi, type FollowKind } from '@/lib/api/research';
 import { useOptionalAuth } from '@/lib/authContext';
 
 /** Saves (or, with `null`, removes) the signed-in account's topic and refreshes what depends on it. */
@@ -35,4 +35,40 @@ export function readPendingTopic(): string | null {
 
 export function clearPendingTopic() {
   sessionStorage.removeItem(PENDING_TOPIC_KEY);
+}
+
+export interface FollowPick {
+  kind: FollowKind;
+  id: string;
+  name: string;
+}
+
+/** Follows several tasks or methods at once and refreshes what depends on them. */
+export function useSaveFollows() {
+  const user = useOptionalAuth()?.user;
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (picks: FollowPick[]) => Promise.all(picks.map(pick => researchApi.setFollow(pick.kind, pick.id, true))),
+    onSuccess: () => {
+      clearPendingFollows();
+      void client.invalidateQueries({ queryKey: ['research-follows', user?.hf_subject] });
+      void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
+      void client.invalidateQueries({ queryKey: ['research-email', user?.hf_subject] });
+    },
+  });
+}
+
+// Tasks and methods a guest picked wait here while they sign in, like the topic.
+const PENDING_FOLLOWS_KEY = 'pwc:following-pending-follows';
+
+export function stashPendingFollows(picks: FollowPick[]) {
+  sessionStorage.setItem(PENDING_FOLLOWS_KEY, JSON.stringify(picks));
+}
+
+export function readPendingFollows(): FollowPick[] {
+  return JSON.parse(sessionStorage.getItem(PENDING_FOLLOWS_KEY) ?? '[]');
+}
+
+export function clearPendingFollows() {
+  sessionStorage.removeItem(PENDING_FOLLOWS_KEY);
 }

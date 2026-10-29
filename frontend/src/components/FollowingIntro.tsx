@@ -1,19 +1,18 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
-import type { Task } from '@/lib/api/catalog.types';
-import { displayTaskName } from '@/lib/transform';
 import { useAuth } from '@/lib/authContext';
 import { isAuthDisabled } from '@/lib/apiUrl';
-import { readPendingTopic } from '@/lib/researchTopic';
+import { readPendingFollows, readPendingTopic } from '@/lib/researchTopic';
 import TopicDialog from './TopicDialog';
 
-/** Asks for a topic on /following, shown to guests and to accounts without follows.
- * `openTopic` opens the topic pop-up on arrival; guests sign in on submit, and /following saves the topic when they return. */
-export default function FollowingIntro({ popularTasks = [], openTopic = false }: { popularTasks?: Task[]; openTopic?: boolean }) {
+/** Invites guests and accounts without follows to build their feed on /following.
+ * `openTopic` opens the pop-up on arrival, unless a guest's picks are still waiting to be saved after sign-in. */
+export default function FollowingIntro({ openTopic = false }: { openTopic?: boolean }) {
   const { user } = useAuth();
   const canFollowTopic = !!user || !isAuthDisabled();
-  const [topicOpen, setTopicOpen] = useState(() => openTopic && canFollowTopic && !readPendingTopic());
+  const [topicOpen, setTopicOpen] = useState(
+    () => openTopic && canFollowTopic && !readPendingTopic() && !readPendingFollows().length);
   return <section className="following-intro" aria-labelledby="following-intro-title">
     <h2 id="following-intro-title">Build your personal research feed</h2>
     <p className="following-intro-lead">
@@ -23,19 +22,13 @@ export default function FollowingIntro({ popularTasks = [], openTopic = false }:
     </p>
     {canFollowTopic && <>
       <button type="button" className="research-topic-save following-intro-topic" onClick={() => setTopicOpen(true)}>
-        <Sparkles aria-hidden="true" />Follow a topic
+        <Sparkles aria-hidden="true" />Build your feed
       </button>
-      <TopicDialog open={topicOpen} onOpenChange={setTopicOpen} signInToSave />
+      <TopicDialog open={topicOpen} onOpenChange={setTopicOpen} />
     </>}
     <p className="following-intro-note">
       Matching papers also arrive as a weekly email, which you can turn off in{' '}
       <Link to="/settings">Settings</Link>.
     </p>
-    {popularTasks.length > 0 && <div className="following-intro-popular">
-      <h3>Popular tasks to follow</h3>
-      <div>
-        {popularTasks.map(task => <Link key={task.id} to={`/tasks/${task.slug}`}>{displayTaskName(task.name, task.slug)}</Link>)}
-      </div>
-    </div>}
   </section>;
 }

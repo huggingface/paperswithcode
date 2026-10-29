@@ -29,6 +29,7 @@ beforeEach(() => {
   vi.stubEnv('VITE_CHAT_ENABLED', '0');
   vi.spyOn(catalogApi, 'topTasks').mockResolvedValue([]);
   vi.spyOn(catalogApi, 'trendingTasks').mockResolvedValue({ results: [], recent_days: 7, baseline_days: 30 });
+  vi.spyOn(catalogApi, 'trendingMethods').mockResolvedValue({ results: [], recent_days: 7, baseline_days: 30 } as never);
   vi.spyOn(papersApi, 'list').mockResolvedValue({ count: 0, results: [], next_page: null, previous_page: null });
   vi.spyOn(researchApi, 'follows').mockResolvedValue([
     { kind: 'task', entity_id: 1, name: 'Task', url: '/tasks/task', created_at: '' },
@@ -74,18 +75,24 @@ it('names every distinct follow that matched, collapsing subtasks and long lists
   await screen.findByText('A paper');
   expect(container.querySelector('.paper-follow-reason')).toHaveTextContent('Because you follow Agents, Reasoning and 2 more');
 });
-it('asks signed-out visitors for a topic and signs them in when they submit it', async () => {
+it('asks signed-out visitors for a topic and picks, and signs them in when they submit', async () => {
   auth.user = null;
+  vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: [
+    { id: '7', name: 'Object Detection', slug: 'object-detection', share_lift: 2 } as never,
+  ], recent_days: 7, baseline_days: 30 });
   renderFeed();
-  expect(await screen.findByRole('dialog', { name: 'Follow a topic' })).toBeInTheDocument();
+  expect(await screen.findByRole('dialog', { name: 'Build your research feed' })).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Build your personal research feed', hidden: true })).toBeInTheDocument();
   expect(screen.queryByText(/Sign in/)).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: /Browse tasks/ })).not.toBeInTheDocument();
   const input = screen.getByRole('textbox', { name: 'Research topic' });
   fireEvent.change(input, { target: { value: '  speculative   decoding ' } });
+  fireEvent.click(await screen.findByRole('button', { name: 'Object Detection' }));
   fireEvent.keyDown(input, { key: 'Enter' });
   expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
   expect(sessionStorage.getItem('pwc:following-pending-topic')).toBe('speculative decoding');
+  expect(JSON.parse(sessionStorage.getItem('pwc:following-pending-follows') ?? '[]'))
+    .toEqual([{ kind: 'task', id: '7', name: 'Object Detection' }]);
   expect(researchApi.following).not.toHaveBeenCalled();
 });
 
@@ -96,6 +103,17 @@ it('saves the topic a visitor submitted before signing in', async () => {
   await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledTimes(1));
   expect(researchApi.setTopic).toHaveBeenCalledWith('speculative decoding');
   await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull());
+});
+
+it('follows the tasks and methods a visitor picked before signing in', async () => {
+  sessionStorage.setItem('pwc:following-pending-follows', JSON.stringify([{ kind: 'task', id: '7', name: 'Object Detection' }]));
+  vi.spyOn(researchApi, 'setFollow').mockRejectedValueOnce(new Error('down')).mockResolvedValueOnce(undefined);
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+  expect(screen.getByText(/Could not follow Object Detection/)).toBeInTheDocument();
+  await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-follows')).toBeNull());
+  expect(researchApi.setFollow).toHaveBeenCalledTimes(2);
+  expect(researchApi.setFollow).toHaveBeenLastCalledWith('task', '7', true);
 });
 
 it('keeps a pre-sign-in topic and offers a retry when saving it fails', async () => {
@@ -119,25 +137,35 @@ it('drops a stashed guest topic once another topic is saved', async () => {
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Follow a topic' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Follow topic' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
   await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull());
 });
 
 it('explains how to follow when a signed-in account follows nothing yet', async () => {
   vi.mocked(researchApi.follows).mockResolvedValue([]);
   vi.mocked(researchApi.following).mockResolvedValue([]);
-  vi.mocked(catalogApi.topTasks).mockResolvedValue([
-    { id: '1', name: 'Object Detection', slug: 'object-detection', paper_count: 10 } as never,
-  ]);
+  vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: [
+    { id: '7', name: 'Object Detection', slug: 'object-detection', share_lift: 2 } as never,
+  ], recent_days: 7, baseline_days: 30 });
+  vi.mocked(catalogApi.trendingMethods).mockResolvedValue({ results: [
+    { id: '9', name: 'LoRA', slug: 'lora' },
+  ], recent_days: 7, baseline_days: 30 } as never);
   vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, status: 'pending' });
+  vi.spyOn(researchApi, 'setFollow').mockResolvedValue(undefined);
   renderFeed();
-  expect(await screen.findByRole('dialog', { name: 'Follow a topic' })).toBeInTheDocument();
-  expect(await screen.findByRole('link', { name: 'Object Detection', hidden: true })).toHaveAttribute('href', '/tasks/object-detection');
+  expect(await screen.findByRole('dialog', { name: 'Build your research feed' })).toBeInTheDocument();
   expect(screen.queryByText(/match these filters/)).not.toBeInTheDocument();
   expect(screen.getAllByRole('textbox', { name: 'Research topic' })).toHaveLength(1);
+  const task = await screen.findByRole('button', { name: 'Object Detection' });
+  expect(task).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(task);
+  expect(task).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(await screen.findByRole('button', { name: 'LoRA' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Follow topic' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
   await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledWith('real-time video generation'));
+  expect(researchApi.setFollow).toHaveBeenCalledWith('task', '7', true);
+  expect(researchApi.setFollow).toHaveBeenCalledWith('method', '9', true);
 });
 
 it('keeps the filter hint when follows exist but nothing matches', async () => {
@@ -251,10 +279,10 @@ it('leaves the topic pop-up closed after the only topic is removed', async () =>
   renderFeed();
   fireEvent.click(await screen.findByRole('button', { name: 'Edit topic' }));
   vi.mocked(researchApi.topic).mockResolvedValue(null);
-  fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove topic' }));
   expect(await screen.findByRole('heading', { name: 'Build your personal research feed', hidden: true })).toBeInTheDocument();
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  expect(screen.getByRole('button', { name: 'Follow a topic' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Build your feed' })).toBeInTheDocument();
 });
 it('shows the feed for an account that follows only a topic', async () => {
   vi.mocked(researchApi.follows).mockResolvedValue([]);

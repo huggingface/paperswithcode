@@ -1,6 +1,6 @@
 import FollowingIntro from "@/components/FollowingIntro";
 import TopicDialog from "@/components/TopicDialog";
-import { clearPendingTopic, readPendingTopic, useSaveTopic } from "@/lib/researchTopic";
+import { clearPendingTopic, readPendingFollows, readPendingTopic, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi, type FollowKind } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -401,6 +401,16 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     if (pending === topic.data?.text) clearPendingTopic();
     else savePendingTopic(pending);
   }, [user, topic.isSuccess, topic.data, savePendingTopic]);
+  // Likewise follow the tasks and methods a guest picked in the pop-up before signing in.
+  const pendingFollows = useSaveFollows();
+  const { mutate: savePendingFollows } = pendingFollows;
+  const pendingFollowsStarted = useRef(false);
+  useEffect(() => {
+    const picks = readPendingFollows();
+    if (!user || !picks.length || pendingFollowsStarted.current) return;
+    pendingFollowsStarted.current = true;
+    savePendingFollows(picks);
+  }, [user, savePendingFollows]);
   const followGroups = useMemo(
     () => FOLLOW_KIND_ORDER
       .map(kind => ({ kind, follows: following ? follows.data?.filter(follow => follow.kind === kind) ?? [] : [] }))
@@ -409,7 +419,6 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   );
   // Keep the follows section up while auth or follows load so the domain lists never flash in.
   const showFollowsSidebar = following && (!!auth?.isLoading || (!!user && !noFollows));
-  const popularTasks = topTasks.data?.slice(0, 8);
   const infinite = following ? followedFeed : publicFeed;
   const cards = useMemo(() => following
     ? followedFeed.data?.pages.flatMap(page => page.map(entry => ({ ...transformPaperForCard(entry.paper), followReasons: entry.reasons }))) ?? []
@@ -577,6 +586,14 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </Alert>
             )}
 
+            {pendingFollows.isError && pendingFollows.variables && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertDescription>
+                  Could not follow {pendingFollows.variables.map(pick => pick.name).join(", ")}. <button type="button" onClick={() => savePendingFollows(pendingFollows.variables)}>Try again</button>
+                </AlertDescription>
+              </Alert>
+            )}
+
             {following && !!user && topic.isSuccess && !follows.isPending && !noFollows && (!topic.data ? (
               <div className="following-topic-note" role="status">
                 Describe a topic in your own words, and a model adds matching new papers to this feed.{" "}
@@ -598,7 +615,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
             )}
 
             {(following && !auth?.isLoading && !user) || noFollows ? (
-              <FollowingIntro popularTasks={popularTasks} openTopic={!hadFollows} />
+              <FollowingIntro openTopic={!hadFollows} />
             ) : isLoading ? (
               <div className="paper-list">
                 {Array.from({ length: 6 }).map((_, i) => (
