@@ -4,7 +4,9 @@ import { Link, useLocation } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { researchApi, TOPIC_MAX_LENGTH, type FollowKind, type ResearchTopic } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
-import { useSaveTopic } from '@/lib/researchTopic';
+import { isAuthDisabled } from '@/lib/apiUrl';
+import { stashPendingTopic, useSaveTopic } from '@/lib/researchTopic';
+import { hfLoginUrl } from './HfSignInButton';
 
 const KIND_NAMES: Record<FollowKind, string> = {
   task: 'task', method: 'method', benchmark: 'benchmark', author: 'author', organization: 'organization',
@@ -18,8 +20,9 @@ function topicStatus(topic: ResearchTopic): string {
 }
 
 /** One free-text research topic; Jev decides which papers match it.
- * `onDone` makes it an inline editor that closes after a save, removal, or cancel. */
-export default function TopicSettings({ onDone }: { onDone?: () => void }) {
+ * `onDone` makes it an inline editor that closes after a save, removal, or cancel.
+ * `signInToSave` also shows it to guests, who sign in on submit; /following saves the topic on return. */
+export default function TopicSettings({ onDone, signInToSave = false }: { onDone?: () => void; signInToSave?: boolean }) {
   const { user } = useAuth();
   const location = useLocation();
   const input = useRef<HTMLTextAreaElement>(null);
@@ -43,13 +46,22 @@ export default function TopicSettings({ onDone }: { onDone?: () => void }) {
       input.current?.focus();
     }
   }, [inline, location.hash, topic.isSuccess]);
-  if (!user) return null;
+  if (!user && (!signInToSave || isAuthDisabled())) return null;
   const saved = topic.data?.text ?? '';
   const value = draft ?? saved;
   const trimmed = value.trim().replace(/\s+/g, ' ');
   // Saving the same text again restarts a backfill that gave up.
   const retry = topic.data?.status === 'failed' && trimmed === saved;
   const savable = trimmed.length >= 3 && (trimmed !== saved || retry);
+  const submit = () => {
+    if (!savable || save.isPending) return;
+    if (user) {
+      save.mutate(trimmed);
+      return;
+    }
+    stashPendingTopic(trimmed);
+    window.location.href = hfLoginUrl(`${location.pathname}${location.search}`);
+  };
   return <div className="research-topic" id="topic">
     <h3 className="research-follow-group-title"><Sparkles aria-hidden="true" />Topic</h3>
     <p className="settings-row-desc">
@@ -61,11 +73,17 @@ export default function TopicSettings({ onDone }: { onDone?: () => void }) {
       : topic.error ? <p className="settings-token-error" role="alert">Could not load your topic.</p>
       : <form className="research-topic-form" onSubmit={event => {
           event.preventDefault();
-          if (savable) save.mutate(trimmed);
+          submit();
         }}>
         <textarea ref={input} className="research-topic-input" rows={2} maxLength={TOPIC_MAX_LENGTH}
           aria-label="Research topic" placeholder="What research do you want to follow?"
-          value={value} onChange={event => setDraft(event.target.value)} />
+          value={value} onChange={event => setDraft(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              submit();
+            }
+          }} />
         <div className="research-topic-actions">
           <span className="research-topic-count">{value.length}/{TOPIC_MAX_LENGTH}</span>
           {onDone && <button type="button" className="research-follow-action" disabled={save.isPending}

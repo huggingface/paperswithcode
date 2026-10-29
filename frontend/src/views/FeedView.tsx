@@ -579,10 +579,8 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </div>
             )}
 
-            {following && !auth?.isLoading && !user ? (
-              <FollowingIntro signedIn={false} popularTasks={popularTasks} />
-            ) : noFollows ? (
-              <FollowingIntro signedIn popularTasks={popularTasks} />
+            {(following && !auth?.isLoading && !user) || noFollows ? (
+              <FollowingIntro popularTasks={popularTasks} />
             ) : isLoading ? (
               <div className="paper-list">
                 {Array.from({ length: 6 }).map((_, i) => (

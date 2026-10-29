@@ -110,51 +110,8 @@
   font-size: 15px;
   line-height: 1.55;
 }
-.following-intro-topic {
-  position: relative;
-  margin-top: 22px;
-}
-.following-intro-topic textarea {
-  display: block;
-  width: 100%;
-  min-height: 112px;
-  padding: 16px 18px 56px;
-  border: 1px solid var(--hairline-strong, var(--hairline));
-  border-radius: 12px;
-  color: var(--ink);
-  background: var(--bg);
-  font: inherit;
-  font-size: 17px;
-  line-height: 1.5;
-  resize: vertical;
-}
-.following-intro-topic textarea:focus {
-  outline: 3px solid var(--accent-soft);
-  border-color: var(--accent-text);
-}
-.following-intro-topic button {
-  position: absolute;
-  right: 12px;
-  bottom: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  border: 0;
-  border-radius: 8px;
-  color: #fff;
-  background: var(--accent-text);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.following-intro-topic button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.following-intro-topic button svg {
-  width: 15px;
-  height: 15px;
+.following-intro .research-topic {
+  margin: 22px 0 0;
 }
 .following-intro-note {
   margin: 10px 0 0;
@@ -324,7 +281,8 @@
   border-radius: 12px;
   background: var(--bg-elevated);
 }
-.following-topic-card .settings-row-desc { max-width: none; }
+.following-topic-card .settings-row-desc,
+.following-intro .settings-row-desc { max-width: none; }
 .following-topic-note {
   margin: 0 0 16px;
   padding: 10px 14px;
