@@ -43,14 +43,6 @@ import {
   withHomepagePaperDateRange,
 } from "@/lib/paperDateRange";
 
-type OrderBy = "trending" | "date_published" | "citation_count";
-
-const SORT_OPTIONS: Array<[OrderBy, string]> = [
-  ["trending", "trending"],
-  ["date_published", "newest"],
-  ["citation_count", "most cited"],
-];
-
 
 const PLACEHOLDER_TYPE_MS = 45;
 const PLACEHOLDER_HOLD_MS = 1_800;
@@ -111,13 +103,6 @@ const useRotatingChatPlaceholder = (active: boolean) => {
   }, [active]);
 
   return { placeholder, prompt: SUGGESTED_CHAT_PROMPTS[promptIndex] };
-};
-
-const parseOrderBy = (value: string | null): OrderBy => {
-  if (value === "trending" || value === "date_published" || value === "citation_count") {
-    return value;
-  }
-  return "trending";
 };
 
 // Inline "ask the assistant" box between the feed title and the paper list.
@@ -337,17 +322,19 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   const auth = useOptionalAuth();
   const user = auth?.user;
   const [searchParams, setSearchParams] = useSearchParams();
-  const orderBy = parseOrderBy(searchParams.get("order_by"));
   // Following defaults to its 30-day match window; the other tabs default to a week.
   const dateRange = readHomepagePaperDateRange(searchParams, undefined, following ? "month" : "week");
   const hasCode = searchParams.get("has_code") === "true";
   const hasHfArtifacts = searchParams.get("has_hf_artifacts") === "true";
 
-  const setOrderBy = (nextOrderBy: OrderBy) => {
+  // The home feed only offers trending and following; newest and most cited
+  // stay on the other paper feeds.
+  const showTrending = () => {
     const next = new URLSearchParams(searchParams);
-    next.set("order_by", nextOrderBy);
-    if (following) navigate(`/?${next}`);
-    else setSearchParams(next);
+    next.delete("order_by");
+    next.delete("only");
+    const query = next.toString();
+    navigate(query ? `/?${query}` : "/");
   };
 
   const setHasCode = (active: boolean) => {
@@ -391,7 +378,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   const publicFeed = useInfinitePapers({
     enabled: !following,
     page_size: 30,
-    order_by: orderBy,
+    order_by: "trending",
     order_dir: "desc",
     start_date: dateRange.startDate,
     end_date: dateRange.endDate,
@@ -570,15 +557,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
             <div className="sort-bar home-feed-sort-bar">
               <div className="paper-feed-toolbar-controls">
                 <div className="sort-options">
-                  {SORT_OPTIONS.map(([k, l]) => (
-                    <button
-                      key={k}
-                      className={`sort-btn ${!following && orderBy === k ? "active" : ""}`}
-                      onClick={() => setOrderBy(k)}
-                    >
-                      {l}
-                    </button>
-                  ))}
+                  <button className={`sort-btn ${following ? "" : "active"}`} onClick={showTrending}>trending</button>
                   <button className={`sort-btn ${following ? "active" : ""}`} onClick={() => {
                     const next = new URLSearchParams(searchParams);
                     next.delete("order_by");

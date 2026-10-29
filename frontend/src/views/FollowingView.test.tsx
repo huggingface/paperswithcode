@@ -46,12 +46,13 @@ it('renders following in the existing tab row with standard paper cards and thum
   expect(screen.getByText('Full abstract.')).toBeInTheDocument();
   const tab = screen.getByRole('button', { name: 'following' });
   expect(tab).toHaveClass('active');
-  expect(tab.parentElement?.textContent).toBe('trendingnewestmost citedfollowing');
+  expect(tab.parentElement?.textContent).toBe('trendingfollowing');
   expect(screen.queryByText('Discover')).not.toBeInTheDocument();
   expect(papersApi.list).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'newest' }));
+  fireEvent.click(screen.getByRole('button', { name: 'trending' }));
   expect(await screen.findByText('No papers in this window.')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'newest' })).toHaveClass('active');
+  expect(screen.getByRole('button', { name: 'trending' })).toHaveClass('active');
+  expect(papersApi.list).toHaveBeenLastCalledWith(expect.objectContaining({ order_by: 'trending' }));
 });
 it('opens Following from the public feed', async () => {
   renderFeed('/');
