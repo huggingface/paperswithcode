@@ -350,6 +350,7 @@
   border-radius: 12px;
   background: var(--bg-elevated);
 }
+.following-topic-card .settings-row-desc { max-width: none; }
 .following-topic-note {
   margin: 0 0 16px;
   padding: 10px 14px;
