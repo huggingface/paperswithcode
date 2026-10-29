@@ -191,6 +191,14 @@ describe("Composer completion", () => {
     fireEvent.change(textarea, { target: { value: "papers on object det", selectionStart: 20 } });
     await waitFor(() => expect(container.querySelector(".chat-prompt-completion")).toHaveTextContent("ection"));
     expect(screen.getByText(/Tab to complete/)).toBeInTheDocument();
+    expect(fireEvent.keyDown(textarea, { key: "Tab", isComposing: true })).toBe(true);
+    expect(textarea).toHaveValue("papers on object det");
+
+    (textarea as HTMLTextAreaElement).setSelectionRange(3, 3);
+    fireEvent.click(textarea);
+    expect(container.querySelector(".chat-prompt-completion")).not.toBeInTheDocument();
+    (textarea as HTMLTextAreaElement).setSelectionRange(20, 20);
+    fireEvent.click(textarea);
     expect(fireEvent.keyDown(textarea, { key: "Tab" })).toBe(false);
     expect(textarea).toHaveValue("papers on object detection");
   });

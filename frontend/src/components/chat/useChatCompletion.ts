@@ -39,9 +39,13 @@ export function useChatCompletion(draft: ChatDraft, suppressed = false) {
   return { completion, trackCaret };
 }
 
-/** Whether a keydown is a bare Tab, the key that accepts a completion. */
+/**
+ * Whether a keydown is a bare Tab, the key that accepts a completion. Tab
+ * during IME composition belongs to the input method.
+ */
 export const isCompletionKey = (event: React.KeyboardEvent) =>
-  event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
+  event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+  && !event.nativeEvent.isComposing;
 
 /**
  * Height that fits the typed text plus its painted completion, which can wrap

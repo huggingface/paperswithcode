@@ -223,7 +223,10 @@ export const AskAssistant: React.FC = () => {
                 mentions.refresh(event.currentTarget.selectionStart);
                 typedCompletion.trackCaret(event.currentTarget);
               }}
-              onClick={(event) => mentions.refresh(event.currentTarget.selectionStart)}
+              onClick={(event) => {
+                mentions.refresh(event.currentTarget.selectionStart);
+                typedCompletion.trackCaret(event.currentTarget);
+              }}
               onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
               onBlur={(event) => {
                 if (!event.relatedTarget?.closest?.(".chat-paper-picker")) window.setTimeout(mentions.close, 0);

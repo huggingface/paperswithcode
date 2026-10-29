@@ -120,7 +120,10 @@ const Composer: React.FC<ComposerProps> = ({
             mentions.refresh(event.currentTarget.selectionStart);
             trackCaret(event.currentTarget);
           }}
-          onClick={(event) => mentions.refresh(event.currentTarget.selectionStart)}
+          onClick={(event) => {
+            mentions.refresh(event.currentTarget.selectionStart);
+            trackCaret(event.currentTarget);
+          }}
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           onBlur={(event) => {
             if (!event.relatedTarget?.closest?.(".chat-paper-picker, .chat-slash-command")) window.setTimeout(mentions.close, 0);
