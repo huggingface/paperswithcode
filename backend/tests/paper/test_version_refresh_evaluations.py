@@ -84,6 +84,8 @@ def test_version_refresh_moves_evaluations_to_the_new_version(tmp_path) -> None:
         db.add_all(
             [
                 _evaluation(7, 1, 1, best_rank=1),
+                # A second copy on the old version collapses into row 7.
+                _evaluation(11, 1, 1, model_name="trgv2", best_rank=1),
                 _evaluation(8, 1, 2, best_rank=1),
                 _evaluation(9, 2, 2, model_name="TRG v2", best_rank=1),
                 _evaluation(10, 3, 2, model_name="Other", mae=4.0, best_rank=3),

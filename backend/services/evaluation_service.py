@@ -654,6 +654,7 @@ class EvaluationService:
         for row in (
             self.db.query(DBEvaluation)
             .filter(DBEvaluation.paper_id == source_paper_id)
+            .order_by(DBEvaluation.id)
             .all()
         ):
             if entry(row) in target_entries:
@@ -661,6 +662,7 @@ class EvaluationService:
                 self.db.delete(row)
             else:
                 row.paper_id = target_paper_id
+                target_entries.add(entry(row))
         if dropped_scopes:
             self.refresh_rank_scopes(dropped_scopes)
 
