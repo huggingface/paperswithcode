@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useLocation } from 'react-router-dom';
-import { Check, Plus } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { ArrowRight, Check, Plus } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { catalogApi } from '@/lib/api/catalog';
 import { researchApi, TOPIC_MAX_LENGTH, type FollowKind } from '@/lib/api/research';
@@ -17,12 +17,9 @@ const POPULAR_AUTHORS = [
   { id: '13379', name: 'Geoffrey Hinton' },
   { id: '25', name: 'Yoshua Bengio' },
   { id: '264', name: 'Kaiming He' },
-  { id: '1469', name: 'Fei-Fei Li' },
-  { id: '3079', name: 'Ilya Sutskever' },
-  { id: '219', name: 'Sergey Levine' },
-  { id: '438', name: 'Percy Liang' },
-  { id: '220', name: 'Chelsea Finn' },
 ];
+// Chips per group; each group links to its full listing for more.
+const CHIPS_PER_GROUP = 5;
 
 /** Builds the Following feed in a pop-up, so /following shows no input field next to the chat box:
  * a free-text topic plus trending tasks and methods, popular authors, and organizations to follow. Guests sign in on submit, and
@@ -47,7 +44,7 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   });
   const methods = useQuery({
     queryKey: ['trending-methods-follow'],
-    queryFn: () => catalogApi.trendingMethods({ limit: 8 }),
+    queryFn: () => catalogApi.trendingMethods({ limit: CHIPS_PER_GROUP }),
     staleTime: 10 * 60 * 1000,
   });
   const organizations = useQuery({
@@ -58,8 +55,7 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   // The directory's curated order puts the best-known labs first.
   const popularOrganizations = (organizations.data?.results ?? [])
     .filter(org => org.display_order != null)
-    .sort((a, b) => a.display_order! - b.display_order!)
-    .slice(0, 10);
+    .sort((a, b) => a.display_order! - b.display_order!);
   const [draft, setDraft] = useState<string | null>(null);
   const [picks, setPicks] = useState<FollowPick[]>([]);
   const saveTopic = useSaveTopic();
@@ -95,11 +91,16 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
       if (results.every(result => result.status === 'fulfilled')) onDone();
     });
   };
-  const chips = (title: string, kind: FollowKind, items: { id: string; name: string; slug?: string | null }[]) =>
+  const chips = (
+    title: string,
+    kind: FollowKind,
+    items: { id: string; name: string; slug?: string | null }[],
+    browse?: { to: string; label: string },
+  ) =>
     items.length > 0 && <div className="topic-dialog-group">
       <h3>{title}</h3>
       <div className="topic-dialog-chips">
-        {items.map(item => {
+        {items.slice(0, CHIPS_PER_GROUP).map(item => {
           const followed = isFollowed(kind, item.id);
           const on = followed || isPicked(kind, item.id);
           const name = kind === 'task' ? displayTaskName(item.name, item.slug ?? undefined) : item.name;
@@ -109,6 +110,7 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
             {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}{name}
           </button>;
         })}
+        {browse && <Link to={browse.to} className="topic-dialog-browse">{browse.label}<ArrowRight aria-hidden="true" /></Link>}
       </div>
     </div>;
   return <form className="topic-dialog-form" onSubmit={event => {
@@ -131,10 +133,11 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
         }} />
       <span className="research-topic-count">{value.length}/{TOPIC_MAX_LENGTH}</span>
     </div>
-    {chips('Trending tasks', 'task', tasks.data?.results ?? [])}
-    {chips('Trending methods', 'method', methods.data?.results ?? [])}
+    {chips('Trending tasks', 'task', tasks.data?.results ?? [], { to: '/tasks', label: 'Browse tasks' })}
+    {chips('Trending methods', 'method', methods.data?.results ?? [], { to: '/methods', label: 'Browse methods' })}
     {chips('Popular authors', 'author', POPULAR_AUTHORS)}
-    {chips('Popular organizations', 'organization', popularOrganizations)}
+    {chips('Popular organizations', 'organization', popularOrganizations,
+      { to: '/organizations', label: 'Browse organizations' })}
     {(saveTopic.error || saveFollows.error) && <p className="settings-token-error" role="alert">
       Could not save your feed. Please try again.
     </p>}

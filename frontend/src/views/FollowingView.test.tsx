@@ -213,6 +213,19 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   expect(researchApi.setFollow).toHaveBeenCalledWith('organization', '3', true);
 });
 
+it('shows the top five per group with links to browse the rest', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(researchApi.following).mockResolvedValue([]);
+  vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: Array.from({ length: 8 }, (_, i) => (
+    { id: String(i + 1), name: `Task ${i + 1}`, slug: `task-${i + 1}`, share_lift: 2 } as never)), recent_days: 7, baseline_days: 30 });
+  renderFeed();
+  expect(await screen.findByRole('button', { name: 'Task 5' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Task 6' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Kaiming He' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Fei-Fei Li' })).not.toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Browse tasks' })).toHaveAttribute('href', '/tasks');
+});
+
 it('keeps the filter hint when follows exist but nothing matches', async () => {
   vi.mocked(researchApi.following).mockResolvedValue([]);
   renderFeed();
