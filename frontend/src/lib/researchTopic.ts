@@ -41,16 +41,18 @@ export interface FollowPick {
   kind: FollowKind;
   id: string;
   name: string;
+  /** False unfollows; missing or true follows. */
+  follow?: boolean;
 }
 
-/** Follows several entities at once and refreshes what depends on them, even when some fail.
- * Following is idempotent, so a retry may resend the ones that succeeded. */
+/** Follows or unfollows several entities at once and refreshes what depends on them, even when some fail.
+ * Both are idempotent, so a retry may resend the ones that succeeded. */
 export function useSaveFollows() {
   const user = useOptionalAuth()?.user;
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (picks: FollowPick[]) => {
-      const results = await Promise.allSettled(picks.map(pick => researchApi.setFollow(pick.kind, pick.id, true)));
+      const results = await Promise.allSettled(picks.map(pick => researchApi.setFollow(pick.kind, pick.id, pick.follow ?? true)));
       const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
       if (failure) throw failure.reason;
     },

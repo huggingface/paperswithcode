@@ -93,7 +93,7 @@ it('asks signed-out visitors for a topic and picks, and signs them in when they 
   expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
   expect(sessionStorage.getItem('pwc:following-pending-topic')).toBe('speculative decoding');
   expect(JSON.parse(sessionStorage.getItem('pwc:following-pending-follows') ?? '[]'))
-    .toEqual([{ kind: 'task', id: '7', name: 'Object Detection' }]);
+    .toEqual([{ kind: 'task', id: '7', name: 'Object Detection', follow: true }]);
   expect(researchApi.following).not.toHaveBeenCalled();
 });
 
@@ -224,6 +224,31 @@ it('shows the top five per group with links to browse the rest', async () => {
   expect(screen.getByRole('button', { name: 'Kaiming He' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Fei-Fei Li' })).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Browse tasks' })).toHaveAttribute('href', '/tasks');
+});
+
+it('shows what the account already follows first, and unfollows on save', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([
+    { kind: 'task', entity_id: 895, name: 'Long-Horizon Agents', url: '/tasks/long-horizon-agents', created_at: '' },
+    { kind: 'benchmark', entity_id: 12, name: 'SWE-bench Verified', url: '/benchmark/swe-bench-verified', created_at: '' },
+  ]);
+  vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: [
+    { id: '895', name: 'Long-Horizon Agents', slug: 'long-horizon-agents', share_lift: 2 } as never,
+    { id: '7', name: 'Object Detection', slug: 'object-detection', share_lift: 2 } as never,
+  ], recent_days: 7, baseline_days: 30 });
+  vi.spyOn(researchApi, 'setFollow').mockResolvedValue(undefined);
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Follow a topic' }));
+  expect(await screen.findByRole('dialog', { name: 'Edit your research feed' })).toBeInTheDocument();
+  const followed = await screen.findByRole('button', { name: 'Long-Horizon Agents' });
+  expect(followed).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getAllByRole('button', { name: 'Long-Horizon Agents' })).toHaveLength(1);
+  expect(screen.getByRole('button', { name: 'Object Detection' })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('button', { name: 'SWE-bench Verified' })).toHaveAttribute('aria-pressed', 'true');
+  expect(screen.getByRole('link', { name: 'Browse benchmarks' })).toHaveAttribute('href', '/tasks');
+  fireEvent.click(followed);
+  expect(followed).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(researchApi.setFollow).toHaveBeenCalledWith('task', '895', false));
 });
 
 it('keeps the filter hint when follows exist but nothing matches', async () => {

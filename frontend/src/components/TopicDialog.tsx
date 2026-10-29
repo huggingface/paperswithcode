@@ -18,7 +18,7 @@ const POPULAR_AUTHORS = [
   { id: '25', name: 'Yoshua Bengio' },
   { id: '264', name: 'Kaiming He' },
 ];
-// Chips per group; each group links to its full listing for more.
+// Suggested chips per group, after everything already followed; each group links to its full listing for more.
 const CHIPS_PER_GROUP = 5;
 
 /** Builds the Following feed in a pop-up, so /following shows no input field next to the chat box:
@@ -57,7 +57,8 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
     .filter(org => org.display_order != null)
     .sort((a, b) => a.display_order! - b.display_order!);
   const [draft, setDraft] = useState<string | null>(null);
-  const [picks, setPicks] = useState<FollowPick[]>([]);
+  // Pending follows and unfollows, applied on submit.
+  const [changes, setChanges] = useState<FollowPick[]>([]);
   const saveTopic = useSaveTopic();
   const saveFollows = useSaveFollows();
   const saved = topic.data?.text ?? '';
@@ -67,57 +68,65 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   const retry = topic.data?.status === 'failed' && trimmed === saved;
   const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry);
   const saving = saveTopic.isPending || saveFollows.isPending;
-  const submittable = !saving && (topicSavable || picks.length > 0);
-  const isPicked = (kind: FollowKind, id: string) => picks.some(pick => pick.kind === kind && pick.id === id);
+  const submittable = !saving && (topicSavable || changes.length > 0);
+  const isChanged = (kind: FollowKind, id: string) => changes.some(change => change.kind === kind && change.id === id);
   const isFollowed = (kind: FollowKind, id: string) =>
     follows.data?.some(follow => follow.kind === kind && String(follow.entity_id) === id) ?? false;
-  const toggle = (pick: FollowPick) => setPicks(current => current.some(p => p.kind === pick.kind && p.id === pick.id)
-    ? current.filter(p => p.kind !== pick.kind || p.id !== pick.id)
-    : [...current, pick]);
+  const toggle = (change: FollowPick) => setChanges(current => current.some(c => c.kind === change.kind && c.id === change.id)
+    ? current.filter(c => c.kind !== change.kind || c.id !== change.id)
+    : [...current, change]);
   const submit = () => {
     if (!submittable) return;
     if (!user) {
       if (topicSavable) stashPendingTopic(trimmed);
-      if (picks.length) stashPendingFollows(picks);
+      if (changes.length) stashPendingFollows(changes);
       window.location.href = hfLoginUrl(`${location.pathname}${location.search}`);
       return;
     }
     // Save the follows and the topic independently, so one failing still saves the other.
     const saves = [
-      ...(picks.length ? [saveFollows.mutateAsync(picks)] : []),
+      ...(changes.length ? [saveFollows.mutateAsync(changes)] : []),
       ...(topicSavable ? [saveTopic.mutateAsync(trimmed)] : []),
     ];
     void Promise.allSettled(saves).then(results => {
       if (results.every(result => result.status === 'fulfilled')) onDone();
     });
   };
+  // Each group lists what is already followed, then the top suggestions not followed yet.
   const chips = (
     title: string,
     kind: FollowKind,
-    items: { id: string; name: string; slug?: string | null }[],
+    suggestions: { id: string; name: string; slug?: string | null }[],
     browse?: { to: string; label: string },
-  ) =>
-    items.length > 0 && <div className="topic-dialog-group">
+  ) => {
+    const followed = (follows.data ?? []).filter(follow => follow.kind === kind)
+      .map(follow => ({ id: String(follow.entity_id), name: follow.name, slug: follow.url.split('/').pop() }));
+    const items = [
+      ...followed,
+      ...suggestions.filter(item => !isFollowed(kind, item.id)).slice(0, CHIPS_PER_GROUP),
+    ];
+    return items.length > 0 && <div className="topic-dialog-group">
       <h3>{title}</h3>
       <div className="topic-dialog-chips">
-        {items.slice(0, CHIPS_PER_GROUP).map(item => {
-          const followed = isFollowed(kind, item.id);
-          const on = followed || isPicked(kind, item.id);
+        {items.map(item => {
+          const on = isFollowed(kind, item.id) !== isChanged(kind, item.id);
           const name = kind === 'task' ? displayTaskName(item.name, item.slug ?? undefined) : item.name;
-          return <button key={item.id} type="button" className="topic-dialog-chip" aria-pressed={on}
-            disabled={followed || saving} title={followed ? 'Already following' : undefined}
-            onClick={() => toggle({ kind, id: item.id, name })}>
+          return <button key={item.id} type="button" className="topic-dialog-chip" aria-pressed={on} disabled={saving}
+            onClick={() => toggle({ kind, id: item.id, name, follow: !isFollowed(kind, item.id) })}>
             {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}{name}
           </button>;
         })}
         {browse && <Link to={browse.to} className="topic-dialog-browse">{browse.label}<ArrowRight aria-hidden="true" /></Link>}
       </div>
     </div>;
+  };
   return <form className="topic-dialog-form" onSubmit={event => {
     event.preventDefault();
     submit();
   }}>
-    <DialogTitle className="topic-dialog-title">Build your research feed</DialogTitle>
+    <DialogTitle className="topic-dialog-title">
+      {saved || follows.data?.length ? 'Edit your research feed' : 'Build your research feed'}
+    </DialogTitle>
     <div className="topic-dialog-group">
       <h3><label htmlFor="topic-dialog-input">Describe a topic in your own words</label></h3>
       <p className="topic-dialog-hint">A model reads every new paper and adds the ones that match to your Following feed.</p>
@@ -135,6 +144,7 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
     </div>
     {chips('Trending tasks', 'task', tasks.data?.results ?? [], { to: '/tasks', label: 'Browse tasks' })}
     {chips('Trending methods', 'method', methods.data?.results ?? [], { to: '/methods', label: 'Browse methods' })}
+    {chips('Benchmarks', 'benchmark', [], { to: '/tasks', label: 'Browse benchmarks' })}
     {chips('Popular authors', 'author', POPULAR_AUTHORS)}
     {chips('Popular organizations', 'organization', popularOrganizations,
       { to: '/organizations', label: 'Browse organizations' })}
@@ -146,7 +156,8 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
         onClick={() => saveTopic.mutate(null, { onSuccess: onDone })}>Remove topic</button>}
       <button type="button" className="research-follow-action" disabled={saving} onClick={onDone}>Cancel</button>
       <button type="submit" className="research-topic-save" disabled={!submittable}>
-        {picks.length ? 'Follow' : retry ? 'Retry' : saved ? 'Update topic' : 'Follow'}
+        {changes.some(change => change.follow === false) ? 'Save'
+          : changes.length ? 'Follow' : retry ? 'Retry' : saved ? 'Update topic' : 'Follow'}
       </button>
     </div>
   </form>;
