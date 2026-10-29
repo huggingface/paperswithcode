@@ -19,6 +19,7 @@ from backend.models.database.research import (
     ResearchFollow,
     ResearchSubscription,
     ResearchTopic,
+    ResearchTopicPreview,
     ResearchTopicVerdict,
 )
 from backend.models.research import ResearchEntry
@@ -41,6 +42,13 @@ def db():
         ) as session:
             yield session
         transaction.rollback()
+
+
+@pytest.fixture(autouse=True)
+def offline(monkeypatch):
+    """No LLM label or embedding preview unless a test provides one."""
+    monkeypatch.setattr(topics, "summarize", lambda _: None)
+    monkeypatch.setattr(topics, "save_preview", lambda *_: None)
 
 
 @pytest.fixture
@@ -104,6 +112,37 @@ def test_jev_judge_chunks_topics_and_reads_noul_scores():
     assert requests[0]["state"] == "Title: A"
     assert '"topic 0"' in requests[0]["questions"]["t0"]["instructions"]
     assert scores[:2] == [0.5, 0.51] and scores[10:] == [0.5, 0.51]
+
+
+def test_summarize_labels_only_long_descriptions(monkeypatch):
+    monkeypatch.undo()
+    monkeypatch.setattr(
+        topics, "get_settings", lambda: type("S", (), {"openai_api_key": "k"})()
+    )
+    requests = []
+
+    def post(url, **kwargs):
+        requests.append(kwargs["json"]["input"])
+        output = [
+            {
+                "type": "message",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": " “Real-time neural audio synthesis.” ",
+                    }
+                ],
+            }
+        ]
+        return httpx.Response(
+            200, json={"output": output}, request=httpx.Request("POST", url)
+        )
+
+    monkeypatch.setattr(topics.httpx, "post", post)
+    assert topics.summarize("audio generation") is None
+    long = "I'm very interested in AI-driven audio generation, fast enough for realtime use."
+    assert topics.summarize(long) == "Real-time neural audio synthesis"
+    assert requests == [long]
 
 
 def entry(key, interests, published="2026-10-10"):
@@ -318,3 +357,28 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
         "Robotics",
         "“video generation”",
     }
+
+
+def test_preview_fills_the_feed_until_the_backfill_is_done(db, now, monkeypatch):
+    monkeypatch.setattr(topics, "summarize", lambda _: "Real-time audio synthesis")
+    preview = paper(db, now, "1", "Audio nearest")
+    judged = paper(db, now, "2", "Audio judged")
+
+    def save_preview(db, topic, now):
+        db.add(ResearchTopicPreview(topic_id=topic.id, paper_id=preview.id))
+        db.flush()
+
+    monkeypatch.setattr(topics, "save_preview", save_preview)
+    topics.set_topic(db, "alice", "audio " + "x" * 80, now)
+    assert topics.topic_view(db, "alice").label == "Real-time audio synthesis"
+    entries = follows.feed_entries(db, "alice", now, 0, 40)
+    assert [(e.title, e.reasons) for e in entries] == [
+        ("Audio nearest", ["“Real-time audio synthesis”"])
+    ]
+    monkeypatch.setattr(topics, "recall_older", lambda *_: [])
+    monkeypatch.setattr(topics, "window_paper_ids", lambda *_: [judged.id])
+    topic = topics.claim_backfill(db, now)
+    assert topics.backfill(db, FakeJudge(), topic, now) == "done"
+    assert [e.title for e in follows.feed_entries(db, "alice", now, 0, 40)] == [
+        "Audio judged"
+    ]

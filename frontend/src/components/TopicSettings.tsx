@@ -15,8 +15,8 @@ const KIND_NAMES: Record<FollowKind, string> = {
 function topicStatus(topic: ResearchTopic): string {
   if (topic.status === 'failed') return 'We could not finish finding papers for this topic. Save it again to retry.';
   if (topic.status === 'done') return 'Matching papers appear in your Following feed, and new ones are added every hour.';
-  return topic.total ? `Finding matching papers: ${topic.judged.toLocaleString()} of ${topic.total.toLocaleString()} checked…`
-    : 'Finding matching papers…';
+  return topic.total ? `Your feed shows the closest papers now. Refining matches: ${topic.judged.toLocaleString()} of ${topic.total.toLocaleString()} checked…`
+    : 'Your feed shows the closest papers now. Refining matches…';
 }
 
 /** One free-text research topic; Jev decides which papers match it.

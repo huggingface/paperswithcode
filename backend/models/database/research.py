@@ -50,6 +50,8 @@ class ResearchTopic(Base):
     id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     text: Mapped[str] = mapped_column(String(300))
     normalized: Mapped[str] = mapped_column(String(300), unique=True)
+    # A few-word LLM summary of a long description, shown where space is short.
+    label: Mapped[str | None] = mapped_column(String(80))
     backfill_status: Mapped[str] = mapped_column(
         String(20), default="pending", server_default="pending"
     )
@@ -86,6 +88,20 @@ class ResearchTopicVerdict(Base):
     policy_version: Mapped[str] = mapped_column(String(32))
     judged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ResearchTopicPreview(Base):
+    """Embedding match shown in the feed until Jev finishes the topic's backfill."""
+
+    __tablename__ = "research_topic_previews"
+    topic_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("research_topics.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
     )
 
 

@@ -307,6 +307,18 @@ class EmbeddingRetrievalService:
             )
         ]
 
+    def encode_query(
+        self, query: str, generation: ActiveGeneration, client: QueryEmbeddingClient
+    ) -> list[float]:
+        contract = QueryEmbeddingContract(
+            generation_id=generation.id,
+            model_name=generation.model_name,
+            model_revision=generation.model_revision,
+            dimensions=generation.dimensions,
+            instruction_version=generation.query_instruction_version,
+        )
+        return client.encode(query, contract)
+
     def encode_and_search(
         self,
         query: str,
@@ -320,16 +332,8 @@ class EmbeddingRetrievalService:
         has_code: bool = False,
         has_hf_artifacts: bool = False,
     ) -> list[RankedCandidate]:
-        contract = QueryEmbeddingContract(
-            generation_id=generation.id,
-            model_name=generation.model_name,
-            model_revision=generation.model_revision,
-            dimensions=generation.dimensions,
-            instruction_version=generation.query_instruction_version,
-        )
-        vector = client.encode(query, contract)
         return self.semantic_search(
-            vector,
+            self.encode_query(query, generation, client),
             generation,
             limit=limit,
             start_date=start_date,

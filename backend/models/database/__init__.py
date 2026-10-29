@@ -191,6 +191,7 @@ __all__ = [
     "ResearchDigest",
     "ResearchEvent",
     "ResearchTopic",
+    "ResearchTopicPreview",
     "ResearchTopicVerdict",
     "Base",
     "AutonomousSubmissionClaim",
@@ -342,5 +343,6 @@ from backend.models.database.research import (
     ResearchDigest,
     ResearchEvent,
     ResearchTopic,
+    ResearchTopicPreview,
     ResearchTopicVerdict,
 )

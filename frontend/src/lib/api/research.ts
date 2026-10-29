@@ -17,6 +17,8 @@ export interface ResearchTopicSuggestion {
 }
 export interface ResearchTopic {
   text: string;
+  /** Few-word summary of a long description; null for short ones. */
+  label: string | null;
   set_at: string | null;
   /** pending/running while the last 90 days and older matches are judged. */
   status: 'pending' | 'running' | 'done' | 'failed';

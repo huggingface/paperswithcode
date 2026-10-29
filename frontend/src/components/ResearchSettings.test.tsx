@@ -27,7 +27,7 @@ describe('research topic', () => {
     fireEvent.change(input, { target: { value: '  real-time   video generation ' } });
     fireEvent.click(screen.getByRole('button', { name: 'Follow topic' }));
     await waitFor(() => expect(set).toHaveBeenCalledWith('real-time video generation'));
-    expect(await screen.findByText('Finding matching papers: 200 of 4,700 checked…')).toBeInTheDocument();
+    expect(await screen.findByText('Your feed shows the closest papers now. Refining matches: 200 of 4,700 checked…')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Update topic' })).toBeDisabled();
   });
   it('removes the topic and names exact catalog matches', async () => {

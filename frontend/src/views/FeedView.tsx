@@ -375,6 +375,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     refetchInterval: query => query.state.data && ["pending", "running"].includes(query.state.data.status) ? 10000 : false,
   });
   const topicBuilding = !!topic.data && ["pending", "running"].includes(topic.data.status);
+  const topicName = topic.data ? topic.data.label ?? topic.data.text : "";
   const [editingTopic, setEditingTopic] = useState(false);
   // Refresh the feed once a new topic's backfill finishes.
   const queryClient = useQueryClient();
@@ -461,7 +462,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                       aria-current={topicOnly ? "true" : undefined}
                     >
                       <span className="sidebar-follow-kind">Topic</span>
-                      <span className="sidebar-follow-name">{topic.data.text}</span>
+                      <span className="sidebar-follow-name">{topicName}</span>
                     </Link>
                     <button type="button" className="sidebar-follow-edit" aria-label="Edit topic"
                       aria-expanded={editingTopic} onClick={() => setEditingTopic(true)}>edit</button>
@@ -583,7 +584,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </div>
             ) : topicBuilding ? (
               <div className="following-topic-note" role="status">
-                Finding papers about “{topic.data.text}”. This will take a few minutes. They’ll appear here as they are found.
+                Showing the closest papers about “{topicName}” now. A model is reading papers to refine these matches, which takes a few minutes.
               </div>
             ) : null)}
 
@@ -591,7 +592,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
 
             {topicOnly && topic.data && (
               <div className="following-topic-note following-topic-filter" role="status">
-                Showing only papers about “{topic.data.text}”.{" "}
+                Showing only papers about “{topicName}”.{" "}
                 <Link to={topicFilterHref(false)}>Show everything you follow</Link>
               </div>
             )}

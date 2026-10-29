@@ -32,6 +32,8 @@ class TopicSuggestion(BaseModel):
 
 class TopicView(BaseModel):
     text: str
+    # Few-word summary of a long description; null for short ones.
+    label: str | None = None
     set_at: datetime | None
     # pending/running while the last 90 days and older recall are judged.
     status: Literal["pending", "running", "done", "failed"]

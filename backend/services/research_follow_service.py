@@ -86,7 +86,8 @@ def interests(db: Session, subject: str) -> dict[tuple[str, int], Interest]:
     sub = db.get(ResearchSubscription, subject)
     topic = sub and sub.topic_id and db.get(ResearchTopic, sub.topic_id)
     if topic:
-        short = topic.text if len(topic.text) <= 80 else topic.text[:79].rstrip() + "…"
+        name = topic.label or topic.text
+        short = name if len(name) <= 80 else name[:79].rstrip() + "…"
         found["topic", topic.id] = Interest("topic", topic.id, f"\u201c{short}\u201d")
     return found
 
@@ -220,6 +221,7 @@ def diverse(
 
 # Match associations on every version, display the latest version, and apply the
 # earliest publication date. Recursive UNION (not UNION ALL) tolerates bad cycles.
+# A topic matches its Jev verdicts, plus its embedding preview until the backfill is done.
 MATCH_SQL = """
 WITH RECURSIVE interests AS (
  SELECT kind,entity_id,created_at FROM research_follows WHERE hf_subject=:subject
@@ -248,6 +250,11 @@ WITH RECURSIVE interests AS (
  UNION ALL
  SELECT 'topic',i.entity_id,v.paper_id,2 FROM interests i
  JOIN research_topic_verdicts v ON v.topic_id=i.entity_id AND v.score>=:topic_threshold
+ WHERE i.kind='topic'
+ UNION ALL
+ SELECT 'topic',i.entity_id,pv.paper_id,2 FROM interests i
+ JOIN research_topics t ON t.id=i.entity_id AND t.backfill_status<>'done'
+ JOIN research_topic_previews pv ON pv.topic_id=t.id
  WHERE i.kind='topic'
 )
 SELECT DISTINCT h.kind,h.entity_id,h.strength,i.created_at followed_at,
