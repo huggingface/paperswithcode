@@ -7,7 +7,6 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { PaperCard } from "@/components";
 import { McpShowcase } from "@/components/McpShowcase";
-import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 import { ArrowUpIcon } from "@/components/chat/icons";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
@@ -298,8 +297,6 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   // Following defaults to its 30-day match window; the other tabs default to a week.
   const dateRange = readHomepagePaperDateRange(searchParams, undefined, following ? "month" : "week");
-  const hasCode = searchParams.get("has_code") === "true";
-  const hasHfArtifacts = searchParams.get("has_hf_artifacts") === "true";
 
   // The home feed only offers trending and following; newest and most cited
   // stay on the other paper feeds.
@@ -311,26 +308,12 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     navigate(query ? `/?${query}` : "/");
   };
 
-  const setHasCode = (active: boolean) => {
-    const next = new URLSearchParams(searchParams);
-    if (active) next.set("has_code", "true");
-    else next.delete("has_code");
-    setSearchParams(next);
-  };
-
   const topicFilterHref = (active: boolean) => {
     const next = new URLSearchParams(searchParams);
     if (active) next.set("only", "topic");
     else next.delete("only");
     const query = next.toString();
     return query ? `/following?${query}` : "/following";
-  };
-
-  const setHasHfArtifacts = (active: boolean) => {
-    const next = new URLSearchParams(searchParams);
-    if (active) next.set("has_hf_artifacts", "true");
-    else next.delete("has_hf_artifacts");
-    setSearchParams(next);
   };
 
   // Sidebar: top tasks by paper count.
@@ -357,12 +340,10 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     start_date: dateRange.startDate,
     end_date: dateRange.endDate,
     include_resources: true,
-    has_code: hasCode,
-    has_hf_artifacts: hasHfArtifacts,
   });
 
   const topicOnly = following && searchParams.get("only") === "topic";
-  const followingFilters = { ...dateRange, hasCode, hasHfArtifacts, topicOnly };
+  const followingFilters = { ...dateRange, topicOnly };
   const followedFeed = useInfiniteQuery({
     queryKey: ["research-feed", user?.hf_subject, followingFilters],
     queryFn: ({ pageParam }) => researchApi.following(pageParam, followingFilters),
@@ -545,12 +526,6 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                     navigate(query ? `/following?${query}` : "/following");
                   }}>following</button>
                 </div>
-                <PaperFeedFilters
-                  hasCode={hasCode}
-                  hasHfArtifacts={hasHfArtifacts}
-                  onHasCodeChange={setHasCode}
-                  onHasHfArtifactsChange={setHasHfArtifacts}
-                />
               </div>
               <PaperDateFilter
                 startDate={dateRange.startDate}

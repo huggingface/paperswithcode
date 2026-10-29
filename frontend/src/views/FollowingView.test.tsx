@@ -110,29 +110,28 @@ it('offers a retry instead of claiming the feed is empty when loading fails', as
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
 
-it('offers the home feed filters on Following and sends them to the feed', async () => {
+it('sends the date filter to Following without resource filters', async () => {
   renderFeed();
   await screen.findByText('A paper');
   // Following defaults to its 30-day window.
   expect(screen.getByRole('button', { name: 'Last Month' })).toHaveClass('active');
   const [, defaults] = vi.mocked(researchApi.following).mock.calls[0];
-  expect(defaults).toMatchObject({ hasCode: false, hasHfArtifacts: false });
   expect(defaults?.startDate).toBeDefined();
-  fireEvent.click(screen.getByRole('button', { name: /Has code/ }));
+  expect(screen.queryByRole('button', { name: /Has code/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Has artifacts/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'All Time' }));
   await vi.waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0, {
-    startDate: undefined, endDate: undefined, hasCode: true, hasHfArtifacts: false, topicOnly: false,
+    startDate: undefined, endDate: undefined, topicOnly: false,
   }));
-  expect(screen.getByRole('button', { name: /Has code/ })).toHaveAttribute('aria-pressed', 'true');
 });
 
-it('keeps filters when switching from the public feed to Following', async () => {
-  renderFeed('/?has_hf_artifacts=true&start_date=2026-09-01&end_date=2026-09-30&order_by=date_published');
+it('keeps the date range when switching from the public feed to Following', async () => {
+  renderFeed('/?start_date=2026-09-01&end_date=2026-09-30&order_by=date_published');
   await screen.findByText('No papers in this window.');
   fireEvent.click(screen.getByRole('button', { name: 'following' }));
   await screen.findByText('A paper');
   expect(researchApi.following).toHaveBeenLastCalledWith(0, {
-    startDate: '2026-09-01', endDate: '2026-09-30', hasCode: false, hasHfArtifacts: true, topicOnly: false,
+    startDate: '2026-09-01', endDate: '2026-09-30', topicOnly: false,
   });
 });
 
