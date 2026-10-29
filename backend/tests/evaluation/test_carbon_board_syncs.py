@@ -409,3 +409,20 @@ def test_sync_dry_run_rolls_back():
         [_entry("Opus 5.5 (xhigh)", 3.61), _entry("Sol 5.6 (xhigh)", 4.7)], commit=False
     )
     assert session.query(Evaluation).count() == 0
+
+
+def test_parse_vals_index_ignores_empty_tables():
+    html = _fixture("vals_index.html").replace("<body>", "<body><table></table>", 1)
+    assert len(boards.parse_vals_index(html)) == 29
+
+
+def test_riemann_fetch_sends_the_surge_browser_user_agent():
+    seen = {}
+
+    def handler(request):
+        seen["agent"] = request.headers["User-Agent"]
+        return httpx.Response(200, text=_fixture("riemann_bench.html"))
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert len(boards.BOARD_SYNCS["sync_riemann_bench"].fetch(client)) == 44
+    assert seen["agent"].startswith("Mozilla/5.0 (X11; Linux x86_64)")

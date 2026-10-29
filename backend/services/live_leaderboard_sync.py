@@ -167,15 +167,15 @@ USER_AGENT = (
 )
 
 
-def fetch_text(url: str, client: httpx.Client | None = None) -> str:
+def fetch_text(
+    url: str, client: httpx.Client | None = None, *, user_agent: str = USER_AGENT
+) -> str:
     owned_client = client is None
     active_client = client or httpx.Client(
-        timeout=httpx.Timeout(30, connect=5),
-        follow_redirects=True,
-        headers={"User-Agent": USER_AGENT},
+        timeout=httpx.Timeout(30, connect=5), follow_redirects=True
     )
     try:
-        response = active_client.get(url)
+        response = active_client.get(url, headers={"User-Agent": user_agent})
         response.raise_for_status()
         return response.text
     finally:

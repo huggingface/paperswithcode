@@ -19,7 +19,11 @@ import httpx
 from bs4 import BeautifulSoup
 
 from backend.services.carbon_board_identities import IDENTITIES
+from backend.services.surge_chartography_sync_service import (
+    USER_AGENT as SURGE_USER_AGENT,
+)
 from backend.services.live_leaderboard_sync import (
+    USER_AGENT,
     LeaderboardEntry,
     LiveLeaderboard,
     check_entry_count,
@@ -74,12 +78,14 @@ def parse_vals_index(html: str) -> list[LeaderboardEntry]:
     tables = []
     for table in BeautifulSoup(html, "html.parser").find_all("table"):
         rows = table.find_all("tr")
+        if not rows:
+            continue
         header = tuple(
             label
             for label in (_text(c) for c in rows[0].find_all(["th", "td"]))
             if label
         )
-        if rows and header[: len(VALS_HEADER)] == VALS_HEADER:
+        if header[: len(VALS_HEADER)] == VALS_HEADER:
             tables.append(rows)
     if len(tables) != 1:
         raise ValueError(f"Vals Index page has {len(tables)} ranked tables; expected 1")
@@ -406,8 +412,12 @@ class BoardSync:
     fetch: Callable[[httpx.Client | None], list[LeaderboardEntry]]
 
 
-def _fetching(url: str, parse: Callable[[str], list[LeaderboardEntry]]):
-    return lambda client=None: parse(fetch_text(url, client))
+def _fetching(
+    url: str,
+    parse: Callable[[str], list[LeaderboardEntry]],
+    user_agent: str = USER_AGENT,
+):
+    return lambda client=None: parse(fetch_text(url, client, user_agent=user_agent))
 
 
 BOARD_SYNCS: dict[str, BoardSync] = {
@@ -491,7 +501,8 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             },
             protocol="25 private research-level problems with programmatic answer checks; agents have coding tools and web search.",
         ),
-        _fetching(RIEMANN_BENCH_URL, parse_riemann_bench),
+        # Surge's Webflow host rejects non-browser user agents.
+        _fetching(RIEMANN_BENCH_URL, parse_riemann_bench, SURGE_USER_AGENT),
     ),
     "sync_cwe_bench": BoardSync(
         LiveLeaderboard(
