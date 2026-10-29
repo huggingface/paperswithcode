@@ -1,0 +1,147 @@
+<html><head><script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Dataset",
+    "name": "CWE-bench",
+    "alternateName": "CWE Bench",
+    "url": "https://cwe-bench.com/",
+    "description": "CWE-bench is a defensive cybersecurity benchmark. It measures whether coding agents can find and fix real vulnerabilities in real codebases. Results are reported on a held-out set of 120 audit-and-patch tasks across 73 distinct CWEs, each graded on whether the exploit is closed and existing behavior still works.",
+    "creator": {
+      "@type": "Organization",
+      "name": "Collinear AI",
+      "url": "https://collinear.ai",
+      "sameAs": ["https://x.com/collinearAI", "https://www.linkedin.com/company/collinearai/"]
+    },
+    "contributor": { "@type": "Organization", "name": "Artificial Analysis", "url": "https://artificialanalysis.ai" },
+    "publisher": { "@type": "Organization", "name": "Collinear AI", "url": "https://collinear.ai" },
+    "citation": {
+      "@type": "ScholarlyArticle",
+      "name": "CWE-bench: Refocusing Agentic Security from Exploitation to Defense",
+      "url": "https://arxiv.org/abs/2610.17020",
+      "datePublished": "2026-10-12",
+      "author": [
+        { "@type": "Person", "name": "Gonzalo Gonzalez-Pumariega" },
+        { "@type": "Person", "name": "Ajay Jagannath" },
+        { "@type": "Person", "name": "Adit Jain" },
+        { "@type": "Person", "name": "Guram Gogia" },
+        { "@type": "Person", "name": "Soumyadeep Bakshi" },
+        { "@type": "Person", "name": "Nazneen Rajani" }
+      ]
+    },
+    "subjectOf": [
+      { "@type": "BlogPosting", "headline": "CWE-bench v1: Defense Is the Harder Test", "url": "https://blog.collinear.ai/p/cwe-bench-v1", "datePublished": "2026-09-28", "publisher": { "@type": "Organization", "name": "Collinear AI", "url": "https://collinear.ai" } },
+      { "@type": "BlogPosting", "headline": "CWE-bench: Measuring Coding Agent Capabilities on Every Class of Known Vulnerability", "url": "https://blog.collinear.ai/p/cwe-bench", "datePublished": "2026-09-02", "publisher": { "@type": "Organization", "name": "Collinear AI", "url": "https://collinear.ai" } }
+    ],
+    "version": "v1 (2026-10-28)",
+    "datePublished": "2026-08-04",
+    "dateModified": "2026-10-28",
+    "isAccessibleForFree": false,
+    "measurementTechnique": "Automated audit-and-patch task graded by a deterministic programmatic verifier (the exploit must no longer work and every pre-existing test must pass), with a three-judge agentic panel that inspects the patched repository reported alongside.",
+    "variableMeasured": {
+      "@type": "PropertyValue",
+      "name": "pass@1",
+      "description": "Share of held-out tasks a model solves on the first attempt under the deterministic programmatic verifier."
+    },
+    "keywords": ["cybersecurity benchmark", "CWE", "vulnerability detection", "audit-and-patch", "coding agents", "LLM evaluation", "defensive security"]
+  }
+  </script><script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "name": "CWE-bench v1 leaderboard",
+    "description": "Twelve models ranked by programmatic pass@1 on the 120 held-out tasks, four rollouts per task at high reasoning, rounded to the nearest point. Models a point or two apart are effectively tied.",
+    "url": "https://cwe-bench.com/#leaderboard",
+    "itemListOrder": "https://schema.org/ItemListOrderDescending",
+    "numberOfItems": 12,
+    "itemListElement": [
+      {
+        "@type": "ListItem",
+        "position": 1,
+        "name": "Gemini 4 Carbon",
+        "description": "Programmatic pass@1 71%, pass@4 81%. Judge-panel pass@1 71%, pass@4 83%. No cost figure yet, run in Antigravity."
+      },
+      {
+        "@type": "ListItem",
+        "position": 2,
+        "name": "Grok 4.7",
+        "description": "Programmatic pass@1 68%, pass@4 81%. Judge-panel pass@1 64%, pass@4 82%. Average cost $2.75 per rollout, run in opencode."
+      },
+      {
+        "@type": "ListItem",
+        "position": 3,
+        "name": "Gemini 4 Argon",
+        "description": "Programmatic pass@1 68%, pass@4 75%. Judge-panel pass@1 62%, pass@4 73%. Average cost $6.63 per rollout, run in Antigravity."
+      },
+      {
+        "@type": "ListItem",
+        "position": 4,
+        "name": "GPT-6 Astra",
+        "description": "Programmatic pass@1 68%, pass@4 74%. Judge-panel pass@1 66%, pass@4 77%. Average cost $2.85 per rollout, run in Codex."
+      },
+      {
+        "@type": "ListItem",
+        "position": 5,
+        "name": "Claude Opus 5.5",
+        "description": "Programmatic pass@1 67%, pass@4 79%. Judge-panel pass@1 67%, pass@4 81%. Average cost $0.79 per rollout, run in Claude Code."
+      },
+      {
+        "@type": "ListItem",
+        "position": 6,
+        "name": "Claude Fable 5.1",
+        "description": "Programmatic pass@1 58%, pass@4 73%. Judge-panel pass@1 60%, pass@4 77%. Average cost $3.47 per rollout, run in Claude Code."
+      },
+      {
+        "@type": "ListItem",
+        "position": 7,
+        "name": "Grok 4.6",
+        "description": "Programmatic pass@1 57%, pass@4 72%. Judge-panel pass@1 55%, pass@4 73%. Average cost $1.09 per rollout, run in opencode."
+      },
+      {
+        "@type": "ListItem",
+        "position": 8,
+        "name": "DeepSeek-V4.1-Flash",
+        "description": "Programmatic pass@1 55%, pass@4 74%. Judge-panel pass@1 53%, pass@4 75%. Average cost $0.09 per rollout, run in opencode."
+      },
+      {
+        "@type": "ListItem",
+        "position": 9,
+        "name": "Muse Spark 1.3",
+        "description": "Programmatic pass@1 55%, pass@4 69%. Judge-panel pass@1 51%, pass@4 68%. Average cost $3.95 per rollout, run in opencode."
+      },
+      {
+        "@type": "ListItem",
+        "position": 10,
+        "name": "Hy4 Preview",
+        "description": "Programmatic pass@1 53%, pass@4 75%. Judge-panel pass@1 50%, pass@4 73%. Average cost $0.47 per rollout, run in opencode."
+      },
+      {
+        "@type": "ListItem",
+        "position": 11,
+        "name": "GPT-6 Sol",
+        "description": "Programmatic pass@1 52%, pass@4 68%. Judge-panel pass@1 52%, pass@4 72%. Average cost $0.96 per rollout, run in Codex."
+      },
+      {
+        "@type": "ListItem",
+        "position": 12,
+        "name": "Inkling",
+        "description": "Programmatic pass@1 37%, pass@4 not reported. Judge-panel pass@1 33%, pass@4 not reported. Average cost $3.00 per rollout, run in opencode."
+      }
+    ]
+  }
+  </script><script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      { "@type": "Question", "name": "What is CWE-bench?", "acceptedAnswer": { "@type": "Answer", "text": "CWE-bench is a defensive cybersecurity benchmark from Collinear AI. It gives a coding agent a checkout of a real open-source repository and one instruction, audit the code and fix what you find. Results on a held-out set of 120 tasks across 73 CWEs were independently evaluated and published by Artificial Analysis." } },
+      { "@type": "Question", "name": "How well do AI coding agents do at finding and fixing vulnerabilities?", "acceptedAnswer": { "@type": "Answer", "text": "Not well yet. On CWE-bench v1 the best model solves 71% of tasks at pass@1, and 5 of the 120 tasks are unsolved by every model tested. Every model still fails more than a quarter of its attempts, which is the gap Collinear’s training data is built to close." } },
+      { "@type": "Question", "name": "How are agents graded on CWE-bench?", "acceptedAnswer": { "@type": "Answer", "text": "By a deterministic programmatic verifier: a proof-of-concept exploit must no longer work and every pre-existing test must still pass, with no partial credit. v1 adds a panel of three independent LLM judges from different model families; each gets a shell in a fresh copy of the patched repository, checks the fix against a fixed checklist, and passes it only if every item holds. The majority verdict of the panel is reported beside the programmatic score, not in place of it." } },
+      { "@type": "Question", "name": "Who evaluated and published the CWE-bench results?", "acceptedAnswer": { "@type": "Answer", "text": "Artificial Analysis independently evaluated and published the results. The held-out evaluation set is private to Collinear and Artificial Analysis and is not available to any external organization, which keeps the benchmark uncontaminated." } },
+      { "@type": "Question", "name": "How can I improve a coding agent’s security performance?", "acceptedAnswer": { "@type": "Answer", "text": "Collinear AI offers a 4,000+ task training corpus of real audit-and-patch tasks, built to raise an agent’s ability to find and fully remediate vulnerabilities across larger repositories and multiple CWEs." } },
+      { "@type": "Question", "name": "Can I download the private evaluation set?", "acceptedAnswer": { "@type": "Answer", "text": "No. The 120-task held-out evaluation set is private to Collinear and Artificial Analysis and is not available to any external organization. Keeping it unreleased is what stops it being trained against, so the scores stay uncontaminated." } },
+      { "@type": "Question", "name": "Can I submit a model for evaluation?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. Collinear runs models against the held-out set and reports the deterministic pass@1 result with the judge-panel verdict alongside." } },
+      { "@type": "Question", "name": "Can I license the separate training corpus?", "acceptedAnswer": { "@type": "Answer", "text": "Yes. The 4,000+ task training corpus of real audit-and-patch tasks is available for teams building defensive-security capability, and evaluation tasks never appear in training deliveries." } },
+      { "@type": "Question", "name": "What is Collinear AI?", "acceptedAnswer": { "@type": "Answer", "text": "Collinear AI builds hard, verifiable RL environments and training data for frontier AI labs, spanning coding, computer use, and enterprise tool use. CWE-bench is its defensive-security benchmark. Learn more at collinear.ai." } }
+    ]
+  }
+  </script></head></html>

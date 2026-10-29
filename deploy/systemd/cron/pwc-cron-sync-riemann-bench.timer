@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync Riemann-Bench leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:23:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-riemann-bench.service
+
+[Install]
+WantedBy=timers.target

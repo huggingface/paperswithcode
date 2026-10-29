@@ -273,6 +273,41 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync FrontierCS 2 leaderboard hourly",
     ),
     TimerSpec(
+        job="sync_vals_index",
+        on_calendar=("*-*-* *:03:00",),
+        description="Sync Vals Index leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_swe_sweep",
+        on_calendar=("*-*-* *:08:00",),
+        description="Sync SWE-sweep leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_vending_bench_2",
+        on_calendar=("*-*-* *:13:00",),
+        description="Sync Vending-Bench 2 leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_blueprint_bench_2",
+        on_calendar=("*-*-* *:16:00",),
+        description="Sync Blueprint-Bench 2 leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_riemann_bench",
+        on_calendar=("*-*-* *:23:00",),
+        description="Sync Riemann-Bench leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_cwe_bench",
+        on_calendar=("*-*-* *:34:00",),
+        description="Sync CWE-bench leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_exploitgym",
+        on_calendar=("*-*-* *:46:00",),
+        description="Sync ExploitGym leaderboard hourly",
+    ),
+    TimerSpec(
         job="sync_physics_iq_verified",
         on_calendar=("*-*-* *:28:00",),
         description="Sync Physics-IQ Verified leaderboard hourly",

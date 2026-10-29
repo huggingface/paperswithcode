@@ -1,0 +1,49 @@
+name: Cron - Sync SWE-sweep
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: cron-sync-swe-sweep
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  run:
+    environment: vps-operations
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:pwc-ci
+      - name: Load SSH key into agent
+        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+      - name: Add VPS to known_hosts
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [ -z "$VPS_HOST" ] || [[ "$VPS_HOST" == *"://"* || "$VPS_HOST" == *"@"* || "$VPS_HOST" == *"/"* || "$VPS_HOST" =~ [[:space:]] ]]; then
+            echo "VPS_HOST must be a bare hostname or IP address."
+            exit 1
+          fi
+          timeout 10 bash -c "cat < /dev/null > /dev/tcp/$VPS_HOST/22"
+          ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Refresh SWE-sweep evaluations on VPS
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            'if sudo /usr/local/sbin/pwc-cron status | grep -q '\''"sync_swe_sweep"'\''; then sudo /usr/local/sbin/pwc-cron sync_swe_sweep; else echo "sync_swe_sweep is not activated in the production CRON allowlist"; fi'

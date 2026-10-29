@@ -1360,6 +1360,268 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_vals_index",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=3),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-vals-index.timer",
+        systemd_service="pwc-cron-sync-vals-index.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync Vals Index Leaderboard",
+        category="hourly",
+        schedule="3 * * * * (hourly)",
+        script_path="hourly/sync_vals_index.py",
+        log_name="sync_vals_index",
+        process_patterns=("scripts.hourly.sync_vals_index",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_vals_index.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'vals-index-v2-2'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Vals AI Vals Index live sync.%'
+        """,
+        workflow_file="cron-sync-vals-index.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_swe_sweep",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=8),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-swe-sweep.timer",
+        systemd_service="pwc-cron-sync-swe-sweep.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync SWE-sweep Leaderboard",
+        category="hourly",
+        schedule="8 * * * * (hourly)",
+        script_path="hourly/sync_swe_sweep.py",
+        log_name="sync_swe_sweep",
+        process_patterns=("scripts.hourly.sync_swe_sweep",),
+        lock_file=("/var/lib/paperswithcode/production/cron-locks/sync_swe_sweep.lock"),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'swe-sweep'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code SWE-sweep live sync.%'
+        """,
+        workflow_file="cron-sync-swe-sweep.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_vending_bench_2",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=13),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-vending-bench-2.timer",
+        systemd_service="pwc-cron-sync-vending-bench-2.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync Vending-Bench 2 Leaderboard",
+        category="hourly",
+        schedule="13 * * * * (hourly)",
+        script_path="hourly/sync_vending_bench_2.py",
+        log_name="sync_vending_bench_2",
+        process_patterns=("scripts.hourly.sync_vending_bench_2",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_vending_bench_2.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'vending-bench-2'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Andon Labs Vending-Bench 2 live sync.%'
+        """,
+        workflow_file="cron-sync-vending-bench-2.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_blueprint_bench_2",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=16),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-blueprint-bench-2.timer",
+        systemd_service="pwc-cron-sync-blueprint-bench-2.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync Blueprint-Bench 2 Leaderboard",
+        category="hourly",
+        schedule="16 * * * * (hourly)",
+        script_path="hourly/sync_blueprint_bench_2.py",
+        log_name="sync_blueprint_bench_2",
+        process_patterns=("scripts.hourly.sync_blueprint_bench_2",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_blueprint_bench_2.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'blueprint-bench-2'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Andon Labs Blueprint-Bench 2 live sync.%'
+        """,
+        workflow_file="cron-sync-blueprint-bench-2.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_riemann_bench",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=23),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-riemann-bench.timer",
+        systemd_service="pwc-cron-sync-riemann-bench.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync Riemann-Bench Leaderboard",
+        category="hourly",
+        schedule="23 * * * * (hourly)",
+        script_path="hourly/sync_riemann_bench.py",
+        log_name="sync_riemann_bench",
+        process_patterns=("scripts.hourly.sync_riemann_bench",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_riemann_bench.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'riemann-bench'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Surge AI Riemann-Bench live sync.%'
+        """,
+        workflow_file="cron-sync-riemann-bench.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_cwe_bench",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=34),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-cwe-bench.timer",
+        systemd_service="pwc-cron-sync-cwe-bench.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync CWE-bench Leaderboard",
+        category="hourly",
+        schedule="34 * * * * (hourly)",
+        script_path="hourly/sync_cwe_bench.py",
+        log_name="sync_cwe_bench",
+        process_patterns=("scripts.hourly.sync_cwe_bench",),
+        lock_file=("/var/lib/paperswithcode/production/cron-locks/sync_cwe_bench.lock"),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'cwe-bench-v1'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Collinear AI CWE-bench live sync.%'
+        """,
+        workflow_file="cron-sync-cwe-bench.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_exploitgym",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=46),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-exploitgym.timer",
+        systemd_service="pwc-cron-sync-exploitgym.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync ExploitGym Leaderboard",
+        category="hourly",
+        schedule="46 * * * * (hourly)",
+        script_path="hourly/sync_exploitgym.py",
+        log_name="sync_exploitgym",
+        process_patterns=("scripts.hourly.sync_exploitgym",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_exploitgym.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'exploitgym'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code ExploitGym live sync.%'
+        """,
+        workflow_file="cron-sync-exploitgym.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_frontiercode",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=45),),

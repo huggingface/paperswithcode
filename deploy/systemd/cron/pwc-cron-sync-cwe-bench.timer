@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync CWE-bench leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:34:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-cwe-bench.service
+
+[Install]
+WantedBy=timers.target

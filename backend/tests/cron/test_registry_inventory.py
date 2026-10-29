@@ -27,8 +27,8 @@ def test_registry_covers_workflows_systemd_and_allowlist_exactly():
     summary = _dashboard_job_summary(
         [{"category": job.category, "status": "healthy"} for job in jobs]
     )
-    assert summary["total_jobs"] == 65
-    assert summary["scheduled_jobs"] == 64
+    assert summary["total_jobs"] == 72
+    assert summary["scheduled_jobs"] == 71
     assert summary["manual_jobs"] == 1
     assert len(by_id) == len(jobs), "duplicate dashboard job IDs"
 
@@ -123,6 +123,13 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "sync_vals_finance_agent" in job_ids
     assert "sync_surge_chartography" in job_ids
     assert "sync_frontiercs_2" in job_ids
+    assert "sync_vals_index" in job_ids
+    assert "sync_swe_sweep" in job_ids
+    assert "sync_vending_bench_2" in job_ids
+    assert "sync_blueprint_bench_2" in job_ids
+    assert "sync_riemann_bench" in job_ids
+    assert "sync_cwe_bench" in job_ids
+    assert "sync_exploitgym" in job_ids
     assert "sync_coarena" in job_ids
     assert "sync_arc_prize" in job_ids
     assert "calculate_organization_trending_scores" in job_ids
@@ -183,6 +190,13 @@ def test_registry_classifies_only_recurring_leaderboard_syncs():
         "sync_vals_finance_agent",
         "sync_surge_chartography",
         "sync_frontiercs_2",
+        "sync_vals_index",
+        "sync_swe_sweep",
+        "sync_vending_bench_2",
+        "sync_blueprint_bench_2",
+        "sync_riemann_bench",
+        "sync_cwe_bench",
+        "sync_exploitgym",
         "sync_coarena",
         "sync_arc_prize",
     }

@@ -452,6 +452,69 @@ COMMANDS: dict[str, Job] = {
             "validated frontier-cs.org leaderboard data; never creates papers"
         ),
     ),
+    "sync_vals_index": job(
+        "-m",
+        "scripts.hourly.sync_vals_index",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Vals Index evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
+    "sync_swe_sweep": job(
+        "-m",
+        "scripts.hourly.sync_swe_sweep",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed SWE-sweep evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
+    "sync_vending_bench_2": job(
+        "-m",
+        "scripts.hourly.sync_vending_bench_2",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Vending-Bench 2 evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
+    "sync_blueprint_bench_2": job(
+        "-m",
+        "scripts.hourly.sync_blueprint_bench_2",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Blueprint-Bench 2 evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
+    "sync_riemann_bench": job(
+        "-m",
+        "scripts.hourly.sync_riemann_bench",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Riemann-Bench evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
+    "sync_cwe_bench": job(
+        "-m",
+        "scripts.hourly.sync_cwe_bench",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed CWE-bench evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
+    "sync_exploitgym": job(
+        "-m",
+        "scripts.hourly.sync_exploitgym",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed ExploitGym evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
     "sync_physics_iq_verified": job(
         "-m",
         "scripts.hourly.sync_physics_iq_verified",

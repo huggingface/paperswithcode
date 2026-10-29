@@ -1,0 +1,327 @@
+<html><body><script>
+(function() {
+  var results = [{"model": "Astra 6", "provider": "OpenAI", "logo": "openai.svg", "slug": "astra-max", "score": 0.09482758620689655, "cost": 34.99693487096774, "calls": 113, "tokens": 119525, "rank": 1}, {"model": "Sol 5.6 (xhigh)", "provider": "OpenAI", "logo": "openai.svg", "slug": "sol-5-6-xhigh", "score": 0.04695181907571288, "cost": 72.304469203, "calls": 233, "tokens": 104813, "rank": 2}, {"model": "Opus 5.5 (xhigh)", "provider": "Anthropic", "logo": "anthropic.svg", "slug": "opus-5-5-xhigh", "score": 0.036135693215339236, "cost": 21.984560126, "calls": 266, "tokens": 112726, "rank": 3}, {"model": "Fable 5.1", "provider": "Anthropic", "logo": "anthropic.svg", "slug": "fable-max", "score": 0.028515240904621434, "cost": 39.0435832325, "calls": 319, "tokens": 165003, "rank": 4}, {"model": "Luna 5.6 (xhigh)", "provider": "OpenAI", "logo": "openai.svg", "slug": "luna-5-6-xhigh", "score": 0.025319567354965586, "cost": 2.2431862192, "calls": 204, "tokens": 61211, "rank": 5}, {"model": "Terra 5.6 (xhigh)", "provider": "OpenAI", "logo": "openai.svg", "slug": "terra-5-6-xhigh", "score": 0.015486725663716814, "cost": 3.568654226, "calls": 76, "tokens": 46647, "rank": 6}, {"model": "Luna 5.6 (high)", "provider": "OpenAI", "logo": "openai.svg", "slug": "luna-5-6-high", "score": 0.014011799410029498, "cost": 0.27752809219999997, "calls": 75, "tokens": 20288, "rank": 7}, {"model": "Opus 5 (xhigh)", "provider": "Anthropic", "logo": "anthropic.svg", "slug": "opus-5-xhigh", "score": 0.012782694198623401, "cost": 53.628184794999996, "calls": 323, "tokens": 192749, "rank": 8}, {"model": "Kimi K3", "provider": "Moonshot AI", "logo": "moonshot-ai.jpg", "slug": "kimi-k3", "score": 0.005653883972468043, "cost": 24.506396546999998, "calls": 337, "tokens": 152613, "rank": 9}, {"model": "Luna 5.6", "provider": "OpenAI", "logo": "openai.svg", "slug": "luna-5-6", "score": 0.005162241887905605, "cost": 0.0387404382, "calls": 22, "tokens": 4466, "rank": 10}, {"model": "GPT-5.4 Mini (high)", "provider": "OpenAI", "logo": "openai.svg", "slug": "gpt-5-4-mini-high", "score": 0.004916420845624385, "cost": 1.223727219, "calls": 75, "tokens": 40513, "rank": 11}, {"model": "GPT-5.4 Mini", "provider": "OpenAI", "logo": "openai.svg", "slug": "gpt-5-4-mini", "score": 0.0019665683382497543, "cost": 0.052583583, "calls": 13, "tokens": 2147, "rank": 12}, {"model": "Gemini 3.5 Flash Lite", "provider": "Google", "logo": "google.svg", "slug": "gemini-3-5-flash-lite", "score": 0.0012291052114060963, "cost": 0.06351498900000001, "calls": 34, "tokens": 5228, "rank": 13}];
+  // Only points with a numeric score can be plotted.
+  var points = results
+    .map(function(r, i) { return { r: r, idx: i }; })
+    .filter(function(p) { return p.r.score != null; });
+
+  var PROVIDER_COLORS = {'OpenAI': '#ff5a0a', 'Anthropic': '#154aa8', 'Google': '#f59e0b'};
+  function colorFor(provider) { return PROVIDER_COLORS[provider] || '#154aa8'; }
+
+  // Organization filter: null = show all; otherwise an object {providerName: true}.
+  var allowedProviders = null;
+  function providerOk(r) { return !allowedProviders || allowedProviders[r.provider]; }
+
+  var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  var gridColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
+  var textColor = isDark ? '#b0b8c4' : '#4a5568';
+  var frontierColor = isDark ? '#8d96a3' : '#8492a6';
+
+  var xMode = 'cost'; // 'cost' | 'calls' | 'tokens' | 'date'
+  var resourceScope = "per repository";
+  var AXIS_TITLE = {
+    cost: 'Cost (USD' + (resourceScope ? ' ' + resourceScope : '') + ')',
+    calls: 'Turns' + (resourceScope ? ' ' + resourceScope : ''),
+    tokens: 'Tokens' + (resourceScope ? ' ' + resourceScope : '')
+  };
+  function xVal(r) {
+    if (xMode === 'cost') return r.cost;
+    if (xMode === 'calls') return r.calls;
+    if (xMode === 'tokens') return r.tokens;
+    return r.date;
+  }
+  // A point is plottable on the current axis only if it has a value for that metric
+  // (e.g. entries with no token data are dropped from the tokens view).
+  function xValid(r) { var v = xVal(r); return v != null && !isNaN(v); }
+
+  function fmtDate(ms) {
+    var d = new Date(ms);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  }
+  function fmtDateShort(ms) {
+    var d = new Date(ms);
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  }
+  function fmtCostTick(value) {
+    // Chart.js tick arithmetic can produce values such as 1.2000000000000002.
+    // Round to cents, then coerce back to a number to omit unnecessary zeroes.
+    return '$' + Number(Number(value).toFixed(2)).toLocaleString();
+  }
+
+  // Pareto frontier: maximize score (y), minimize x. A point is on the
+  // frontier if no other point has x <= this.x and y >= this.y (strict once).
+  function frontier() {
+    var sorted = points.filter(function(p) { return xValid(p.r) && providerOk(p.r); }).sort(function(a, b) {
+      var dx = xVal(a.r) - xVal(b.r);
+      return dx !== 0 ? dx : b.r.score - a.r.score;
+    });
+    var out = [], bestY = -Infinity;
+    sorted.forEach(function(p) {
+      if (p.r.score > bestY) { out.push(p); bestY = p.r.score; }
+    });
+    return out.map(function(p) { return { x: xVal(p.r), y: p.r.score * 100 }; });
+  }
+
+  function scatterData() {
+    return points.filter(function(p) { return xValid(p.r) && providerOk(p.r); }).map(function(p) {
+      return { x: xVal(p.r), y: p.r.score * 100, _idx: p.idx, _p: p.r };
+    });
+  }
+
+  var baseRadius = 13, hoverRadius = 16;
+  var highlightIdx = null;
+  var chips = {}; // provider -> {normal, large} logo markers, built async once logos load
+
+  // Draws crisp, high-DPI logo chips on top of (invisible) scatter points.
+  // Rendering here rather than via pointStyle lets us blit device-resolution
+  // canvases 1:1, avoiding the blur from Chart.js upscaling a small marker.
+  var chipPlugin = {
+    id: 'logoChips',
+    afterDatasetsDraw: function(chartInstance) {
+      var meta = chartInstance.getDatasetMeta(1);
+      if (!meta || meta.hidden) return;
+      var ctx = chartInstance.ctx;
+      var data = chartInstance.data.datasets[1].data;
+      var area = chartInstance.chartArea;
+      meta.data.forEach(function(pt, i) {
+        var raw = data[i];
+        if (!raw || !raw._p || pt.skip) return;
+        if (pt.x < area.left - 20 || pt.x > area.right + 20) return;
+        var big = raw._idx === highlightIdx;
+        var s = big ? hoverRadius * 2 : baseRadius * 2;
+        var chip = chips[raw._p.provider];
+        if (chip) {
+          ctx.drawImage(big ? chip.large : chip.normal, pt.x - s / 2, pt.y - s / 2, s, s);
+        } else {
+          // Fallback until logos load: provider-colored rounded square.
+          ctx.save();
+          roundRect(ctx, pt.x - s / 2, pt.y - s / 2, s, s, s * 0.22);
+          ctx.fillStyle = colorFor(raw._p.provider);
+          ctx.fill();
+          ctx.restore();
+        }
+      });
+    }
+  };
+
+  var canvas = document.getElementById('scatterChart');
+  var chart = new Chart(canvas, {
+    plugins: [chipPlugin],
+    data: {
+      datasets: [
+        {
+          type: 'line',
+          label: 'Pareto frontier',
+          data: frontier(),
+          borderColor: frontierColor,
+          borderWidth: 1.5,
+          borderDash: [5, 4],
+          pointRadius: 0,
+          pointHitRadius: 0,
+          fill: false,
+          tension: 0,
+          order: 2
+        },
+        {
+          type: 'scatter',
+          label: 'Models',
+          data: scatterData(),
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          pointHitRadius: baseRadius,
+          order: 1
+        }
+      ]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'nearest', intersect: true },
+      onClick: function(e, els) {
+        if (els.length) {
+          var d = chart.data.datasets[els[0].datasetIndex].data[els[0].index];
+          if (d && d._p) window.location = '/model/' + d._p.slug + '/';
+        }
+      },
+      onHover: function(e, els) {
+        var idx = null;
+        for (var i = 0; i < els.length; i++) {
+          var d = chart.data.datasets[els[i].datasetIndex].data[els[i].index];
+          if (d && d._idx != null) { idx = d._idx; break; }
+        }
+        setHighlight(idx);
+        canvas.style.cursor = idx != null ? 'pointer' : 'default';
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: isDark ? '#1a2233' : '#ffffff',
+          titleColor: isDark ? '#e4e8ee' : '#1a202c',
+          bodyColor: isDark ? '#b0b8c4' : '#4a5568',
+          borderColor: isDark ? '#1f2937' : '#dfe2e8',
+          borderWidth: 1,
+          padding: 12,
+          titleFont: { family: "'Inter', sans-serif", weight: 600, size: 13 },
+          bodyFont: { family: "'JetBrains Mono', monospace", size: 12 },
+          displayColors: false,
+          filter: function(item) { return item.raw && item.raw._p; },
+          callbacks: {
+            title: function(items) { return items[0].raw._p.model; },
+            label: function(ctx) {
+              var r = ctx.raw._p;
+              var lines = [
+                r.provider,
+                'Bugs resolved: ' + (r.score * 100).toFixed(1) + '%',
+                'Cost: $' + r.cost.toFixed(2),
+                'Turns: ' + r.calls.toLocaleString()
+              ];
+              if (r.tokens != null) lines.push('Output tokens: ' + r.tokens.toLocaleString());
+              return lines;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          title: { display: true, text: AXIS_TITLE.cost, color: textColor, font: { family: "'Inter', sans-serif", size: 13, weight: 600 } },
+          ticks: { color: textColor, font: { family: "'JetBrains Mono', monospace", size: 11 }, maxTicksLimit: 8, callback: function(v) { return xMode === 'cost' ? fmtCostTick(v) : (xMode === 'date' ? fmtDateShort(v) : v.toLocaleString()); } },
+          grid: { color: gridColor }
+        },
+        y: {
+          title: { display: true, text: '% Bugs Resolved', color: textColor, font: { family: "'Inter', sans-serif", size: 13, weight: 600 } },
+          min: 0,
+          ticks: { color: textColor, font: { family: "'JetBrains Mono', monospace", size: 11 }, callback: function(v) { return v + '%'; } },
+          grid: { color: gridColor }
+        }
+      }
+    }
+  });
+
+  /* ── Provider-logo point markers ──
+     Each point is a rounded white chip (visible in both themes) with a
+     provider-colored border and the provider logo centered inside. Built on a
+     canvas and used as Chart.js pointStyle. */
+  function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // Render the chip at device-pixel resolution so blitting it at `size` CSS px
+  // (into Chart's already-dpr-scaled context) stays crisp on retina displays.
+  var CHIP_RES = Math.max(2, Math.ceil(window.devicePixelRatio || 1));
+  function drawChip(provider, img, size) {
+    var c = document.createElement('canvas');
+    c.width = size * CHIP_RES;
+    c.height = size * CHIP_RES;
+    var ctx = c.getContext('2d');
+    ctx.scale(CHIP_RES, CHIP_RES);
+    var inset = 1;
+    roundRect(ctx, inset, inset, size - inset * 2, size - inset * 2, Math.round(size * 0.22));
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.lineWidth = 1.75;
+    ctx.strokeStyle = colorFor(provider);
+    ctx.stroke();
+    if (img && img.complete && (img.naturalWidth || 0) > 0) {
+      var box = size * 0.56;
+      var iw = img.naturalWidth || box, ih = img.naturalHeight || box;
+      var scale = Math.min(box / iw, box / ih);
+      var w = iw * scale, h = ih * scale;
+      ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+    }
+    return c;
+  }
+
+  var logoByProvider = {};
+  results.forEach(function(r) { if (r.logo) logoByProvider[r.provider] = r.logo; });
+  var providers = Object.keys(logoByProvider);
+  if (providers.length) {
+    var pending = providers.length;
+    providers.forEach(function(p) {
+      var img = new Image();
+      img.onload = img.onerror = function() {
+        chips[p] = { normal: drawChip(p, img, 26), large: drawChip(p, img, 32) };
+        if (--pending === 0) chart.update('none');
+      };
+      img.src = '/static/images/' + logoByProvider[p];
+    });
+  }
+
+  var sideItems = Array.prototype.slice.call(document.querySelectorAll('.scatter-side-item'));
+
+  function setHighlight(idx) {
+    if (idx === highlightIdx) return;
+    highlightIdx = idx;
+    sideItems.forEach(function(el) {
+      el.classList.toggle('active', parseInt(el.dataset.idx, 10) === idx);
+    });
+    chart.update('none');
+  }
+
+  // Hovering a side item highlights its point (only if it's plotted).
+  var plottable = {};
+  points.forEach(function(p) { plottable[p.idx] = true; });
+  sideItems.forEach(function(el) {
+    var idx = parseInt(el.dataset.idx, 10);
+    el.addEventListener('mouseenter', function() { if (plottable[idx]) setHighlight(idx); });
+    el.addEventListener('mouseleave', function() { setHighlight(null); });
+  });
+  canvas.addEventListener('mouseleave', function() { setHighlight(null); });
+
+  var METRIC_WORD = { cost: 'per cost', calls: 'per turn', tokens: 'per token' };
+  var SIDE_LABEL = { cost: 'Cost', calls: 'Turns', tokens: 'Tokens' };
+
+  function refresh() {
+    chart.data.datasets[0].data = frontier();
+    chart.data.datasets[1].data = scatterData();
+    chart.options.scales.x.title.text = AXIS_TITLE[xMode];
+    chart.update('none');
+    document.getElementById('scatterMetricWord').textContent = METRIC_WORD[xMode];
+    document.getElementById('scatterSideMetric').textContent = SIDE_LABEL[xMode];
+    sideItems.forEach(function(el) {
+      var x = el.querySelector('.scatter-side-x');
+      x.textContent = xMode === 'cost' ? x.dataset.cost : (xMode === 'calls' ? x.dataset.calls : x.dataset.tokens);
+    });
+  }
+
+  document.querySelectorAll('#scatterToggle .scatter-toggle-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      document.querySelectorAll('#scatterToggle .scatter-toggle-btn').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      xMode = btn.dataset.x;
+      refresh();
+    });
+  });
+
+  // Exposed so the org-filter control (in index/extended) can restrict the chart.
+  // Pass an array of allowed provider names, or null to show all.
+  window.__pbScatterFilter = function(allowedList) {
+    allowedProviders = null;
+    if (allowedList) { allowedProviders = {}; allowedList.forEach(function(p) { allowedProviders[p] = true; }); }
+    var rank = 0;
+    sideItems.forEach(function(el) {
+      var ok = !allowedProviders || allowedProviders[el.dataset.provider];
+      el.style.display = ok ? '' : 'none';
+      if (ok) {
+        rank += 1;
+        var r = el.querySelector('.scatter-side-rank');
+        if (r) {
+          r.textContent = rank;
+          r.classList.remove('rank-1', 'rank-2', 'rank-3');
+          if (rank <= 3) r.classList.add('rank-' + rank);
+        }
+      }
+    });
+    setHighlight(null);
+    refresh();
+  };
+})();
+</script></body></html>

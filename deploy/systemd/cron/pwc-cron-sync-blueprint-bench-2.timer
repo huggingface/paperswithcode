@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync Blueprint-Bench 2 leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:16:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-blueprint-bench-2.service
+
+[Install]
+WantedBy=timers.target

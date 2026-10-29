@@ -139,6 +139,41 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `frontiercs-2` on task `coding-agents`; Pass Rate (%) 0–100 (best metric) and FCI (unbounded, Kimi K2.7 = 0); the `MODELS`/`PASS`/`ECI` constants in https://frontier-cs.org/assets/js/fcs2-data.js behind https://frontier-cs.org/#leaderboard; typically 8–200 entries, one per model and harness (14 on 2026-10-26, all reviewed).
 - **Proof:** Diff the data file against managed rows (model, harness, pass rate, FCI); confirm `frontiercs_2_unreviewed` names get an identity (index the model's paper first), `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on Pass Rate.
 
+## `sync_vals_index`
+
+- **Contract:** `vals-index-v2-2` on task `agents`; Accuracy (%) 0–100; the single ranked table at https://www.vals.ai/benchmarks/vals_index; typically 15–400 rows (29 on 2026-10-29).
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_vals_index_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+
+## `sync_swe_sweep`
+
+- **Contract:** `swe-sweep` on task `coding-agents`; Resolved (%) 0–100 from the site's 0–1 score, harness mini-SWE-agent; the inline results array behind https://swesweep.com/; typically 5–200 rows (13 on 2026-10-29, `Astra 6` excluded as a partial run).
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_swe_sweep_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+
+## `sync_vending_bench_2`
+
+- **Contract:** `vending-bench-2` on task `long-horizon-agents`; Bank Balance ($) unbounded (mean final balance); `runs.vb2[*].final_value` in the hashed SvelteKit data chunk imported by https://andonlabs.com/evals/vending-bench-2 (the page table shows only the top 10); typically 20–400 models (73 on 2026-10-29).
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_vending_bench_2_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+
+## `sync_blueprint_bench_2`
+
+- **Contract:** `blueprint-bench-2` on task `spatial-understanding`; Similarity Score 0–1 (random = 0); the score table at https://andonlabs.com/evals/blueprint-bench-2, skipping `Human*` and `0.000**` floor rows; typically 10–300 rows (30 on 2026-10-29).
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_blueprint_bench_2_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+
+## `sync_riemann_bench`
+
+- **Contract:** `riemann-bench` on task `math`; Pass@1 0–1 from the visible percentage; the "Riemann-bench Leaderboard" block at https://surgehq.ai/benchmarks/riemann-bench (Chartography layout, empty `data-score`); typically 15–400 rows (44 on 2026-10-29).
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_riemann_bench_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+
+## `sync_cwe_bench`
+
+- **Contract:** `cwe-bench-v1` on task `cybersecurity`; Pass@1 0–1 (programmatic verifier), harness from "run in …"; the `CWE-bench v1 leaderboard` JSON-LD ItemList on https://cwe-bench.com/; typically 5–200 items (12 on 2026-10-29).
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_cwe_bench_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+
+## `sync_exploitgym`
+
+- **Contract:** `exploitgym` on task `cybersecurity`; Success Rate (%) 0–100 = on_target / instances.total, harness from `agent`; https://www.cybergym.io/assets/data/exploitgym.json, keeping only full-set `6h timeout` / `rescaled 6h timeout` rows (v1 or unversioned); typically 4–200 rows (9 on 2026-10-29).
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_exploitgym_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+
 ## `sync_physics_iq_verified`
 
 - **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.

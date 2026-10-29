@@ -52,6 +52,13 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-vals-finance-agent.timer` | `*-*-* *:47:00` | `sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
 | `pwc-cron-sync-surge-chartography.timer` | `*-*-* *:38:00` | `sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
 | `pwc-cron-sync-frontiercs-2.timer` | `*-*-* *:43:00` | `sync_frontiercs_2` | `.github/workflows/scripts/hourly/sync_frontiercs_2.py` |
+| `pwc-cron-sync-vals-index.timer` | `*-*-* *:03:00` | `sync_vals_index` | `.github/workflows/scripts/hourly/sync_vals_index.py` |
+| `pwc-cron-sync-swe-sweep.timer` | `*-*-* *:08:00` | `sync_swe_sweep` | `.github/workflows/scripts/hourly/sync_swe_sweep.py` |
+| `pwc-cron-sync-vending-bench-2.timer` | `*-*-* *:13:00` | `sync_vending_bench_2` | `.github/workflows/scripts/hourly/sync_vending_bench_2.py` |
+| `pwc-cron-sync-blueprint-bench-2.timer` | `*-*-* *:16:00` | `sync_blueprint_bench_2` | `.github/workflows/scripts/hourly/sync_blueprint_bench_2.py` |
+| `pwc-cron-sync-riemann-bench.timer` | `*-*-* *:23:00` | `sync_riemann_bench` | `.github/workflows/scripts/hourly/sync_riemann_bench.py` |
+| `pwc-cron-sync-cwe-bench.timer` | `*-*-* *:34:00` | `sync_cwe_bench` | `.github/workflows/scripts/hourly/sync_cwe_bench.py` |
+| `pwc-cron-sync-exploitgym.timer` | `*-*-* *:46:00` | `sync_exploitgym` | `.github/workflows/scripts/hourly/sync_exploitgym.py` |
 | `pwc-cron-sync-physics-iq-verified.timer` | `*-*-* *:28:00` | `sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
 | `pwc-cron-sync-artificial-analysis.timer` | `*-*-* 00/2:35:00` | `sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
 | `pwc-cron-sync-mmteb-reranking.timer` | `*-*-* *:37:00` | `sync_mmteb_reranking` | `.github/workflows/scripts/hourly/sync_mmteb.py` reranking |
@@ -394,6 +401,20 @@ harness (Gemini 4 Argon in Pi and Antigravity). The job never creates papers,
 so unreviewed names and unresolved papers are logged as warnings. It creates
 missing mapped rows and rewrites managed rows' scores and methodology every
 run; managed rows that drop off the leaderboard are reported, never deleted.
+
+`sync_vals_index.py`, `sync_swe_sweep.py`, `sync_vending_bench_2.py`,
+`sync_blueprint_bench_2.py`, `sync_riemann_bench.py`, `sync_cwe_bench.py`, and
+`sync_exploitgym.py` keep the frontier boards added with Gemini 4 Carbon
+current. Each parses its official leaderboard in
+`backend/services/carbon_board_syncs.py` (failing on any layout change or an
+implausible row count) and hands the rows to the shared single-metric engine in
+`backend/services/live_leaderboard_sync.py`. Upstream names map to reviewed
+identities in `backend/services/carbon_board_identities.py`; other names are
+auto-matched or handed to the release radar, and a board's `excluded` names
+(partial runs, non-standard setups) are skipped. The engine keeps one row per
+catalog model and harness (the best upstream setting), adopts hand-imported
+rows for the same model, never creates papers, and reports managed rows that
+leave the leaderboard instead of deleting them.
 
 `sync_surge_chartography.py` parses the server-rendered "Chartography
 Leaderboard" block on https://surgehq.ai/benchmarks/chartography (provider,

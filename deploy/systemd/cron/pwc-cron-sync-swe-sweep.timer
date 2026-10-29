@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync SWE-sweep leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:08:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-swe-sweep.service
+
+[Install]
+WantedBy=timers.target
