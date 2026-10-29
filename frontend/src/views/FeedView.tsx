@@ -395,7 +395,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   }, [topicBuilding, queryClient, user?.hf_subject]);
   const noFollows = following && !!user && follows.data?.length === 0 && topic.isSuccess && !topic.data;
   // Save the topic a guest submitted before signing in; it stays stashed until the save succeeds.
-  const pendingSave = useSaveTopic(clearPendingTopic);
+  const pendingSave = useSaveTopic();
   const { mutate: savePendingTopic } = pendingSave;
   const pendingStarted = useRef(false);
   useEffect(() => {
@@ -587,7 +587,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </Alert>
             )}
 
-            {following && !!user && topic.isSuccess && follows.isSuccess && !noFollows && (!topic.data || editingTopic ? (
+            {following && !!user && topic.isSuccess && !follows.isPending && !noFollows && (!topic.data || editingTopic ? (
               <section className="following-topic-card" aria-label={topic.data ? "Edit your topic" : "Follow a topic"}>
                 <TopicSettings onDone={topic.data ? () => setEditingTopic(false) : undefined} />
               </section>

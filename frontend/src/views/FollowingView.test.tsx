@@ -109,6 +109,17 @@ it('keeps a pre-sign-in topic and offers a retry when saving it fails', async ()
   expect(researchApi.setTopic).toHaveBeenCalledTimes(2);
 });
 
+it('drops a stashed guest topic once another topic is saved', async () => {
+  sessionStorage.setItem('pwc:following-pending-topic', 'old guest topic');
+  vi.spyOn(researchApi, 'setTopic').mockRejectedValueOnce(new Error('down'))
+    .mockResolvedValueOnce({ ...topic, status: 'pending' });
+  renderFeed();
+  expect(await screen.findByText(/Could not follow “old guest topic”/)).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Follow topic' }));
+  await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull());
+});
+
 it('explains how to follow when a signed-in account follows nothing yet', async () => {
   vi.mocked(researchApi.follows).mockResolvedValue([]);
   vi.mocked(researchApi.following).mockResolvedValue([]);

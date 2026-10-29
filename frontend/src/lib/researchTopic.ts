@@ -10,6 +10,8 @@ export function useSaveTopic(onSaved?: () => void) {
     mutationFn: async (text: string | null) => text === null ? (await researchApi.clearTopic(), null) : researchApi.setTopic(text),
     onSuccess: data => {
       client.setQueryData(['research-topic', user?.hf_subject], data);
+      // Any saved topic supersedes one a guest stashed before signing in.
+      clearPendingTopic();
       onSaved?.();
       void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
       // Following something turns the weekly email on by default.
