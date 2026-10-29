@@ -67,9 +67,11 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   const saved = topic.data?.text ?? '';
   const value = draft ?? saved;
   const trimmed = value.trim().replace(/\s+/g, ' ');
-  const topicChanged = trimmed.length >= 3 && trimmed !== saved;
+  // Saving the same text again restarts a backfill that gave up.
+  const retry = topic.data?.status === 'failed' && trimmed === saved;
+  const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry);
   const saving = saveTopic.isPending || saveFollows.isPending;
-  const submittable = !saving && (topicChanged || picks.length > 0);
+  const submittable = !saving && (topicSavable || picks.length > 0);
   const isPicked = (kind: FollowKind, id: string) => picks.some(pick => pick.kind === kind && pick.id === id);
   const isFollowed = (kind: FollowKind, id: string) =>
     follows.data?.some(follow => follow.kind === kind && String(follow.entity_id) === id) ?? false;
@@ -79,14 +81,19 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   const submit = () => {
     if (!submittable) return;
     if (!user) {
-      if (topicChanged) stashPendingTopic(trimmed);
+      if (topicSavable) stashPendingTopic(trimmed);
       if (picks.length) stashPendingFollows(picks);
       window.location.href = hfLoginUrl(`${location.pathname}${location.search}`);
       return;
     }
-    const finish = () => topicChanged ? saveTopic.mutate(trimmed, { onSuccess: onDone }) : onDone();
-    if (picks.length) saveFollows.mutate(picks, { onSuccess: finish });
-    else finish();
+    // Save the follows and the topic independently, so one failing still saves the other.
+    const saves = [
+      ...(picks.length ? [saveFollows.mutateAsync(picks)] : []),
+      ...(topicSavable ? [saveTopic.mutateAsync(trimmed)] : []),
+    ];
+    void Promise.allSettled(saves).then(results => {
+      if (results.every(result => result.status === 'fulfilled')) onDone();
+    });
   };
   const chips = (title: string, kind: FollowKind, items: { id: string; name: string; slug?: string | null }[]) =>
     items.length > 0 && <div className="topic-dialog-group">
@@ -136,7 +143,7 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
         onClick={() => saveTopic.mutate(null, { onSuccess: onDone })}>Remove topic</button>}
       <button type="button" className="research-follow-action" disabled={saving} onClick={onDone}>Cancel</button>
       <button type="submit" className="research-topic-save" disabled={!submittable}>
-        {saved && !picks.length ? 'Update topic' : 'Follow'}
+        {picks.length ? 'Follow' : retry ? 'Retry' : saved ? 'Update topic' : 'Follow'}
       </button>
     </div>
   </form>;

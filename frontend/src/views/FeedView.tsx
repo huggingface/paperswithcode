@@ -1,5 +1,6 @@
 import FollowingIntro from "@/components/FollowingIntro";
 import TopicDialog from "@/components/TopicDialog";
+import { isAuthDisabled } from "@/lib/apiUrl";
 import { clearPendingTopic, readPendingFollows, readPendingTopic, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi, type FollowKind } from "@/lib/api/research";
@@ -387,9 +388,19 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     wasBuilding.current = topicBuilding;
   }, [topicBuilding, queryClient, user?.hf_subject]);
   const noFollows = following && !!user && follows.data?.length === 0 && topic.isSuccess && !topic.data;
-  // The intro opens its topic pop-up only for visitors who arrived without follows, not after a removal.
+  const showIntro = (following && !auth?.isLoading && !user) || noFollows;
+  const canBuildFeed = !!user || !isAuthDisabled();
+  // The pop-up opens on its own only when the intro first shows to a visitor who arrived without follows:
+  // not after a removal, and not while saving what a guest picked before signing in, which may finish
+  // before follows reload. It lives here rather than in the intro so it stays open once the first save lands.
   const [hadFollows, setHadFollows] = useState(false);
+  const [restoringPicks] = useState(() => !!readPendingTopic() || readPendingFollows().length > 0);
+  const [introShown, setIntroShown] = useState(false);
   if (!hadFollows && (!!topic.data || !!follows.data?.length)) setHadFollows(true);
+  if (showIntro && !introShown) {
+    setIntroShown(true);
+    if (canBuildFeed && !hadFollows && !restoringPicks) setEditingTopic(true);
+  }
   // Save the topic a guest submitted before signing in; it stays stashed until the save succeeds.
   const pendingSave = useSaveTopic();
   const { mutate: savePendingTopic } = pendingSave;
@@ -605,7 +616,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </div>
             ) : null)}
 
-            {following && !!user && <TopicDialog open={editingTopic} onOpenChange={setEditingTopic} />}
+            {following && canBuildFeed && <TopicDialog open={editingTopic} onOpenChange={setEditingTopic} />}
 
             {topicOnly && topic.data && (
               <div className="following-topic-note following-topic-filter" role="status">
@@ -614,8 +625,8 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </div>
             )}
 
-            {(following && !auth?.isLoading && !user) || noFollows ? (
-              <FollowingIntro openTopic={!hadFollows} />
+            {showIntro ? (
+              <FollowingIntro onBuild={canBuildFeed ? () => setEditingTopic(true) : undefined} />
             ) : isLoading ? (
               <div className="paper-list">
                 {Array.from({ length: 6 }).map((_, i) => (

@@ -117,6 +117,40 @@ it('follows the tasks and methods a visitor picked before signing in', async () 
   expect(researchApi.setFollow).toHaveBeenLastCalledWith('task', '7', true);
 });
 
+it('keeps the pop-up closed while saving picks a guest made before signing in', async () => {
+  sessionStorage.setItem('pwc:following-pending-follows', JSON.stringify([{ kind: 'author', id: '266', name: 'Yann LeCun' }]));
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(researchApi.following).mockResolvedValue([]);
+  vi.spyOn(researchApi, 'setFollow').mockResolvedValue(undefined);
+  renderFeed();
+  await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-follows')).toBeNull());
+  expect(await screen.findByRole('button', { name: 'Build your feed' })).toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+
+it('saves the topic even when a picked follow fails, and reports the failure', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(researchApi.following).mockResolvedValue([]);
+  vi.spyOn(researchApi, 'setFollow').mockRejectedValue(new Error('down'));
+  vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, status: 'pending' });
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Yann LeCun' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
+  await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledWith('real-time video generation'));
+  expect(await screen.findByText('Could not save your feed. Please try again.')).toBeInTheDocument();
+  expect(screen.getByRole('dialog')).toBeInTheDocument();
+});
+
+it('retries a topic whose backfill failed from the pop-up', async () => {
+  vi.mocked(researchApi.topic).mockResolvedValue({ ...topic, status: 'failed' });
+  vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, status: 'pending' });
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit topic' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Retry' }));
+  await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledWith('real-time video generation'));
+});
+
 it('keeps a pre-sign-in topic and offers a retry when saving it fails', async () => {
   sessionStorage.setItem('pwc:following-pending-topic', 'speculative decoding');
   vi.spyOn(researchApi, 'setTopic').mockRejectedValueOnce(new Error('down'))

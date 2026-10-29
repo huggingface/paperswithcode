@@ -43,14 +43,19 @@ export interface FollowPick {
   name: string;
 }
 
-/** Follows several tasks or methods at once and refreshes what depends on them. */
+/** Follows several entities at once and refreshes what depends on them, even when some fail.
+ * Following is idempotent, so a retry may resend the ones that succeeded. */
 export function useSaveFollows() {
   const user = useOptionalAuth()?.user;
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (picks: FollowPick[]) => Promise.all(picks.map(pick => researchApi.setFollow(pick.kind, pick.id, true))),
-    onSuccess: () => {
-      clearPendingFollows();
+    mutationFn: async (picks: FollowPick[]) => {
+      const results = await Promise.allSettled(picks.map(pick => researchApi.setFollow(pick.kind, pick.id, true)));
+      const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (failure) throw failure.reason;
+    },
+    onSuccess: () => clearPendingFollows(),
+    onSettled: () => {
       void client.invalidateQueries({ queryKey: ['research-follows', user?.hf_subject] });
       void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
       void client.invalidateQueries({ queryKey: ['research-email', user?.hf_subject] });
