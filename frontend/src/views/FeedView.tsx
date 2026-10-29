@@ -283,11 +283,11 @@ export const AskAssistant: React.FC = () => {
 };
 
 const FOLLOW_KIND_LABELS: Record<FollowKind, string> = {
-  task: "Task",
-  method: "Method",
-  benchmark: "Benchmark",
-  author: "Author",
-  organization: "Org",
+  task: "Tasks",
+  method: "Methods",
+  benchmark: "Benchmarks",
+  author: "Authors",
+  organization: "Orgs",
 };
 const FOLLOW_KIND_ORDER = Object.keys(FOLLOW_KIND_LABELS) as FollowKind[];
 
@@ -392,10 +392,10 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     wasBuilding.current = topicBuilding;
   }, [topicBuilding, queryClient, user?.hf_subject]);
   const noFollows = following && !!user && follows.data?.length === 0 && topic.isSuccess && !topic.data;
-  const followedEntities = useMemo(
-    () => following && follows.data
-      ? [...follows.data].sort((a, b) => FOLLOW_KIND_ORDER.indexOf(a.kind) - FOLLOW_KIND_ORDER.indexOf(b.kind))
-      : [],
+  const followGroups = useMemo(
+    () => FOLLOW_KIND_ORDER
+      .map(kind => ({ kind, follows: following ? follows.data?.filter(follow => follow.kind === kind) ?? [] : [] }))
+      .filter(group => group.follows.length > 0),
     [following, follows.data],
   );
   // Keep the follows section up while auth or follows load so the domain lists never flash in.
@@ -458,11 +458,15 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                     <Link to="/settings#topic" className="sidebar-follow-edit" aria-label="Edit topic">edit</Link>
                   </div>
                 )}
-                {followedEntities.map((follow) => (
-                  <Link key={`${follow.kind}-${follow.entity_id}`} to={follow.url} className="sidebar-link sidebar-follow-link">
-                    <span className="sidebar-follow-kind">{FOLLOW_KIND_LABELS[follow.kind]}</span>
-                    <span className="sidebar-follow-name">{follow.name}</span>
-                  </Link>
+                {followGroups.map((group) => (
+                  <div key={group.kind} className="sidebar-follow-group">
+                    <span className="sidebar-follow-kind">{FOLLOW_KIND_LABELS[group.kind]}</span>
+                    {group.follows.map((follow) => (
+                      <Link key={follow.entity_id} to={follow.url} className="sidebar-link sidebar-follow-link">
+                        <span className="sidebar-follow-name">{follow.name}</span>
+                      </Link>
+                    ))}
+                  </div>
                 ))}
               </div>
               <Link to="/settings" className="sidebar-follow-manage">Manage in Settings</Link>

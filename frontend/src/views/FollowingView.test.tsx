@@ -136,15 +136,17 @@ it('keeps filters when switching from the public feed to Following', async () =>
   });
 });
 
-it('lists followed entities with kind badges in the sidebar', async () => {
+it('groups followed entities under one kind badge each in the sidebar', async () => {
   vi.mocked(researchApi.follows).mockResolvedValue([
     { kind: 'organization', entity_id: 7, name: 'Liquid AI', url: '/organizations/liquid-ai', created_at: '' },
     { kind: 'task', entity_id: 1, name: 'Coding Agents', url: '/tasks/coding-agents', created_at: '' },
+    { kind: 'task', entity_id: 2, name: 'Robotics', url: '/tasks/robotics', created_at: '' },
   ]);
   const { container } = renderFeed();
-  const links = await screen.findAllByRole('link', { name: /Coding Agents|Liquid AI/ });
-  expect(links.map(link => link.textContent)).toEqual(['TaskCoding Agents', 'OrgLiquid AI']);
-  expect(links[1]).toHaveAttribute('href', '/organizations/liquid-ai');
+  await screen.findByRole('link', { name: 'Liquid AI' });
+  const groups = [...container.querySelectorAll('.sidebar-follow-group')];
+  expect(groups.map(group => group.textContent)).toEqual(['TasksCoding AgentsRobotics', 'OrgsLiquid AI']);
+  expect(screen.getByRole('link', { name: 'Liquid AI' })).toHaveAttribute('href', '/organizations/liquid-ai');
   expect(container.querySelector('.sidebar-section-top-domains')).toBeNull();
 });
 

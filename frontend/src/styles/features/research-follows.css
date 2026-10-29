@@ -253,9 +253,19 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.sidebar-follow-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-top: 10px;
+}
+.sidebar-follow-group .sidebar-follow-kind { flex: none; width: 76px; margin-bottom: 2px; }
 @media (max-width: 880px) {
   .sidebar-follow-link { gap: 8px; }
   .sidebar-follow-kind { flex: none; padding: 1px 6px; }
+  /* Mobile: the kind badge leads its names in the swipeable chip row. */
+  .sidebar-follow-group { display: contents; }
+  .sidebar-follow-group .sidebar-follow-kind { width: auto; margin: 0; align-self: center; }
 }
 .sidebar-follow-topic {
   display: flex;
