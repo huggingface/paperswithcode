@@ -77,7 +77,8 @@ it('names every distinct follow that matched, collapsing subtasks and long lists
 it('asks signed-out visitors for a topic and signs them in when they submit it', async () => {
   auth.user = null;
   renderFeed();
-  expect(await screen.findByRole('heading', { name: 'Build your personal research feed' })).toBeInTheDocument();
+  expect(await screen.findByRole('dialog', { name: 'Follow a topic' })).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Build your personal research feed', hidden: true })).toBeInTheDocument();
   expect(screen.queryByText(/Sign in/)).not.toBeInTheDocument();
   expect(screen.queryByRole('link', { name: /Browse tasks/ })).not.toBeInTheDocument();
   const input = screen.getByRole('textbox', { name: 'Research topic' });
@@ -115,6 +116,8 @@ it('drops a stashed guest topic once another topic is saved', async () => {
     .mockResolvedValueOnce({ ...topic, status: 'pending' });
   renderFeed();
   expect(await screen.findByText(/Could not follow “old guest topic”/)).toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Follow a topic' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
   fireEvent.click(screen.getByRole('button', { name: 'Follow topic' }));
   await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull());
@@ -128,8 +131,8 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   ]);
   vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, status: 'pending' });
   renderFeed();
-  expect(await screen.findByRole('heading', { name: 'Build your personal research feed' })).toBeInTheDocument();
-  expect(await screen.findByRole('link', { name: 'Object Detection' })).toHaveAttribute('href', '/tasks/object-detection');
+  expect(await screen.findByRole('dialog', { name: 'Follow a topic' })).toBeInTheDocument();
+  expect(await screen.findByRole('link', { name: 'Object Detection', hidden: true })).toHaveAttribute('href', '/tasks/object-detection');
   expect(screen.queryByText(/match these filters/)).not.toBeInTheDocument();
   expect(screen.getAllByRole('textbox', { name: 'Research topic' })).toHaveLength(1);
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
@@ -235,8 +238,9 @@ it('filters the feed to topic matches from the sidebar and back', async () => {
   expect(row).toHaveAttribute('href', '/following');
   expect(screen.getByRole('link', { name: 'Show everything you follow' })).toHaveAttribute('href', '/following');
 });
-it('prompts accounts without a topic to describe one above their follows feed', async () => {
+it('offers accounts without a topic a pop-up to describe one above their follows feed', async () => {
   renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Follow a topic' }));
   expect(await screen.findByRole('textbox', { name: 'Research topic' })).toBeInTheDocument();
   expect(await screen.findByText('A paper')).toBeInTheDocument();
 });

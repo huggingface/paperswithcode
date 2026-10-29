@@ -110,9 +110,19 @@
   font-size: 15px;
   line-height: 1.55;
 }
-.following-intro .research-topic {
-  margin: 22px 0 0;
+.following-intro-topic {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 18px 0 0;
+  min-height: 36px;
+  padding: 7px 16px;
+  font-size: 14px;
 }
+.following-intro-topic svg { width: 15px; height: 15px; }
+.topic-dialog { max-width: 520px; }
+.topic-dialog-title { font-family: var(--serif); font-size: 22px; font-weight: 500; color: var(--ink); }
+.topic-dialog .research-topic { margin: 0; }
 .following-intro-note {
   margin: 10px 0 0;
   color: var(--ink-faint);
@@ -284,15 +294,7 @@
 }
 .research-topic-save:disabled { opacity: 0.45; cursor: default; }
 .research-topic-suggestion { margin: 6px 0 0; color: var(--ink-soft); font-size: 13px; }
-.following-topic-card {
-  margin: 0 0 20px;
-  padding: 16px 18px 4px;
-  border: 1px solid var(--hairline);
-  border-radius: 12px;
-  background: var(--bg-elevated);
-}
-.following-topic-card .settings-row-desc,
-.following-intro .settings-row-desc { max-width: none; }
+.topic-dialog .settings-row-desc { max-width: none; }
 .following-topic-note {
   margin: 0 0 16px;
   padding: 10px 14px;

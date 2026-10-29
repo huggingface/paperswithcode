@@ -20,7 +20,7 @@ function topicStatus(topic: ResearchTopic): string {
 }
 
 /** One free-text research topic; Jev decides which papers match it.
- * `onDone` makes it an inline editor that closes after a save, removal, or cancel.
+ * `onDone` makes it the editor inside TopicDialog, which closes after a save, removal, or cancel.
  * `signInToSave` also shows it to guests, who sign in on submit; /following saves the topic on return. */
 export default function TopicSettings({ onDone, signInToSave = false }: { onDone?: () => void; signInToSave?: boolean }) {
   const { user } = useAuth();
@@ -42,7 +42,7 @@ export default function TopicSettings({ onDone, signInToSave = false }: { onDone
   const inline = !!onDone;
   useEffect(() => {
     if ((inline || location.hash === '#topic') && topic.isSuccess) {
-      input.current?.scrollIntoView({ block: 'center' });
+      if (!inline) input.current?.scrollIntoView({ block: 'center' });
       input.current?.focus();
     }
   }, [inline, location.hash, topic.isSuccess]);
@@ -63,7 +63,7 @@ export default function TopicSettings({ onDone, signInToSave = false }: { onDone
     window.location.href = hfLoginUrl(`${location.pathname}${location.search}`);
   };
   return <div className="research-topic" id="topic">
-    <h3 className="research-follow-group-title"><Sparkles aria-hidden="true" />Topic</h3>
+    {!inline && <h3 className="research-follow-group-title"><Sparkles aria-hidden="true" />Topic</h3>}
     <p className="settings-row-desc">
       Describe the research you want to follow in your own words, for example
       {' '}<em>real-time video generation</em> or <em>speculative decoding for LLM inference</em>.

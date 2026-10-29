@@ -1,5 +1,5 @@
 import FollowingIntro from "@/components/FollowingIntro";
-import TopicSettings from "@/components/TopicSettings";
+import TopicDialog from "@/components/TopicDialog";
 import { clearPendingTopic, readPendingTopic, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi, type FollowKind } from "@/lib/api/research";
@@ -573,15 +573,18 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </Alert>
             )}
 
-            {following && !!user && topic.isSuccess && !follows.isPending && !noFollows && (!topic.data || editingTopic ? (
-              <section className="following-topic-card" aria-label={topic.data ? "Edit your topic" : "Follow a topic"}>
-                <TopicSettings onDone={topic.data ? () => setEditingTopic(false) : undefined} />
-              </section>
+            {following && !!user && topic.isSuccess && !follows.isPending && !noFollows && (!topic.data ? (
+              <div className="following-topic-note" role="status">
+                Describe a topic in your own words, and a model adds matching new papers to this feed.{" "}
+                <button type="button" className="link-button" onClick={() => setEditingTopic(true)}>Follow a topic</button>
+              </div>
             ) : topicBuilding ? (
               <div className="following-topic-note" role="status">
                 Finding papers about “{topic.data.text}”. This will take a few minutes. They’ll appear here as they are found.
               </div>
             ) : null)}
+
+            {following && !!user && <TopicDialog open={editingTopic} onOpenChange={setEditingTopic} />}
 
             {topicOnly && topic.data && (
               <div className="following-topic-note following-topic-filter" role="status">
