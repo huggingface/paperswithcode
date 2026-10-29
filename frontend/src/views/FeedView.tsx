@@ -579,7 +579,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </section>
             ) : topicBuilding ? (
               <div className="following-topic-note" role="status">
-                Finding papers about “{topic.data.text}”. They appear here as they are found.
+                Finding papers about “{topic.data.text}”. This will take a few minutes. They’ll appear here as they are found.
               </div>
             ) : null)}
 
