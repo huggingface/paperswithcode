@@ -263,17 +263,19 @@
   gap: 8px;
 }
 .sidebar-follow-topic .sidebar-follow-link { flex: 1; min-width: 0; }
-/* On desktop, show the whole free-text topic below its badge; mobile keeps one-line chips. */
+/* On desktop, wrap follow names instead of truncating them, with the free-text
+   topic below its badge; mobile keeps one-line chips. */
 @media (min-width: 881px) {
-  .sidebar-follow-topic { align-items: flex-start; }
-  .sidebar-follow-topic .sidebar-follow-link { flex-wrap: wrap; row-gap: 6px; }
-  .sidebar-follow-topic .sidebar-follow-name {
-    flex-basis: 100%;
+  .sidebar-follow-link { align-items: flex-start; }
+  .sidebar-follow-name {
     overflow: visible;
     overflow-wrap: anywhere;
     white-space: normal;
     line-height: 1.4;
   }
+  .sidebar-follow-topic { align-items: flex-start; }
+  .sidebar-follow-topic .sidebar-follow-link { flex-wrap: wrap; row-gap: 6px; }
+  .sidebar-follow-topic .sidebar-follow-name { flex-basis: 100%; }
   .sidebar-follow-topic .sidebar-follow-edit { padding-top: 7px; }
 }
 .sidebar-follow-topic.active .sidebar-follow-kind {

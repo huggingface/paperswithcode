@@ -40,11 +40,13 @@
   justify-content: flex-end;
   padding: 4px 6px 4px 12px;
 }
-/* Keep the MCP card at the bottom left even when the sidebar above it is short. */
+/* Keep the MCP card at the bottom left even when the sidebar above it is short.
+   250px is the sidebar's top on first paint (header and feed title), so the card
+   stays above the fold before the sidebar sticks at 100px. */
 .feed-sidebar {
   display: flex;
   flex-direction: column;
-  min-height: calc(100dvh - 124px);
+  min-height: calc(100dvh - 250px);
 }
 .feed-sidebar > .sidebar-section-tools { margin-top: auto; margin-bottom: 0; }
 @media (max-width: 880px) {
