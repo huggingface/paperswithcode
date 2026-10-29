@@ -1420,6 +1420,7 @@ def main() -> None:
                     "error": str(error)[:1000],
                     "requested_version": entry["version"],
                     "version_fallback_attempted": not bool(args.stub_root),
+                    "lfs_pdf_url_attempted": not bool(args.stub_root),
                 }
             result.setdefault(
                 "duration_seconds", round(time.monotonic() - paper_started, 3)

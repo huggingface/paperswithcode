@@ -645,6 +645,25 @@ def test_retry_disposition_uses_persisted_fields():
     )
 
 
+def test_pre_lfs_fix_external_invalid_pdf_is_readmitted_once():
+    record = {
+        "schema_version": 2,
+        "status": "failed",
+        "source": "external",
+        "attempt_count": 1,
+        "error_class": "invalid_pdf",
+        "retryable": False,
+    }
+    assert MODULE.status_disposition(record) == "retryable_due"
+    assert (
+        MODULE.status_disposition({**record, "lfs_pdf_url_attempted": True})
+        == "permanent_failure"
+    )
+    assert (
+        MODULE.status_disposition({**record, "source": "arxiv"}) == "permanent_failure"
+    )
+
+
 def test_missing_canonical_object_overrides_old_success():
     record = {"status": "succeeded", "attempt_count": 1}
     assert MODULE.status_disposition(record) == "completed"

@@ -244,6 +244,16 @@ def status_disposition(
         and status.get("version_fallback_attempted") is not True
     ):
         return "retryable_due"
+    # Before the Git LFS URL fix, GitHub-hosted PDFs resolved to the LFS pointer
+    # and failed as a permanent invalid_pdf. Re-admit those records once; the
+    # corrected archiver and worker record that they used the fixed resolver.
+    if (
+        state == "failed"
+        and status.get("source") == "external"
+        and status.get("error_class") == "invalid_pdf"
+        and status.get("lfs_pdf_url_attempted") is not True
+    ):
+        return "retryable_due"
     if status.get("retryable") is not True:
         return "permanent_failure"
     retry_at = status.get("next_retry_at")
@@ -1235,6 +1245,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
                         "error": str(error)[:1000],
                         "requested_version": entry["version"],
                         "version_fallback_attempted": False,
+                        "lfs_pdf_url_attempted": True,
                     },
                     prior=self._bucket_json(status_key),
                     error=error,
