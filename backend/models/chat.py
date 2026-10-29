@@ -942,6 +942,10 @@ class ChatAvailabilityResponse(BaseModel):
     paper_artifacts_enabled: bool = False
 
 
+class ChatAutocompleteVocabularyResponse(BaseModel):
+    names: list[str]
+
+
 class ChatWebSearchEventResponse(BaseModel):
     id: str
     type: str

@@ -33,6 +33,7 @@ from backend.config import Settings, get_settings
 from backend.database.connection import db_manager, get_database_session
 from backend.models.chat import (
     ArchiveOldChatsResponse,
+    ChatAutocompleteVocabularyResponse,
     ChatAvailabilityResponse,
     ChatBrowserLatencyRequest,
     ChatFeedbackListResponse,
@@ -65,6 +66,7 @@ from backend.models.database import (
 )
 from backend.routers.inference_billing import inference_credential_for_request
 from backend.services.chat_artifact_service import ArtifactError, ChatArtifactService
+from backend.services.chat_autocomplete_service import get_autocomplete_vocabulary
 from backend.services.chat_feedback_service import (
     ChatFeedbackService,
     ChatFeedbackUnavailable,
@@ -461,6 +463,17 @@ async def proxy_excalidraw_mcp_app(
     _require_mcp_apps_host(settings)
     _require_same_origin_csrf(request, settings)
     return await forward_excalidraw_mcp(request)
+
+
+@router.get(
+    "/autocomplete-vocabulary", response_model=ChatAutocompleteVocabularyResponse
+)
+def chat_autocomplete_vocabulary(
+    response: Response, db: Session = Depends(get_database_session)
+):
+    """Public catalog names that chat composers complete with Tab."""
+    response.headers["Cache-Control"] = "public, max-age=3600"
+    return {"names": get_autocomplete_vocabulary(db)}
 
 
 @router.get("/availability", response_model=ChatAvailabilityResponse)

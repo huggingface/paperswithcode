@@ -32,6 +32,9 @@ beforeEach(() => {
     items: STAGING_FALLBACK_CHAT_MODELS,
     default_model: DEFAULT_CHAT_MODEL,
   });
+  vi.spyOn(chatApi, "getAutocompleteVocabulary").mockResolvedValue({
+    names: ["Transformer", "Object Detection"],
+  });
   sessionStorage.clear();
   vi.stubEnv("MODE", "staging");
 });
@@ -89,7 +92,6 @@ describe("AskAssistant", () => {
     const textarea = screen.getByRole("textbox", { name: "Ask the assistant" });
 
     await user.type(textarea, "find rel");
-    (textarea as HTMLTextAreaElement).setSelectionRange(2, 2);
     expect(container.querySelector(".chat-prompt-completion"))
       .toHaveTextContent("evant papers on RLVR");
 
@@ -97,6 +99,22 @@ describe("AskAssistant", () => {
     expect(textarea).toHaveValue("find relevant papers on RLVR");
     await waitFor(() => expect(textarea).toHaveProperty("selectionStart", 28));
     expect(container.querySelector(".chat-prompt-completion")).not.toBeInTheDocument();
+  });
+
+  it("completes a catalog name with Tab only while the caret is at the end", async () => {
+    const user = userEvent.setup();
+    const { container } = renderAskAssistant();
+    const textarea = screen.getByRole("textbox", { name: "Ask the assistant" }) as HTMLTextAreaElement;
+
+    await user.type(textarea, "papers on object det");
+    await waitFor(() => expect(container.querySelector(".chat-prompt-completion")).toHaveTextContent("ection"));
+
+    await user.keyboard("{ArrowLeft}");
+    expect(container.querySelector(".chat-prompt-completion")).not.toBeInTheDocument();
+
+    await user.keyboard("{End}{Tab}");
+    expect(textarea).toHaveValue("papers on object detection");
+    expect(textarea).toHaveFocus();
   });
 
   it("leaves Tab to move focus when the text matches no suggestion", async () => {

@@ -36,6 +36,10 @@ export interface ChatAvailability {
   paper_artifacts_enabled?: boolean;
 }
 
+export interface ChatAutocompleteVocabulary {
+  names: string[];
+}
+
 export interface ChatSandboxSpendStatus {
   environment: string;
   provider_mode: 'starter_workspace' | 'team_environments';

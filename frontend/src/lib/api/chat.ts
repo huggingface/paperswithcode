@@ -1,4 +1,5 @@
 import type {
+  ChatAutocompleteVocabulary,
   ChatAvailability,
   ChatSandboxSpendStatus,
   ChatWebSearchBudgetStatus,
@@ -114,6 +115,10 @@ export class ChatApi {
 
   getAvailability(): Promise<ChatAvailability> {
     return this.request("/chat/availability", { cache: "no-store" });
+  }
+
+  getAutocompleteVocabulary(): Promise<ChatAutocompleteVocabulary> {
+    return this.request("/chat/autocomplete-vocabulary");
   }
 
   getInferenceBilling(): Promise<InferenceBillingStatus> {

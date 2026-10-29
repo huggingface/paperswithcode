@@ -6,6 +6,7 @@ import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
 import { PaperSelectionCard } from "@/components/chat/PaperSelectionCard";
 import { ArrowUpIcon, Spinner } from "@/components/chat/icons";
+import { completedScrollHeight, isCompletionKey, useChatCompletion } from "@/components/chat/useChatCompletion";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import type { ChatDraft } from "@/lib/chat";
 import { emptyChatDraft } from "@/lib/paperSelection";
@@ -48,14 +49,16 @@ const Composer: React.FC<ComposerProps> = ({
     enabled: paperMentionsEnabled,
     textareaRef: ref,
   });
+  const slashCommandOpen = paperArtifactsEnabled && value.text === "/";
+  const { completion, trackCaret } = useChatCompletion(value, mentions.open || slashCommandOpen);
 
   useEffect(() => {
     const el = ref.current;
     if (el) {
       el.style.height = "auto";
-      el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+      el.style.height = `${Math.min(completedScrollHeight(el), 200)}px`;
     }
-  }, [value.text]);
+  }, [value.text, completion]);
 
   useEffect(() => { if (autoFocus) ref.current?.focus(); }, [autoFocus]);
 
@@ -77,7 +80,6 @@ const Composer: React.FC<ComposerProps> = ({
 
   const selectionBlocked = Boolean(value.paperSelection) && !paperSelectionEnabled;
   const canSend = Boolean(value.text.trim()) && !selectionBlocked;
-  const slashCommandOpen = paperArtifactsEnabled && value.text === "/";
 
   return (
     <div
@@ -101,7 +103,7 @@ const Composer: React.FC<ComposerProps> = ({
         </div>
       )}
       <div className="chat-composer-textarea-wrap">
-        <PaperMentionHighlights text={value.text} mentions={value.paperMentions} scrollTop={scrollTop} />
+        <PaperMentionHighlights text={value.text} mentions={value.paperMentions} scrollTop={scrollTop} completion={completion} />
         <textarea
           className="ph-no-capture"
           data-ph-no-autocapture="true"
@@ -110,8 +112,14 @@ const Composer: React.FC<ComposerProps> = ({
           rows={1}
           value={value.text}
           placeholder={placeholder || (value.paperSelection ? "Ask about this selection…" : "Ask anything about research…")}
-          onChange={(event) => mentions.updateText(event.target.value, event.target.selectionStart)}
-          onSelect={(event) => mentions.refresh(event.currentTarget.selectionStart)}
+          onChange={(event) => {
+            mentions.updateText(event.target.value, event.target.selectionStart);
+            trackCaret(event.target);
+          }}
+          onSelect={(event) => {
+            mentions.refresh(event.currentTarget.selectionStart);
+            trackCaret(event.currentTarget);
+          }}
           onClick={(event) => mentions.refresh(event.currentTarget.selectionStart)}
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           onBlur={(event) => {
@@ -119,6 +127,13 @@ const Composer: React.FC<ComposerProps> = ({
           }}
           onKeyDown={(event) => {
             if (mentions.keyDown(event)) return;
+            if (isCompletionKey(event) && completion) {
+              event.preventDefault();
+              const text = value.text + completion;
+              mentions.updateText(text, text.length);
+              window.requestAnimationFrame(() => ref.current?.setSelectionRange(text.length, text.length));
+              return;
+            }
             if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               submit();
@@ -161,7 +176,7 @@ const Composer: React.FC<ComposerProps> = ({
       {mentions.message && <div id="chat-paper-mention-message" className="chat-paper-mention-message" role="alert">{mentions.message}</div>}
       <div className="chat-composer-row">
         <div className="chat-composer-tools">
-          <span className="chat-composer-hint">Enter to send · Shift+Enter for newline</span>
+          <span className="chat-composer-hint">{completion ? "Tab to complete · " : ""}Enter to send · Shift+Enter for newline</span>
         </div>
         <button type="button" className={`chat-send${(busy || canSend) ? " chat-send-on" : ""}`} onClick={busy ? onStop : submit} disabled={disabled || (busy ? !onStop : !canSend)} aria-label={busy ? "Stop generating" : "Send message"}>
           {busy ? (onStop ? <span aria-hidden="true">■</span> : <Spinner light />) : <ArrowUpIcon />}

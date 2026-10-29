@@ -12,6 +12,7 @@ import { PaperDateFilter } from "@/components/PaperDateFilter";
 import { ArrowUpIcon } from "@/components/chat/icons";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
 import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
+import { completedScrollHeight, isCompletionKey, useChatCompletion } from "@/components/chat/useChatCompletion";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import { chatApi } from "@/lib/api/chat";
 import { catalogApi } from "@/lib/api/catalog";
@@ -22,7 +23,7 @@ import {
 } from "@/lib/apiUrl";
 import type { ChatDraft } from "@/lib/chat";
 import { queueChatLaunch } from "@/lib/chatLaunch";
-import { SUGGESTED_CHAT_PROMPTS, completeSuggestedChatPrompt } from "@/lib/chatPrompts";
+import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
 import {
   createSession,
   DEFAULT_CHAT_MODEL,
@@ -114,9 +115,6 @@ export const AskAssistant: React.FC = () => {
   // as a link the visitor can open themselves.
   const [blockedHandoffUrl, setBlockedHandoffUrl] = useState<string | null>(null);
   const { placeholder, prompt: placeholderPrompt } = useRotatingChatPlaceholder(!question);
-  // Tab accepts the shown suggestion: the whole prompt in an empty box, or the
-  // rest of a suggestion the visitor has started typing.
-  const completion = question ? completeSuggestedChatPrompt(question) : placeholderPrompt;
   const ref = useRef<HTMLTextAreaElement>(null);
   const availabilityQuery = useQuery({
     queryKey: ["chatAvailability"],
@@ -132,6 +130,10 @@ export const AskAssistant: React.FC = () => {
     enabled: paperMentionsEnabled,
     textareaRef: ref,
   });
+  const typedCompletion = useChatCompletion(draft, mentions.open);
+  // Tab accepts the shown suggestion: the whole prompt in an empty box, or the
+  // rest of what the visitor has started typing.
+  const completion = question ? typedCompletion.completion : placeholderPrompt;
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -140,7 +142,7 @@ export const AskAssistant: React.FC = () => {
     const resize = () => {
       el.style.height = "auto";
       if (question) {
-        el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
+        el.style.height = `${Math.min(completedScrollHeight(el), 160)}px`;
         return;
       }
 
@@ -159,7 +161,7 @@ export const AskAssistant: React.FC = () => {
     resize();
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
-  }, [question]);
+  }, [question, completion]);
 
   const submit = async (nextDraft = draft) => {
     const q = nextDraft.text.trim();
@@ -213,8 +215,14 @@ export const AskAssistant: React.FC = () => {
               placeholder={placeholder}
               aria-label="Ask the assistant"
               disabled={launching}
-              onChange={(event) => mentions.updateText(event.target.value, event.target.selectionStart)}
-              onSelect={(event) => mentions.refresh(event.currentTarget.selectionStart)}
+              onChange={(event) => {
+                mentions.updateText(event.target.value, event.target.selectionStart);
+                typedCompletion.trackCaret(event.target);
+              }}
+              onSelect={(event) => {
+                mentions.refresh(event.currentTarget.selectionStart);
+                typedCompletion.trackCaret(event.currentTarget);
+              }}
               onClick={(event) => mentions.refresh(event.currentTarget.selectionStart)}
               onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
               onBlur={(event) => {
@@ -222,7 +230,7 @@ export const AskAssistant: React.FC = () => {
               }}
               onKeyDown={(event) => {
                 if (mentions.keyDown(event)) return;
-                if (event.key === "Tab" && !event.shiftKey && completion) {
+                if (isCompletionKey(event) && completion) {
                   event.preventDefault();
                   const text = question + completion;
                   mentions.updateText(text, text.length);
