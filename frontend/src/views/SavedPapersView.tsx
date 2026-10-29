@@ -117,7 +117,18 @@ const SavedPapersView: React.FC = () => {
         </Alert>
       ) : null}
 
-      {showBucketMigration ? (
+      {showBucketMigration && query.data.bucket_migrated ? (
+        <div className="saved-bucket-migration">
+          <p>
+            Your saved papers are already in your private Hugging Face Bucket.
+            Reconnect it in this browser to read from it and save new papers
+            there.
+          </p>
+          <button type="button" className="hf-signin-btn" onClick={authorizeBucket}>
+            Reconnect Hugging Face Bucket
+          </button>
+        </div>
+      ) : showBucketMigration ? (
         <div className="saved-bucket-migration">
           <p>
             {query.data.count

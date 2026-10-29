@@ -28,6 +28,8 @@ export interface SavedPapersResponse {
   count: number;
   areas: SavedAreaGroup[];
   bucket_connected: boolean;
+  /** True once any device has migrated this account to its HF Bucket. */
+  bucket_migrated: boolean;
 }
 
 /** Payload accepted by `POST /papers/submit`. Either `arxiv_id` or

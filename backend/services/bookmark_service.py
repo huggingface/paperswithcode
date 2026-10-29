@@ -5,13 +5,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-from sqlalchemy import desc, text
+from sqlalchemy import desc, func, text
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.models.papers import Paper as ApiPaper
 from backend.models.database import Paper as DBPaper
-from backend.models.database import UserBookmark
+from backend.models.database import UserBookmark, UserPreference
 from backend.services.hf_inference_billing_service import decrypt_oauth_credential
 from backend.services.paper_bucket_service import PaperBucketError
 from backend.services.paper_service import PaperService
@@ -49,6 +50,7 @@ class SavedPapersProjection:
     count: int
     areas: tuple[SavedAreaProjection, ...]
     bucket_connected: bool
+    bucket_migrated: bool
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,31 @@ class BookmarkService:
         store.initialize(lambda: self.load_legacy_refs(username))
         return store
 
+    def bucket_migrated(self, username: str) -> bool:
+        """Whether any device has already read this user's saved-papers Bucket."""
+        migrated_at = (
+            self.db.query(UserPreference.saved_papers_bucket_migrated_at)
+            .filter(UserPreference.hf_username == username)
+            .scalar()
+        )
+        return migrated_at is not None
+
+    def record_bucket_migration(self, username: str) -> None:
+        """Remember the migration on the account, writing only the first time."""
+        if self.bucket_migrated(username):
+            return
+        # Upsert because the IDs and listing endpoints often run concurrently.
+        self.db.execute(
+            insert(UserPreference)
+            .values(hf_username=username, saved_papers_bucket_migrated_at=func.now())
+            .on_conflict_do_update(
+                index_elements=[UserPreference.hf_username],
+                set_={"saved_papers_bucket_migrated_at": func.now()},
+                where=UserPreference.saved_papers_bucket_migrated_at.is_(None),
+            )
+        )
+        self.db.commit()
+
     def list_refs(
         self,
         *,
@@ -150,7 +177,7 @@ class BookmarkService:
             )
             if store is None:
                 return BookmarkRefListing(tuple(legacy), False)
-            return BookmarkRefListing(tuple(store.list()), True)
+            refs = tuple(store.list())
         except PaperBucketError as error:
             logger.warning(
                 "Falling back to database bookmarks for %s: %s",
@@ -158,6 +185,8 @@ class BookmarkService:
                 error,
             )
             return BookmarkRefListing(tuple(legacy), False)
+        self.record_bucket_migration(username)
+        return BookmarkRefListing(refs, True)
 
     def list_grouped(
         self,
@@ -171,12 +200,14 @@ class BookmarkService:
             hf_user_id=hf_user_id,
             username=username,
         )
+        bucket_migrated = listing.bucket_connected or self.bucket_migrated(username)
         paper_ids = [item.paper_id for item in listing.refs]
         if not paper_ids:
             return SavedPapersProjection(
                 count=0,
                 areas=(),
                 bucket_connected=listing.bucket_connected,
+                bucket_migrated=bucket_migrated,
             )
 
         db_papers = self.db.query(DBPaper).filter(DBPaper.id.in_(paper_ids)).all()
@@ -278,6 +309,7 @@ class BookmarkService:
                 for area in areas.values()
             ),
             bucket_connected=listing.bucket_connected,
+            bucket_migrated=bucket_migrated,
         )
 
     def _require_bucket(

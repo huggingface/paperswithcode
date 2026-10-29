@@ -65,6 +65,14 @@ class SavedPapersResponse(BaseModel):
         False,
         description="Whether the response was read from the user's HF Bucket",
     )
+    bucket_migrated: bool = Field(
+        False,
+        description=(
+            "Whether the account's saved papers were already migrated to an HF "
+            "Bucket on any device; when true but not connected, this browser "
+            "only needs to reconnect"
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +154,7 @@ def get_my_bookmarks(
         count=projection.count,
         areas=areas,
         bucket_connected=projection.bucket_connected,
+        bucket_migrated=projection.bucket_migrated,
     )
 
 

@@ -68,6 +68,12 @@ class UserPreference(Base):
     hide_closed_source_evals: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )
+    # First time the user's saved papers were read from their HF Bucket. The
+    # Bucket token lives in a per-browser cookie, so this tells other devices
+    # to offer a reconnect instead of a fresh migration.
+    saved_papers_bucket_migrated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

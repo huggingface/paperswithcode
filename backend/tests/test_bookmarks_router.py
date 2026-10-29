@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.dialects import postgresql
 from starlette.requests import Request
 
 from backend.models.database import Paper as DBPaper
@@ -74,6 +75,12 @@ def test_bookmark_reads_keep_legacy_data_visible_without_bucket_authorization():
 
 def test_connected_bucket_read_keeps_eager_legacy_query(monkeypatch):
     saved_at = datetime.now(UTC)
+    recorded = []
+    monkeypatch.setattr(
+        BookmarkService,
+        "record_bucket_migration",
+        lambda _self, name: recorded.append(name),
+    )
     db = LegacyBookmarkDb([(42, saved_at, "Legacy paper", None, None)])
     initialized = []
 
@@ -105,10 +112,17 @@ def test_connected_bucket_read_keeps_eager_legacy_query(monkeypatch):
     assert listing.bucket_connected is True
     assert len(initialized) == 1
     assert db.query_calls == 1
+    assert recorded == ["alice"]
 
 
 def test_first_bucket_migration_loads_legacy_refs_again(monkeypatch):
     saved_at = datetime.now(UTC)
+    recorded = []
+    monkeypatch.setattr(
+        BookmarkService,
+        "record_bucket_migration",
+        lambda _self, name: recorded.append(name),
+    )
     db = LegacyBookmarkDb([(42, saved_at, "Legacy paper", None, None)])
 
     class MigratingBucket:
@@ -137,6 +151,7 @@ def test_first_bucket_migration_loads_legacy_refs_again(monkeypatch):
     assert [item.paper_id for item in listing.refs] == [42]
     assert listing.bucket_connected is True
     assert db.query_calls == 2
+    assert recorded == ["alice"]
 
 
 def test_bucket_read_failure_falls_back_to_eager_legacy_refs(monkeypatch):
@@ -159,6 +174,11 @@ def test_bucket_read_failure_falls_back_to_eager_legacy_refs(monkeypatch):
         lambda *_args: SimpleNamespace(token="bucket-token"),
     )
     monkeypatch.setattr(bookmark_service, "SavedPapersBucket", FailingBucket)
+    monkeypatch.setattr(
+        BookmarkService,
+        "record_bucket_migration",
+        lambda *_args: pytest.fail("a failed Bucket read is not a migration"),
+    )
 
     listing = BookmarkService(db).list_refs(
         encrypted_credential="encrypted",
@@ -266,6 +286,7 @@ def test_bookmark_groups_preserve_first_seen_order_and_use_card_hydration(monkey
     assert db.primary_query_calls == 1
     assert response.count == 5
     assert response.bucket_connected is True
+    assert response.bucket_migrated is True
     assert [
         (
             area.id,
@@ -324,6 +345,7 @@ def test_empty_bookmark_listing_skips_paper_projection(monkeypatch):
     assert result.count == 0
     assert result.areas == ()
     assert result.bucket_connected is True
+    assert result.bucket_migrated is True
 
 
 def test_bookmark_mutations_request_bucket_authorization_dynamically():
@@ -494,3 +516,68 @@ def test_bucket_mutation_failure_prevents_database_mirror_change(monkeypatch):
     assert db.bookmark_queries == 0
     assert db.bookmark_query.deleted is False
     assert db.commits == 0
+
+
+class PreferenceQuery:
+    def __init__(self, migrated_at):
+        self.migrated_at = migrated_at
+
+    def filter(self, *_args, **_kwargs):
+        return self
+
+    def scalar(self):
+        return self.migrated_at
+
+
+class PreferenceDb:
+    def __init__(self, migrated_at=None):
+        self.migrated_at = migrated_at
+        self.statements = []
+        self.commits = 0
+
+    def query(self, *_args):
+        return PreferenceQuery(self.migrated_at)
+
+    def execute(self, statement):
+        self.statements.append(statement)
+
+    def commit(self):
+        self.commits += 1
+
+
+def test_bucket_migration_is_recorded_once_per_account():
+    db = PreferenceDb()
+    BookmarkService(db).record_bucket_migration("alice")
+
+    assert db.commits == 1
+    sql = str(db.statements[0].compile(dialect=postgresql.dialect()))
+    assert "ON CONFLICT (hf_username) DO UPDATE" in sql
+    assert "saved_papers_bucket_migrated_at IS NULL" in sql
+
+    recorded = PreferenceDb(migrated_at=datetime.now(UTC))
+    BookmarkService(recorded).record_bucket_migration("alice")
+
+    assert recorded.statements == []
+    assert recorded.commits == 0
+
+
+@pytest.mark.parametrize(
+    ("migrated_at", "expected"), [(None, False), (datetime.now(UTC), True)]
+)
+def test_disconnected_listing_reports_account_bucket_migration(
+    monkeypatch, migrated_at, expected
+):
+    monkeypatch.setattr(
+        BookmarkService,
+        "list_refs",
+        lambda *_args, **_kwargs: BookmarkRefListing((), False),
+    )
+
+    result = BookmarkService(PreferenceDb(migrated_at)).list_grouped(
+        encrypted_credential=None,
+        hf_user_id="hf-alice",
+        username="alice",
+    )
+
+    assert result.bucket_connected is False
+    assert result.bucket_migrated is expected
