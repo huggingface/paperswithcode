@@ -150,78 +150,6 @@ describe("AskAssistant", () => {
       .toHaveAttribute("href", `https://paperswithcode.co/chat?${params}`);
   });
 
-  it("offers the four truthful staging model routes", () => {
-    expect(STAGING_FALLBACK_CHAT_MODELS).toEqual([
-      {
-        id: "deepseek-ai/DeepSeek-V4-Flash-0731",
-        label: "DeepSeek V4 Flash",
-        provider: "huggingface",
-      },
-      {
-        id: "moonshotai/Kimi-K3",
-        label: "Kimi K3",
-        provider: "huggingface",
-      },
-      {
-        id: "gpt-5.6-luna@openrouter",
-        label: "GPT-5.6 Luna",
-        provider: "openrouter",
-      },
-      {
-        id: "gpt-5.6-luna@openai",
-        label: "GPT-6 Luna (Direct)",
-        provider: "openai",
-      },
-    ]);
-    renderAskAssistant();
-
-    const picker = screen.getByLabelText("Research model");
-    expect(picker).toHaveValue("gpt-5.6-luna@openai");
-    expect([...picker.querySelectorAll("optgroup")].map((group) => group.label)).toEqual([
-      "Hugging Face Inference Providers",
-      "OpenRouter",
-      "OpenAI",
-    ]);
-    expect([...picker.querySelectorAll("option")].map((option) => option.value)).toEqual([
-      "deepseek-ai/DeepSeek-V4-Flash-0731",
-      "moonshotai/Kimi-K3",
-      "gpt-5.6-luna@openrouter",
-      "gpt-5.6-luna@openai",
-    ]);
-    expect(screen.queryByText(/^Via\b/)).not.toBeInTheDocument();
-
-    fireEvent.change(picker, { target: { value: "deepseek-ai/DeepSeek-V4-Flash-0731" } });
-    expect(screen.queryByText(/^Via\b/)).not.toBeInTheDocument();
-  });
-
-  it("offers Luna and the free DeepSeek to signed-out production visitors", () => {
-    vi.stubEnv("MODE", "production");
-    auth.value = { user: null, isLoading: false };
-    renderAskAssistant();
-
-    const picker = screen.getByRole("combobox", { name: "Research model" });
-    expect(picker).toHaveValue("gpt-5.6-luna@openai");
-    expect([...picker.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
-      "DeepSeek V4.1 Flash",
-      "GPT-6 Luna",
-    ]);
-    expect(chatApi.getModels).not.toHaveBeenCalled();
-  });
-
-  it("offers the discovered production models to signed-in users", async () => {
-    vi.stubEnv("MODE", "production");
-    vi.stubEnv("VITE_CHAT_ENABLED", "1");
-    vi.mocked(chatApi.getModels).mockResolvedValue({
-      items: [{ id: "gpt-5.6-luna@openai", label: "GPT-6 Luna", provider: "openai" }],
-      default_model: "gpt-5.6-luna@openai",
-    });
-    renderAskAssistant();
-
-    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Research model" }))
-      .not.toBeInTheDocument());
-    expect(screen.getByLabelText("Research model")).toHaveTextContent("GPT-6 Luna");
-  });
-
   it("types, holds, erases, and rotates the suggested placeholder", () => {
     vi.useFakeTimers();
     renderAskAssistant();
@@ -307,6 +235,14 @@ describe("AskAssistant", () => {
     renderAskAssistant();
 
     expect(screen.queryByRole("button", { name: /Reasoning effort/ })).not.toBeInTheDocument();
+  });
+
+  it("does not show or offer the research model", () => {
+    renderAskAssistant();
+
+    expect(screen.queryByLabelText("Research model")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Luna|DeepSeek/)).not.toBeInTheDocument();
+    expect(chatApi.getModels).not.toHaveBeenCalled();
   });
 
   it("selects an inline paper and carries its structured mention into chat", async () => {
@@ -395,8 +331,6 @@ describe("AskAssistant", () => {
     const user = userEvent.setup();
     renderAskAssistant();
 
-    expect(await screen.findByLabelText("Research model"))
-      .toHaveValue("gpt-5.6-luna@openai");
     expect(screen.queryByRole("switch", { name: "Web search" })).not.toBeInTheDocument();
     await user.type(
       screen.getByRole("combobox", { name: "Ask the assistant" }),

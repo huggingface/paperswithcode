@@ -37,14 +37,8 @@
 .ask-home-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 4px 6px 4px 12px;
-}
-.ask-home-provider-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 /* Keep the MCP card at the bottom left even when the sidebar above it is short. */
 .feed-sidebar {

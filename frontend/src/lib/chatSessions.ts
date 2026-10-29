@@ -177,17 +177,6 @@ export function isSponsoredChatModel(
   return model ? model.sponsored === true : selectedModel === SPONSORED_CHAT_MODEL;
 }
 
-export function labelForChatModel(
-  models: Array<Pick<ChatModelChoice, "id" | "label">>,
-  selectedModel: string,
-): string {
-  return models.find((model) => model.id === selectedModel)?.label
-    ?? (selectedModel === LEGACY_OPENROUTER_LUNA_MODEL
-      ? "GPT-5.6 Luna (Legacy OpenRouter)"
-      : selectedModel === DEFAULT_CHAT_MODEL
-        ? "GPT-6 Luna"
-      : `${selectedModel} (unavailable)`);
-}
 // Signed-out visitors cannot read discovery, so this list is what they see.
 export const PRODUCTION_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
   {
