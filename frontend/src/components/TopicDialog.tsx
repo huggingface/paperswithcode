@@ -10,8 +10,22 @@ import { displayTaskName } from '@/lib/transform';
 import { stashPendingFollows, stashPendingTopic, useSaveFollows, useSaveTopic, type FollowPick } from '@/lib/researchTopic';
 import { hfLoginUrl } from './HfSignInButton';
 
+// Well-known researchers; author popularity has no data signal, since citation ranks favour coauthors of a few huge papers.
+const POPULAR_AUTHORS = [
+  { id: '266', name: 'Yann LeCun' },
+  { id: '4049', name: 'Jürgen Schmidhuber' },
+  { id: '13379', name: 'Geoffrey Hinton' },
+  { id: '25', name: 'Yoshua Bengio' },
+  { id: '264', name: 'Kaiming He' },
+  { id: '1469', name: 'Fei-Fei Li' },
+  { id: '3079', name: 'Ilya Sutskever' },
+  { id: '219', name: 'Sergey Levine' },
+  { id: '438', name: 'Percy Liang' },
+  { id: '220', name: 'Chelsea Finn' },
+];
+
 /** Builds the Following feed in a pop-up, so /following shows no input field next to the chat box:
- * a free-text topic plus trending tasks and methods to follow. Guests sign in on submit, and
+ * a free-text topic plus trending tasks and methods, popular authors, and organizations to follow. Guests sign in on submit, and
  * /following saves what they picked when they return. */
 export default function TopicDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
@@ -36,6 +50,16 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
     queryFn: () => catalogApi.trendingMethods({ limit: 8 }),
     staleTime: 10 * 60 * 1000,
   });
+  const organizations = useQuery({
+    queryKey: ['organizations', 'featured'],
+    queryFn: () => catalogApi.organizationIndex(),
+    staleTime: 10 * 60 * 1000,
+  });
+  // The directory's curated order puts the best-known labs first.
+  const popularOrganizations = (organizations.data?.results ?? [])
+    .filter(org => org.display_order != null)
+    .sort((a, b) => a.display_order! - b.display_order!)
+    .slice(0, 10);
   const [draft, setDraft] = useState<string | null>(null);
   const [picks, setPicks] = useState<FollowPick[]>([]);
   const saveTopic = useSaveTopic();
@@ -100,8 +124,10 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
         }} />
       <span className="research-topic-count">{value.length}/{TOPIC_MAX_LENGTH}</span>
     </div>
-    {chips('Or pick trending tasks', 'task', tasks.data?.results ?? [])}
-    {chips('And methods', 'method', methods.data?.results ?? [])}
+    {chips('Trending tasks', 'task', tasks.data?.results ?? [])}
+    {chips('Trending methods', 'method', methods.data?.results ?? [])}
+    {chips('Popular authors', 'author', POPULAR_AUTHORS)}
+    {chips('Popular organizations', 'organization', popularOrganizations)}
     {(saveTopic.error || saveFollows.error) && <p className="settings-token-error" role="alert">
       Could not save your feed. Please try again.
     </p>}

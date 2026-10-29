@@ -29,6 +29,7 @@ beforeEach(() => {
   vi.stubEnv('VITE_CHAT_ENABLED', '0');
   vi.spyOn(catalogApi, 'topTasks').mockResolvedValue([]);
   vi.spyOn(catalogApi, 'trendingTasks').mockResolvedValue({ results: [], recent_days: 7, baseline_days: 30 });
+  vi.spyOn(catalogApi, 'organizationIndex').mockResolvedValue({ count: 0, results: [] } as never);
   vi.spyOn(catalogApi, 'trendingMethods').mockResolvedValue({ results: [], recent_days: 7, baseline_days: 30 } as never);
   vi.spyOn(papersApi, 'list').mockResolvedValue({ count: 0, results: [], next_page: null, previous_page: null });
   vi.spyOn(researchApi, 'follows').mockResolvedValue([
@@ -150,6 +151,11 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   vi.mocked(catalogApi.trendingMethods).mockResolvedValue({ results: [
     { id: '9', name: 'LoRA', slug: 'lora' },
   ], recent_days: 7, baseline_days: 30 } as never);
+  vi.mocked(catalogApi.organizationIndex).mockResolvedValue({ count: 3, results: [
+    { id: '1', name: 'Microsoft', slug: 'microsoft', display_order: 1 },
+    { id: '3', name: 'NVIDIA', slug: 'nvidia', display_order: 3 },
+    { id: '8', name: 'Unranked Lab', slug: 'unranked', display_order: null },
+  ] } as never);
   vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, status: 'pending' });
   vi.spyOn(researchApi, 'setFollow').mockResolvedValue(undefined);
   renderFeed();
@@ -161,11 +167,16 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   fireEvent.click(task);
   expect(task).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(await screen.findByRole('button', { name: 'LoRA' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Yann LeCun' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'NVIDIA' }));
+  expect(screen.queryByRole('button', { name: 'Unranked Lab' })).not.toBeInTheDocument();
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
   fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
   await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledWith('real-time video generation'));
   expect(researchApi.setFollow).toHaveBeenCalledWith('task', '7', true);
   expect(researchApi.setFollow).toHaveBeenCalledWith('method', '9', true);
+  expect(researchApi.setFollow).toHaveBeenCalledWith('author', '266', true);
+  expect(researchApi.setFollow).toHaveBeenCalledWith('organization', '3', true);
 });
 
 it('keeps the filter hint when follows exist but nothing matches', async () => {
