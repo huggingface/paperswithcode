@@ -197,51 +197,62 @@ export const AskAssistant: React.FC = () => {
         </div>
       )}
       <div className="ask-home">
-        <div className="ask-home-textarea-wrap">
-          <PaperMentionHighlights
-            text={draft.text}
-            mentions={draft.paperMentions}
-            scrollTop={scrollTop}
-            variant="home"
-            completion={question ? completion : ""}
-          />
-          <textarea
-            ref={ref}
-            rows={1}
-            value={question}
-            placeholder={placeholder}
+        <div className="ask-home-row">
+          <div className="ask-home-textarea-wrap">
+            <PaperMentionHighlights
+              text={draft.text}
+              mentions={draft.paperMentions}
+              scrollTop={scrollTop}
+              variant="home"
+              completion={question ? completion : ""}
+            />
+            <textarea
+              ref={ref}
+              rows={1}
+              value={question}
+              placeholder={placeholder}
+              aria-label="Ask the assistant"
+              disabled={launching}
+              onChange={(event) => mentions.updateText(event.target.value, event.target.selectionStart)}
+              onSelect={(event) => mentions.refresh(event.currentTarget.selectionStart)}
+              onClick={(event) => mentions.refresh(event.currentTarget.selectionStart)}
+              onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+              onBlur={(event) => {
+                if (!event.relatedTarget?.closest?.(".chat-paper-picker")) window.setTimeout(mentions.close, 0);
+              }}
+              onKeyDown={(event) => {
+                if (mentions.keyDown(event)) return;
+                if (event.key === "Tab" && !event.shiftKey && completion) {
+                  event.preventDefault();
+                  const text = question + completion;
+                  mentions.updateText(text, text.length);
+                  window.requestAnimationFrame(() => ref.current?.setSelectionRange(text.length, text.length));
+                  return;
+                }
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void submit();
+                }
+              }}
+              role={paperMentionsEnabled ? "combobox" : undefined}
+              aria-expanded={paperMentionsEnabled ? mentions.open : undefined}
+              aria-controls={mentions.open ? mentions.pickerId : undefined}
+              aria-activedescendant={mentions.open && mentions.results.length
+                ? `${mentions.optionIdPrefix}-${mentions.activeIndex}`
+                : undefined}
+              aria-autocomplete={paperMentionsEnabled ? "list" : undefined}
+              aria-describedby={mentions.message ? "ask-home-paper-mention-message" : undefined}
+            />
+          </div>
+          <button
+            type="button"
+            className={`chat-send${question.trim() ? " chat-send-on" : ""}`}
+            onClick={() => void submit()}
+            disabled={!question.trim() || launching}
             aria-label="Ask the assistant"
-            disabled={launching}
-            onChange={(event) => mentions.updateText(event.target.value, event.target.selectionStart)}
-            onSelect={(event) => mentions.refresh(event.currentTarget.selectionStart)}
-            onClick={(event) => mentions.refresh(event.currentTarget.selectionStart)}
-            onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
-            onBlur={(event) => {
-              if (!event.relatedTarget?.closest?.(".chat-paper-picker")) window.setTimeout(mentions.close, 0);
-            }}
-            onKeyDown={(event) => {
-              if (mentions.keyDown(event)) return;
-              if (event.key === "Tab" && !event.shiftKey && completion) {
-                event.preventDefault();
-                const text = question + completion;
-                mentions.updateText(text, text.length);
-                window.requestAnimationFrame(() => ref.current?.setSelectionRange(text.length, text.length));
-                return;
-              }
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void submit();
-              }
-            }}
-            role={paperMentionsEnabled ? "combobox" : undefined}
-            aria-expanded={paperMentionsEnabled ? mentions.open : undefined}
-            aria-controls={mentions.open ? mentions.pickerId : undefined}
-            aria-activedescendant={mentions.open && mentions.results.length
-              ? `${mentions.optionIdPrefix}-${mentions.activeIndex}`
-              : undefined}
-            aria-autocomplete={paperMentionsEnabled ? "list" : undefined}
-            aria-describedby={mentions.message ? "ask-home-paper-mention-message" : undefined}
-          />
+          >
+            <ArrowUpIcon />
+          </button>
         </div>
         {blockedHandoffUrl && (
           <div className="chat-paper-mention-message" role="alert">
@@ -255,17 +266,6 @@ export const AskAssistant: React.FC = () => {
             {mentions.message}
           </div>
         )}
-        <div className="ask-home-foot">
-          <button
-            type="button"
-            className={`chat-send${question.trim() ? " chat-send-on" : ""}`}
-            onClick={() => void submit()}
-            disabled={!question.trim() || launching}
-            aria-label="Ask the assistant"
-          >
-            <ArrowUpIcon />
-          </button>
-        </div>
         <PaperMentionPicker
           open={mentions.open}
           query={mentions.query}

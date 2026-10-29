@@ -17,7 +17,13 @@
   box-shadow: 0 1px 2px rgba(30, 28, 20, 0.04), 0 12px 34px -18px rgba(30, 28, 20, 0.28);
   padding: 8px;
 }
-.ask-home-textarea-wrap { position: relative; }
+.ask-home-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.ask-home-row > .chat-send { flex: none; margin: 0 2px 2px 0; }
+.ask-home-textarea-wrap { position: relative; flex: 1; min-width: 0; }
 .ask-home textarea {
   position: relative;
   z-index: 1;
@@ -31,15 +37,9 @@
   line-height: 1.45;
   color: transparent;
   caret-color: var(--ink);
-  padding: 12px 12px 4px;
+  padding: 8px 12px;
 }
 .ask-home textarea::placeholder { color: var(--ink-faint); }
-.ask-home-foot {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 4px 6px 4px 12px;
-}
 /* Keep the MCP card at the bottom left even when the sidebar above it is short.
    250px is the sidebar's top on first paint (header and feed title), so the card
    stays above the fold before the sidebar sticks at 100px. */
