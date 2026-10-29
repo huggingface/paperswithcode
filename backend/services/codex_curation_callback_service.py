@@ -1280,6 +1280,7 @@ class CodexCurationCallbackService:
                 )
             self._validate_trending_model_ownership(row, body)
             self._validate_trending_source_coverage(row, body)
+            self._validate_results_image_coverage(row, body)
             for removal in body.evaluation_removals:
                 existing = self.db.get(Evaluation, removal.evaluation_id)
                 if existing is None or existing.paper_id != row.paper_id:
@@ -1381,6 +1382,37 @@ class CodexCurationCallbackService:
                 raise ValueError("Source coverage has an invalid inspection status")
             if not isinstance(item.get("benchmark_outcomes"), list):
                 raise ValueError("Source coverage must include benchmark outcomes")
+
+    @staticmethod
+    def _validate_results_image_coverage(row, body: ApplyMutationRequest) -> None:
+        """Release pages often publish their only results table as an image.
+
+        The preflight downloads such images; each must be viewed and reported.
+        """
+        documents = (getattr(row, "url_candidates", None) or {}).get(
+            "source_documents"
+        ) or []
+        expected = {
+            source_url_identity(item["url"])
+            for item in documents
+            if isinstance(item, dict)
+            and item.get("kind") == "results_image"
+            and item.get("url")
+        }
+        covered = {
+            source_url_identity(item.get("url"))
+            for item in body.source_coverage
+            if isinstance(item, dict)
+            and item.get("url")
+            and isinstance(item.get("benchmark_outcomes"), list)
+        }
+        missing = sorted(expected - covered)
+        if missing:
+            raise ValueError(
+                "Open every results_image source document with view_image and add "
+                "a source_coverage entry listing each benchmark it shows: "
+                f"{', '.join(missing)}"
+            )
 
     @staticmethod
     def _benchmark_outcomes(body: ApplyMutationRequest, dispositions: set[str]):

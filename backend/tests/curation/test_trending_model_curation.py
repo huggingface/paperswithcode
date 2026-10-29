@@ -2319,3 +2319,46 @@ def test_external_upgrade_moves_method_evidence_and_skips_same_name_authors():
     }
     assert authors == {alice_arxiv.id, bob.id}
     assert db.get(Paper, external.id).is_latest_version is False
+
+
+def test_add_evals_requires_coverage_for_every_results_image():
+    image = "https://cdn.example/images/evals-table.original.png"
+    row = SimpleNamespace(
+        trigger="external-paper-markdown-ready",
+        url_candidates={
+            "source_documents": [
+                {"kind": "paper_source", "url": "https://example.com/blog"},
+                {"kind": "results_image", "url": image},
+            ]
+        },
+    )
+    blog = {
+        "url": "https://example.com/blog",
+        "status": "inspected",
+        "benchmark_outcomes": [],
+    }
+
+    with pytest.raises(ValueError, match="view_image"):
+        CodexCurationCallbackService._validate_results_image_coverage(
+            row, ApplyMutationRequest(source_coverage=[blog])
+        )
+
+    CodexCurationCallbackService._validate_results_image_coverage(
+        row,
+        ApplyMutationRequest(
+            source_coverage=[
+                blog,
+                {
+                    "url": image,
+                    "status": "inspected",
+                    "benchmark_outcomes": [
+                        {
+                            "benchmark": "OSWorld 2.1",
+                            "disposition": "evaluation",
+                            "detail": "Offline subset row, Partial score 81.5.",
+                        }
+                    ],
+                },
+            ]
+        ),
+    )

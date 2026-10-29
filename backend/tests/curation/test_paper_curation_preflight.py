@@ -649,3 +649,89 @@ def test_external_preflight_waits_only_for_an_expected_copy(monkeypatch, expecte
     assert result["awaiting_markdown"] is expected
     assert result["complete"] is True
     assert "local_path" not in result["source_documents"][0]
+
+
+RELEASE_PAGE = (
+    PAPER_TEXT.decode()
+    + "\n![Faceted crystal header](https://cdn.example/images/header.webp)\n"
+    + "[![Model benchmark table](https://cdn.example/images/evals-table.w1200.webp)]"
+    + "(https://cdn.example/images/evals-table.original.png)\n"
+    + "![chart showing ExploitGym](/images/exploitgym.webp)\n"
+    + "[![](https://cdn.example/images/related-story.fill-300x300.webp)](/blog/other)\n"
+).encode()
+
+
+def test_results_image_links_keep_result_images_and_prefer_full_size():
+    links = url_preflight.results_image_links(
+        RELEASE_PAGE.decode(), "https://openai.com/index/introducing-gpt-6-1-terra"
+    )
+
+    assert links == [
+        (
+            "Model benchmark table",
+            [
+                "https://cdn.example/images/evals-table.original.png",
+                "https://cdn.example/images/evals-table.w1200.webp",
+            ],
+        ),
+        ("chart showing ExploitGym", ["https://openai.com/images/exploitgym.webp"]),
+    ]
+
+
+def test_add_evals_external_preflight_downloads_results_images(monkeypatch, tmp_path):
+    monkeypatch.setenv(url_preflight.OCR_MARKDOWN_TOKEN_ENV, "hf-test")
+    context = _external_context(markdown_expected=True)
+    context["job"] = {"kind": "add-evals"}
+
+    def fetch(url: str, _limit: int):
+        if url == "https://cdn.example/images/evals-table.original.png":
+            raise ValueError("response exceeds limit")
+        if url == "https://cdn.example/images/evals-table.w1200.webp":
+            return b"RIFF\x00\x00\x00\x00WEBPVP8 ", url
+        if url == "https://openai.com/images/exploitgym.webp":
+            return b"<html>not an image</html>", url
+        return _refused(url, _limit)
+
+    result = url_preflight.extract_candidates(
+        context,
+        fetch=fetch,
+        fetch_external_markdown=lambda *_args, **_kwargs: (RELEASE_PAGE, "bucket"),
+        source_cache_dir=tmp_path / "paper-sources",
+    )
+
+    images = [
+        item for item in result["source_documents"] if item["kind"] == "results_image"
+    ]
+    # The oversized original falls back to the inline copy.
+    assert [(item["url"], item["alt"]) for item in images] == [
+        ("https://cdn.example/images/evals-table.w1200.webp", "Model benchmark table")
+    ]
+    assert Path(images[0]["local_path"]).suffix == ".webp"
+    assert images[0]["page_url"] == context["paper"]["source_url"]
+    # An image that cannot be read never blocks curation.
+    assert result["complete"] is True
+    assert {
+        "source": "results_image",
+        "url": "https://openai.com/images/exploitgym.webp",
+        "error": "NotAnImage",
+    } in result["errors"]
+
+
+def test_enrich_external_preflight_skips_results_images(monkeypatch, tmp_path):
+    monkeypatch.setenv(url_preflight.OCR_MARKDOWN_TOKEN_ENV, "hf-test")
+    context = _external_context(markdown_expected=True)
+    context["job"] = {"kind": "enrich-paper"}
+
+    def fetch(url: str, _limit: int):
+        if "images" in url:
+            raise AssertionError("enrichment does not read result images")
+        return _refused(url, _limit)
+
+    result = url_preflight.extract_candidates(
+        context,
+        fetch=fetch,
+        fetch_external_markdown=lambda *_args, **_kwargs: (RELEASE_PAGE, "bucket"),
+        source_cache_dir=tmp_path / "paper-sources",
+    )
+
+    assert all(item["kind"] != "results_image" for item in result["source_documents"])

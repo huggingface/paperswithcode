@@ -113,37 +113,45 @@ or a mismatch, including fractions that happen to fit inside 0–100 bounds.
 If metadata conflicts with source or existing leaderboard evidence, skip the
 result and report the conflict instead of choosing a scale arbitrarily.
 
-### Benchmark chart images (add-evals only)
+### Benchmark result images (add-evals only)
 
-Many model cards, READMEs, and release pages publish their scores only as an
-embedded benchmark chart. When a source document has no text table or prose
-score for a benchmark but embeds a results image (`<img>`, Markdown
-`![...](...)`), you may read that image:
+Lab release pages, model cards, and READMEs often publish their whole results
+table or chart only as an image; the page text may mention just a few scores.
+Read result images before you list the paper's benchmarks:
 
-1. Resolve the image URL from the source document (absolute, first-party: the
-   model repo, the release page's own domain, or its GitHub repo). Download it
-   to `/tmp/charts/` with Python (`urllib.request`, browser User-Agent), then
-   open the local file with the `view_image` tool.
-2. Import only values printed on the chart as numbers (a data label on or
-   above the bar, or a value in a chart table). Never estimate a value from bar
-   height, axis gridlines, or pixel position; skip unlabeled bars.
-3. The bar must unambiguously belong to the introduced model: its label or
-   legend entry names the release, and the legend color-to-model mapping is
-   clear. Comparator bars stay excluded, as in text tables.
-4. Apply every text-table rule: exact benchmark version, split, setting
-   (thinking/tools/pass@k), metric definition, and scale. A chart panel title
-   such as `SWE-bench Verified` names the benchmark; a footnote may define the
-   protocol. If the chart omits protocol details that the leaderboard needs,
-   skip and report.
-5. Cite the chart. In `score_evidence`, `source_url` is the image URL and
-   `table_reference` is `Chart image on <source document URL>: panel
-   "<exact panel/benchmark title>", bar "<exact bar label>", printed value
-   "<exact text>"`. Use the same citation in any `validation_evidence` entry
-   that relies on the chart, and list the source document in `source_coverage`
-   with the chart named in the outcome detail.
+1. Every `results_image` entry in `/tmp/url_candidates.json`
+   `source_documents` is a results table or chart that the preflight already
+   downloaded from the paper's page (`local_path`; `alt` is its caption). Open
+   each one with the `view_image` tool before you enumerate benchmarks, and give
+   each one its own `source_coverage` entry (its `url`) that lists every
+   benchmark it shows. The server rejects proposals that omit one. Use status
+   `unavailable` only if the file cannot be opened.
+2. For other source documents, open any embedded image whose caption, alt text,
+   or file name suggests results (`<img>`, Markdown `![...](...)`). An image the
+   page itself embeds is first-party whatever host serves it (release pages
+   often use a CDN such as `storage.googleapis.com`). Download it to
+   `/tmp/charts/` with Python (`urllib.request`, browser User-Agent), preferring
+   a linked full-size original, then open it with `view_image`.
+3. Import only values printed in the image as numbers (a table cell, or a data
+   label on or above a bar). Never estimate a value from bar height, axis
+   gridlines, or pixel position; skip unlabeled bars.
+4. The cell, column, or bar must unambiguously belong to the introduced model:
+   its header, label, or legend entry names the release. Comparator columns
+   and bars stay excluded, as in text tables.
+5. Apply every text-table rule: exact benchmark version, split, setting
+   (thinking/tools/pass@k), metric definition, and scale. A row label such as
+   `OSWorld-2.1 (Offline subset)` or a panel title names the benchmark; a
+   footnote or a linked methodology page may define the protocol. If the image
+   and its linked notes omit protocol details that the leaderboard needs, skip
+   and report.
+6. Cite the image. In `score_evidence`, `source_url` is the image URL and
+   `table_reference` is `Results image on <page URL>: row/panel "<exact
+   benchmark label>", column/bar "<exact model label>", printed value "<exact
+   text>"`. Use the same citation in any `validation_evidence` entry that
+   relies on the image.
 
-Prefer a text table whenever both exist; the chart only fills gaps. Report
-which values came from charts in the audit.
+Prefer a text table whenever both carry the same score; images fill gaps.
+Report which values came from images in the audit.
 
 Query every benchmark the paper reports under its exact name and common
 variants (for example `ImageNet`, `ImageNet-1K`, `ILSVRC-2012`); the first match

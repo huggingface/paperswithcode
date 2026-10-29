@@ -30,6 +30,16 @@ OCR_MARKDOWN_BUCKET_ID = "huggingface/pwc-papers-content"
 OCR_MARKDOWN_TOKEN_ENV = "PWC_PAPER_MARKDOWN_HF_TOKEN"
 
 BENCHMARK_GAP_KINDS = {"review-benchmark-gaps", "add-benchmark"}
+# Lab release pages publish their results tables as images, which the page
+# Markdown keeps only as links: `[![alt](inline)](full-size)` or `![alt](src)`.
+MARKDOWN_IMAGE_PATTERN = re.compile(
+    r"\[?!\[(?P<alt>[^\]]*)\]\((?P<src>[^)\s]+)[^)]*\)(?:\]\((?P<href>[^)\s]+)[^)]*\))?"
+)
+RESULTS_IMAGE_HINT = re.compile(
+    r"bench|eval|result|leaderboard|score|chart|table|comparison|performance|metric",
+    re.IGNORECASE,
+)
+MAX_RESULTS_IMAGES = 8
 
 
 class _BucketRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -241,6 +251,82 @@ def _hint(url: str) -> str | None:
 def _matches(text: str) -> Iterable[str]:
     for pattern in (GITHUB_URL_PATTERN, PROJECT_PAGE_URL_PATTERN):
         yield from re.findall(pattern, text)
+
+
+def _image_suffix(body: bytes) -> str | None:
+    if body.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if body.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if body.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if body.startswith(b"RIFF") and body[8:12] == b"WEBP":
+        return ".webp"
+    return None
+
+
+def results_image_links(markdown: str, base_url: str) -> list[tuple[str, list[str]]]:
+    """Return (alt text, URLs to try) for images that look like benchmark results.
+
+    A linked image tries its full-size target first, then the inline copy.
+    """
+    images: dict[str, tuple[str, list[str]]] = {}
+    for match in MARKDOWN_IMAGE_PATTERN.finditer(markdown):
+        alt = match.group("alt").strip()
+        urls = [
+            urllib.parse.urljoin(base_url, value)
+            for value in (match.group("href"), match.group("src"))
+            if value
+        ]
+        urls = [
+            url
+            for url in dict.fromkeys(urls)
+            if url.startswith(("http://", "https://"))
+        ]
+        names = " ".join(
+            urllib.parse.urlsplit(url).path.rsplit("/", 1)[-1] for url in urls
+        )
+        if urls and RESULTS_IMAGE_HINT.search(f"{alt} {names}"):
+            images.setdefault(urls[0], (alt, urls))
+    return list(images.values())[:MAX_RESULTS_IMAGES]
+
+
+def fetch_results_images(
+    markdown: str, base_url: str, cache_dir: Path, *, fetch=_fetch
+) -> tuple[list[dict], list[dict]]:
+    """Download results images for the curator to view; return documents and errors."""
+    documents: list[dict] = []
+    errors: list[dict] = []
+    for alt, urls in results_image_links(markdown, base_url):
+        error = None
+        for url in urls:
+            try:
+                body, _final_url = fetch(url, MAX_TEXT_BYTES)
+            except Exception as exc:
+                error = type(exc).__name__
+                continue
+            suffix = _image_suffix(body)
+            if suffix is None:
+                error = "NotAnImage"
+                continue
+            sha256 = hashlib.sha256(body).hexdigest()
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cached = cache_dir / f"{sha256}{suffix}"
+            cached.write_bytes(body)
+            documents.append(
+                {
+                    "kind": "results_image",
+                    "url": url,
+                    "alt": alt[:300],
+                    "page_url": base_url,
+                    "local_path": str(cached.resolve()),
+                    "sha256": sha256,
+                }
+            )
+            break
+        else:
+            errors.append({"source": "results_image", "url": urls[0], "error": error})
+    return documents, errors
 
 
 def extract_candidates(
@@ -583,6 +669,24 @@ def extract_candidates(
     if front_matter is not None:
         source_documents.append(front_matter)
 
+    if (
+        (context.get("job") or {}).get("kind") == "add-evals"
+        and source_cache_dir is not None
+        and paper.get("source_url")
+    ):
+        for source in sources:
+            if source.get("source") == "external_markdown" and source.get("local_path"):
+                images, image_errors = fetch_results_images(
+                    Path(source["local_path"]).read_text(
+                        encoding="utf-8", errors="replace"
+                    ),
+                    paper["source_url"],
+                    source_cache_dir / "images",
+                    fetch=fetch,
+                )
+                source_documents.extend(images)
+                errors.extend(image_errors)
+
     markdown_available = (
         hf_markdown_available or ocr_markdown_available or external_markdown_available
     )
@@ -605,6 +709,9 @@ def extract_candidates(
         if source == "paper_front_matter":
             # Only organization tagging uses it; the skill falls back to the
             # Markdown header and the paper's release links.
+            return True
+        if source == "results_image":
+            # The page Markdown still names the image; the agent can fetch it.
             return True
         if source == "project_page_html" and error.get("http_status") in {404, 410}:
             return paper_text_available
