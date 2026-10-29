@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import urllib.error
 from pathlib import Path
@@ -735,3 +736,38 @@ def test_enrich_external_preflight_skips_results_images(monkeypatch, tmp_path):
     )
 
     assert all(item["kind"] != "results_image" for item in result["source_documents"])
+
+
+class _BodyResponse(io.BytesIO):
+    headers: dict = {}
+
+    def geturl(self):
+        return "https://cdn.example/images/evals-table.original.png"
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+def test_fetch_allows_large_images_but_keeps_html_on_the_text_budget(monkeypatch):
+    size = url_preflight.MAX_TEXT_BYTES + 1_000_000
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * size
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _BodyResponse(png),
+    )
+    body, _url = url_preflight._fetch(
+        "https://cdn.example/t.png", url_preflight.MAX_IMAGE_BYTES
+    )
+    assert body == png
+
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _BodyResponse(b"<html>" + b"x" * size),
+    )
+    with pytest.raises(ValueError, match="exceeds"):
+        url_preflight._fetch("https://cdn.example/t.png", url_preflight.MAX_IMAGE_BYTES)

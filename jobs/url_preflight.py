@@ -40,6 +40,8 @@ RESULTS_IMAGE_HINT = re.compile(
     re.IGNORECASE,
 )
 MAX_RESULTS_IMAGES = 8
+# Full-size results tables from release pages are often several megabytes.
+MAX_IMAGE_BYTES = 20_000_000
 
 
 class _BucketRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -113,10 +115,10 @@ def _fetch(url: str, limit: int) -> tuple[bytes, str]:
     )
     with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
         final_url = response.geturl()
-        prefix = response.read(5)
+        prefix = response.read(12)
         # Project URLs can redirect to PDFs. Keep HTML bounded to the text
-        # budget even when the caller allows a larger PDF response.
-        if not prefix.startswith(b"%PDF-"):
+        # budget even when the caller allows a larger PDF or image response.
+        if not prefix.startswith(b"%PDF-") and _image_suffix(prefix) is None:
             limit = min(limit, MAX_TEXT_BYTES)
         content_length = int(response.headers.get("Content-Length") or 0)
         if content_length > limit:
@@ -301,7 +303,7 @@ def fetch_results_images(
         error = None
         for url in urls:
             try:
-                body, _final_url = fetch(url, MAX_TEXT_BYTES)
+                body, _final_url = fetch(url, MAX_IMAGE_BYTES)
             except Exception as exc:
                 error = type(exc).__name__
                 continue
