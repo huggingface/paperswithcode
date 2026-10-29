@@ -159,7 +159,7 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     ),
     "Muse Glimmer 30B": ModelIdentity(
         "Muse Glimmer-30B",
-        source_url="https://huggingface.co/meta-models/Muse-Glimmer-30B",
+        arxiv_id="2610.24628",
         is_open=True,
         hf_model_url="https://huggingface.co/meta-models/Muse-Glimmer-30B",
     ),

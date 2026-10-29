@@ -34,6 +34,7 @@ from backend.models.database import (
     ProjectPage,
     TrendingModelCandidate,
 )
+from backend.services.evaluation_entry_identity import leaderboard_model_key
 from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
@@ -567,9 +568,23 @@ class TrendingModelResolutionService:
         for row in source_methods:
             self.db.delete(row)
 
-        self.db.query(Evaluation).filter(Evaluation.paper_id == source.id).update(
-            {Evaluation.paper_id: target.id}, synchronize_session=False
-        )
+        # Both rows were often curated; keep the arXiv paper's copy of an entry.
+        target_entries = {
+            (row.task_id, row.dataset_id, row.best_metric)
+            + leaderboard_model_key(row.model_name, row.harness)
+            for row in self.db.query(Evaluation).filter(
+                Evaluation.paper_id == target.id
+            )
+        }
+        for row in (
+            self.db.query(Evaluation).filter(Evaluation.paper_id == source.id).all()
+        ):
+            if (row.task_id, row.dataset_id, row.best_metric) + leaderboard_model_key(
+                row.model_name, row.harness
+            ) in target_entries:
+                self.db.delete(row)
+            else:
+                row.paper_id = target.id
         releases = (
             self.db.query(ModelRelease)
             .filter(ModelRelease.paper_id == source.id)

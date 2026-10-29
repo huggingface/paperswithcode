@@ -2319,3 +2319,47 @@ def test_external_upgrade_moves_method_evidence_and_skips_same_name_authors():
     }
     assert authors == {alice_arxiv.id, bob.id}
     assert db.get(Paper, external.id).is_latest_version is False
+
+
+def test_external_upgrade_keeps_one_row_per_leaderboard_entry():
+    db = _resolution_session()
+    external = Paper(
+        title="Infinity-Parser2-Pro",
+        source="external",
+        source_url="https://huggingface.co/infly/Infinity-Parser2-Pro",
+        version="v1",
+        is_latest_version=True,
+    )
+    arxiv = Paper(
+        title="Infinity-Parser2 Technical Report",
+        source="arxiv",
+        arxiv_id="2607.07836",
+        version="v1",
+        is_latest_version=True,
+    )
+    db.add_all([external, arxiv])
+    db.flush()
+
+    def evaluation(paper, model_name, dataset_id):
+        return Evaluation(
+            paper_id=paper.id,
+            task_id=1,
+            dataset_id=dataset_id,
+            model_name=model_name,
+            metrics={"Accuracy": 87.6},
+            best_metric="Accuracy",
+        )
+
+    kept = evaluation(arxiv, "Infinity-Parser2-Pro", 1)
+    moved = evaluation(external, "Infinity-Parser2-Pro", 2)
+    db.add_all([kept, evaluation(external, "Infinity Parser2 Pro", 1), moved])
+    db.commit()
+
+    TrendingModelResolutionService(db)._upgrade_external_paper(external, arxiv)
+    db.commit()
+
+    rows = db.query(Evaluation).order_by(Evaluation.id).all()
+    assert [(row.id, row.paper_id) for row in rows] == [
+        (kept.id, arxiv.id),
+        (moved.id, arxiv.id),
+    ]

@@ -58,11 +58,19 @@ class _Database:
 
 
 class _EvaluationService:
-    def __init__(self):
+    def __init__(self, duplicate=None):
         self.updates = []
+        self.creates = []
+        self.duplicate = duplicate
 
     def update_evaluation(self, evaluation_id, **values):
         self.updates.append((evaluation_id, values))
+
+    def create_evaluation(self, **values):
+        self.creates.append(values)
+
+    def find_leaderboard_duplicate(self, **_identity):
+        return self.duplicate
 
 
 def _existing(methodology: str | None, *, score=54.93, evaluation_id=40025):
@@ -150,7 +158,33 @@ def test_unchanged_resubmission_of_a_sync_managed_row_is_a_no_op():
     service = _service(_existing(VALS_HEAD))
     body = ApplyMutationRequest(evaluations=[_proposal(score=54.93)])
 
-    assert service._apply_evaluations(body) == (0, 0)
+    assert service._apply_evaluations(body) == (0, 0, [])
+
+
+def test_curator_skips_a_model_already_on_the_leaderboard_from_a_twin_paper():
+    twin = SimpleNamespace(id=4945, paper_id=83158)
+    service = CodexCurationCallbackService(
+        _Database([]),
+        evaluation_service=_EvaluationService(duplicate=twin),
+        association_service=SimpleNamespace(),
+    )
+    body = ApplyMutationRequest(evaluations=[_proposal()])
+
+    created, updated, skipped = service._apply_evaluations(body)
+
+    assert (created, updated) == (0, 0)
+    assert service.evaluation_service.creates == []
+    assert skipped == [
+        {
+            "task_id": TASK_ID,
+            "dataset_id": DATASET_ID,
+            "model_name": "Ling-3.0-flash-Fin",
+            "harness": None,
+            "best_metric": "Accuracy",
+            "duplicate_evaluation_id": 4945,
+            "duplicate_paper_id": 83158,
+        }
+    ]
 
 
 def test_curator_may_still_update_unmanaged_rows():
@@ -159,7 +193,7 @@ def test_curator_may_still_update_unmanaged_rows():
         evaluations=[_proposal(methodology="Corrected from the appendix table.")]
     )
 
-    assert service._apply_evaluations(body) == (0, 1)
+    assert service._apply_evaluations(body) == (0, 1, [])
 
 
 @pytest.mark.parametrize(

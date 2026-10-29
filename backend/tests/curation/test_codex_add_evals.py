@@ -714,6 +714,9 @@ def test_scoped_worker_can_apply_discovered_evaluation(monkeypatch):
         def __init__(self, _db):
             pass
 
+        def find_leaderboard_duplicate(self, **_identity):
+            return None
+
         def create_evaluation(self, **values):
             created.append(values)
 

@@ -274,6 +274,8 @@ class PaperVersionRefreshService:
                 dataset_id=link.dataset_id,
             )
 
+        # Leaderboards list every version's rows, so results move to the new
+        # version rather than being copied; the old version keeps none.
         for evaluation in (
             self.db.query(DBEvaluation)
             .filter(DBEvaluation.paper_id == source_paper_id)
@@ -292,28 +294,9 @@ class PaperVersionRefreshService:
                 .first()
             )
             if exists:
-                continue
-            self.db.add(
-                DBEvaluation(
-                    paper_id=target_paper_id,
-                    task_id=evaluation.task_id,
-                    dataset_id=evaluation.dataset_id,
-                    model_name=evaluation.model_name,
-                    harness=evaluation.harness,
-                    methodology=evaluation.methodology,
-                    metrics=evaluation.metrics,
-                    uses_additional_data=evaluation.uses_additional_data,
-                    is_open=evaluation.is_open,
-                    best_rank=evaluation.best_rank,
-                    best_metric=evaluation.best_metric,
-                    evaluated_on=evaluation.evaluated_on,
-                    external_source_url=evaluation.external_source_url,
-                    source_url=evaluation.source_url,
-                    external=evaluation.external,
-                    num_parameters=evaluation.num_parameters,
-                    hf_model_url=evaluation.hf_model_url,
-                )
-            )
+                self.db.delete(evaluation)
+            else:
+                evaluation.paper_id = target_paper_id
 
     def _add_if_missing(
         self, model: Any, defaults: Optional[Dict[str, Any]] = None, **keys: Any
