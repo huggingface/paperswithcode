@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from backend.config import get_settings
 from backend.models.curation import ApplyMutationRequest, ResolveModelPaperMutation
 from backend.models.database import (
+    Metric,
     Author,
     Base,
     Evaluation,
@@ -358,6 +359,7 @@ def _resolution_session() -> Session:
             PaperConference.__table__,
             PaperOrganization.__table__,
             Evaluation.__table__,
+            Metric.__table__,
             PaperRelation.__table__,
             PaperCurationBootstrapBundle.__table__,
             PaperCurationJob.__table__,

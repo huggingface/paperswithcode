@@ -9,13 +9,13 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from backend.models.papers import Paper
+from backend.services.evaluation_service import EvaluationService
 from backend.services.author_service import (
     get_or_create_author_by_name,
     normalize_arxiv_author_name,
 )
 from backend.models.database import (
     Author as DBAuthor,
-    Evaluation as DBEvaluation,
     Paper as DBPaper,
     PaperAuthor,
     PaperConference as DBPaperConference,
@@ -276,27 +276,9 @@ class PaperVersionRefreshService:
 
         # Leaderboards list every version's rows, so results move to the new
         # version rather than being copied; the old version keeps none.
-        for evaluation in (
-            self.db.query(DBEvaluation)
-            .filter(DBEvaluation.paper_id == source_paper_id)
-            .all()
-        ):
-            exists = (
-                self.db.query(DBEvaluation.id)
-                .filter(
-                    DBEvaluation.paper_id == target_paper_id,
-                    DBEvaluation.task_id == evaluation.task_id,
-                    DBEvaluation.dataset_id == evaluation.dataset_id,
-                    DBEvaluation.model_name == evaluation.model_name,
-                    DBEvaluation.harness == evaluation.harness,
-                    DBEvaluation.best_metric == evaluation.best_metric,
-                )
-                .first()
-            )
-            if exists:
-                self.db.delete(evaluation)
-            else:
-                evaluation.paper_id = target_paper_id
+        EvaluationService(self.db).move_paper_evaluations(
+            source_paper_id, target_paper_id
+        )
 
     def _add_if_missing(
         self, model: Any, defaults: Optional[Dict[str, Any]] = None, **keys: Any

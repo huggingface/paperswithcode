@@ -628,6 +628,42 @@ class EvaluationService:
                 return row
         return None
 
+    def move_paper_evaluations(
+        self, source_paper_id: int, target_paper_id: int
+    ) -> None:
+        """Hand a paper's evaluations to the paper that supersedes it.
+
+        Leaderboards list rows from every paper, so an entry the target already
+        shows is dropped rather than moved, and those boards are re-ranked.
+        """
+
+        def entry(row: DBEvaluation) -> tuple:
+            return (
+                row.task_id,
+                row.dataset_id,
+                row.best_metric,
+            ) + leaderboard_model_key(row.model_name, row.harness)
+
+        target_entries = {
+            entry(row)
+            for row in self.db.query(DBEvaluation).filter(
+                DBEvaluation.paper_id == target_paper_id
+            )
+        }
+        dropped_scopes: RankScopes = set()
+        for row in (
+            self.db.query(DBEvaluation)
+            .filter(DBEvaluation.paper_id == source_paper_id)
+            .all()
+        ):
+            if entry(row) in target_entries:
+                dropped_scopes |= self._rank_scopes(row)
+                self.db.delete(row)
+            else:
+                row.paper_id = target_paper_id
+        if dropped_scopes:
+            self.refresh_rank_scopes(dropped_scopes)
+
     def _reject_leaderboard_duplicate(self, **identity) -> None:
         duplicate = self.find_leaderboard_duplicate(**identity)
         if duplicate is not None:

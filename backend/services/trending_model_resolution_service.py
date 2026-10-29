@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from backend.models.curation import ResolveModelPaperMutation
 from backend.models.database import (
     Author,
-    Evaluation,
     HfArtifact,
     ModelProviderAlias,
     ModelRelease,
@@ -34,7 +33,7 @@ from backend.models.database import (
     ProjectPage,
     TrendingModelCandidate,
 )
-from backend.services.evaluation_entry_identity import leaderboard_model_key
+from backend.services.evaluation_service import EvaluationService
 from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
@@ -569,22 +568,7 @@ class TrendingModelResolutionService:
             self.db.delete(row)
 
         # Both rows were often curated; keep the arXiv paper's copy of an entry.
-        target_entries = {
-            (row.task_id, row.dataset_id, row.best_metric)
-            + leaderboard_model_key(row.model_name, row.harness)
-            for row in self.db.query(Evaluation).filter(
-                Evaluation.paper_id == target.id
-            )
-        }
-        for row in (
-            self.db.query(Evaluation).filter(Evaluation.paper_id == source.id).all()
-        ):
-            if (row.task_id, row.dataset_id, row.best_metric) + leaderboard_model_key(
-                row.model_name, row.harness
-            ) in target_entries:
-                self.db.delete(row)
-            else:
-                row.paper_id = target.id
+        EvaluationService(self.db).move_paper_evaluations(source.id, target.id)
         releases = (
             self.db.query(ModelRelease)
             .filter(ModelRelease.paper_id == source.id)
