@@ -10,7 +10,6 @@ import { McpShowcase } from "@/components/McpShowcase";
 import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 import { ArrowUpIcon } from "@/components/chat/icons";
-import ModelPicker from "@/components/chat/ModelPicker";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
 import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
@@ -20,7 +19,6 @@ import {
   CANONICAL_CHAT_URL,
   isChatEnabled,
   isChatMirror,
-  isStagingEnvironment,
 } from "@/lib/apiUrl";
 import type { ChatDraft } from "@/lib/chat";
 import { queueChatLaunch } from "@/lib/chatLaunch";
@@ -28,9 +26,6 @@ import { SUGGESTED_CHAT_PROMPTS, completeSuggestedChatPrompt } from "@/lib/chatP
 import {
   createSession,
   DEFAULT_CHAT_MODEL,
-  getChatModels,
-  PRODUCTION_FALLBACK_CHAT_MODELS,
-  STAGING_FALLBACK_CHAT_MODELS,
 } from "@/lib/chatSessions";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { useInfinitePapers } from "@/hooks/usePapers";
@@ -111,23 +106,9 @@ const useRotatingChatPlaceholder = (active: boolean) => {
 export const AskAssistant: React.FC = () => {
   const navigate = useNavigate();
   const mirror = isChatMirror();
-  const signedIn = Boolean(useOptionalAuth()?.user);
-  // Discovery needs a signed-in user; everyone else sees the fallback list.
-  const modelsQuery = useQuery({
-    queryKey: ["chatModels"],
-    queryFn: getChatModels,
-    retry: false,
-    enabled: isChatEnabled() && signedIn && !mirror,
-  });
-  const models = modelsQuery.data?.items ?? (
-    isStagingEnvironment()
-      ? STAGING_FALLBACK_CHAT_MODELS
-      : PRODUCTION_FALLBACK_CHAT_MODELS
-  );
   const [draft, setDraft] = useState<ChatDraft>({ text: "", paperMentions: [] });
   const question = draft.text;
   const [scrollTop, setScrollTop] = useState(0);
-  const [selectedModel, setSelectedModel] = useState(DEFAULT_CHAT_MODEL);
   const [launching, setLaunching] = useState(false);
   // Set when the browser blocks the mirror's new tab, so the question survives
   // as a link the visitor can open themselves.
@@ -184,7 +165,7 @@ export const AskAssistant: React.FC = () => {
     const q = nextDraft.text.trim();
     if (!q || launching) return;
     if (mirror) {
-      const params = new URLSearchParams({ q, model: selectedModel });
+      const params = new URLSearchParams({ q, model: DEFAULT_CHAT_MODEL });
       const url = `${CANONICAL_CHAT_URL}?${params}`;
       const tab = window.open(url, "_blank");
       if (!tab) {
@@ -197,9 +178,9 @@ export const AskAssistant: React.FC = () => {
       return;
     }
     setLaunching(true);
-    queueChatLaunch(nextDraft, selectedModel);
+    queueChatLaunch(nextDraft, DEFAULT_CHAT_MODEL);
     try {
-      const session = await createSession(selectedModel);
+      const session = await createSession(DEFAULT_CHAT_MODEL);
       navigate(`/chat/${session.id}`);
     } catch {
       // Anonymous users still need the chat route to begin OAuth. Network and
@@ -275,13 +256,6 @@ export const AskAssistant: React.FC = () => {
           </div>
         )}
         <div className="ask-home-foot">
-          <div className="ask-home-provider-tools">
-            <ModelPicker
-              models={models}
-              selectedModel={selectedModel}
-              onModelChange={setSelectedModel}
-            />
-          </div>
           <button
             type="button"
             className={`chat-send${question.trim() ? " chat-send-on" : ""}`}

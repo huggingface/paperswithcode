@@ -37,14 +37,8 @@
 .ask-home-foot {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   padding: 4px 6px 4px 12px;
-}
-.ask-home-provider-tools {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 @media (max-width: 880px) {
   .layout-with-sidebar > .sidebar,

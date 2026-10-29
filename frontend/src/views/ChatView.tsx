@@ -582,9 +582,6 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
         setDraft(next);
       }
     },
-    models,
-    selectedModel,
-    onModelChange: (model: string) => void changeModel(model),
     disabled: chatPaused || authLoading || (chat.busy && !selectedTurn),
     describedBy: chatPaused ? "chat-paused-description" : undefined,
     paperMentionsEnabled: Boolean(availabilityQuery.data?.paper_mentions_enabled),

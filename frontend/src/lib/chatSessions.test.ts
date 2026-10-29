@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   isSponsoredChatModel,
-  labelForChatModel,
   PRODUCTION_FALLBACK_CHAT_MODELS,
   providerForChatModel,
   toUiMessages,
@@ -30,13 +29,10 @@ describe("production model fallback", () => {
 describe("legacy model compatibility", () => {
   it("keeps the hidden historical Luna ID on OpenRouter", () => {
     expect(providerForChatModel([], "openai/gpt-5.6-luna")).toBe("openrouter");
-    expect(labelForChatModel([], "openai/gpt-5.6-luna"))
-      .toBe("GPT-5.6 Luna (Legacy OpenRouter)");
   });
 
   it("recognizes production OpenAI Luna without discovery", () => {
     expect(providerForChatModel([], "gpt-5.6-luna@openai")).toBe("openai");
-    expect(labelForChatModel([], "gpt-5.6-luna@openai")).toBe("GPT-6 Luna");
   });
 
   it("recognizes the sponsored model before discovery loads", () => {

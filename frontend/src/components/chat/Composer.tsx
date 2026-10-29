@@ -6,7 +6,6 @@ import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
 import { PaperSelectionCard } from "@/components/chat/PaperSelectionCard";
 import { ArrowUpIcon, Spinner } from "@/components/chat/icons";
-import ModelPicker, { type ModelPickerOption } from "@/components/chat/ModelPicker";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import type { ChatDraft } from "@/lib/chat";
 import { emptyChatDraft } from "@/lib/paperSelection";
@@ -19,9 +18,6 @@ interface ComposerProps {
   draft?: ChatDraft;
   onDraftChange?: (value: ChatDraft) => void;
   onStop?: () => void;
-  models?: ModelPickerOption[];
-  selectedModel?: string;
-  onModelChange?: (model: string) => void;
   disabled?: boolean;
   describedBy?: string;
   paperMentionsEnabled?: boolean;
@@ -33,7 +29,7 @@ const EMPTY_DRAFT: ChatDraft = emptyChatDraft();
 
 const Composer: React.FC<ComposerProps> = ({
   onSend, busy, placeholder, autoFocus, draft, onDraftChange, onStop,
-  models = [], selectedModel, onModelChange, disabled = false, describedBy,
+  disabled = false, describedBy,
   paperMentionsEnabled = false,
   paperSelectionEnabled = true,
   paperArtifactsEnabled = false,
@@ -165,7 +161,6 @@ const Composer: React.FC<ComposerProps> = ({
       {mentions.message && <div id="chat-paper-mention-message" className="chat-paper-mention-message" role="alert">{mentions.message}</div>}
       <div className="chat-composer-row">
         <div className="chat-composer-tools">
-          {models.length > 0 && selectedModel && onModelChange && <ModelPicker models={models} selectedModel={selectedModel} onModelChange={onModelChange} disabled={busy} />}
           <span className="chat-composer-hint">Enter to send · Shift+Enter for newline</span>
         </div>
         <button type="button" className={`chat-send${(busy || canSend) ? " chat-send-on" : ""}`} onClick={busy ? onStop : submit} disabled={disabled || (busy ? !onStop : !canSend)} aria-label={busy ? "Stop generating" : "Send message"}>
