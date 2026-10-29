@@ -244,6 +244,18 @@ it('offers accounts without a topic a pop-up to describe one above their follows
   expect(await screen.findByRole('textbox', { name: 'Research topic' })).toBeInTheDocument();
   expect(await screen.findByText('A paper')).toBeInTheDocument();
 });
+it('leaves the topic pop-up closed after the only topic is removed', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(researchApi.topic).mockResolvedValue(topic);
+  vi.spyOn(researchApi, 'clearTopic').mockResolvedValue(undefined);
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit topic' }));
+  vi.mocked(researchApi.topic).mockResolvedValue(null);
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+  expect(await screen.findByRole('heading', { name: 'Build your personal research feed', hidden: true })).toBeInTheDocument();
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: 'Follow a topic' })).toBeInTheDocument();
+});
 it('shows the feed for an account that follows only a topic', async () => {
   vi.mocked(researchApi.follows).mockResolvedValue([]);
   vi.mocked(researchApi.topic).mockResolvedValue({ ...topic, status: 'running', judged: 200, total: 4700 });

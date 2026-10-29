@@ -9,11 +9,11 @@ import { readPendingTopic } from '@/lib/researchTopic';
 import TopicDialog from './TopicDialog';
 
 /** Asks for a topic on /following, shown to guests and to accounts without follows.
- * The topic pop-up opens on arrival; guests sign in on submit, and /following saves the topic when they return. */
-export default function FollowingIntro({ popularTasks = [] }: { popularTasks?: Task[] }) {
+ * `openTopic` opens the topic pop-up on arrival; guests sign in on submit, and /following saves the topic when they return. */
+export default function FollowingIntro({ popularTasks = [], openTopic = false }: { popularTasks?: Task[]; openTopic?: boolean }) {
   const { user } = useAuth();
   const canFollowTopic = !!user || !isAuthDisabled();
-  const [topicOpen, setTopicOpen] = useState(() => canFollowTopic && !readPendingTopic());
+  const [topicOpen, setTopicOpen] = useState(() => openTopic && canFollowTopic && !readPendingTopic());
   return <section className="following-intro" aria-labelledby="following-intro-title">
     <h2 id="following-intro-title">Build your personal research feed</h2>
     <p className="following-intro-lead">

@@ -386,6 +386,9 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     wasBuilding.current = topicBuilding;
   }, [topicBuilding, queryClient, user?.hf_subject]);
   const noFollows = following && !!user && follows.data?.length === 0 && topic.isSuccess && !topic.data;
+  // The intro opens its topic pop-up only for visitors who arrived without follows, not after a removal.
+  const [hadFollows, setHadFollows] = useState(false);
+  if (!hadFollows && (!!topic.data || !!follows.data?.length)) setHadFollows(true);
   // Save the topic a guest submitted before signing in; it stays stashed until the save succeeds.
   const pendingSave = useSaveTopic();
   const { mutate: savePendingTopic } = pendingSave;
@@ -594,7 +597,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
             )}
 
             {(following && !auth?.isLoading && !user) || noFollows ? (
-              <FollowingIntro popularTasks={popularTasks} />
+              <FollowingIntro popularTasks={popularTasks} openTopic={!hadFollows} />
             ) : isLoading ? (
               <div className="paper-list">
                 {Array.from({ length: 6 }).map((_, i) => (
