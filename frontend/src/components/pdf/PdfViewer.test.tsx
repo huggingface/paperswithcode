@@ -225,7 +225,7 @@ describe("PdfViewer resize rendering", () => {
     expect(onPageChange).not.toHaveBeenCalled();
   });
 
-  it("keeps the rendered pages and live scale after divider dragging ends", async () => {
+  it("re-renders sharp pages at the new width once divider dragging ends", async () => {
     const view = render(<PdfViewer
       url="https://arxiv.org/pdf/1706.03762"
       paperKey="1706.03762"
@@ -255,10 +255,8 @@ describe("PdfViewer resize rendering", () => {
       paperTitle="Attention Is All You Need"
       paperHref="/paper/1706.03762"
     />);
-    await waitFor(() => expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-width", "790"));
-    expect(screen.getByTestId("pdf-page").closest(".pdf-pages")).toHaveStyle({
-      "--pdf-live-scale": String(610 / 790),
-    });
+    await waitFor(() => expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-width", "610"));
+    expect(screen.getByTestId("pdf-page").closest(".pdf-pages")).toHaveStyle({ "--pdf-live-scale": "1" });
   });
 
   it("centers the document horizontally after zooming", () => {

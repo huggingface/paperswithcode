@@ -408,7 +408,6 @@ export function PdfViewer({
   const renderedZoom = useRef(1);
   const liveZoom = useRef(1);
   const liveResizeScale = useRef(1);
-  const retainLiveResizeScale = useRef(false);
   const [retry, setRetry] = useState(0);
   const [pages, setPages] = useState(0);
   const [pageAspect, setPageAspect] = useState(DEFAULT_PAGE_ASPECT);
@@ -473,7 +472,6 @@ export function PdfViewer({
     renderedZoom.current = 1;
     liveZoom.current = 1;
     liveResizeScale.current = 1;
-    retainLiveResizeScale.current = false;
     pagesRef.current?.style.setProperty("--pdf-live-scale", "1");
     setError("");
     textIndex.current = undefined;
@@ -487,11 +485,16 @@ export function PdfViewer({
     if (!element) return;
     const update = () => {
       const nextWidth = Math.max(240, element.clientWidth - 10);
-      if (resizeActive) retainLiveResizeScale.current = true;
-      const preserveRenderedPages = resizeActive || retainLiveResizeScale.current;
-      liveResizeScale.current = preserveRenderedPages ? nextWidth / fitWidth : 1;
-      pagesRef.current?.style.setProperty("--pdf-live-scale", String(liveResizeScale.current));
-      if (!preserveRenderedPages) setFitWidth(nextWidth);
+      // While the divider or chat toggle moves, the rendered pages only scale.
+      // Once it settles, the new width is committed: each page keeps its last
+      // canvas scaled until a sharp one at the new width has painted, and the
+      // live scale returns to 1 in the same commit.
+      liveResizeScale.current = resizeActive ? nextWidth / fitWidth : 1;
+      if (resizeActive) {
+        pagesRef.current?.style.setProperty("--pdf-live-scale", String(liveResizeScale.current));
+      } else {
+        setFitWidth(nextWidth);
+      }
     };
     update();
     const observer = new ResizeObserver(update);
@@ -501,10 +504,7 @@ export function PdfViewer({
 
   useLayoutEffect(() => {
     renderedZoom.current = zoom;
-    pagesRef.current?.style.setProperty(
-      "--pdf-live-scale",
-      String(retainLiveResizeScale.current ? liveResizeScale.current : 1),
-    );
+    pagesRef.current?.style.setProperty("--pdf-live-scale", String(liveResizeScale.current));
     const element = scrollRef.current;
     if (element && zoomAnchor.current) restoreZoomAnchor(element, zoomAnchor.current);
     zoomAnchor.current = undefined;
