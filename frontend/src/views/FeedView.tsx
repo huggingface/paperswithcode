@@ -455,7 +455,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
       </div>
 
       <div className="layout-with-sidebar">
-        <aside className="sidebar">
+        <aside className="sidebar feed-sidebar">
           {showFollowsSidebar ? (
             <div className="sidebar-section sidebar-section-follows">
               <div className="sidebar-label">You follow</div>

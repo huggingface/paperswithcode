@@ -46,6 +46,13 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+/* Keep the MCP card at the bottom left even when the sidebar above it is short. */
+.feed-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100dvh - 124px);
+}
+.feed-sidebar > .sidebar-section-tools { margin-top: auto; margin-bottom: 0; }
 @media (max-width: 880px) {
   .layout-with-sidebar > .sidebar,
   .layout-with-sidebar > .feed-main {
@@ -57,6 +64,7 @@
   .sidebar-section-follows { order: 2; }
   .feed-content { order: 4; }
   .sidebar-section-tools { order: 5; }
+  .feed-sidebar > .sidebar-section-tools { margin-top: 0; }
   /* /following without follows: lead with the feed intro, above the chat. */
   .feed-content:has(> .following-intro) { display: contents; }
   .feed-content:has(> .following-intro) > * { order: 4; }
