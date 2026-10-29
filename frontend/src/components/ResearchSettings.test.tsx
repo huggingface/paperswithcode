@@ -15,7 +15,7 @@ function wrapper({ children }: { children: React.ReactNode }) {
 beforeEach(() => { vi.spyOn(researchApi, 'topic').mockResolvedValue(null); });
 afterEach(() => vi.restoreAllMocks());
 describe('research topic', () => {
-  const saved = { text: 'real-time video generation', set_at: '2026-10-28T10:00:00Z', status: 'pending' as const,
+  const saved = { text: 'real-time video generation', label: null, set_at: '2026-10-28T10:00:00Z', status: 'pending' as const,
     judged: 0, total: null, suggestions: [] };
   it('saves a trimmed topic and reports backfill progress', async () => {
     vi.spyOn(researchApi, 'follows').mockResolvedValue([]);

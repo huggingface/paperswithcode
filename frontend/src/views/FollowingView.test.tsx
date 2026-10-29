@@ -38,7 +38,7 @@ beforeEach(() => {
     reasons: ['Task'], scores: [] }]);
   vi.spyOn(researchApi, 'topic').mockResolvedValue(null);
 });
-const topic = { text: 'real-time video generation', set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
+const topic = { text: 'real-time video generation', label: null, set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
   judged: 10, total: 10, suggestions: [] };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); sessionStorage.clear(); login.hfLoginUrl.mockClear(); });
 it('renders following in the existing tab row with standard paper cards and thumbnails', async () => {

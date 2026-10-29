@@ -382,3 +382,14 @@ def test_preview_fills_the_feed_until_the_backfill_is_done(db, now, monkeypatch)
     assert [e.title for e in follows.feed_entries(db, "alice", now, 0, 40)] == [
         "Audio judged"
     ]
+
+
+def test_saving_again_retries_a_missing_label_and_preview(db, now, monkeypatch):
+    previews = []
+    monkeypatch.setattr(topics, "save_preview", lambda *_: previews.append(1))
+    topics.set_topic(db, "alice", "audio " + "x" * 80, now)
+    assert topics.topic_view(db, "alice").label is None
+    monkeypatch.setattr(topics, "summarize", lambda _: "Audio")
+    topics.set_topic(db, "alice", "audio " + "x" * 80, now)
+    assert topics.topic_view(db, "alice").label == "Audio"
+    assert len(previews) == 2

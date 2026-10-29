@@ -450,16 +450,15 @@ def summarize(value: str) -> str | None:
             },
             timeout=LABEL_TIMEOUT,
         )
-        body = response.raise_for_status().json()
-    except httpx.HTTPError:
-        return None  # The full text is shown instead.
-    label = "".join(
-        part["text"]
-        for item in body["output"]
-        if item.get("type") == "message"
-        for part in item.get("content", [])
-        if part.get("type") == "output_text"
-    )
+        label = "".join(
+            part["text"]
+            for item in response.raise_for_status().json()["output"]
+            if item.get("type") == "message"
+            for part in item.get("content", [])
+            if part.get("type") == "output_text"
+        )
+    except (httpx.HTTPError, KeyError, ValueError):
+        return None  # The full text is shown; the next save retries.
     label = display_text(label).strip("\"'“”").rstrip(".")[:80]
     return label[:1].upper() + label[1:] or None
 
@@ -557,11 +556,10 @@ def set_topic(db: Session, subject: str, value: str | None, now: datetime) -> No
         db.commit()
         return
     normalized = normalize(value)
-    created = db.scalar(
+    db.execute(
         insert(ResearchTopic)
         .values(text=display_text(value), normalized=normalized)
         .on_conflict_do_nothing(index_elements=["normalized"])
-        .returning(ResearchTopic.id)
     )
     topic = db.scalar(
         select(ResearchTopic).where(ResearchTopic.normalized == normalized)
@@ -574,7 +572,14 @@ def set_topic(db: Session, subject: str, value: str | None, now: datetime) -> No
         sub.topic_id = topic.id
         sub.topic_set_at = now
     db.commit()
-    if created is not None:
+    # Saving the topic again retries a label or preview that failed.
+    if topic.label is None:
         topic.label = summarize(topic.text)
         db.commit()
+    has_preview = db.scalar(
+        select(ResearchTopicPreview.paper_id)
+        .where(ResearchTopicPreview.topic_id == topic.id)
+        .limit(1)
+    )
+    if topic.backfill_status != "done" and has_preview is None:
         save_preview(db, topic, now)
