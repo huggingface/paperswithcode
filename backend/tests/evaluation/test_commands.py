@@ -96,7 +96,8 @@ def mutation():
     )
 
 
-def create_payload():
+def create_payload(model_name="Original"):
+    # A leaderboard holds one entry per model, so multi-row tests name each row.
     return dict(
         paper_id=1,
         task_id=1,
@@ -107,7 +108,7 @@ def create_payload():
         source_url="https://example.com/result",
         num_parameters=0,
         hf_model_url="https://huggingface.co/org/model",
-        model_name="Original",
+        model_name=model_name,
     )
 
 
@@ -209,7 +210,7 @@ def test_batch_foreign_paper_failure_rolls_back_rows_ranks_and_audit(db, operati
                 dict(
                     operation="create",
                     payload={
-                        **create_payload(),
+                        **create_payload("Second"),
                         "paper_id": 2,
                         "metrics": {"Accuracy": 99},
                     },
@@ -273,7 +274,7 @@ def test_direct_batch_update_delete_and_audit(db):
                 evaluation_id=int(created.id),
                 payload={"metrics": {"Accuracy": 42}},
             ),
-            dict(operation="create", payload=create_payload()),
+            dict(operation="create", payload=create_payload("Second")),
         ],
         mutation=mutation(),
     )
@@ -293,7 +294,7 @@ def test_direct_batch_update_delete_and_audit(db):
 def test_url_normalization_is_shared_by_both_adapters(db):
     payload = {**create_payload(), "source_url": "  https://example.com/result  "}
     result = EvaluationCurationService(db).create(payload=payload, mutation=mutation())
-    row = paper_apply(db, payload)
+    row = paper_apply(db, {**payload, "model_name": "Second"})
     assert row.source_url == result.source_url == "https://example.com/result"
 
 
@@ -443,7 +444,11 @@ def test_batch_refreshes_distinct_old_new_scopes_after_all_writes(
 
     def create(score, **extra):
         return service.create_evaluation(
-            **{**create_payload(), "metrics": {"Accuracy": score}, **extra}
+            **{
+                **create_payload(f"Model {score}"),
+                "metrics": {"Accuracy": score},
+                **extra,
+            }
         )
 
     moved = create(90)
@@ -478,11 +483,14 @@ def test_batch_refreshes_distinct_old_new_scopes_after_all_writes(
             {"operation": "delete", "evaluation_id": int(deleted.id)},
             {
                 "operation": "create",
-                "payload": {**create_payload(), "metrics": {"Accuracy": 70, "Loss": 1}},
+                "payload": {
+                    **create_payload("New 70"),
+                    "metrics": {"Accuracy": 70, "Loss": 1},
+                },
             },
             {
                 "operation": "create",
-                "payload": {**create_payload(), "metrics": {"Accuracy": 60}},
+                "payload": {**create_payload("New 60"), "metrics": {"Accuracy": 60}},
             },
         ],
     )
@@ -533,7 +541,7 @@ def test_batch_rank_failure_rolls_back_rows_and_derived_ranks(db, monkeypatch, a
                     {
                         "operation": "create",
                         "payload": {
-                            **create_payload(),
+                            **create_payload("Second"),
                             "metrics": {"Accuracy": 99, "Loss": 1},
                         },
                     }
@@ -593,7 +601,10 @@ def test_paper_edit_batch_refreshes_once_and_snapshots_final_ranks(db, monkeypat
         operations=[
             {
                 "section": "evaluations",
-                "payload": {**create_payload(), "metrics": {"Accuracy": score}},
+                "payload": {
+                    **create_payload(f"Model {score}"),
+                    "metrics": {"Accuracy": score},
+                },
             }
             for score in (10, 20)
         ],

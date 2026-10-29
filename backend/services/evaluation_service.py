@@ -33,10 +33,14 @@ from backend.models.evaluations import (
 from backend.utils.exceptions import DatabaseError
 from backend.utils.task_hierarchy import collect_descendant_task_ids
 from backend.utils.urls import external_source_url_to_paper_url, parse_arxiv_url
-from backend.services.evaluation_entry_identity import evaluation_display_entry_key
+from backend.services.evaluation_entry_identity import (
+    evaluation_display_entry_key,
+    leaderboard_model_key,
+)
 from backend.services.leaderboard_metric_service import LeaderboardMetricService
 from backend.services.metric_value_service import parse_metric_value
 from backend.services.catalog_errors import (
+    CatalogConflictError,
     CatalogNotFoundError,
     CatalogPersistenceError,
     CatalogValidationError,
@@ -588,6 +592,89 @@ class EvaluationService:
 
         return True, None
 
+    def find_leaderboard_duplicate(
+        self,
+        task_id: int,
+        dataset_id: int,
+        best_metric: Optional[str],
+        model_name: Optional[str],
+        harness: Optional[str],
+        exclude_id: Optional[int] = None,
+    ) -> Optional[DBEvaluation]:
+        """Return the row already showing this model on the leaderboard, on any paper."""
+        key = leaderboard_model_key(model_name, harness)
+        if not key[0] or best_metric is None:
+            return None
+        rows = (
+            self.db.query(DBEvaluation)
+            .options(
+                load_only(
+                    DBEvaluation.id,
+                    DBEvaluation.paper_id,
+                    DBEvaluation.model_name,
+                    DBEvaluation.harness,
+                )
+            )
+            .filter(
+                DBEvaluation.task_id == task_id,
+                DBEvaluation.dataset_id == dataset_id,
+                DBEvaluation.best_metric == best_metric,
+            )
+        )
+        if exclude_id is not None:
+            rows = rows.filter(DBEvaluation.id != exclude_id)
+        for row in rows.order_by(DBEvaluation.id):
+            if leaderboard_model_key(row.model_name, row.harness) == key:
+                return row
+        return None
+
+    def move_paper_evaluations(
+        self, source_paper_id: int, target_paper_id: int
+    ) -> None:
+        """Hand a paper's evaluations to the paper that supersedes it.
+
+        Leaderboards list rows from every paper, so an entry the target already
+        shows is dropped rather than moved, and those boards are re-ranked.
+        """
+
+        def entry(row: DBEvaluation) -> tuple:
+            return (
+                row.task_id,
+                row.dataset_id,
+                row.best_metric,
+            ) + leaderboard_model_key(row.model_name, row.harness)
+
+        target_entries = {
+            entry(row)
+            for row in self.db.query(DBEvaluation).filter(
+                DBEvaluation.paper_id == target_paper_id
+            )
+        }
+        dropped_scopes: RankScopes = set()
+        for row in (
+            self.db.query(DBEvaluation)
+            .filter(DBEvaluation.paper_id == source_paper_id)
+            .order_by(DBEvaluation.id)
+            .all()
+        ):
+            if entry(row) in target_entries:
+                dropped_scopes |= self._rank_scopes(row)
+                self.db.delete(row)
+            else:
+                row.paper_id = target_paper_id
+                target_entries.add(entry(row))
+        if dropped_scopes:
+            self.refresh_rank_scopes(dropped_scopes)
+
+    def _reject_leaderboard_duplicate(self, **identity) -> None:
+        duplicate = self.find_leaderboard_duplicate(**identity)
+        if duplicate is not None:
+            raise CatalogConflictError(
+                f"'{identity['model_name']}' is already on this leaderboard as "
+                f"evaluation {duplicate.id} (paper {duplicate.paper_id}). Update or "
+                "move that row instead, or set a distinct harness."
+            )
+
     def _validate_harness_support(
         self, task_id: int, dataset_id: int, harness: Optional[str]
     ) -> tuple[bool, Optional[str]]:
@@ -1016,6 +1103,14 @@ class EvaluationService:
             if not is_valid:
                 raise CatalogValidationError(error_message)
 
+            self._reject_leaderboard_duplicate(
+                task_id=task_id,
+                dataset_id=dataset_id,
+                best_metric=best_metric,
+                model_name=model_name,
+                harness=harness,
+            )
+
             canonical_source_url = source_url or external_source_url
             derived_external = self._derive_external(paper_id, canonical_source_url)
 
@@ -1159,6 +1254,31 @@ class EvaluationService:
             )
             if not is_valid:
                 raise CatalogValidationError(error_message)
+
+            # Existing rows keep editing freely; only a change of leaderboard or
+            # model identity must not land on another row's entry.
+            target_model_name = (
+                model_name if model_name is not None else db_evaluation.model_name
+            )
+            if (
+                target_task_id,
+                target_dataset_id,
+                target_best_metric,
+                leaderboard_model_key(target_model_name, target_harness),
+            ) != (
+                old_task_id,
+                old_dataset_id,
+                db_evaluation.best_metric,
+                leaderboard_model_key(db_evaluation.model_name, db_evaluation.harness),
+            ):
+                self._reject_leaderboard_duplicate(
+                    task_id=target_task_id,
+                    dataset_id=target_dataset_id,
+                    best_metric=target_best_metric,
+                    model_name=target_model_name,
+                    harness=target_harness,
+                    exclude_id=evaluation_id,
+                )
 
             # Validate metrics if they are being changed or task/dataset is changing
             if (

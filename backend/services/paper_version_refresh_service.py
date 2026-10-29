@@ -9,13 +9,13 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from backend.models.papers import Paper
+from backend.services.evaluation_service import EvaluationService
 from backend.services.author_service import (
     get_or_create_author_by_name,
     normalize_arxiv_author_name,
 )
 from backend.models.database import (
     Author as DBAuthor,
-    Evaluation as DBEvaluation,
     Paper as DBPaper,
     PaperAuthor,
     PaperConference as DBPaperConference,
@@ -274,46 +274,11 @@ class PaperVersionRefreshService:
                 dataset_id=link.dataset_id,
             )
 
-        for evaluation in (
-            self.db.query(DBEvaluation)
-            .filter(DBEvaluation.paper_id == source_paper_id)
-            .all()
-        ):
-            exists = (
-                self.db.query(DBEvaluation.id)
-                .filter(
-                    DBEvaluation.paper_id == target_paper_id,
-                    DBEvaluation.task_id == evaluation.task_id,
-                    DBEvaluation.dataset_id == evaluation.dataset_id,
-                    DBEvaluation.model_name == evaluation.model_name,
-                    DBEvaluation.harness == evaluation.harness,
-                    DBEvaluation.best_metric == evaluation.best_metric,
-                )
-                .first()
-            )
-            if exists:
-                continue
-            self.db.add(
-                DBEvaluation(
-                    paper_id=target_paper_id,
-                    task_id=evaluation.task_id,
-                    dataset_id=evaluation.dataset_id,
-                    model_name=evaluation.model_name,
-                    harness=evaluation.harness,
-                    methodology=evaluation.methodology,
-                    metrics=evaluation.metrics,
-                    uses_additional_data=evaluation.uses_additional_data,
-                    is_open=evaluation.is_open,
-                    best_rank=evaluation.best_rank,
-                    best_metric=evaluation.best_metric,
-                    evaluated_on=evaluation.evaluated_on,
-                    external_source_url=evaluation.external_source_url,
-                    source_url=evaluation.source_url,
-                    external=evaluation.external,
-                    num_parameters=evaluation.num_parameters,
-                    hf_model_url=evaluation.hf_model_url,
-                )
-            )
+        # Leaderboards list every version's rows, so results move to the new
+        # version rather than being copied; the old version keeps none.
+        EvaluationService(self.db).move_paper_evaluations(
+            source_paper_id, target_paper_id
+        )
 
     def _add_if_missing(
         self, model: Any, defaults: Optional[Dict[str, Any]] = None, **keys: Any

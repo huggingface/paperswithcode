@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import re
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
@@ -112,6 +112,20 @@ class CodexCurationEvaluationsNotAllowedError(ValueError):
 
 class CodexCurationEnrichmentRequiredError(ValueError):
     """An enrichment job did not receive its mutation payload."""
+
+
+class _ProposalIdentity(NamedTuple):
+    task_id: int
+    dataset_id: int
+    model_name: str | None
+    harness: str | None
+    best_metric: str | None
+
+
+def _proposal_identity(values: dict[str, Any]) -> _ProposalIdentity:
+    return _ProposalIdentity(
+        *(values.get(field) for field in _ProposalIdentity._fields)
+    )
 
 
 def _evaluation_harness_clause(harness: str | None):
@@ -816,9 +830,10 @@ class CodexCurationCallbackService:
             created = 0
             updated = 0
             removed = 0
+            skipped_duplicates: list[dict[str, Any]] = []
             organization_links = None
             if row.kind == "add-evals":
-                created, updated = self._apply_evaluations(body)
+                created, updated, skipped_duplicates = self._apply_evaluations(body)
                 removed = self._apply_evaluation_removals(row, body)
             else:
                 organization_links = self._apply_enrichment(row, body)
@@ -826,7 +841,7 @@ class CodexCurationCallbackService:
             if hasattr(self.db, "flush"):
                 self.db.flush()
             after_state = self._mutation_projection(row, body)
-            self._verify_after_state(row, body, after_state)
+            self._verify_after_state(row, body, after_state, skipped_duplicates)
 
             before_evaluations = {
                 int(item["id"]): item for item in before_state.get("evaluations", [])
@@ -896,6 +911,10 @@ class CodexCurationCallbackService:
                 )
             if removed:
                 row.mutation_result["evaluations_removed"] = removed
+            if skipped_duplicates:
+                row.mutation_result["evaluations_skipped_duplicates"] = (
+                    skipped_duplicates
+                )
             if organization_links:
                 row.mutation_result["organizations"] = organization_links
             if row.kind == "add-evals":
@@ -1126,7 +1145,11 @@ class CodexCurationCallbackService:
         }
 
     def _verify_after_state(
-        self, row, body: ApplyMutationRequest, after_state: dict[str, Any]
+        self,
+        row,
+        body: ApplyMutationRequest,
+        after_state: dict[str, Any],
+        skipped_duplicates: list[dict[str, Any]] | None = None,
     ) -> None:
         if not hasattr(self.db, "flush"):
             return
@@ -1155,7 +1178,10 @@ class CodexCurationCallbackService:
         all_rows = (
             self.db.query(Evaluation).filter(Evaluation.paper_id == row.paper_id).all()
         )
+        skipped = {_proposal_identity(item) for item in skipped_duplicates or []}
         for proposal in body.evaluations:
+            if _proposal_identity(proposal.model_dump()) in skipped:
+                continue
             matches = [
                 item
                 for item in all_rows
@@ -2072,9 +2098,12 @@ class CodexCurationCallbackService:
             "saying the leaderboard row is managed by a live sync."
         )
 
-    def _apply_evaluations(self, body: ApplyMutationRequest) -> tuple[int, int]:
+    def _apply_evaluations(
+        self, body: ApplyMutationRequest
+    ) -> tuple[int, int, list[dict[str, Any]]]:
         created = 0
         updated = 0
+        skipped_duplicates: list[dict[str, Any]] = []
         for item in body.evaluations:
             query = self.db.query(Evaluation).filter(
                 Evaluation.paper_id == item.paper_id,
@@ -2094,6 +2123,25 @@ class CodexCurationCallbackService:
             existing = self._canonical_evaluation(matches) if matches else None
             values = item.model_dump()
             if existing is None:
+                # The model may already be on the leaderboard from a twin paper
+                # (an external release page, an older arXiv version); one entry
+                # per model, so leave that row and report the skip.
+                duplicate = self.evaluation_service.find_leaderboard_duplicate(
+                    task_id=item.task_id,
+                    dataset_id=item.dataset_id,
+                    best_metric=item.best_metric,
+                    model_name=item.model_name,
+                    harness=item.harness,
+                )
+                if duplicate is not None:
+                    skipped_duplicates.append(
+                        {
+                            **_proposal_identity(values)._asdict(),
+                            "duplicate_evaluation_id": duplicate.id,
+                            "duplicate_paper_id": duplicate.paper_id,
+                        }
+                    )
+                    continue
                 self.evaluation_service.create_evaluation(**values, commit=False)
                 created += 1
             else:
@@ -2116,7 +2164,7 @@ class CodexCurationCallbackService:
                 for duplicate in matches:
                     if duplicate.id != existing.id:
                         self.db.delete(duplicate)
-        return created, updated
+        return created, updated, skipped_duplicates
 
     def _apply_evaluation_removals(self, row, body: ApplyMutationRequest) -> int:
         removed = 0

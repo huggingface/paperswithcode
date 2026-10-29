@@ -384,6 +384,9 @@ def test_mixed_evaluation_apply_uses_one_final_transaction():
     calls = []
 
     class Evaluations:
+        def find_leaderboard_duplicate(self, **_identity):
+            return None
+
         def create_evaluation(self, **values):
             calls.append(("create", values))
 
@@ -435,6 +438,9 @@ def test_exact_existing_evaluation_is_a_true_no_op():
     database = _MutationDatabase(existing=[existing])
 
     class Evaluations:
+        def find_leaderboard_duplicate(self, **_identity):
+            return None
+
         def create_evaluation(self, **_values):
             raise AssertionError("exact duplicate must not be created")
 
@@ -490,6 +496,9 @@ def test_late_evaluation_failure_rolls_back_the_whole_apply():
     database = _MutationDatabase(existing=[None, None])
 
     class Evaluations:
+        def find_leaderboard_duplicate(self, **_identity):
+            return None
+
         def create_evaluation(self, **values):
             assert values["commit"] is False
             database.pending.append(values["model_name"])
@@ -621,6 +630,9 @@ def test_all_evaluation_paper_ids_are_checked_before_the_first_write():
     database = _MutationDatabase()
 
     class Evaluations:
+        def find_leaderboard_duplicate(self, **_identity):
+            return None
+
         def create_evaluation(self, **_values):
             raise AssertionError("prevalidation must happen before mutation")
 

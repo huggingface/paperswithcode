@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 from backend.models.curation import ResolveModelPaperMutation
 from backend.models.database import (
     Author,
-    Evaluation,
     HfArtifact,
     ModelProviderAlias,
     ModelRelease,
@@ -34,6 +33,7 @@ from backend.models.database import (
     ProjectPage,
     TrendingModelCandidate,
 )
+from backend.services.evaluation_service import EvaluationService
 from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
@@ -567,9 +567,8 @@ class TrendingModelResolutionService:
         for row in source_methods:
             self.db.delete(row)
 
-        self.db.query(Evaluation).filter(Evaluation.paper_id == source.id).update(
-            {Evaluation.paper_id: target.id}, synchronize_session=False
-        )
+        # Both rows were often curated; keep the arXiv paper's copy of an entry.
+        EvaluationService(self.db).move_paper_evaluations(source.id, target.id)
         releases = (
             self.db.query(ModelRelease)
             .filter(ModelRelease.paper_id == source.id)
