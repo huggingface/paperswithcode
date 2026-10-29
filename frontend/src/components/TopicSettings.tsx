@@ -25,7 +25,7 @@ function topicStatus(topic: ResearchTopic): string {
 export default function TopicSettings({ onDone, signInToSave = false }: { onDone?: () => void; signInToSave?: boolean }) {
   const { user } = useAuth();
   const location = useLocation();
-  const input = useRef<HTMLTextAreaElement>(null);
+  const input = useRef<HTMLInputElement>(null);
   const queryKey = ['research-topic', user?.hf_subject];
   const topic = useQuery({
     queryKey,
@@ -75,26 +75,28 @@ export default function TopicSettings({ onDone, signInToSave = false }: { onDone
           event.preventDefault();
           submit();
         }}>
-        <textarea ref={input} className="research-topic-input" rows={2} maxLength={TOPIC_MAX_LENGTH}
-          aria-label="Research topic" placeholder="What research do you want to follow?"
-          value={value} onChange={event => setDraft(event.target.value)}
-          onKeyDown={event => {
-            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-              event.preventDefault();
-              submit();
-            }
-          }} />
-        <div className="research-topic-actions">
-          <span className="research-topic-count">{value.length}/{TOPIC_MAX_LENGTH}</span>
-          {onDone && <button type="button" className="research-follow-action" disabled={save.isPending}
-            onClick={() => { setDraft(null); onDone(); }}>Cancel</button>}
-          {saved && <button type="button" className="research-follow-action" disabled={save.isPending}
-            onClick={() => save.mutate(null)}>Remove</button>}
+        <div className="research-topic-field">
+          <input ref={input} className="research-topic-input" type="text" maxLength={TOPIC_MAX_LENGTH}
+            aria-label="Research topic" placeholder="e.g. diffusion policies for robot manipulation"
+            value={value} onChange={event => setDraft(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                submit();
+              }
+            }} />
           <button type="submit" className="research-topic-save"
             disabled={save.isPending || !savable}>
             {retry ? 'Retry' : saved ? 'Update topic' : 'Follow topic'}
           </button>
         </div>
+        {(value || onDone || saved) && <div className="research-topic-actions">
+          {value && <span className="research-topic-count">{value.length}/{TOPIC_MAX_LENGTH}</span>}
+          {onDone && <button type="button" className="research-follow-action" disabled={save.isPending}
+            onClick={() => { setDraft(null); onDone(); }}>Cancel</button>}
+          {saved && <button type="button" className="research-follow-action" disabled={save.isPending}
+            onClick={() => save.mutate(null)}>Remove</button>}
+        </div>}
       </form>}
     {topic.data && <p className="research-email-status" role="status">{topicStatus(topic.data)}</p>}
     {topic.data?.suggestions.map(s => <p key={`${s.kind}:${s.entity_id}`} className="research-topic-suggestion">

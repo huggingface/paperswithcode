@@ -247,22 +247,31 @@
 .research-topic { margin: 4px 0 20px; }
 .research-topic .settings-row-desc { margin: 4px 0 10px; }
 .research-topic-form { display: flex; flex-direction: column; gap: 8px; }
-.research-topic-input {
-  width: 100%;
-  padding: 10px 12px;
+.research-topic-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 12px;
   border: 1px solid var(--hairline-strong, var(--hairline));
   border-radius: 8px;
-  color: var(--ink);
   background: var(--bg-elevated);
+}
+.research-topic-field:focus-within { outline: 2px solid var(--accent-soft); border-color: var(--accent-text); }
+.research-topic-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 0;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
   font: inherit;
   font-size: 14px;
-  line-height: 1.45;
-  resize: vertical;
 }
-.research-topic-input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent-text); }
-.research-topic-actions { display: flex; align-items: center; gap: 8px; }
+.research-topic-input:focus { outline: none; }
+.research-topic-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .research-topic-count { margin-right: auto; color: var(--ink-faint); font-family: var(--mono); font-size: 11px; }
 .research-topic-save {
+  flex-shrink: 0;
   min-height: 30px;
   padding: 5px 12px;
   border: 0;
@@ -271,6 +280,7 @@
   background: var(--accent-text);
   font-size: 12px;
   font-weight: 600;
+  white-space: nowrap;
 }
 .research-topic-save:disabled { opacity: 0.45; cursor: default; }
 .research-topic-suggestion { margin: 6px 0 0; color: var(--ink-soft); font-size: 13px; }
