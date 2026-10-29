@@ -16,8 +16,9 @@ function topicStatus(topic: ResearchTopic): string {
     : 'Finding matching papers…';
 }
 
-/** One free-text research topic; Jev decides which papers match it. */
-export default function TopicSettings() {
+/** One free-text research topic; Jev decides which papers match it.
+ * `onDone` makes it an inline editor that closes after a save, removal, or cancel. */
+export default function TopicSettings({ onDone }: { onDone?: () => void }) {
   const { user } = useAuth();
   const client = useQueryClient();
   const location = useLocation();
@@ -36,15 +37,19 @@ export default function TopicSettings() {
     onSuccess: data => {
       client.setQueryData(queryKey, data);
       setDraft(null);
+      onDone?.();
       void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
+      // Following something turns the weekly email on by default.
+      void client.invalidateQueries({ queryKey: ['research-email', user?.hf_subject] });
     },
   });
+  const inline = !!onDone;
   useEffect(() => {
-    if (location.hash === '#topic' && topic.isSuccess) {
+    if ((inline || location.hash === '#topic') && topic.isSuccess) {
       input.current?.scrollIntoView({ block: 'center' });
       input.current?.focus();
     }
-  }, [location.hash, topic.isSuccess]);
+  }, [inline, location.hash, topic.isSuccess]);
   if (!user) return null;
   const saved = topic.data?.text ?? '';
   const value = draft ?? saved;
@@ -70,6 +75,8 @@ export default function TopicSettings() {
           value={value} onChange={event => setDraft(event.target.value)} />
         <div className="research-topic-actions">
           <span className="research-topic-count">{value.length}/{TOPIC_MAX_LENGTH}</span>
+          {onDone && <button type="button" className="research-follow-action" disabled={save.isPending}
+            onClick={() => { setDraft(null); onDone(); }}>Cancel</button>}
           {saved && <button type="button" className="research-follow-action" disabled={save.isPending}
             onClick={() => save.mutate(null)}>Remove</button>}
           <button type="submit" className="research-topic-save"

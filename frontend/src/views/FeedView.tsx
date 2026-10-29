@@ -382,6 +382,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     refetchInterval: query => query.state.data && ["pending", "running"].includes(query.state.data.status) ? 10000 : false,
   });
   const topicBuilding = !!topic.data && ["pending", "running"].includes(topic.data.status);
+  const [editingTopic, setEditingTopic] = useState(false);
   // Refresh the feed once a new topic's backfill finishes.
   const queryClient = useQueryClient();
   const wasBuilding = useRef(false);
@@ -455,7 +456,8 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                       <span className="sidebar-follow-kind">Topic</span>
                       <span className="sidebar-follow-name">{topic.data.text}</span>
                     </Link>
-                    <Link to="/settings#topic" className="sidebar-follow-edit" aria-label="Edit topic">edit</Link>
+                    <button type="button" className="sidebar-follow-edit" aria-label="Edit topic"
+                      aria-expanded={editingTopic} onClick={() => setEditingTopic(true)}>edit</button>
                   </div>
                 )}
                 {followGroups.map((group) => (
@@ -565,9 +567,9 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </Alert>
             )}
 
-            {following && !!user && !noFollows && topic.isSuccess && (!topic.data ? (
-              <section className="following-topic-card" aria-label="Follow a topic">
-                <TopicSettings />
+            {following && !!user && topic.isSuccess && (!topic.data || editingTopic ? (
+              <section className="following-topic-card" aria-label={topic.data ? "Edit your topic" : "Follow a topic"}>
+                <TopicSettings onDone={topic.data ? () => setEditingTopic(false) : undefined} />
               </section>
             ) : topicBuilding ? (
               <div className="following-topic-note" role="status">
@@ -602,7 +604,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                 ))}
               </div>
             ) : cards.length === 0 ? (error ? null :
-              <div className="no-results">{topicOnly ? <>No papers about your topic match these filters. Widen the date range or <Link to="/settings#topic">edit your topic</Link>.</> : following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
+              <div className="no-results">{topicOnly ? <>No papers about your topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(true)}>edit your topic</button>.</> : following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
             ) : (
               <>
                 <div className="paper-list">

@@ -32,6 +32,8 @@ export default function ResearchFollowButton({ kind, entityId }: { kind: FollowK
       setJustFollowed(followed ? null : entityKey);
       await client.invalidateQueries({ queryKey });
       await client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
+      // Following something turns the weekly email on by default.
+      await client.invalidateQueries({ queryKey: ['research-email', user?.hf_subject] });
     },
   });
   if (!auth) return null;

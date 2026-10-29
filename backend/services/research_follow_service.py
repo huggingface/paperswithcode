@@ -6,7 +6,7 @@ import secrets
 from typing import NamedTuple
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, String, column, select, text
+from sqlalchemy import Integer, String, column, exists, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -128,6 +128,30 @@ def subscription(db: Session, subject: str) -> ResearchSubscription:
     )
     db.flush()
     return db.get(ResearchSubscription, subject)
+
+
+def default_email_on(
+    db: Session, subject: str, email: str | None, now: datetime
+) -> None:
+    """Turn the weekly email on for an account that follows something and never had it on.
+
+    Opting in sets ``opted_in_at`` and turning the email off keeps it, so an
+    account that switched the email off or unsubscribed is never re-enabled.
+    """
+    sub = subscription(db, subject)
+    db.refresh(sub, with_for_update=True)
+    follows_something = sub.topic_id is not None or db.scalar(
+        select(exists().where(ResearchFollow.hf_subject == subject))
+    )
+    if (
+        email
+        and not sub.enabled
+        and sub.opted_in_at is None
+        and follows_something
+        and not suppressed(db, email)
+    ):
+        sub.enabled, sub.email, sub.opted_in_at = True, email, now
+    db.commit()
 
 
 def suppressed(db: Session, email: str | None) -> bool:

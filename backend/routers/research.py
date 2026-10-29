@@ -43,10 +43,14 @@ def list_follows(
 def follow(
     kind: FollowKind,
     entity_id: int,
+    request: Request,
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
     service.set_follow(db, user["hf_subject"], kind, entity_id, True)
+    service.default_email_on(
+        db, user["hf_subject"], verified_email(request), datetime.now(timezone.utc)
+    )
 
 
 @router.delete("/me/follows/{kind}/{entity_id}", status_code=204)
@@ -69,15 +73,16 @@ def topic(
 @router.put("/me/topic", response_model=TopicView)
 def set_topic(
     body: TopicUpdate,
+    request: Request,
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
     text = research_topic_service.display_text(body.text)
     if len(research_topic_service.normalize(text)) < 3:
         raise HTTPException(422, "Describe the topic in a few words")
-    research_topic_service.set_topic(
-        db, user["hf_subject"], text, datetime.now(timezone.utc)
-    )
+    now = datetime.now(timezone.utc)
+    research_topic_service.set_topic(db, user["hf_subject"], text, now)
+    service.default_email_on(db, user["hf_subject"], verified_email(request), now)
     return research_topic_service.topic_view(db, user["hf_subject"])
 
 
@@ -92,6 +97,7 @@ def clear_topic(
 
 @router.get("/me/following", response_model=list[ResearchFeedEntry])
 def following(
+    request: Request,
     offset: int = Query(0, ge=0),
     limit: int = Query(40, ge=1, le=100),
     start_date: date | None = Query(
@@ -109,10 +115,13 @@ def following(
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
+    now = datetime.now(timezone.utc)
+    if offset == 0:
+        service.default_email_on(db, user["hf_subject"], verified_email(request), now)
     return service.feed_entries(
         db,
         user["hf_subject"],
-        datetime.now(timezone.utc),
+        now,
         offset,
         limit,
         start_date=start_date,
@@ -124,10 +133,22 @@ def following(
     )
 
 
-def subscription_view(db, sub, request):
+def verified_email(request: Request) -> str | None:
+    """The session's verified Hugging Face email, normalized, or None."""
     identity = decode_request_session(request) or {}
-    verified = identity.get("email") if identity.get("email_verified") is True else None
-    email = sub.email or verified
+    email = identity.get("email")
+    if (
+        identity.get("email_verified") is not True
+        or not isinstance(email, str)
+        or not email.strip()
+        or len(email) > 320
+    ):
+        return None
+    return email.strip().lower()
+
+
+def subscription_view(db, sub, request):
+    email = sub.email or verified_email(request)
     return SubscriptionView(
         enabled=sub.enabled,
         email=email,
@@ -142,9 +163,10 @@ def email_settings(
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
-    sub = service.subscription(db, user["hf_subject"])
-    db.commit()
-    return subscription_view(db, sub, request)
+    service.default_email_on(
+        db, user["hf_subject"], verified_email(request), datetime.now(timezone.utc)
+    )
+    return subscription_view(db, service.subscription(db, user["hf_subject"]), request)
 
 
 @router.put("/me/research-email", response_model=SubscriptionView)
@@ -161,18 +183,11 @@ def update_email(
         .with_for_update()
     )
     if body.enabled:
-        identity = decode_request_session(request) or {}
-        email = identity.get("email")
-        if (
-            identity.get("email_verified") is not True
-            or not isinstance(email, str)
-            or not email.strip()
-            or len(email) > 320
-        ):
+        email = verified_email(request)
+        if email is None:
             raise HTTPException(
                 409, "Request verified email access from Hugging Face before opting in"
             )
-        email = email.strip().lower()
         if service.suppressed(db, email):
             raise HTTPException(409, "Delivery to this email address is suppressed")
         if not sub.enabled or sub.email != email:

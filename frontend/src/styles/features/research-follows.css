@@ -293,6 +293,11 @@
   background: var(--accent-text);
 }
 .sidebar-follow-topic.active .sidebar-follow-name { font-weight: 600; }
+.sidebar-follow-edit,
+.no-results .link-button {
+  padding: 0;
+  font: inherit;
+}
 .sidebar-follow-edit {
   margin-left: auto;
   color: var(--ink-faint);

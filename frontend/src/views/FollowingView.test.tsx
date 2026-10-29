@@ -157,13 +157,29 @@ it('keeps domain lists out of the Following sidebar while follows load', () => {
   expect(container.querySelector('.sidebar-section-top-domains')).toBeNull();
 });
 
-it('lists the topic first in the sidebar as a filter with an edit link, and links Settings below', async () => {
+it('lists the topic first in the sidebar as a filter with an edit button, and links Settings below', async () => {
   vi.mocked(researchApi.topic).mockResolvedValue(topic);
   renderFeed();
   const row = await screen.findByRole('link', { name: /^Topic real-time video generation$/ });
   expect(row).toHaveAttribute('href', '/following?only=topic');
-  expect(screen.getByRole('link', { name: 'Edit topic' })).toHaveAttribute('href', '/settings#topic');
+  expect(screen.getByRole('button', { name: 'Edit topic' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Manage in Settings' })).toHaveAttribute('href', '/settings');
+  expect(screen.queryByRole('textbox', { name: 'Research topic' })).not.toBeInTheDocument();
+});
+it('edits the topic in place on /following and closes the editor after saving', async () => {
+  vi.mocked(researchApi.topic).mockResolvedValue(topic);
+  vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, text: 'video world models' });
+  Element.prototype.scrollIntoView = vi.fn();
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit topic' }));
+  const input = await screen.findByRole('textbox', { name: 'Research topic' });
+  expect(input).toHaveValue('real-time video generation');
+  fireEvent.change(input, { target: { value: 'video world models' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Update topic' }));
+  await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledWith('video world models'));
+  await waitFor(() => expect(screen.queryByRole('textbox', { name: 'Research topic' })).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button', { name: 'Edit topic' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
   expect(screen.queryByRole('textbox', { name: 'Research topic' })).not.toBeInTheDocument();
 });
 it('filters the feed to topic matches from the sidebar and back', async () => {

@@ -394,7 +394,8 @@ def test_api_ownership_optin_and_unsubscribe(db, now, monkeypatch):
     assert len(client.get("/me/follows").json()) == 1
     assert client.delete(f"/me/follows/task/{t.id}").status_code == 204
     assert db.get(ResearchFollow, ("bob", "task", t.id)) is not None
-    assert client.get("/me/research-email").json()["enabled"] is False
+    # The follow turned the weekly email on by default; unfollowing keeps it.
+    assert client.get("/me/research-email").json()["enabled"] is True
     assert (
         client.put("/me/research-email", json={"enabled": True}).json()["email"]
         == "alice@example.com"
@@ -412,6 +413,33 @@ def test_api_ownership_optin_and_unsubscribe(db, now, monkeypatch):
         lambda request: {"email": "spoof@example.com", "email_verified": False},
     )
     assert client.put("/me/research-email", json={"enabled": True}).status_code == 409
+
+
+def test_weekly_email_defaults_on_once_and_respects_opt_out(db, monkeypatch):
+    app = FastAPI()
+    app.include_router(research.router)
+    app.dependency_overrides[get_database_session] = lambda: db
+    user = {"hf_subject": "alice"}
+    app.dependency_overrides[require_user] = lambda: user
+    session = {"email": "Alice@example.com", "email_verified": True}
+    monkeypatch.setattr(research, "decode_request_session", lambda request: session)
+    first, second = Task(name="First"), Task(name="Second")
+    db.add_all([first, second])
+    db.flush()
+    client = TestClient(app)
+    assert client.get("/me/research-email").json()["enabled"] is False
+    assert client.put(f"/me/follows/task/{first.id}").status_code == 204
+    prefs = client.get("/me/research-email").json()
+    assert prefs["enabled"] is True and prefs["email"] == "alice@example.com"
+    assert db.get(ResearchSubscription, "alice").opted_in_at is not None
+    client.put("/me/research-email", json={"enabled": False})
+    assert client.put(f"/me/follows/task/{second.id}").status_code == 204
+    assert client.get("/me/following").status_code == 200
+    assert client.get("/me/research-email").json()["enabled"] is False
+    user["hf_subject"] = "bob"
+    session = {"email": "bob@example.com", "email_verified": False}
+    assert client.put(f"/me/follows/task/{first.id}").status_code == 204
+    assert client.get("/me/research-email").json()["enabled"] is False
 
 
 def test_retry_outbox_payload_suppression_and_expiry(db, now, monkeypatch):

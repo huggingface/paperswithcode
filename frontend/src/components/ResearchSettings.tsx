@@ -120,7 +120,8 @@ export default function ResearchSettings() {
             <span className="settings-row-label">Email me a weekly digest</span>
             <span className="settings-row-desc">
               Up to 20 new papers and benchmark results matching your follows, sent
-              Mondays at 08:00 UTC. No email is sent in weeks without new matches.
+              Mondays at 08:00 UTC. No email is sent in weeks without new matches. On by
+              default once you follow something; turn it off here or from any email.
             </span>
           </label>
           <Switch id="research-weekly-email" checked={prefs.enabled}
@@ -133,7 +134,7 @@ export default function ResearchSettings() {
             <span>Sending to <strong>{prefs.email}</strong></span>
             <a href={hfLoginUrl('/settings', false, true)}>Refresh from Hugging Face</a>
           </> : <>
-            <span>To opt in, allow access to the verified email on your Hugging Face account.</span>
+            <span>To receive it, allow access to the verified email on your Hugging Face account.</span>
             <HfSignInButton returnTo="/settings" collectEmail label="Allow email access" />
           </>}
         </div>
