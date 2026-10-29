@@ -13,6 +13,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 
 import httpx
@@ -39,6 +40,12 @@ RIEMANN_BENCH_URL = "https://surgehq.ai/benchmarks/riemann-bench"
 CWE_BENCH_URL = "https://cwe-bench.com/#leaderboard"
 EXPLOITGYM_URL = "https://www.cybergym.io/exploitgym/"
 EXPLOITGYM_DATA_URL = "https://www.cybergym.io/assets/data/exploitgym.json"
+CYBERGYM_URL = "https://www.cybergym.io/cybergym/"
+CYBERGYM_DATA_URL = "https://www.cybergym.io/assets/data/cybergym.json"
+PATCHEVAL_VERIFIED_URL = "https://github.com/bytedance/PatchEval"
+PATCHEVAL_VERIFIED_README_URL = (
+    "https://raw.githubusercontent.com/bytedance/PatchEval/main/README.md"
+)
 
 
 def _text(node) -> str:
@@ -403,6 +410,100 @@ def parse_exploitgym(text: str) -> list[LeaderboardEntry]:
     return entries
 
 
+# --- CyberGym -----------------------------------------------------------------
+
+# Feature labels the site's default "Model-focused" view leaves out: runs
+# against the cleaned vulnerable image, or with a test-time knowledge base.
+CYBERGYM_EXCLUDED_FEATURES = ("dynamic", "test-time mem.")
+
+
+def parse_cybergym(text: str, now: datetime | None = None) -> list[LeaderboardEntry]:
+    """Read the Level 1 rows the site ranks in its default model-focused view."""
+    data = json.loads(text)
+    rows = data.get("level1") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError("CyberGym data has no level1 list")
+    now = now or datetime.now(UTC)
+    entries = []
+    for row in rows:
+        # The page ranks single-trial rows that are not held back.
+        if row.get("trials") != 1 or row.get("hidden"):
+            continue
+        if (row.get("focus") or "model") != "model":
+            continue
+        features = row.get("features") or []
+        if any(str(f).startswith(CYBERGYM_EXCLUDED_FEATURES) for f in features):
+            continue
+        visible_after = row.get("visible_after")
+        if visible_after and datetime.fromisoformat(visible_after) > now:
+            continue
+        name = str(row.get("model") or "").strip()
+        score = row.get("score_10")
+        if not name or len(name) > 200:
+            raise ValueError(f"CyberGym row is malformed: {row!r}")
+        if isinstance(score, bool) or not isinstance(score, int | float):
+            raise ValueError(f"CyberGym score is invalid for {name!r}")
+        if not 0 <= score <= 1:
+            raise ValueError(f"CyberGym score is outside 0-1 for {name!r}")
+        rate = round(score * 100, 2)
+        entries.append(
+            LeaderboardEntry(
+                name,
+                rate,
+                f"{rate}% Level 1 success rate, one trial, "
+                f"reported by {row.get('source') or 'unknown'}",
+                harness=str(row.get("agent") or "").strip() or "Not reported",
+            )
+        )
+    _unique(entries, "CyberGym")
+    check_entry_count(entries, "CyberGym", 20, 300)
+    return entries
+
+
+# --- PatchEval-Verified ---------------------------------------------------------
+
+PATCHEVAL_HEADING = "## 📈 Results on PatchEval-Verified"
+PATCHEVAL_HEADER = ("Agent", "Model", "Pass@1")
+PATCHEVAL_CASES = 230
+# README agent labels -> the CLI names used as harness on other boards.
+PATCHEVAL_HARNESSES = {"codex": "Codex", "opencode": "OpenCode", "trae": "Trae CLI"}
+_PATCHEVAL_SCORE = re.compile(r"(\d+)/(\d+) \(([\d.]+)%\)")
+
+
+def parse_patcheval_verified(markdown: str) -> list[LeaderboardEntry]:
+    """Read the results table under the README's PatchEval-Verified heading."""
+    if not isinstance(markdown, str) or PATCHEVAL_HEADING not in markdown:
+        raise ValueError("PatchEval README has no PatchEval-Verified results heading")
+    section = markdown.split(PATCHEVAL_HEADING, 1)[1].split("\n## ", 1)[0]
+    lines = [line.strip() for line in section.splitlines() if line.strip()]
+    table = [line for line in lines if line.startswith("|")]
+    if len(table) < 3:
+        raise ValueError("PatchEval-Verified results table is missing")
+    cells = [[cell.strip() for cell in line.strip("|").split("|")] for line in table]
+    if tuple(cells[0]) != PATCHEVAL_HEADER:
+        raise ValueError(f"PatchEval-Verified header changed: {cells[0]!r}")
+    entries = []
+    for agent, name, result in cells[2:]:
+        match = _PATCHEVAL_SCORE.fullmatch(result)
+        if not match or not name or len(name) > 200:
+            raise ValueError(f"PatchEval-Verified row is malformed: {name!r}")
+        solved, total = int(match[1]), int(match[2])
+        if total != PATCHEVAL_CASES or not 0 <= solved <= total:
+            raise ValueError(f"PatchEval-Verified case count changed: {result!r}")
+        rate = round(solved / total * 100, 2)
+        entries.append(
+            LeaderboardEntry(
+                name,
+                rate,
+                f"{solved}/{total} CVEs repaired ({rate}%) with {agent}",
+                harness=PATCHEVAL_HARNESSES.get(agent.lower(), agent),
+            )
+        )
+    _unique(entries, "PatchEval-Verified")
+    check_entry_count(entries, "PatchEval-Verified", 5, 200)
+    return entries
+
+
 # --- Board registry -----------------------------------------------------------
 
 
@@ -531,5 +632,33 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             protocol="Full 869-task v1 set, mitigations off, 6-hour budget; success requires the flag and a judge-confirmed intended vulnerability.",
         ),
         _fetching(EXPLOITGYM_DATA_URL, parse_exploitgym),
+    ),
+    "sync_cybergym": BoardSync(
+        LiveLeaderboard(
+            source="CyberGym",
+            provider="cybergym",
+            url=CYBERGYM_URL,
+            task_slug="cybersecurity",
+            dataset_slug="cybergym",
+            metric="Success Rate",
+            identities=IDENTITIES["cybergym"],
+            min_selected=20,
+            protocol="All 1,507 Level 1 tasks (vulnerability description plus unpatched codebase), one trial; success requires a PoC that reproduces the target vulnerability. Model-focused runs without the cleaned vulnerable image or test-time memory.",
+        ),
+        _fetching(CYBERGYM_DATA_URL, parse_cybergym),
+    ),
+    "sync_patcheval_verified": BoardSync(
+        LiveLeaderboard(
+            source="PatchEval-Verified",
+            provider="patcheval-verified",
+            url=PATCHEVAL_VERIFIED_URL,
+            task_slug="cybersecurity",
+            dataset_slug="patcheval-verified",
+            metric="Accuracy",
+            identities=IDENTITIES["patcheval-verified"],
+            min_selected=5,
+            protocol="230 real-world Go, JavaScript and Python CVEs, one patch per case, graded by each case's Docker validation entrypoint with the strengthened PatchEval-Verified PoC tests.",
+        ),
+        _fetching(PATCHEVAL_VERIFIED_README_URL, parse_patcheval_verified),
     ),
 }

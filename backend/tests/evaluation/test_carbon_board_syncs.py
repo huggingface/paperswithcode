@@ -1,5 +1,7 @@
 """Parsing and sync tests for the frontier boards added with Gemini 4 Carbon."""
 
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -153,6 +155,45 @@ def test_parse_exploitgym_keeps_only_six_hour_full_set_runs():
     assert all("subset" not in entry.detail for entry in entries.values())
 
 
+def test_parse_cybergym_keeps_the_default_model_focused_level_1_view():
+    entries = boards.parse_cybergym(
+        _fixture("cybergym.json"), now=datetime(2026, 10, 29, tzinfo=UTC)
+    )
+    by_label = {entry.label: entry for entry in entries}
+    assert by_label["DeepSeek-V4-Pro (DeepSeek Agent)"].value == 83.3
+    # One model can appear under several agents; each is its own row.
+    assert by_label["GPT-5.4 (OpenAI Agent)"].value == 79.0
+    assert by_label["GPT-5.4 (Codex CLI)"].value == 66.3
+    names = {entry.name for entry in entries}
+    # Agent-focused systems, 30-trial runs, and dynamic / test-time-memory
+    # runs are other views of the board.
+    assert "Multi-model (DeepSeek-V4.1-Flash, Abliterated GLM-5.2)" not in names
+    assert all("dynamic" not in entry.detail for entry in entries)
+    assert len(entries) == 44
+
+
+def test_parse_cybergym_waits_for_held_back_rows():
+    data = json.loads(_fixture("cybergym.json"))
+    row = next(r for r in data["level1"] if r["model"] == "GLM-5.1")
+    row["visible_after"] = "2026-11-01T00:00:00-07:00"
+    entries = boards.parse_cybergym(
+        json.dumps(data), now=datetime(2026, 10, 29, tzinfo=UTC)
+    )
+    assert "GLM-5.1" not in {entry.name for entry in entries}
+
+
+def test_parse_patcheval_verified_reads_the_readme_results_table():
+    entries = _by_name(
+        boards.parse_patcheval_verified(_fixture("patcheval_verified.md"))
+    )
+    assert entries["gpt-5.6-sol"].value == 83.91
+    assert entries["gpt-5.6-sol"].harness == "Codex"
+    assert entries["seed-2.1-turbo"].harness == "Trae CLI"
+    assert entries["GLM 5.2"].harness == "OpenCode"
+    assert "193/230 CVEs repaired" in entries["gpt-5.6-sol"].detail
+    assert set(entries) == set(IDENTITIES["patcheval-verified"])
+
+
 @pytest.mark.parametrize(
     ("parse", "fixture", "old", "new", "message"),
     [
@@ -191,6 +232,27 @@ def test_parse_exploitgym_keeps_only_six_hour_full_set_runs():
             '"total": 9',
             "instance total changed",
         ),
+        (
+            boards.parse_cybergym,
+            "cybergym.json",
+            '"level1"',
+            '"levelOne"',
+            "no level1 list",
+        ),
+        (
+            boards.parse_patcheval_verified,
+            "patcheval_verified.md",
+            "| Agent | Model | Pass@1 |",
+            "| Agent | Model | Resolved |",
+            "header changed",
+        ),
+        (
+            boards.parse_patcheval_verified,
+            "patcheval_verified.md",
+            "193/230",
+            "193/300",
+            "case count changed",
+        ),
     ],
 )
 def test_parsers_fail_on_layout_changes(parse, fixture, old, new, message):
@@ -209,6 +271,8 @@ def test_every_board_has_identities_and_a_configured_fetcher():
         "sync_riemann_bench",
         "sync_cwe_bench",
         "sync_exploitgym",
+        "sync_cybergym",
+        "sync_patcheval_verified",
     }
     for sync in boards.BOARD_SYNCS.values():
         assert len(sync.board.identities) >= sync.board.min_selected

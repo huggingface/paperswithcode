@@ -694,4 +694,169 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             source_url="https://www.anthropic.com/claude-fable-and-mythos-5-1",
         ),
     },
+    "cybergym": {
+        # Upstream DeepSeek rows link the 0813 / 0731 checkpoints of the
+        # DeepSeek-V4 report; the catalog names them by checkpoint and mode.
+        "DeepSeek-V4-Pro": ModelIdentity(
+            "DeepSeek-V4-Pro-0813 (Max)",
+            arxiv_id="2606.19348",
+            is_open=True,
+            hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813",
+        ),
+        "DeepSeek-V4-Flash": ModelIdentity(
+            "DeepSeek-V4-Flash-0731 (Max)",
+            arxiv_id="2606.19348",
+            is_open=True,
+            hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+        ),
+        "Gemini 3.8 Flash Cyber": ModelIdentity(
+            "Gemini 3.8 Flash Cyber",
+            source_url="https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/",
+        ),
+        "GLM-5.3": ModelIdentity(
+            "GLM-5.3",
+            source_url="https://z.ai/blog/glm-5.3",
+            is_open=True,
+            hf_model_url="https://huggingface.co/zai-org/GLM-5.3",
+        ),
+        "GLM-5.2": ModelIdentity(
+            "GLM-5.2",
+            source_url="https://z.ai/blog/glm-5.2",
+            is_open=True,
+            hf_model_url="https://huggingface.co/zai-org/GLM-5.2",
+        ),
+        "GLM-5.1": ModelIdentity(
+            "GLM-5.1",
+            source_url="https://z.ai/blog/glm-5.1",
+            is_open=True,
+            hf_model_url="https://huggingface.co/zai-org/GLM-5.1",
+        ),
+        "GLM-5": ModelIdentity(
+            "GLM-5",
+            arxiv_id="2602.15763",
+            is_open=True,
+            hf_model_url="https://huggingface.co/zai-org/GLM-5",
+        ),
+        "GPT-5.5": ModelIdentity(
+            "GPT-5.5", source_url="https://openai.com/index/introducing-gpt-5-5/"
+        ),
+        "GPT-5.4": ModelIdentity(
+            "GPT-5.4", source_url="https://openai.com/index/introducing-gpt-5-4/"
+        ),
+        "GPT-5": ModelIdentity(
+            "GPT-5", source_url="https://openai.com/index/introducing-gpt-5/"
+        ),
+        "o4-mini": ModelIdentity(
+            "o4-mini", source_url="https://openai.com/index/introducing-o3-and-o4-mini/"
+        ),
+        "Grok 4.6": ModelIdentity("Grok 4.6", source_url="https://x.ai/news/grok-4-6"),
+        "Grok 4.5": ModelIdentity("Grok 4.5", source_url="https://x.ai/news/grok-4-5"),
+        "Claude Opus 4.6": ModelIdentity(
+            "Claude Opus 4.6",
+            source_url="https://www.anthropic.com/news/claude-opus-4-6",
+        ),
+        "Claude Sonnet 4.6": ModelIdentity(
+            "Claude Sonnet 4.6",
+            source_url="https://www.anthropic.com/news/claude-sonnet-4-6",
+        ),
+        "Claude Opus 4.5": ModelIdentity(
+            "Claude Opus 4.5",
+            source_url="https://www.anthropic.com/news/claude-opus-4-5",
+        ),
+        "Claude Sonnet 4.5": ModelIdentity(
+            "Claude Sonnet 4.5",
+            source_url="https://www.anthropic.com/news/claude-sonnet-4-5",
+        ),
+        "Claude Opus 4.1": ModelIdentity(
+            "Claude Opus 4.1",
+            source_url="https://www.anthropic.com/news/claude-opus-4-1",
+        ),
+        "Claude Sonnet 4": ModelIdentity(
+            "Claude Sonnet 4", source_url="https://www.anthropic.com/news/claude-4"
+        ),
+        "Claude Sonnet 3.7": ModelIdentity(
+            "Claude 3.7 Sonnet",
+            source_url="https://www.anthropic.com/news/claude-3-7-sonnet",
+        ),
+        "Gemini 3.1 Pro": ModelIdentity(
+            "Gemini 3.1 Pro",
+            source_url="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/",
+        ),
+        "Gemini 2.5 Flash Preview": ModelIdentity(
+            "Gemini 2.5 Flash Preview", arxiv_id="2507.06261"
+        ),
+        # The May 2026 safety report evaluates the original API model, not
+        # the October open-weight Muse Spark Open release.
+        "Muse Spark": ModelIdentity("Muse Spark", arxiv_id="2606.12429"),
+        "Muse Spark 1.1 (helpful-only)": ModelIdentity(
+            "Muse Spark 1.1 (helpful-only)",
+            source_url="https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/",
+        ),
+        "Kimi K2.5": ModelIdentity(
+            "Kimi K2.5",
+            arxiv_id="2602.02276",
+            is_open=True,
+            hf_model_url="https://huggingface.co/moonshotai/Kimi-K2.5",
+        ),
+        "DeepSeek-V3": ModelIdentity(
+            "DeepSeek-V3",
+            arxiv_id="2412.19437",
+            is_open=True,
+            hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V3",
+        ),
+        "Qwen3-235B-A22B": ModelIdentity(
+            "Qwen3-235B-A22B",
+            arxiv_id="2505.09388",
+            is_open=True,
+            hf_model_url="https://huggingface.co/Qwen/Qwen3-235B-A22B",
+        ),
+        "R2E-Gym-32B": ModelIdentity(
+            "R2E-Gym-32B", arxiv_id="2504.07164", is_open=True
+        ),
+        "SWE-Gym-32B": ModelIdentity(
+            "SWE-Gym-32B", arxiv_id="2412.21139", is_open=True
+        ),
+    },
+    "patcheval-verified": {
+        "gpt-5.6-sol": ModelIdentity(
+            "GPT-5.6 Sol", source_url="https://openai.com/index/gpt-5-6/"
+        ),
+        "gpt-5.5": ModelIdentity(
+            "GPT-5.5", source_url="https://openai.com/index/introducing-gpt-5-5/"
+        ),
+        "gpt-5.4": ModelIdentity(
+            "GPT-5.4", source_url="https://openai.com/index/introducing-gpt-5-4/"
+        ),
+        "DeepSeek-V4-Flash-0731": ModelIdentity(
+            "DeepSeek-V4-Flash-0731",
+            arxiv_id="2606.19348",
+            is_open=True,
+            hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+        ),
+        "seed-2.1-turbo": ModelIdentity(
+            "Seed2.1 Turbo",
+            source_url="https://lf3-static.bytednsdoc.com/obj/eden-cn/lapzild-tss/ljhwZthlaukjlkulzlp/seed2.1/Seed2_1_Model_Card.pdf",
+        ),
+        "kimi-2.7-code": ModelIdentity(
+            "Kimi K2.7 Code",
+            source_url="https://huggingface.co/moonshotai/Kimi-K2.7-Code",
+            is_open=True,
+            hf_model_url="https://huggingface.co/moonshotai/Kimi-K2.7-Code",
+        ),
+        "GLM 5.2": ModelIdentity(
+            "GLM-5.2",
+            source_url="https://z.ai/blog/glm-5.2",
+            is_open=True,
+            hf_model_url="https://huggingface.co/zai-org/GLM-5.2",
+        ),
+        "MiniMax-M3": ModelIdentity(
+            "MiniMax-M3",
+            source_url="https://www.minimax.io/blog/minimax-m3",
+            is_open=True,
+            hf_model_url="https://huggingface.co/MiniMaxAI/MiniMax-M3",
+        ),
+        "qwen3.7 plus": ModelIdentity(
+            "Qwen3.7-Plus", source_url="https://www.qwencloud.com/models/qwen3.7-plus"
+        ),
+    },
 }

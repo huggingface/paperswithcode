@@ -515,6 +515,24 @@ COMMANDS: dict[str, Job] = {
             "validated official leaderboard; never creates papers"
         ),
     ),
+    "sync_cybergym": job(
+        "-m",
+        "scripts.hourly.sync_cybergym",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed CyberGym evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
+    "sync_patcheval_verified": job(
+        "-m",
+        "scripts.hourly.sync_patcheval_verified",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed PatchEval-Verified evaluation rows from the "
+            "validated official leaderboard; never creates papers"
+        ),
+    ),
     "sync_physics_iq_verified": job(
         "-m",
         "scripts.hourly.sync_physics_iq_verified",

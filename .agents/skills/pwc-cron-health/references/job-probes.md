@@ -174,6 +174,16 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `exploitgym` on task `cybersecurity`; Success Rate (%) 0–100 = on_target / instances.total, harness from `agent`; https://www.cybergym.io/assets/data/exploitgym.json, keeping only full-set `6h timeout` / `rescaled 6h timeout` rows (v1 or unversioned); typically 4–200 rows (9 on 2026-10-29).
 - **Proof:** Diff the upstream rows against managed rows; confirm `sync_exploitgym_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
 
+
+## `sync_cybergym`
+
+- **Contract:** `cybergym` on task `cybersecurity`; Success Rate (%) 0–100 = `score_10` × 100, harness from `agent`; https://www.cybergym.io/assets/data/cybergym.json `level1`, keeping the site's default view (single trial, not hidden or held back by `visible_after`, `focus` model, no `dynamic` / `test-time mem.` features); typically 20–300 rows (44 on 2026-10-29, 32 reviewed).
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_cybergym_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+
+## `sync_patcheval_verified`
+
+- **Contract:** `patcheval-verified` on task `cybersecurity`; Accuracy (%) 0–100 = repaired / 230, harness from the Agent column (codex → Codex, Opencode → OpenCode, trae → Trae CLI); the "Results on PatchEval-Verified" table in https://raw.githubusercontent.com/bytedance/PatchEval/main/README.md; typically 5–200 rows (9 on 2026-10-29).
+- **Proof:** Same as `sync_cybergym`; the hand-imported FrogNano row (Leaf harness) is not upstream and stays unmanaged.
 ## `sync_physics_iq_verified`
 
 - **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.

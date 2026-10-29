@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync PatchEval-Verified leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:21:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-patcheval-verified.service
+
+[Install]
+WantedBy=timers.target

@@ -59,6 +59,8 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-riemann-bench.timer` | `*-*-* *:23:00` | `sync_riemann_bench` | `.github/workflows/scripts/hourly/sync_riemann_bench.py` |
 | `pwc-cron-sync-cwe-bench.timer` | `*-*-* *:34:00` | `sync_cwe_bench` | `.github/workflows/scripts/hourly/sync_cwe_bench.py` |
 | `pwc-cron-sync-exploitgym.timer` | `*-*-* *:46:00` | `sync_exploitgym` | `.github/workflows/scripts/hourly/sync_exploitgym.py` |
+| `pwc-cron-sync-cybergym.timer` | `*-*-* *:09:00` | `sync_cybergym` | `.github/workflows/scripts/hourly/sync_cybergym.py` |
+| `pwc-cron-sync-patcheval-verified.timer` | `*-*-* *:21:00` | `sync_patcheval_verified` | `.github/workflows/scripts/hourly/sync_patcheval_verified.py` |
 | `pwc-cron-sync-physics-iq-verified.timer` | `*-*-* *:28:00` | `sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
 | `pwc-cron-sync-artificial-analysis.timer` | `*-*-* 00/2:35:00` | `sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
 | `pwc-cron-sync-mmteb-reranking.timer` | `*-*-* *:37:00` | `sync_mmteb_reranking` | `.github/workflows/scripts/hourly/sync_mmteb.py` reranking |
@@ -405,7 +407,9 @@ run; managed rows that drop off the leaderboard are reported, never deleted.
 `sync_vals_index.py`, `sync_swe_sweep.py`, `sync_vending_bench_2.py`,
 `sync_blueprint_bench_2.py`, `sync_riemann_bench.py`, `sync_cwe_bench.py`, and
 `sync_exploitgym.py` keep the frontier boards added with Gemini 4 Carbon
-current. Each parses its official leaderboard in
+current; `sync_cybergym.py` (the site's default model-focused Level 1 view) and
+`sync_patcheval_verified.py` (the README results table) do the same for two
+more Cybersecurity boards. Each parses its official leaderboard in
 `backend/services/carbon_board_syncs.py` (failing on any layout change or an
 implausible row count) and hands the rows to the shared single-metric engine in
 `backend/services/live_leaderboard_sync.py`. Upstream names map to reviewed

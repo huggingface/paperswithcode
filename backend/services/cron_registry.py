@@ -1622,6 +1622,80 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_cybergym",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=9),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-cybergym.timer",
+        systemd_service="pwc-cron-sync-cybergym.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync CyberGym Leaderboard",
+        category="hourly",
+        schedule="9 * * * * (hourly)",
+        script_path="hourly/sync_cybergym.py",
+        log_name="sync_cybergym",
+        process_patterns=("scripts.hourly.sync_cybergym",),
+        lock_file=("/var/lib/paperswithcode/production/cron-locks/sync_cybergym.lock"),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'cybergym'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code CyberGym live sync.%'
+        """,
+        workflow_file="cron-sync-cybergym.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_patcheval_verified",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=21),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-patcheval-verified.timer",
+        systemd_service="pwc-cron-sync-patcheval-verified.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync PatchEval-Verified Leaderboard",
+        category="hourly",
+        schedule="21 * * * * (hourly)",
+        script_path="hourly/sync_patcheval_verified.py",
+        log_name="sync_patcheval_verified",
+        process_patterns=("scripts.hourly.sync_patcheval_verified",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_patcheval_verified.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'patcheval-verified'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code PatchEval-Verified live sync.%'
+        """,
+        workflow_file="cron-sync-patcheval-verified.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_frontiercode",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=45),),

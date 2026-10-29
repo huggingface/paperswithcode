@@ -308,6 +308,16 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync ExploitGym leaderboard hourly",
     ),
     TimerSpec(
+        job="sync_cybergym",
+        on_calendar=("*-*-* *:09:00",),
+        description="Sync CyberGym leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_patcheval_verified",
+        on_calendar=("*-*-* *:21:00",),
+        description="Sync PatchEval-Verified leaderboard hourly",
+    ),
+    TimerSpec(
         job="sync_physics_iq_verified",
         on_calendar=("*-*-* *:28:00",),
         description="Sync Physics-IQ Verified leaderboard hourly",

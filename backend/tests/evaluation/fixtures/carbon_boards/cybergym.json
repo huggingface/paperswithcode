@@ -1,0 +1,1371 @@
+{
+  "level1": [
+    {
+      "agent": "DeepSeek Agent",
+      "model": "DeepSeek-V4-Pro",
+      "model_release_date": "2026-08-13",
+      "include_in_plot": true,
+      "score_10": 0.833,
+      "date": "2026-08-13",
+      "source": "DeepSeek",
+      "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Grok Build",
+      "model": "Grok 4.5",
+      "model_release_date": "2026-07-14",
+      "include_in_plot": true,
+      "score_10": 0.79,
+      "date": "2026-07-14",
+      "source": "xAI",
+      "source_url": "https://cursor.com/resources/grok-4-5-model-card.pdf",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Grok Build",
+      "model": "Grok 4.6",
+      "model_release_date": "2026-08-12",
+      "include_in_plot": true,
+      "score_10": 0.797,
+      "date": "2026-08-12",
+      "source": "xAI",
+      "source_url": "https://media.x.ai/v1/website/card-4p6-4cd2dc57.pdf",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Claude Code",
+      "model": "GLM-5.2",
+      "model_release_date": "2026-07-21",
+      "include_in_plot": true,
+      "score_10": 0.772,
+      "date": "2026-07-21",
+      "source": "Zhipu AI",
+      "source_url": "https://z.ai/blog/glm-5.3",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Claude Code",
+      "model": "GLM-5.3",
+      "model_release_date": "2026-08-14",
+      "include_in_plot": true,
+      "score_10": 0.845,
+      "date": "2026-08-14",
+      "source": "Zhipu AI",
+      "source_url": "https://z.ai/blog/glm-5.3",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Claude Code",
+      "model": "Feyospace-v1.1 (finetuned from Qwen3.8-27B)",
+      "model_release_date": "2026-09-23",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/feyospace.png",
+      "score_10": 0.8441,
+      "date": "2026-09-23",
+      "source": "Vera Praxis Lab",
+      "source_url": "https://verapraxis.ai/en/research/feyospace-v1-1",
+      "trials": 1,
+      "focus": "model",
+      "subRows": [
+        {
+          "model": "Feyospace-v1",
+          "score_10": 0.6304,
+          "date": "2026-09-08",
+          "source_url": "https://arxiv.org/abs/2609.08418"
+        },
+        {
+          "model": "Feyospace-v0",
+          "score_10": 0.5116,
+          "date": "2026-09-08",
+          "source_url": "https://arxiv.org/abs/2609.08418"
+        }
+      ]
+    },
+    {
+      "agent": "Claude Code",
+      "model": "ASL-Cyber-Flash (finetuned from DeepSeek-V4-Flash)",
+      "model_release_date": "2026-09-03",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/aeye.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.8587,
+      "date": "2026-09-03",
+      "source": "Aeye Security Lab",
+      "source_url": "https://github.com/aeyesec/asl-cyber-flash-submission/",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Google Antigravity",
+      "model": "Gemini 3.8 Flash Cyber",
+      "model_release_date": "2026-09-02",
+      "include_in_plot": true,
+      "score_10": 0.8626,
+      "date": "2026-09-10",
+      "source": "Google",
+      "source_url": "https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Panshi \\(磐石\\)",
+      "model": "DeepSeek-V4-Pro",
+      "model_release_date": "2026-08-13",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Pro"
+      ],
+      "icon": "/assets/images/cybergym/panshi.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9542,
+      "date": "2026-09-04",
+      "source": "Huawei Cloud",
+      "source_url": "https://github.com/PanshiAgent/Panshi-Security-Agent",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "NASH",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash"
+      ],
+      "icon": "/assets/images/cybergym/nash.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9137,
+      "date": "2026-09-01",
+      "source": "NASH Team",
+      "source_url": "https://github.com/NASH-nrxt/NASH",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Lyrie Agent",
+      "model": "Multi-model (DeepSeek-V4.1-Flash, Abliterated GLM-5.2)",
+      "model_release_date": "2026-09-15",
+      "include_in_plot": true,
+      "plot_links": [
+        "GLM-5.2"
+      ],
+      "icon": "/assets/images/cybergym/lyrie.png",
+      "features": [
+        "Multi-model",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.992,
+      "date": "2026-09-15",
+      "source": "Lyrie",
+      "source_url": "https://lyrie.ai/cybergym",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "PwnBot",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash"
+      ],
+      "icon": "/assets/images/cybergym/pwnbot.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)",
+        "test-time mem. (with a test-time-updated knowledge base)"
+      ],
+      "score_10": 0.931,
+      "date": "2026-09-27",
+      "source": "FUNNY_04",
+      "source_url": "https://github.com/CyberLadX64/PwnBot",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "OrcaCyber",
+      "model": "Multi-model (DeepSeek-V4-Flash, OrcaCyber-Zero-1.0)",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash"
+      ],
+      "icon": "/assets/images/cybergym/orcacyber.png",
+      "features": [
+        "Multi-model",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9801,
+      "date": "2026-09-14",
+      "source": "Continuum AI",
+      "source_url": "https://orcacyber.ai/blog/cybergym-technical-report",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Ostorlab Neutron",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash"
+      ],
+      "icon": "/assets/images/cybergym/ostorlab.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9708,
+      "date": "2026-10-06",
+      "source": "Ostorlab",
+      "source_url": "https://blog.ostorlab.co/cybergym-benchmark-technical-writeup.html",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "HiAUDIT Agent",
+      "model": "DeepSeek-V4-Pro",
+      "model_release_date": "2026-08-13",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Pro"
+      ],
+      "icon": "/assets/images/cybergym/techfund.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)",
+        "test-time mem. (with a test-time-updated knowledge base)"
+      ],
+      "score_10": 0.9064,
+      "date": "2026-09-18",
+      "source": "TECHFUND Inc.",
+      "source_url": "https://techfund.jp/en/media/cybergym",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Codex CLI",
+      "model": "Basin (basin1-0912-pre-dpo)",
+      "model_release_date": "2026-09-23",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/basin.png",
+      "score_10": 0.8003,
+      "date": "2026-09-23",
+      "source": "Submersion AI",
+      "source_url": "https://submersion.ai/basin",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "AiPy Mini",
+      "model": "DeepSeek-V4.1-Flash",
+      "model_release_date": "2026-09-23",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/aipy.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9283,
+      "date": "2026-09-23",
+      "source": "Knownsec",
+      "source_url": "https://github.com/knownsec/cybergym-writeup",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "TriLane",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash"
+      ],
+      "icon": "/assets/images/cybergym/trilane.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.8892,
+      "date": "2026-09-20",
+      "source": "CMHI (China Mobile (Hangzhou) Information Technology Co., Ltd.)",
+      "source_url": "https://github.com/xyun92/trilane/blob/main/docs/cybergym-submission-report.md",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Ji Realm \\(极境\\)",
+      "model": "Multi-model (DeepSeek-V4-Flash, GLM-5.2)",
+      "model_release_date": "2026-09-07",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash",
+        "GLM-5.2"
+      ],
+      "icon": "/assets/images/cybergym/jirealm.png",
+      "features": [
+        "Multi-model",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9244,
+      "date": "2026-09-07",
+      "source": "Sealed Realm Team \\(界内\\)",
+      "source_url": "https://JiRealmAgent.github.io/writeup_static.html",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "ai-deep-audit",
+      "model": "Multi-model (DeepSeek-V4-Flash, DeepSeek-V4.1-Flash, GLM-5.3, GLM-5.3-Flash)",
+      "model_release_date": "2026-09-18",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash",
+        "GLM-5.3"
+      ],
+      "icon": "/assets/images/cybergym/bybit.png",
+      "features": [
+        "Multi-model",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9416,
+      "date": "2026-09-18",
+      "source": "Bybit",
+      "source_url": "https://github.com/bybit-sec/cybergym",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "NPC Agent System",
+      "model": "Multi-model (DeepSeek-V4-Flash, GLM-5.2, GLM-5.3, GLM-5.3-Flash)",
+      "model_release_date": "2026-10-06",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash",
+        "GLM-5.2",
+        "GLM-5.3"
+      ],
+      "icon": "/assets/images/cybergym/npc.png",
+      "features": [
+        "Multi-model",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9668,
+      "date": "2026-10-06",
+      "source": "NPC Agent",
+      "source_url": "https://github.com/npc4g3nt/npc",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "RedbudAI",
+      "model": "GLM-5.2",
+      "model_release_date": "2026-08-10",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/redbud.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)",
+        "test-time mem. (with a test-time-updated knowledge base)"
+      ],
+      "score_10": 0.86264,
+      "date": "2026-08-10",
+      "source": "Redbud",
+      "source_url": "https://redbud.tsinghua.edu.cn/posts/cybergym.html",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "DoGNAVY",
+      "model": "GLM-5.3",
+      "model_release_date": "2026-08-14",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/dognavy.png",
+      "features": [
+        "Multi-agent",
+        "Memory",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9496,
+      "date": "2026-08-17",
+      "source": "deepsec@DARKNAVY",
+      "source_url": "https://deepsec.darknavy.net/blog/cybergym",
+      "trials": 1,
+      "focus": "agent",
+      "subRows": [
+        { "model": "GLM-5.2", "score_10": 0.9084, "date": "2026-08-03" }
+      ]
+    },
+    {
+      "agent": "NSFOCUS AI",
+      "model": "GLM-5.3",
+      "model_release_date": "2026-08-14",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/nsfocus.png",
+      "features": ["dynamic (uses cleaned vulnerable Docker image)"],
+      "score_10": 0.9502,
+      "date": "2026-08-13",
+      "source": "NSFOCUS",
+      "source_url": "https://nsfocusglobal.com/nsfocus-ai-cybergym-level-1-technical-report/",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Gcsa Agent",
+      "model": "Multi-model (Grok 4.5, Grok 4.6)",
+      "model_release_date": "2026-08-12",
+      "include_in_plot": true,
+      "plot_links": [
+        "Grok 4.5",
+        "Grok 4.6"
+      ],
+      "icon": "/assets/images/cybergym/gcsa.png",
+      "features": [
+        "Multi-model",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9131,
+      "date": "2026-08-25",
+      "source": "Gcsa",
+      "source_url": "https://gcsa.org/cybergym/l1-writeup-v2.0.html",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "mneme",
+      "model": "Claude Opus 4.6",
+      "model_release_date": "2026-02-05",
+      "include_in_plot": true,
+      "plot_links": [
+        "Claude Opus 4.6"
+      ],
+      "icon": "/assets/images/cybergym/mneme.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9104,
+      "date": "2026-07-13",
+      "source": "Soongsil AISC",
+      "source_url": "https://aisc-ssu.github.io/mneme/",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "VARAS-OneMind \\(智安·宇盾\\)",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash"
+      ],
+      "icon": "/assets/images/cybergym/varas.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)",
+        "test-time mem. (with a test-time-updated knowledge base)"
+      ],
+      "score_10": 0.9695,
+      "date": "2026-09-16",
+      "source": "VARAS",
+      "source_url": "https://varas-onemind.github.io/posts/cybergym_v2/",
+      "trials": 1,
+      "focus": "agent",
+      "subRows": [
+        {
+          "model": "GPT-5.4",
+          "score_10": 0.7379,
+          "date": "2026-08-14",
+          "source_url": "https://varas-onemind.github.io/posts/cybergym/",
+          "features": [
+            "test-time mem. (with a test-time-updated knowledge base)"
+          ]
+        }
+      ]
+    },
+    {
+      "agent": "Gusion",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash"
+      ],
+      "icon": "/assets/images/cybergym/gusion.png",
+      "features": [],
+      "score_10": 0.8706,
+      "date": "2026-08-16",
+      "source": "Gusion",
+      "source_url": "https://github.com/EBWi11/Gusion/blob/add-level1-technical-report/README.md",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "FangcunCyber",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Flash"
+      ],
+      "icon": "/assets/images/cybergym/fangcun.png",
+      "features": [
+        "test-time mem. (with a test-time-updated knowledge base)"
+      ],
+      "score_10": 0.9131,
+      "date": "2026-08-16",
+      "source": "Fangcun AI",
+      "source_url": "https://github.com/Fangcun-AI/FangcunCyber",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Alipay AI4SDL",
+      "model": "GLM-5.3",
+      "model_release_date": "2026-08-14",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/alipay-logo.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9675,
+      "date": "2026-09-06",
+      "source": "Alipay",
+      "source_url": "https://github.com/Alipay-Risk-Tech/CyberGym-Writeup",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Creation \\(天工\\)",
+      "model": "Multi-model (Creation Model, DeepSeek-V4-Pro, Qwen 3.8 Max)",
+      "model_release_date": "2026-08-30",
+      "include_in_plot": true,
+      "plot_links": [
+        "DeepSeek-V4-Pro"
+      ],
+      "icon": "/assets/images/cybergym/creation.png",
+      "features": [
+        "Multi-model",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9847,
+      "date": "2026-09-07",
+      "source": "Creation Lab",
+      "source_url": "https://github.com/AntAISecurityLab/Creation",
+      "trials": 1,
+      "focus": "agent",
+      "subRows": [
+        {
+          "model": "Multi-model (DeepSeek-V4-Pro, Creation Model, Qwen 3.8 Max)",
+          "score_10": 0.9535,
+          "date": "2026-08-30"
+        }
+      ]
+    },
+    {
+      "agent": "Spur",
+      "model": "Qwen-Internal",
+      "model_release_date": "2026-08-29",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/spur.png",
+      "features": [],
+      "score_10": 0.918381,
+      "date": "2026-09-03",
+      "source": "Alibaba Cloud Security",
+      "source_url": null,
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Hero Agent",
+      "model": "Hero (finetuned from GLM-5.2)",
+      "model_release_date": "2026-09-03",
+      "include_in_plot": true,
+      "plot_links": [
+        "GLM-5.2"
+      ],
+      "icon": "/assets/images/cybergym/dream.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)",
+        "test-time mem. (with a test-time-updated knowledge base)"
+      ],
+      "score_10": 0.9662,
+      "date": "2026-09-03",
+      "source": "Dream",
+      "source_url": "https://www.dreamgroup.com/blog/hercules-on-premises-ai-vulnerability-model-ranked-1-on-cybergym",
+      "visible_after": "2026-09-03T07:00:00-07:00",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "RO0T Agent",
+      "model": "DeepSeek-V4.1-Flash",
+      "model_release_date": "2026-09-18",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/root-lab.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.977,
+      "date": "2026-09-18",
+      "source": "RO0T Lab",
+      "source_url": "https://github.com/RO0TLab/RO0T-Agent/blob/main/README.md",
+      "trials": 1,
+      "focus": "agent",
+      "subRows": [
+        {
+          "model": "DeepSeek-V4-Flash",
+          "score_10": 0.9416,
+          "date": "2026-08-26"
+        }
+      ]
+    },
+    {
+      "agent": "DeepSeek Agent",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "score_10": 0.767,
+      "date": "2026-07-31",
+      "source": "DeepSeek",
+      "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Velldepth Agent",
+      "model": "XekRung",
+      "model_release_date": "2026-07-23",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/velldepth.png",
+      "score_10": 0.8534,
+      "date": "2026-08-03",
+      "source": "Alibaba Security",
+      "source_url": "https://alibaba-velldepth.github.io/writeups/",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "XekRung Agent",
+      "model": "XekRung-1.5-27B-Preview (finetuned from Qwen3.8-27B)",
+      "model_release_date": "2026-09-13",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/velldepth.png",
+      "score_10": 0.8892,
+      "date": "2026-09-13",
+      "source": "Alibaba Security",
+      "source_url": "https://alibaba-velldepth.github.io/writeups/model-track.html",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "JiuXuan \\(九玄\\)",
+      "model": "JT236B",
+      "model_release_date": "2026-10-16",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/jiutian.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.923,
+      "date": "2026-10-16",
+      "source": "China Mobile Jiutian AI Team",
+      "source_url": "https://github.com/as837430732/JiuXuan",
+      "trials": 1,
+      "focus": "agent",
+      "subRows": [
+        {
+          "model": "GLM-5.1",
+          "score_10": 0.7286,
+          "date": "2026-08-03",
+          "source": "China Mobile Jiutian AI",
+          "features": [
+            "Memory",
+            "dynamic (uses cleaned vulnerable Docker image)"
+          ]
+        }
+      ]
+    },
+    {
+      "agent": "Wiz Atlas",
+      "model": "Multi-model (GPT-5.5, Claude Opus 4.6)",
+      "model_release_date": "2026-07-27",
+      "include_in_plot": true,
+      "plot_links": [
+        "GPT-5.5",
+        "Claude Opus 4.6"
+      ],
+      "icon": "/assets/images/cybergym/wiz-atlas.png",
+      "features": [
+        "Multi-model",
+        "Multi-stage"
+      ],
+      "score_10": 0.909,
+      "date": "2026-07-27",
+      "source": "Wiz",
+      "source_url": "https://www.wiz.io/blog/atlas-ai-vulnerability-researcher",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Sangfor AI",
+      "model": "GLM-5.3",
+      "model_release_date": "2026-08-14",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/sangfor.png",
+      "features": [
+        "Orchestration",
+        "Multi-stage",
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.9721,
+      "date": "2026-09-02",
+      "source": "Sangfor AI",
+      "source_url": "https://github.com/Sangfor-AI/cybergym-submission-sangfor-ai-v2",
+      "trials": 1,
+      "focus": "agent",
+      "subRows": [
+        {
+          "model": "DeepSeek-V4-Flash",
+          "score_10": 0.9317,
+          "date": "2026-08-08",
+          "source_url": "https://github.com/Sangfor-AI/cybergym-submission-sangfor-ai-v2"
+        },
+        {
+          "model": "GLM-5.2",
+          "score_10": 0.8633,
+          "date": "2026-07-21",
+          "source_url": "https://www.sangfor.com/news-and-press-release/sangfor-ai-ranked-4-on-cybergym-2026"
+        }
+      ]
+    },
+    {
+      "agent": "Whitzard \\(白泽\\)",
+      "model": "DeepSeek-V4-Flash",
+      "model_release_date": "2026-07-31",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/fudan-logo.png",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "score_10": 0.912,
+      "date": "2026-08-07",
+      "source": "Fudan Whitzard",
+      "source_url": "https://github.com/WhitzardAgent/Whitzard",
+      "trials": 1,
+      "focus": "agent",
+      "subRows": [
+        {
+          "model": "GLM-5.1-FP8",
+          "score_10": 0.689,
+          "date": "2026-07-21"
+        }
+      ]
+    },
+    {
+      "agent": "Claude Code",
+      "model": "DeepSeek-V4-Pro Preview",
+      "model_release_date": "2026-04-24",
+      "include_in_plot": true,
+      "score_10": 0.577,
+      "date": "2026-07-13",
+      "source": "XDxAI",
+      "source_url": "https://github.com/XDxAI/cybergym-deepseek-submission-2026",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "XD Agent",
+      "model": "DeepSeek-V4-Pro Preview",
+      "model_release_date": "2026-04-24",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/xdagent.png",
+      "features": [],
+      "score_10": 0.641,
+      "date": "2026-08-11",
+      "source": "XDxAI",
+      "source_url": "https://github.com/XDxAI/XD-Agent/blob/main/CyberGym_submission_XDagent.md",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "Meta Agent",
+      "model": "Muse Spark 1.1 (helpful-only)",
+      "model_release_date": "2026-07-09",
+      "include_in_plot": true,
+      "score_10": 0.59,
+      "date": "2026-07-09",
+      "source": "Meta AI",
+      "source_url": "https://ai.meta.com/static-resource/muse-spark-1-1-evaluation-report",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Xuanwu Atuin AI",
+      "model": "GLM-5.2",
+      "model_release_date": "2026-07-22",
+      "include_in_plot": true,
+      "score_10": 0.848,
+      "date": "2026-07-22",
+      "source": "Tencent Xuanwu Lab",
+      "source_url": "https://xlab.tencent.com/en/2026/07/17/xuanwu-atuin-cybergym-glm52/",
+      "trials": 1,
+      "focus": "agent",
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "icon": "/assets/images/cybergym/XuanwuLogo.png",
+      "subRows": [
+        {
+          "model": "GLM-5.1",
+          "score_10": 0.84,
+          "date": "2026-07-02",
+          "source_url": "https://xlab.tencent.com/en/2026/07/02/xuanwu-atuin-cybergym/"
+        }
+      ]
+    },
+    {
+      "agent": "MopMonk Agent",
+      "model": "MiniMax M3",
+      "model_release_date": "2026-06-01",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/mopmonk.png",
+      "score_10": 0.731,
+      "date": "2026-06-28",
+      "source": "MopMonk AI",
+      "source_url": "https://github.com/MopMonkAI/MopMonkAgent",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "OpenAI Agent",
+      "model": "GPT-5.5-Cyber",
+      "model_release_date": "2026-06-22",
+      "include_in_plot": true,
+      "score_10": 0.856,
+      "date": "2026-06-22",
+      "source": "OpenAI",
+      "source_url": "https://openai.com/index/daybreak-securing-the-world/",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Crystalline",
+      "model": "Claude Opus 4.6",
+      "model_release_date": "2026-02-05",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/crystalline.png",
+      "features": [
+        "test-time mem. (with a test-time-updated knowledge base)",
+        "Test-time memory"
+      ],
+      "score_10": 0.896,
+      "date": "2026-06-08",
+      "source": "Independent researcher",
+      "source_url": "https://github.com/synchopate/cybergym-logos",
+      "trials": 1,
+      "focus": "agent"
+    },
+    {
+      "agent": "MDASH",
+      "model": "Multi-model (GPT-5.4, Claude Opus 4.6, Claude Sonnet 4.6)",
+      "model_release_date": "2026-05-12",
+      "include_in_plot": true,
+      "plot_links": [
+        "GPT-5.4",
+        "Claude Opus 4.6",
+        "Claude Sonnet 4.6"
+      ],
+      "features": [
+        "Multi-model",
+        "Orchestration"
+      ],
+      "score_10": 0.9097,
+      "date": "2026-06-17",
+      "source": "Microsoft",
+      "source_url": "https://www.microsoft.com/en-us/security/blog/2026/06/17/beyond-the-benchmark-advancing-security-at-ai-speed/",
+      "trials": 1,
+      "focus": "agent",
+      "subRows": [
+        {
+          "model": "Multi-model (MAI-Cyber-1-Flash, GPT-5.4, Claude Opus 4.6)",
+          "score_10": 0.8626,
+          "date": "2026-07-27",
+          "source_url": "https://microsoft.ai/news/introducing-mai-cyber-1-flash-inside-mdash/"
+        },
+        {
+          "model": "Multi-model (GPT-5.4, Claude Opus 4.6, Claude Sonnet 4.6)",
+          "score_10": 0.8845,
+          "date": "2026-05-12",
+          "source_url": "https://www.microsoft.com/en-us/security/blog/2026/05/12/defense-at-ai-speed-microsofts-new-multi-model-agentic-security-system-tops-leading-industry-benchmark/"
+        }
+      ]
+    },
+    {
+      "agent": "Meta Agent",
+      "model": "Muse Spark",
+      "model_release_date": "2026-04-08",
+      "include_in_plot": true,
+      "score_10": 0.435,
+      "date": "2026-04-14",
+      "source": "Meta AI",
+      "source_url": "https://ai.meta.com/static-resource/muse-spark-safety-and-preparedness-report",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenAI Agent",
+      "model": "GPT-5.4",
+      "model_release_date": "2026-03-05",
+      "include_in_plot": true,
+      "score_10": 0.79,
+      "date": "2026-04-23",
+      "source": "OpenAI",
+      "source_url": "https://openai.com/index/introducing-gpt-5-5",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenAI Agent",
+      "model": "GPT-5.5",
+      "model_release_date": "2026-04-23",
+      "include_in_plot": true,
+      "score_10": 0.818,
+      "date": "2026-04-23",
+      "source": "OpenAI",
+      "source_url": "https://openai.com/index/introducing-gpt-5-5",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Claude Code",
+      "model": "GLM-5",
+      "model_release_date": "2026-02-12",
+      "include_in_plot": true,
+      "score_10": 0.432,
+      "date": "2026-02-12",
+      "source": "Zhipu AI",
+      "source_url": "https://z.ai/blog/glm-5",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Claude Code",
+      "model": "GLM-5.1",
+      "model_release_date": "2026-04-07",
+      "include_in_plot": true,
+      "score_10": 0.687,
+      "date": "2026-04-07",
+      "source": "Zhipu AI",
+      "source_url": "https://z.ai/blog/glm-5.1",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Codex CLI",
+      "model": "GPT-5.4",
+      "model_release_date": "2026-03-05",
+      "include_in_plot": false,
+      "score_10": 0.663,
+      "date": "2026-04-07",
+      "source": "Zhipu AI",
+      "source_url": "https://z.ai/blog/glm-5.1",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Gemini CLI",
+      "model": "Gemini 3.1 Pro",
+      "model_release_date": "2026-02-19",
+      "include_in_plot": false,
+      "score_10": 0.388,
+      "date": "2026-04-07",
+      "source": "Zhipu AI",
+      "source_url": "https://z.ai/blog/glm-5.1",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Claude Code",
+      "model": "GLM-4.7",
+      "model_release_date": "2025-12-22",
+      "include_in_plot": true,
+      "score_10": 0.235,
+      "date": "2026-02-12",
+      "source": "Zhipu AI",
+      "source_url": "https://z.ai/blog/glm-5",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Kimi Agent",
+      "model": "Kimi K2.5",
+      "model_release_date": "2026-02-02",
+      "include_in_plot": true,
+      "score_10": 0.413,
+      "date": "2026-02-02",
+      "source": "Kimi",
+      "source_url": "https://arxiv.org/abs/2602.02276",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "SageAgent",
+      "model": "GPT-5",
+      "model_release_date": "2025-08-07",
+      "include_in_plot": true,
+      "icon": "/assets/images/cybergym/sageagent.png",
+      "plot_links": [
+        "GPT-5"
+      ],
+      "score_10": 0.602,
+      "date": "2026-02-09",
+      "source": "OpenSage Team",
+      "source_url": "https://www.opensage-agent.ai/",
+      "trials": 1,
+      "features": [
+        "dynamic (uses cleaned vulnerable Docker image)"
+      ],
+      "focus": "agent"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Mythos Preview",
+      "model_release_date": "2026-04-07",
+      "include_in_plot": true,
+      "score_10": 0.831,
+      "date": "2026-04-07",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-mythos-preview-system-card",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Opus 4.6",
+      "model_release_date": "2026-02-05",
+      "include_in_plot": true,
+      "score_10": 0.666,
+      "date": "2026-02-05",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-opus-4-6-system-card",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Sonnet 4.6",
+      "model_release_date": "2026-02-17",
+      "include_in_plot": true,
+      "score_10": 0.652,
+      "date": "2026-02-17",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-6-system-card",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Opus 4.5",
+      "model_release_date": "2025-11-24",
+      "include_in_plot": true,
+      "score_10": 0.5063,
+      "date": "2026-02-05",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-opus-4-5-system-card",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Sonnet 4.5",
+      "model_release_date": "2025-09-29",
+      "include_in_plot": false,
+      "score_10": 0.667,
+      "date": "2025-09-29",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-5-system-card",
+      "trials": 30,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Opus 4.1",
+      "model_release_date": "2025-08-05",
+      "include_in_plot": false,
+      "score_10": 0.613,
+      "date": "2025-09-29",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-5-system-card",
+      "trials": 30,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Sonnet 4",
+      "model_release_date": "2025-05-22",
+      "include_in_plot": false,
+      "score_10": 0.595,
+      "date": "2025-09-29",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-5-system-card",
+      "trials": 30,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Sonnet 3.7",
+      "model_release_date": "2025-02-24",
+      "include_in_plot": false,
+      "score_10": 0.472,
+      "date": "2025-09-29",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-5-system-card",
+      "trials": 30,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Sonnet 4.5",
+      "model_release_date": "2025-09-29",
+      "include_in_plot": true,
+      "score_10": 0.289,
+      "date": "2025-09-29",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-5-system-card",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Opus 4.1",
+      "model_release_date": "2025-08-05",
+      "include_in_plot": true,
+      "score_10": 0.25,
+      "date": "2025-09-29",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-5-system-card",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Sonnet 4",
+      "model_release_date": "2025-05-22",
+      "include_in_plot": true,
+      "score_10": 0.226,
+      "date": "2025-09-29",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-5-system-card",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Anthropic Agent",
+      "model": "Claude Sonnet 3.7",
+      "model_release_date": "2025-02-24",
+      "include_in_plot": true,
+      "score_10": 0.145,
+      "date": "2025-09-29",
+      "source": "Anthropic",
+      "source_url": "https://www.anthropic.com/claude-sonnet-4-5-system-card",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "Claude Sonnet 4",
+      "model_release_date": "2025-05-22",
+      "include_in_plot": false,
+      "score_10": 0.17850033178500332,
+      "score_x1": 0.019907100199071003,
+      "date": "2025-05-23",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "Claude Sonnet 3.7",
+      "model_release_date": "2025-02-24",
+      "include_in_plot": false,
+      "score_10": 0.11944260119442601,
+      "score_x1": 0.021897810218978103,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "GPT-5",
+      "model_release_date": "2025-08-07",
+      "include_in_plot": true,
+      "score_10": 0.394,
+      "date": "2025-12-05",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "GPT-4.1",
+      "model_release_date": "2025-04-14",
+      "include_in_plot": true,
+      "score_10": 0.09356337093563372,
+      "score_x1": 0.012607830126078301,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Cybench",
+      "model": "GPT-4.1",
+      "model_release_date": "2025-04-14",
+      "include_in_plot": false,
+      "score_10": 0.08958195089581951,
+      "score_x1": 0.0225613802256138,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "Codex CLI",
+      "model": "GPT-4.1",
+      "model_release_date": "2025-04-14",
+      "include_in_plot": false,
+      "score_10": 0.07365627073656271,
+      "score_x1": 0.011944260119442602,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "ENiGMA",
+      "model": "GPT-4.1",
+      "model_release_date": "2025-04-14",
+      "include_in_plot": false,
+      "score_10": 0.07232913072329131,
+      "score_x1": 0.019243530192435302,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "Gemini 2.5 Flash Preview",
+      "model_release_date": "2025-04-17",
+      "include_in_plot": true,
+      "score_10": 0.04844061048440611,
+      "score_x1": 0.007962840079628402,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "DeepSeek-V3",
+      "model_release_date": "2024-12-26",
+      "include_in_plot": true,
+      "score_10": 0.035832780358327807,
+      "score_x1": 0.006635700066357001,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "o4-mini",
+      "model_release_date": "2025-04-16",
+      "include_in_plot": false,
+      "score_10": 0.0245520902455209,
+      "score_x1": 0.0006635700066357001,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "R2E-Gym-32B",
+      "include_in_plot": false,
+      "score_10": 0.019907100199071003,
+      "score_x1": 0.005972130059721301,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "Qwen3-235B-A22B",
+      "model_release_date": "2025-04-28",
+      "include_in_plot": false,
+      "score_10": 0.0185799601857996,
+      "score_x1": 0.0033178500331785005,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "OpenHands-LM-32B",
+      "include_in_plot": false,
+      "score_10": 0.0165892501658925,
+      "score_x1": 0.0033178500331785005,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    },
+    {
+      "agent": "OpenHands",
+      "model": "SWE-Gym-32B",
+      "include_in_plot": false,
+      "score_10": 0.0006635700066357001,
+      "score_x1": 0.0006635700066357001,
+      "date": "2025-05-15",
+      "source": "CyberGym Team",
+      "trials": 1,
+      "focus": "model"
+    }
+  ],
+  "level0": [
+    {
+      "agent": "OpenHands",
+      "model": "GPT-4.1",
+      "score_10": 0.034505640345056404,
+      "score_x1": 0.0165892501658925,
+      "date": "2025-05-15"
+    }
+  ],
+  "level2": [
+    {
+      "agent": "OpenHands",
+      "model": "GPT-4.1",
+      "score_10": 0.13072329130723293,
+      "score_x1": 0.0165892501658925,
+      "date": "2025-05-15"
+    }
+  ],
+  "level3": [
+    {
+      "agent": "OpenHands",
+      "model": "GPT-4.1",
+      "score_10": 0.1712010617120106,
+      "score_x1": 0.013271400132714002,
+      "date": "2025-05-15"
+    }
+  ]
+}
