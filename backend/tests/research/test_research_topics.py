@@ -230,6 +230,28 @@ def test_backfill_judges_window_and_recall_then_retries_failures(db, now, monkey
     assert [title for title, _ in judge.calls] == ["Title: Video old"]
 
 
+def test_backfill_stops_recall_when_a_batch_stops_matching(db, now, monkeypatch):
+    topics.set_topic(db, "alice", "video generation", now)
+    titles = ["Video a", "Video b", "Audio c", "Audio d", "Video e"]
+    older = [
+        paper(db, now, str(i), title, days=400).id for i, title in enumerate(titles)
+    ]
+    monkeypatch.setattr(topics, "recall_older", lambda *_: older)
+    monkeypatch.setattr(topics, "window_paper_ids", lambda *_: [])
+    monkeypatch.setattr(topics, "RECALL_BATCH", 2)
+    monkeypatch.setattr(topics, "MIN_BATCH_HITS", 1)
+    topic = topics.claim_backfill(db, now)
+    judge = FakeJudge()
+    assert topics.backfill(db, judge, topic, now) == "done"
+    assert sorted(title for title, _ in judge.calls) == [
+        "Title: Audio c",
+        "Title: Audio d",
+        "Title: Video a",
+        "Title: Video b",
+    ]
+    assert topic.backfill_total == 4 and topic.backfill_done == 4
+
+
 def test_backfill_gives_up_after_max_attempts(db, now, monkeypatch):
     topics.set_topic(db, "alice", "video generation", now)
     monkeypatch.setattr(topics, "recall_older", lambda *_: [])

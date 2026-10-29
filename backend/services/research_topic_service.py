@@ -6,7 +6,8 @@ precision). Verdicts carry the SHA-256 of the paper card Jev saw and the prompt
 version, so a curated card or a new prompt is judged again.
 
 New topics are backfilled by a per-minute CRON: every paper from the last 90
-days, then the best older matches by dense + lexical recall, judged once. The
+days, then older papers ranked by dense + lexical recall, judged in batches
+until a batch yields fewer than ``MIN_BATCH_HITS`` matches. The
 hourly CRON judges new and changed papers in the 90-day window against every
 followed topic. A failed Jev call leaves the pair unjudged for the next run.
 """
@@ -46,7 +47,9 @@ from backend.services.query_embedding_client import (
 POLICY_VERSION = "2026-10-28"
 THRESHOLD = 0.80
 WINDOW_DAYS = 90
-RECALL_LIMIT = 500
+RECALL_DEPTH = 3000
+RECALL_BATCH = 500
+MIN_BATCH_HITS = 5
 QUESTIONS_PER_CALL = 10
 CARD_BATCH = 200
 WORKERS = 8
@@ -251,6 +254,16 @@ def _stored_shas(
     return {(t, p): (sha, version) for t, p, sha, version in rows}
 
 
+def _hits(db: Session, topic_id: int, paper_ids: list[int]) -> int:
+    return db.scalar(
+        select(func.count()).where(
+            ResearchTopicVerdict.topic_id == topic_id,
+            ResearchTopicVerdict.paper_id.in_(paper_ids),
+            ResearchTopicVerdict.score >= THRESHOLD,
+        )
+    )
+
+
 def _store(db: Session, topic_id: int, paper_id: int, score: float, sha: str) -> None:
     values = {
         "score": score,
@@ -291,7 +304,7 @@ def recall_older(db: Session, topic: str, now: datetime) -> list[int]:
             LIMIT :limit
             """
         ),
-        {"topic": topic, "end": end, "limit": RECALL_LIMIT},
+        {"topic": topic, "end": end, "limit": RECALL_DEPTH},
     ).scalars()
     branches = [([RankedCandidate(i, rank) for rank, i in enumerate(lexical, 1)], 1.0)]
     settings = get_settings()
@@ -304,15 +317,19 @@ def recall_older(db: Session, topic: str, now: datetime) -> list[int]:
             settings.query_embedding_timeout_ms,
             settings.query_embedding_max_concurrency,
         )
+        # The HNSW scan stops after ef_search (40) rows; keep scanning in exact
+        # distance order until the date-filtered search fills the depth.
+        db.execute(text("SET LOCAL hnsw.ef_search = 1000"))
+        db.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
         dense = retrieval.encode_and_search(
-            topic, generation, client, RECALL_LIMIT, end_date=end
+            topic, generation, client, RECALL_DEPTH, end_date=end
         )
         branches = [
             (branches[0][0], settings.hybrid_lexical_weight),
             (dense, settings.hybrid_semantic_weight),
         ]
     fused = reciprocal_rank_fusion(branches, rrf_k=settings.hybrid_rrf_k)
-    return [paper_id for paper_id, _, _ in fused[:RECALL_LIMIT]]
+    return [paper_id for paper_id, _, _ in fused[:RECALL_DEPTH]]
 
 
 def claim_backfill(db: Session, now: datetime) -> ResearchTopic | None:
@@ -353,20 +370,32 @@ def claim_backfill(db: Session, now: datetime) -> ResearchTopic | None:
 def backfill(
     db: Session, judge: TopicJudge, topic: ResearchTopic, now: datetime
 ) -> str:
-    """Judge the 90-day window and the older recall set; retried until it succeeds."""
+    """Judge the 90-day window, then older recall batches while they still match.
+
+    Retried until it succeeds; a retry judges only pairs without a verdict.
+    """
     try:
         older = recall_older(db, topic.text, now)
     except QueryEmbeddingUnavailable:
         older = None  # Judge the window now; recall older papers on the retry.
-    paper_ids = window_paper_ids(db, now) + (older or [])
-    topic.backfill_total = len(paper_ids)
+    window = window_paper_ids(db, now)
+    topic.backfill_total = len(window) + len(older or [])
     db.commit()
 
-    def progress(done: int) -> None:
-        topic.backfill_done = done
-        db.commit()
+    def judge_from(offset: int, paper_ids: list[int]) -> int:
+        def progress(done: int) -> None:
+            topic.backfill_done = offset + done
+            db.commit()
 
-    _, failed = judge_papers(db, judge, {topic.id: topic.text}, paper_ids, progress)
+        return judge_papers(db, judge, {topic.id: topic.text}, paper_ids, progress)[1]
+
+    failed = judge_from(0, window)
+    for start in range(0, len(older or []), RECALL_BATCH):
+        batch = older[start : start + RECALL_BATCH]
+        failed += judge_from(len(window) + start, batch)
+        if _hits(db, topic.id, batch) < MIN_BATCH_HITS:
+            topic.backfill_total = len(window) + start + len(batch)
+            break
     if older is None or failed:
         retry = topic.backfill_attempts < MAX_BACKFILL_ATTEMPTS
         topic.backfill_status = "pending" if retry else "failed"

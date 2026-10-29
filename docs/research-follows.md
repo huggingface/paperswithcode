@@ -38,8 +38,9 @@ locally).
 Topic matches join entity matches in one feed, deduplicated by paper and
 ranked by the same trending order; the reason line names the topic in quotes.
 A new topic is backfilled by the per-minute `backfill_research_topics` job:
-every paper from the last 90 days plus the 500 best older matches by dense +
-lexical reciprocal rank fusion, judged once. The hourly
+every paper from the last 90 days, then up to 3,000 older papers ranked by
+dense + lexical reciprocal rank fusion, judged once in batches of 500 until a
+batch has fewer than five matches. The hourly
 `judge_research_topics` job (:54) judges papers in the 90-day window that are
 new or whose card changed, against every followed topic. There is no fallback:
 failed Jev calls leave pairs unjudged for the next run, a failed backfill

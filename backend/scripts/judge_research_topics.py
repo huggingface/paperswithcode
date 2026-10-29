@@ -6,7 +6,7 @@ unjudged for the next run.
 
 Every minute (`--backfill`): claim topics awaiting their first judgement (new
 topics, retries, or claims whose worker died) and judge the last 90 days plus
-the top older matches by dense + lexical recall.
+older papers by dense + lexical recall, in batches while they still match.
 
 Needs PWC_OPENROUTER_API_KEY.
 
