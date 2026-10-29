@@ -10,6 +10,10 @@ import FeedView from './FeedView';
 
 const auth = vi.hoisted(() => ({ user: { hf_subject: 'alice', username: 'alice' } as { hf_subject: string; username: string } | null, isLoading: false }));
 vi.mock('@/lib/authContext', () => ({ useAuth: () => auth, useOptionalAuth: () => auth }));
+const login = vi.hoisted(() => ({ hfLoginUrl: vi.fn(() => window.location.href) }));
+vi.mock('@/components/HfSignInButton', async importOriginal => ({
+  ...await importOriginal<typeof import('@/components/HfSignInButton')>(), hfLoginUrl: login.hfLoginUrl,
+}));
 vi.mock('@/hooks/useIntersectionObserver', () => ({ useIntersectionObserver: () => ({ targetRef: () => {}, isIntersecting: false }) }));
 const paper = { id: '1', arxiv_id: '2610.12345', title: 'A paper', abstract: 'Full abstract.',
   published: '2026-10-10', authors: ['An Author'], version: '1', is_latest_version: true,
@@ -36,7 +40,7 @@ beforeEach(() => {
 });
 const topic = { text: 'real-time video generation', set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
   judged: 10, total: 10, suggestions: [] };
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); sessionStorage.clear(); login.hfLoginUrl.mockClear(); });
 it('renders following in the existing tab row with standard paper cards and thumbnails', async () => {
   const { container } = renderFeed();
   await screen.findByText('A paper');
@@ -70,14 +74,27 @@ it('names every distinct follow that matched, collapsing subtasks and long lists
   await screen.findByText('A paper');
   expect(container.querySelector('.paper-follow-reason')).toHaveTextContent('Because you follow Agents, Reasoning and 2 more');
 });
-it('explains how to start following to signed-out visitors without fetching private papers', async () => {
+it('asks signed-out visitors for a topic and signs them in when they submit it', async () => {
   auth.user = null;
   renderFeed();
   expect(await screen.findByRole('heading', { name: 'Build your personal research feed' })).toBeInTheDocument();
-  expect(screen.getByText(/Sign in with your Hugging Face account/)).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Sign in with Hugging Face' })).toBeInTheDocument();
-  expect(screen.getByRole('link', { name: /Browse tasks/ })).toHaveAttribute('href', '/tasks');
+  expect(screen.queryByText(/Sign in/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('link', { name: /Browse tasks/ })).not.toBeInTheDocument();
+  const input = screen.getByRole('textbox', { name: 'Research topic' });
+  fireEvent.change(input, { target: { value: '  speculative   decoding ' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
+  expect(sessionStorage.getItem('pwc:following-pending-topic')).toBe('speculative decoding');
   expect(researchApi.following).not.toHaveBeenCalled();
+});
+
+it('saves the topic a visitor submitted before signing in', async () => {
+  sessionStorage.setItem('pwc:following-pending-topic', 'speculative decoding');
+  vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, text: 'speculative decoding', status: 'pending' });
+  renderFeed();
+  await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledTimes(1));
+  expect(researchApi.setTopic).toHaveBeenCalledWith('speculative decoding');
+  expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull();
 });
 
 it('explains how to follow when a signed-in account follows nothing yet', async () => {
@@ -86,11 +103,15 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   vi.mocked(catalogApi.topTasks).mockResolvedValue([
     { id: '1', name: 'Object Detection', slug: 'object-detection', paper_count: 10 } as never,
   ]);
+  vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, status: 'pending' });
   renderFeed();
   expect(await screen.findByRole('heading', { name: 'Build your personal research feed' })).toBeInTheDocument();
-  expect(screen.queryByText(/Sign in with your Hugging Face account/)).not.toBeInTheDocument();
   expect(await screen.findByRole('link', { name: 'Object Detection' })).toHaveAttribute('href', '/tasks/object-detection');
   expect(screen.queryByText(/match these filters/)).not.toBeInTheDocument();
+  expect(screen.getAllByRole('textbox', { name: 'Research topic' })).toHaveLength(1);
+  fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Follow topic' }));
+  await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledWith('real-time video generation'));
 });
 
 it('keeps the filter hint when follows exist but nothing matches', async () => {

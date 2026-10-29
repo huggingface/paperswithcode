@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { researchApi, TOPIC_MAX_LENGTH, type FollowKind, type ResearchTopic } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
+import { useSaveTopic } from '@/lib/researchTopic';
 
 const KIND_NAMES: Record<FollowKind, string> = {
   task: 'task', method: 'method', benchmark: 'benchmark', author: 'author', organization: 'organization',
@@ -20,7 +21,6 @@ function topicStatus(topic: ResearchTopic): string {
  * `onDone` makes it an inline editor that closes after a save, removal, or cancel. */
 export default function TopicSettings({ onDone }: { onDone?: () => void }) {
   const { user } = useAuth();
-  const client = useQueryClient();
   const location = useLocation();
   const input = useRef<HTMLTextAreaElement>(null);
   const queryKey = ['research-topic', user?.hf_subject];
@@ -32,16 +32,9 @@ export default function TopicSettings({ onDone }: { onDone?: () => void }) {
     refetchInterval: query => query.state.data && ['pending', 'running'].includes(query.state.data.status) ? 5000 : false,
   });
   const [draft, setDraft] = useState<string | null>(null);
-  const save = useMutation({
-    mutationFn: async (text: string | null) => text === null ? (await researchApi.clearTopic(), null) : researchApi.setTopic(text),
-    onSuccess: data => {
-      client.setQueryData(queryKey, data);
-      setDraft(null);
-      onDone?.();
-      void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
-      // Following something turns the weekly email on by default.
-      void client.invalidateQueries({ queryKey: ['research-email', user?.hf_subject] });
-    },
+  const save = useSaveTopic(() => {
+    setDraft(null);
+    onDone?.();
   });
   const inline = !!onDone;
   useEffect(() => {

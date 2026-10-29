@@ -1,5 +1,6 @@
 import FollowingIntro from "@/components/FollowingIntro";
 import TopicSettings from "@/components/TopicSettings";
+import { takePendingTopic, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi, type FollowKind } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -393,6 +394,13 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     wasBuilding.current = topicBuilding;
   }, [topicBuilding, queryClient, user?.hf_subject]);
   const noFollows = following && !!user && follows.data?.length === 0 && topic.isSuccess && !topic.data;
+  // Save the topic a guest submitted before signing in.
+  const { mutate: saveTopic } = useSaveTopic();
+  useEffect(() => {
+    if (!user || !topic.isSuccess) return;
+    const pending = takePendingTopic();
+    if (pending && pending !== topic.data?.text) saveTopic(pending);
+  }, [user, topic.isSuccess, topic.data, saveTopic]);
   const followGroups = useMemo(
     () => FOLLOW_KIND_ORDER
       .map(kind => ({ kind, follows: following ? follows.data?.filter(follow => follow.kind === kind) ?? [] : [] }))
@@ -567,7 +575,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </Alert>
             )}
 
-            {following && !!user && topic.isSuccess && (!topic.data || editingTopic ? (
+            {following && !!user && topic.isSuccess && !noFollows && (!topic.data || editingTopic ? (
               <section className="following-topic-card" aria-label={topic.data ? "Edit your topic" : "Follow a topic"}>
                 <TopicSettings onDone={topic.data ? () => setEditingTopic(false) : undefined} />
               </section>
