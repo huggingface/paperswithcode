@@ -57,8 +57,9 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
     .filter(org => org.display_order != null)
     .sort((a, b) => a.display_order! - b.display_order!);
   const [draft, setDraft] = useState<string | null>(null);
-  // Pending follows and unfollows, applied on submit.
-  const [changes, setChanges] = useState<FollowPick[]>([]);
+  // The follow state chosen per chip; submit sends only those that differ from the current follows,
+  // so chips stay right when a partial save refreshes the follows.
+  const [selection, setSelection] = useState<FollowPick[]>([]);
   const saveTopic = useSaveTopic();
   const saveFollows = useSaveFollows();
   const saved = topic.data?.text ?? '';
@@ -68,13 +69,16 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   const retry = topic.data?.status === 'failed' && trimmed === saved;
   const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry);
   const saving = saveTopic.isPending || saveFollows.isPending;
-  const submittable = !saving && (topicSavable || changes.length > 0);
-  const isChanged = (kind: FollowKind, id: string) => changes.some(change => change.kind === kind && change.id === id);
   const isFollowed = (kind: FollowKind, id: string) =>
     follows.data?.some(follow => follow.kind === kind && String(follow.entity_id) === id) ?? false;
-  const toggle = (change: FollowPick) => setChanges(current => current.some(c => c.kind === change.kind && c.id === change.id)
-    ? current.filter(c => c.kind !== change.kind || c.id !== change.id)
-    : [...current, change]);
+  const isSelected = (kind: FollowKind, id: string) =>
+    selection.find(pick => pick.kind === kind && pick.id === id)?.follow ?? isFollowed(kind, id);
+  const changes = selection.filter(pick => pick.follow !== isFollowed(pick.kind, pick.id));
+  const submittable = !saving && (topicSavable || changes.length > 0);
+  const toggle = (kind: FollowKind, id: string, name: string) => setSelection(current => [
+    ...current.filter(pick => pick.kind !== kind || pick.id !== id),
+    { kind, id, name, follow: !isSelected(kind, id) },
+  ]);
   const submit = () => {
     if (!submittable) return;
     if (!user) {
@@ -109,10 +113,10 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
       <h3>{title}</h3>
       <div className="topic-dialog-chips">
         {items.map(item => {
-          const on = isFollowed(kind, item.id) !== isChanged(kind, item.id);
+          const on = isSelected(kind, item.id);
           const name = kind === 'task' ? displayTaskName(item.name, item.slug ?? undefined) : item.name;
           return <button key={item.id} type="button" className="topic-dialog-chip" aria-pressed={on} disabled={saving}
-            onClick={() => toggle({ kind, id: item.id, name, follow: !isFollowed(kind, item.id) })}>
+            onClick={() => toggle(kind, item.id, name)}>
             {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}{name}
           </button>;
         })}

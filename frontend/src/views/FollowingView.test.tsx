@@ -251,6 +251,30 @@ it('shows what the account already follows first, and unfollows on save', async 
   await waitFor(() => expect(researchApi.setFollow).toHaveBeenCalledWith('task', '895', false));
 });
 
+it('keeps a chip selected when its follow saved but the topic did not', async () => {
+  vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: [
+    { id: '7', name: 'Object Detection', slug: 'object-detection', share_lift: 2 } as never,
+  ], recent_days: 7, baseline_days: 30 });
+  vi.spyOn(researchApi, 'setFollow').mockImplementation(async () => {
+    vi.mocked(researchApi.follows).mockResolvedValue([
+      { kind: 'task', entity_id: 1, name: 'Task', url: '/tasks/task', created_at: '' },
+      { kind: 'task', entity_id: 7, name: 'Object Detection', url: '/tasks/object-detection', created_at: '' },
+    ]);
+  });
+  vi.spyOn(researchApi, 'setTopic').mockRejectedValue(new Error('down'));
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Follow a topic' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Object Detection' }));
+  fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
+  expect(await screen.findByText('Could not save your feed. Please try again.')).toBeInTheDocument();
+  await waitFor(() => expect(vi.mocked(researchApi.follows).mock.calls.length).toBeGreaterThanOrEqual(2));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Object Detection' })).toHaveAttribute('aria-pressed', 'true'));
+  fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
+  await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledTimes(2));
+  expect(researchApi.setFollow).toHaveBeenCalledTimes(1);
+});
+
 it('keeps the filter hint when follows exist but nothing matches', async () => {
   vi.mocked(researchApi.following).mockResolvedValue([]);
   renderFeed();
