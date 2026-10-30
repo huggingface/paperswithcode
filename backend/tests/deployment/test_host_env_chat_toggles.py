@@ -155,7 +155,7 @@ def test_scope_title_hf_values_are_exact_and_environment_isolated(environment):
         "PWC_CHAT_SCOPE_GUARDRAIL_HF_BILL_TO": "huggingface",
         "PWC_CHAT_SCOPE_GUARDRAIL_GLM_MODEL": ("zai-org/GLM-5.3-Flash:baseten"),
         "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY": (f"sk-guardrail-{environment}"),
-        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_MODEL": "gpt-5.6-luna",
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_MODEL": "gpt-6-luna",
         "PWC_CHAT_POSTERLY_ENABLED": "false",
         **(
             {

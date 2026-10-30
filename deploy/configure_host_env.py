@@ -561,7 +561,7 @@ def scope_title_hf_values(
         "PWC_CHAT_SCOPE_GUARDRAIL_HF_BILL_TO": bill_to,
         "PWC_CHAT_SCOPE_GUARDRAIL_GLM_MODEL": ("zai-org/GLM-5.3-Flash:baseten"),
         "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY": fallback,
-        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_MODEL": "gpt-5.6-luna",
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_MODEL": "gpt-6-luna",
         "PWC_CHAT_POSTERLY_ENABLED": "false",
     }
     if environment == "staging":

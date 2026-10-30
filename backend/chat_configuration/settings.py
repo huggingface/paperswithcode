@@ -228,7 +228,7 @@ class ChatScopeGuardrailSettings(BaseModel):
     )
     chat_scope_guardrail_openai_api_key: str = Field(default="")
     chat_scope_guardrail_openai_model: str = Field(
-        default="gpt-5.6-luna", pattern=r"^gpt-5\.6-luna$"
+        default="gpt-6-luna", pattern=r"^gpt-6-luna$"
     )
     chat_scope_guardrail_attempt_timeout_seconds: float = Field(
         default=1.5, ge=0.1, le=1.5

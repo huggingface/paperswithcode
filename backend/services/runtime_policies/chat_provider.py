@@ -19,7 +19,7 @@ def validate_chat_scope_guardrail_configuration(settings: Settings) -> None:
         return
     if settings.chat_scope_guardrail_glm_model != "zai-org/GLM-5.3-Flash:baseten":
         raise RuntimeError("scope guardrail GLM must pin the Baseten provider")
-    if settings.chat_scope_guardrail_openai_model != "gpt-5.6-luna":
+    if settings.chat_scope_guardrail_openai_model != "gpt-6-luna":
         raise RuntimeError("scope guardrail fallback must use direct Luna")
     if settings.chat_scope_guardrail_max_context_chars != 8_000:
         raise RuntimeError("scope guardrail context must preserve a full API message")
