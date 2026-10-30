@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import type { ChatDraft, PaperSelectionDraft } from "@/lib/chat";
-import { readStoredChatDraft } from "@/lib/chatLaunch";
+import { forgetStoredChatDraft, readStoredChatDraft } from "@/lib/chatLaunch";
 import { emptyChatDraft } from "@/lib/paperSelection";
 
 interface ChatAutoSendOptions {
@@ -39,9 +39,13 @@ export function useChatAutoSend({
     if (authLoading || !signedIn) return;
     const stored = readStoredChatDraft();
     if (!stored) return;
-    onPaperSelectionChange?.(stored.draft.paperSelection);
-    if (stored.autoSend) setPendingDraft(stored.draft);
-    else restoreDraft(stored.draft);
+    if (stored.draft.paperSelection) onPaperSelectionChange?.(stored.draft.paperSelection);
+    if (stored.autoSend) {
+      setPendingDraft(stored.draft);
+    } else {
+      restoreDraft(stored.draft);
+      forgetStoredChatDraft();
+    }
   }, [authLoading, onPaperSelectionChange, restoreDraft, setPendingDraft, signedIn]);
 
   useEffect(() => {

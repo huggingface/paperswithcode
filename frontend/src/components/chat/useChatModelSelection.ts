@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import { isStagingEnvironment } from "@/lib/apiUrl";
@@ -33,6 +33,11 @@ export function useChatModelSelection({
   const requestedModelRef = useRef(requestedModel);
   const savedModelRef = useRef<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(requestedModel || DEFAULT_CHAT_MODEL);
+  // A model chosen after mount (picker or ?model= launch) wins over discovery's default.
+  const chooseModel = useCallback((model: string) => {
+    requestedModelRef.current = model;
+    setSelectedModel(model);
+  }, []);
   const modelsQuery = useQuery({ ...chatModelsQuery(userId), enabled: signedIn && !authLoading });
   const discovered = modelsQuery.data;
   const models = discovered?.items
@@ -61,7 +66,7 @@ export function useChatModelSelection({
   return {
     models,
     selectedModel,
-    setSelectedModel,
+    setSelectedModel: chooseModel,
     provider,
     sponsored,
     /** Hugging Face models bill the user unless the organization sponsors them. */

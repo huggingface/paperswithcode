@@ -114,6 +114,9 @@ export const chatAuthorizationAttempted = (): boolean => (
 
 export const storedChatModel = (): string | null => sessionStorage.getItem(CHAT_MODEL_KEY);
 
+/** The composer now holds the restored prompt; later chat surfaces must not restore it again. */
+export const forgetStoredChatDraft = (): void => sessionStorage.removeItem(CHAT_DRAFT_KEY);
+
 /** A send is in flight: a remount must not send the queued prompt again. */
 export const stopChatAutoSend = (): void => sessionStorage.removeItem(CHAT_AUTO_SEND_KEY);
 
