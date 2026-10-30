@@ -31,7 +31,7 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   const topic = useQuery({ queryKey: ['research-topic', user?.hf_subject], queryFn: researchApi.topic, enabled: !!user });
   const follows = useQuery({ queryKey: ['research-follows', user?.hf_subject], queryFn: researchApi.follows, enabled: !!user });
   const tasks = useQuery({
-    queryKey: ['trending-tasks-sidebar'],
+    queryKey: ['trending-tasks-follow'],
     queryFn: () => catalogApi.trendingTasks({ limit: SUGGESTIONS_PER_GROUP, level: 0 }),
     staleTime: 10 * 60 * 1000,
   });
