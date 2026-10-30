@@ -188,3 +188,25 @@ it("reports a metric lookup failure instead of an empty metric list", async () =
   expect(await screen.findByText("Could not load metrics")).toBeInTheDocument();
   expect(screen.queryByText("No configured metrics")).not.toBeInTheDocument();
 });
+
+it("keeps an existing harness by waiting for the benchmark's harness support", async () => {
+  let resolveDatasets!: (value: Awaited<ReturnType<typeof catalogApi.listDatasets>>) => void;
+  vi.mocked(catalogApi.listDatasets).mockReturnValueOnce(new Promise((resolve) => { resolveDatasets = resolve; }));
+  const user = userEvent.setup();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}>
+    <EditEvaluationsDialog onOpenChange={vi.fn()} paperId="11" submitMode="direct"
+      initialEvaluations={[{ ...stored, harness: "lm-eval" }]} />
+  </QueryClientProvider>);
+  const save = screen.getByRole("button", { name: "Save Changes" });
+  expect(save).toBeDisabled();
+
+  resolveDatasets({ results: [{ id: "7", name: "Benchmark", supports_harness: true }] } as never);
+  await waitFor(() => expect(save).toBeEnabled());
+  await user.clear(screen.getByPlaceholderText("Model name"));
+  await user.type(screen.getByPlaceholderText("Model name"), "Model v2");
+  await user.click(save);
+  await waitFor(() => expect(batch).toHaveBeenCalledWith(11, [expect.objectContaining({
+    payload: expect.objectContaining({ model_name: "Model v2", harness: "lm-eval" }),
+  })]));
+});

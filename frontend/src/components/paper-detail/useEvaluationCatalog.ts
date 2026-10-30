@@ -76,7 +76,10 @@ export function useEvaluationCatalog(rows: EditableEvaluationRow[], initialEvalu
         queryFn: () => catalogApi.getDataset(id),
         staleTime: Infinity,
       })),
-    combine: (results) => results.map((result) => result.data),
+    combine: (results) => ({
+      data: results.map((result) => result.data),
+      loaded: results.every((result) => result.isSuccess),
+    }),
   });
   const metricQueries = useQueries({
     queries: leaderboards.map((leaderboard) => {
@@ -89,8 +92,11 @@ export function useEvaluationCatalog(rows: EditableEvaluationRow[], initialEvalu
   });
 
   const tasks = byId([...storedTasks.values()], pickedTasks);
-  const datasets = byId([...storedDatasets.values()], [...listedDatasets.values()], pickedDatasets);
+  const datasets = byId([...storedDatasets.values()], [...listedDatasets.values()], pickedDatasets.data);
   const datasetListError = taskDatasets.find((result) => result.error)?.error ?? null;
+  // Stored rows don't say whether their dataset supports a harness; until the
+  // task lists load, saving would clear an existing harness.
+  const harnessSupportKnown = taskDatasets.every((result) => result.isSuccess) && pickedDatasets.loaded;
 
   return {
     task: (id: string) => tasks.get(id),
@@ -102,6 +108,7 @@ export function useEvaluationCatalog(rows: EditableEvaluationRow[], initialEvalu
       return { metrics: query?.data ?? [], loading: query?.isFetching ?? false, error: query?.error ?? null };
     },
     datasetListError,
+    harnessSupportKnown,
     searchTasks: async (query: string): Promise<SearchableSelectOption[]> => {
       const response = await catalogApi.listTasks({
         page_size: SEARCH_PAGE_SIZE,

@@ -164,6 +164,7 @@ export function EditEvaluationsDialog({
         onOpenChange={onOpenChange}
         onSave={handleSave}
         isSaving={save.isPending}
+        saveDisabled={!catalog.harnessSupportKnown}
         footerStart={
           <div className="flex flex-wrap gap-2 sm:mr-auto">
             <Button variant="ghost" onClick={() => setSuggestionKind("benchmark")}>
