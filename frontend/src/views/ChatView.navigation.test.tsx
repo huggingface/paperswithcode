@@ -51,6 +51,7 @@ vi.mock("@/components/chat/ChatSharing", () => ({ ChatSharing: () => null }));
 import ChatView from "@/views/ChatView";
 import { chatApi } from "@/lib/api/chat";
 import { ApiError } from "@/lib/apiTransport";
+import { chatArtifactKeys } from "@/lib/chatSessionQueries";
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -159,10 +160,10 @@ describe("selected conversation and active turn ownership", () => {
     });
     render(element("/chat/a"));
     await screen.findByText("a saved question");
-    client.setQueryData(["chat-latex-paper", "artifact-a"], { artifact_id: "artifact-a" });
+    client.setQueryData(chatArtifactKeys.latexPaper("artifact-a"), { artifact_id: "artifact-a" });
     fireEvent.click(screen.getByText("Send test prompt"));
 
-    await waitFor(() => expect(client.getQueryState(["chat-latex-paper", "artifact-a"])?.isInvalidated).toBe(true));
+    await waitFor(() => expect(client.getQueryState(chatArtifactKeys.latexPaper("artifact-a"))?.isInvalidated).toBe(true));
   });
 
   it("a failed route load leaves the background turn alive and allows retry", async () => {

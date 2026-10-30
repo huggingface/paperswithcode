@@ -51,7 +51,7 @@ import {
   toUiMessages,
 } from "@/lib/chatSessions";
 
-import { chatAvailabilityQuery, chatSessionListQuery, chatSessionQuery } from "@/lib/chatSessionQueries";
+import { chatArtifactKeys, chatAvailabilityQuery, chatSessionListQuery, chatSessionQuery } from "@/lib/chatSessionQueries";
 
 
 /** In the reader, the PDF owns the selection: the composer draft carries only text and mentions. */
@@ -180,7 +180,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       if (sessionId) patchSession(sessionId, { is_busy: false });
       // A turn can publish paper versions without a receipt reaching the
       // browser, so an open paper panel reloads its server descriptor.
-      void queryClient.invalidateQueries({ queryKey: ["chat-latex-paper"] });
+      void queryClient.invalidateQueries({ predicate: (query) => chatArtifactKeys.isLatexPaper(query.queryKey) });
       void queryClient.invalidateQueries({ queryKey: OPENAI_USAGE_QUERY_KEY });
       void refreshSessions();
     },
