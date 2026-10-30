@@ -492,6 +492,7 @@ def test_repository_trending_uses_scoped_order_and_keeps_all_papers(monkeypatch)
     filter_sql = " ".join(str(item) for item in database.paper_query.filters)
     assert "is_latest_version" in filter_sql
     assert "paper_hf_artifacts" in filter_sql
+    assert "cardinality(papers.hf_models)" in filter_sql
     assert "lower(papers.title)" in filter_sql
     assert "papers.date_published" in filter_sql
 
@@ -741,5 +742,7 @@ def test_trending_feed_filters_to_linked_hf_artifacts_when_requested():
 
     assert response.count == 0
     assert "paper_hf_artifacts" in captured["sql"]
-    assert "artifact_link.paper_id = p.id" in captured["sql"]
+    assert "pha.paper_id = p.id" in captured["sql"]
+    # External papers list Hub links in explicit arrays, as feed badges do.
+    assert "cardinality(p.hf_models) > 0" in captured["sql"]
     assert captured["params"]["has_hf_artifacts"] is True

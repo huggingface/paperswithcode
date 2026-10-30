@@ -70,7 +70,9 @@ from backend.utils.exceptions import (
 )
 from backend.config import get_settings
 from backend.services.paper_implementation_service import (
+    HF_ARTIFACTS_EXIST_SQL,
     family_repository_exists_clause,
+    hf_artifacts_exist_clause,
 )
 from backend.services.paper_feed_executor import PaperFeedExecutor, GENERAL_ORDERING
 from backend.services.paper_citation_refresh_service import PaperCitationRefreshService
@@ -1194,7 +1196,7 @@ class PaperService:
     # star velocity of their best official repository. Two-step dedup: pick the
     # best official repo per paper, then keep one paper per repo (most recently
     # published) so the feed never shows duplicate repo cards.
-    _TRENDING_SQL_GITHUB = text("""
+    _TRENDING_SQL_GITHUB = text(f"""
         WITH paper_trending AS (
             SELECT DISTINCT ON (p.id)
                 p.id as paper_id,
@@ -1236,10 +1238,7 @@ class PaperService:
                         OR (p.arxiv_id IS NULL AND family.id = p.id)
                       )
                 ))
-                AND (:has_hf_artifacts = FALSE OR EXISTS (
-                    SELECT 1 FROM paper_hf_artifacts artifact_link
-                    WHERE artifact_link.paper_id = p.id
-                ))
+                AND (:has_hf_artifacts = FALSE OR {HF_ARTIFACTS_EXIST_SQL})
             ORDER BY p.id, r.trending_score DESC NULLS LAST, r.num_stars DESC NULLS LAST
         ),
         ranked_by_repo AS (
@@ -1267,7 +1266,7 @@ class PaperService:
     # cron. Papers with HF-only signal have a NULL repository_id and are NOT deduped
     # together (the `repository_id IS NULL` branch keeps every one of them); papers
     # sharing the same official repo are still deduped to the most recent paper.
-    _TRENDING_SQL_COMPOSITE = text("""
+    _TRENDING_SQL_COMPOSITE = text(f"""
         WITH paper_pool AS (
             SELECT DISTINCT ON (p.id)
                 p.id as paper_id,
@@ -1308,10 +1307,7 @@ class PaperService:
                         OR (p.arxiv_id IS NULL AND family.id = p.id)
                       )
                 ))
-                AND (:has_hf_artifacts = FALSE OR EXISTS (
-                    SELECT 1 FROM paper_hf_artifacts artifact_link
-                    WHERE artifact_link.paper_id = p.id
-                ))
+                AND (:has_hf_artifacts = FALSE OR {HF_ARTIFACTS_EXIST_SQL})
             ORDER BY p.id, r.num_stars DESC NULLS LAST
         ),
         ranked_by_repo AS (
@@ -1495,7 +1491,7 @@ class PaperService:
     @staticmethod
     def apply_has_hf_artifacts_filter(query):
         """Keep papers with at least one linked Hugging Face artifact."""
-        return query.filter(DBPaper.hf_artifacts.any())
+        return query.filter(hf_artifacts_exist_clause())
 
     def get_paper_versions(self, arxiv_id: str) -> PaperVersions:
         """

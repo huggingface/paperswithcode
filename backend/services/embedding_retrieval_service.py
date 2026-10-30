@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.models.database import Paper, PaperTask
+from backend.services.paper_implementation_service import HF_ARTIFACTS_EXIST_SQL
 from backend.services.query_embedding_client import (
     QueryEmbeddingClient,
     QueryEmbeddingContract,
@@ -134,16 +135,7 @@ class EmbeddingRetrievalService:
                         )
                     )
                   )
-                  AND (
-                    :has_hf_artifacts = FALSE
-                    OR EXISTS (
-                        SELECT 1 FROM paper_hf_artifacts pha
-                        WHERE pha.paper_id = p.id
-                    )
-                    OR cardinality(p.hf_models) > 0
-                    OR cardinality(p.hf_datasets) > 0
-                    OR cardinality(p.hf_spaces) > 0
-                  )
+                  AND (:has_hf_artifacts = FALSE OR {HF_ARTIFACTS_EXIST_SQL})
                 ORDER BY e.embedding::halfvec({generation.dimensions}) <=>
                          CAST(:vector AS halfvec({generation.dimensions}))
                 LIMIT :limit

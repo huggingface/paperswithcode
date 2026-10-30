@@ -19,6 +19,9 @@ from backend.services.paper_bucket_service import (
     BUCKET_MANAGE_OAUTH_COOKIE_NAME,
     BUCKET_OAUTH_COOKIE_NAME,
 )
+from backend.services.user_profile_service import UserProfileService
+
+_REAL_UPSERT_VERIFIED_IDENTITY = UserProfileService.upsert_verified_identity
 
 
 @pytest.fixture(autouse=True)
@@ -251,6 +254,64 @@ def test_production_new_bucket_authorization_requests_manage_scope(monkeypatch):
 
     query = parse_qs(urlparse(response.headers["location"]).query)
     assert query["scope"] == ["openid profile manage-repos"]
+
+
+def test_oauth_callback_keeps_new_profile_uncommitted_when_session_fails(
+    monkeypatch,
+):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from backend.database.connection import db_manager
+    from backend.models.database import UserProfile, UserProfileAlias
+
+    engine = create_engine("sqlite://")
+    UserProfile.__table__.create(engine)
+    UserProfileAlias.__table__.create(engine)
+    session_local = sessionmaker(bind=engine)
+    monkeypatch.setattr(db_manager, "_session_local", session_local)
+    monkeypatch.setattr(
+        UserProfileService, "upsert_verified_identity", _REAL_UPSERT_VERIFIED_IDENTITY
+    )
+
+    def fail_create_session(*_args, **_kwargs):
+        raise RuntimeError("session insert failed")
+
+    monkeypatch.setattr(
+        auth.auth_session_service, "create_session", fail_create_session
+    )
+    monkeypatch.setattr(auth, "get_settings", lambda: _settings(production=True))
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, **_kwargs):
+            return httpx.Response(200, json={"access_token": "access"})
+
+        async def get(self, _url, **_kwargs):
+            return httpx.Response(
+                200, json={"sub": "hf-new", "preferred_username": "newcomer"}
+            )
+
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    state = auth._encode_state("/", "paperswithcode.co", nonce="browser-nonce")
+
+    with pytest.raises(RuntimeError, match="session insert failed"):
+        asyncio.run(
+            auth.hf_callback(
+                _request("paperswithcode.co", "pwc_oauth_state=browser-nonce"),
+                code="authorization-code",
+                state=state,
+                error=None,
+            )
+        )
+
+    with session_local() as db:
+        assert db.get(UserProfile, "hf-new") is None
 
 
 def test_oauth_callback_sets_encrypted_bucket_cookie(monkeypatch):

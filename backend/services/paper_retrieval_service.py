@@ -34,7 +34,9 @@ from backend.services.embedding_retrieval_service import (
     reciprocal_rank_fusion,
 )
 from backend.services.paper_implementation_service import (
+    HF_ARTIFACTS_EXIST_SQL,
     family_repository_exists_clause,
+    hf_artifacts_exist_clause,
 )
 from backend.services.query_embedding_client import (
     QueryEmbeddingUnavailable,
@@ -449,14 +451,7 @@ class PaperRetrievalService:
         if has_code:
             query = query.filter(family_repository_exists_clause())
         if has_hf_artifacts:
-            query = query.filter(
-                or_(
-                    DBPaper.hf_artifacts.any(),
-                    func.cardinality(DBPaper.hf_models) > 0,
-                    func.cardinality(DBPaper.hf_datasets) > 0,
-                    func.cardinality(DBPaper.hf_spaces) > 0,
-                )
-            )
+            query = query.filter(hf_artifacts_exist_clause())
         return query
 
     def _paper_has_official_implementation(self, paper: DBPaper) -> bool:
@@ -607,7 +602,7 @@ class PaperRetrievalService:
 
         rows = (
             self.db.execute(
-                text("""
+                text(f"""
                 WITH nearest AS MATERIALIZED (
                     SELECT p.id,
                            p.title,
@@ -641,13 +636,7 @@ class PaperRetrievalService:
                             )
                         )
                       )
-                      AND (
-                        :has_hf_artifacts = FALSE
-                        OR EXISTS (SELECT 1 FROM paper_hf_artifacts pha WHERE pha.paper_id = p.id)
-                        OR cardinality(p.hf_models) > 0
-                        OR cardinality(p.hf_datasets) > 0
-                        OR cardinality(p.hf_spaces) > 0
-                      )
+                      AND (:has_hf_artifacts = FALSE OR {HF_ARTIFACTS_EXIST_SQL})
                     ORDER BY CAST(:query AS text) <<-> lower(p.title)
                     LIMIT :candidate_limit
                 )
@@ -931,14 +920,7 @@ class PaperRetrievalService:
         if has_code:
             date_filters.append(family_repository_exists_clause())
         if has_hf_artifacts:
-            date_filters.append(
-                or_(
-                    DBPaper.hf_artifacts.any(),
-                    func.cardinality(DBPaper.hf_models) > 0,
-                    func.cardinality(DBPaper.hf_datasets) > 0,
-                    func.cardinality(DBPaper.hf_spaces) > 0,
-                )
-            )
+            date_filters.append(hf_artifacts_exist_clause())
 
         identity_candidates = select(
             DBPaper.id.label("paper_id"),

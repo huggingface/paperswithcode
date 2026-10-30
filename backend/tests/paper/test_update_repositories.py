@@ -19,6 +19,7 @@ from backend.models.database import (
 )
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.repository_service import RepositoryService
+from backend.utils.exceptions import PaperNotFoundError
 
 
 @compiles(BigInteger, "sqlite")
@@ -219,6 +220,35 @@ def test_first_repository_association_is_official_by_default(db_session):
 
     link = db_session.query(PaperRepository).filter(PaperRepository.paper_id == 2).one()
     assert link.is_official is True
+
+
+def test_repository_for_missing_paper_leaves_no_orphan(db_session):
+    with pytest.raises(PaperNotFoundError):
+        RepositoryService(db_session).create_repository_for_paper(
+            paper_id="404",
+            url="https://github.com/example/orphan",
+            skip_if_official_exists=False,
+        )
+
+    assert db_session.query(DBRepository).count() == 0
+
+
+def test_repository_for_paper_is_created_and_linked(db_session):
+    db_session.add(
+        DBPaper(id=3, title="Linked Paper", abstract="Abstract", arxiv_id="2601.00003")
+    )
+    db_session.commit()
+
+    repository = RepositoryService(db_session).create_repository_for_paper(
+        paper_id="3",
+        url="https://github.com/Example/Linked",
+        is_official=False,
+    )
+
+    link = db_session.query(PaperRepository).filter(PaperRepository.paper_id == 3).one()
+    assert link.repository_id == int(repository.id)
+    assert link.is_official is True
+    assert repository.url == "https://github.com/example/linked"
 
 
 def test_date_order_index_keeps_sqlite_schema_creation_compatible(db_session):

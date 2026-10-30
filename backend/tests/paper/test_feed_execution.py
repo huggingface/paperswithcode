@@ -1,5 +1,6 @@
 """Behavioral characterization of general and task feed selection on local SQL."""
 
+import json
 from datetime import date, datetime, timezone
 
 import pytest
@@ -32,6 +33,14 @@ def _sqlite_json(_type, _compiler, **_kwargs):
 @pytest.fixture
 def feeds(monkeypatch):
     engine = create_engine("sqlite://")
+    # PostgreSQL ``cardinality`` over the JSON the SQLite array variant stores.
+    event.listen(
+        engine,
+        "connect",
+        lambda connection, _record: connection.create_function(
+            "cardinality", 1, lambda value: len(json.loads(value or "null") or [])
+        ),
+    )
     Base.metadata.create_all(
         engine,
         tables=[
@@ -196,6 +205,17 @@ def test_latest_only_can_be_disabled(feeds, task_feed):
         )
     )
     assert result.count == 4 and ids(result)[0] == "4"
+
+
+def test_hf_artifact_filter_matches_explicit_hub_links(feeds):
+    db, _ = feeds
+    # External papers list Hub links on the row instead of the junction table.
+    db.get(Paper, 3).hf_spaces = ["https://huggingface.co/spaces/org/demo"]
+    db.commit()
+    result = PaperService(db).get_papers(
+        task="1", has_hf_artifacts=True, order_by="date_published"
+    )
+    assert sorted(ids(result)) == ["2", "3"]
 
 
 def test_search_and_official_implementation_filter_real_rows(feeds):

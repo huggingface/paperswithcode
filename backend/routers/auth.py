@@ -687,7 +687,6 @@ async def _complete_hf_callback(
     with db_manager.session_local() as profile_db:
         is_new_profile = profile_db.get(UserProfile, hf_user_id) is None
         UserProfileService(profile_db).upsert_verified_identity(hf_user_id, username)
-        profile_db.commit()
         session_id = auth_session_service.create_session(
             profile_db, hf_user_id, ttl_seconds=SESSION_TTL_SECONDS
         )

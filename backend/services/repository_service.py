@@ -11,6 +11,7 @@ the new many-to-many relationship structure, including:
 
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timedelta
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc, func, case
 import logging
@@ -302,48 +303,12 @@ class RepositoryService:
             Repository object (created or updated)
         """
         try:
-            # Normalize GitHub URLs to lowercase to avoid case-sensitivity duplicates
-            # GitHub URLs are case-insensitive in practice (they redirect)
-            normalized_url = normalize_github_url(url)
-            if normalized_url:
-                url = normalized_url
-                parsed_owner, parsed_name = parse_github_url(url)
-                owner = owner or parsed_owner
-                name = name or parsed_name
-                logger.debug(f"Normalized GitHub URL to: {url}")
-
-            existing_repo = find_repository_by_url(self.db, url)
-
-            if existing_repo:
-                if existing_repo.url != url:
-                    existing_repo.url = url
-                # Update existing repository
-                existing_repo.owner = owner or existing_repo.owner
-                existing_repo.name = name or existing_repo.name
-                existing_repo.num_stars = max(
-                    num_stars, existing_repo.num_stars
-                )  # Keep highest star count
-                # Don't update source - keep original
-
-                self.db.commit()
-                return self._db_repository_to_api(existing_repo)
-            else:
-                # Create new repository
-                new_repo = DBRepository(
-                    url=url,
-                    owner=owner,
-                    name=name,
-                    num_stars=num_stars,
-                    source=source,
-                )
-
-                self.db.add(new_repo)
-                self.db.commit()
-                return self._db_repository_to_api(new_repo)
-
-        except Exception as e:
+            repository = self._upsert_repository(url, owner, name, num_stars, source)
+            self.db.commit()
+        except SQLAlchemyError as e:
             self.db.rollback()
             raise DatabaseError(f"Failed to create/update repository: {str(e)}")
+        return self._db_repository_to_api(repository)
 
     def associate_repository_with_paper(
         self,
@@ -364,88 +329,23 @@ class RepositoryService:
 
         Raises:
             PaperNotFoundError: If paper or repository not found
-            DatabaseError: If association already exists or other database error
+            DatabaseError: On database errors
         """
         try:
-            # Check if paper exists
-            paper = self.db.query(DBPaper).filter(DBPaper.id == int(paper_id)).first()
-            if not paper:
-                raise PaperNotFoundError(f"Paper with ID {paper_id} not found")
-
-            # Check if repository exists
-            repository = (
-                self.db.query(DBRepository)
-                .filter(DBRepository.id == int(repository_id))
-                .first()
+            repository = self._associate_repository(
+                paper_id, repository_id, is_official
             )
-            if not repository:
-                raise PaperNotFoundError(
-                    f"Repository with ID {repository_id} not found"
-                )
-
-            # Check if association already exists
-            existing_association = (
-                self.db.query(DBPaperRepository)
-                .filter(
-                    DBPaperRepository.paper_id == int(paper_id),
-                    DBPaperRepository.repository_id == int(repository_id),
-                )
-                .first()
-            )
-
-            if existing_association:
-                # Update existing association instead of raising error
-                is_only_repository = (
-                    self.db.query(DBPaperRepository)
-                    .filter(DBPaperRepository.paper_id == int(paper_id))
-                    .count()
-                    == 1
-                )
-                existing_association.is_official = (
-                    is_official
-                    or existing_association.is_official
-                    or is_only_repository
-                )
-                self.db.commit()
-
-                # Return API model with embedded repository data
-                api_repo = self._db_repository_to_api(repository)
-                return PaperRepository(
-                    paper_id=paper_id,
-                    repository_id=repository_id,
-                    repository=api_repo,
-                )
-
-            # The first and only repository on a paper page is treated as its
-            # official repository by default. Explicit flags still govern
-            # additional repositories.
-            is_first_repository = not (
-                self.db.query(DBPaperRepository)
-                .filter(DBPaperRepository.paper_id == int(paper_id))
-                .first()
-            )
-            new_association = DBPaperRepository(
-                paper_id=int(paper_id),
-                repository_id=int(repository_id),
-                is_official=is_official or is_first_repository,
-            )
-
-            self.db.add(new_association)
             self.db.commit()
-
-            # Return API model with embedded repository data
-            api_repo = self._db_repository_to_api(repository)
-            return PaperRepository(
-                paper_id=paper_id,
-                repository_id=repository_id,
-                repository=api_repo,
-            )
-
         except ValueError:
             raise PaperNotFoundError("Invalid paper ID or repository ID")
-        except Exception as e:
+        except SQLAlchemyError as e:
             self.db.rollback()
             raise DatabaseError(f"Failed to associate repository with paper: {str(e)}")
+        return PaperRepository(
+            paper_id=paper_id,
+            repository_id=repository_id,
+            repository=self._db_repository_to_api(repository),
+        )
 
     def create_repository_for_paper(
         self,
@@ -459,10 +359,7 @@ class RepositoryService:
         skip_if_official_exists: bool = True,
     ) -> Optional[Repository]:
         """
-        Create a repository and associate it with a paper in one operation.
-
-        This is a convenience method that combines create_or_update_repository
-        and associate_repository_with_paper.
+        Create a repository and associate it with a paper in one transaction.
 
         Args:
             paper_id: Paper ID
@@ -501,28 +398,103 @@ class RepositoryService:
                 if existing_official:
                     return None  # Skip - official repository already exists
 
-            # Create or update the repository
-            repository = self.create_or_update_repository(
-                url=url,
-                owner=owner,
-                name=name,
-                num_stars=num_stars,
-                source=source,
-            )
-
-            # Associate with paper
-            self.associate_repository_with_paper(
-                paper_id=paper_id,
-                repository_id=repository.id,
-                is_official=is_official,
-            )
-
-            return repository
-
+            repository = self._upsert_repository(url, owner, name, num_stars, source)
+            self._associate_repository(paper_id, str(repository.id), is_official)
+            self.db.commit()
         except ValueError:
             raise PaperNotFoundError(f"Invalid paper ID: {paper_id}")
-        except Exception as e:
+        except PaperNotFoundError:
+            self.db.rollback()
+            raise
+        except SQLAlchemyError as e:
+            self.db.rollback()
             raise DatabaseError(f"Failed to create repository for paper: {str(e)}")
+        return self._db_repository_to_api(repository)
+
+    def _upsert_repository(
+        self,
+        url: str,
+        owner: Optional[str],
+        name: Optional[str],
+        num_stars: int,
+        source: str,
+    ) -> DBRepository:
+        """Create or update a repository row and flush it without committing."""
+        # Normalize GitHub URLs to lowercase to avoid case-sensitivity duplicates
+        # GitHub URLs are case-insensitive in practice (they redirect)
+        normalized_url = normalize_github_url(url)
+        if normalized_url:
+            url = normalized_url
+            parsed_owner, parsed_name = parse_github_url(url)
+            owner = owner or parsed_owner
+            name = name or parsed_name
+            logger.debug(f"Normalized GitHub URL to: {url}")
+
+        existing_repo = find_repository_by_url(self.db, url)
+
+        if existing_repo:
+            if existing_repo.url != url:
+                existing_repo.url = url
+            existing_repo.owner = owner or existing_repo.owner
+            existing_repo.name = name or existing_repo.name
+            # Keep highest star count; don't update source - keep original
+            existing_repo.num_stars = max(num_stars, existing_repo.num_stars)
+            self.db.flush()
+            return existing_repo
+
+        new_repo = DBRepository(
+            url=url,
+            owner=owner,
+            name=name,
+            num_stars=num_stars,
+            source=source,
+        )
+        self.db.add(new_repo)
+        self.db.flush()
+        return new_repo
+
+    def _associate_repository(
+        self, paper_id: str, repository_id: str, is_official: bool
+    ) -> DBRepository:
+        """Link a repository to a paper and flush it without committing."""
+        paper = self.db.query(DBPaper).filter(DBPaper.id == int(paper_id)).first()
+        if not paper:
+            raise PaperNotFoundError(f"Paper with ID {paper_id} not found")
+
+        repository = (
+            self.db.query(DBRepository)
+            .filter(DBRepository.id == int(repository_id))
+            .first()
+        )
+        if not repository:
+            raise PaperNotFoundError(f"Repository with ID {repository_id} not found")
+
+        paper_links = self.db.query(DBPaperRepository).filter(
+            DBPaperRepository.paper_id == int(paper_id)
+        )
+        existing_association = paper_links.filter(
+            DBPaperRepository.repository_id == int(repository_id)
+        ).first()
+
+        if existing_association:
+            is_only_repository = paper_links.count() == 1
+            existing_association.is_official = (
+                is_official or existing_association.is_official or is_only_repository
+            )
+        else:
+            # The first and only repository on a paper page is treated as its
+            # official repository by default. Explicit flags still govern
+            # additional repositories.
+            is_first_repository = paper_links.first() is None
+            self.db.add(
+                DBPaperRepository(
+                    paper_id=int(paper_id),
+                    repository_id=int(repository_id),
+                    is_official=is_official or is_first_repository,
+                )
+            )
+        self.db.flush()
+        return repository
 
     def _db_repository_to_api(self, db_repository: DBRepository) -> Repository:
         """
