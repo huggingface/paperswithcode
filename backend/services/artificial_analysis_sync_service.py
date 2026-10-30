@@ -272,6 +272,8 @@ class ArtificialAnalysisLeaderboard:
     quota_limit: str | None = None
     # Reviewed slugs Artificial Analysis no longer lists.
     missing_reviewed: list[str] = field(default_factory=list)
+    # Indexes with no scores at all; their rows are kept until scores return.
+    withdrawn_indexes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -344,7 +346,9 @@ def _parse_score(raw_score: Any, *, slug: str, index: ArtificialAnalysisIndex) -
     return score
 
 
-def _parse_page(payload: Any) -> tuple[str, list[ArtificialAnalysisEntry], dict]:
+def _parse_page(
+    payload: Any,
+) -> tuple[str, list[ArtificialAnalysisEntry], dict, set[str]]:
     if not isinstance(payload, dict):
         raise TypeError("Artificial Analysis response must be a JSON object")
     version = payload.get("intelligence_index_version")
@@ -359,10 +363,13 @@ def _parse_page(payload: Any) -> tuple[str, list[ArtificialAnalysisEntry], dict]
         raise TypeError("Artificial Analysis response has invalid pagination or data")
 
     entries: list[ArtificialAnalysisEntry] = []
+    listed: set[str] = set()
     for row in rows:
         if not isinstance(row, dict):
             raise TypeError("Artificial Analysis model rows must be objects")
         slug = row.get("slug")
+        if isinstance(slug, str):
+            listed.add(slug)
         name = row.get("name")
         evaluations = row.get("evaluations")
         scores: dict[str, float] = {}
@@ -392,7 +399,7 @@ def _parse_page(payload: Any) -> tuple[str, list[ArtificialAnalysisEntry], dict]
                 f"Artificial Analysis release date is invalid for {slug}"
             ) from exc
         entries.append(ArtificialAnalysisEntry(slug, name, scores, released))
-    return version, entries, pagination
+    return version, entries, pagination, listed
 
 
 def fetch_artificial_analysis_leaderboard(
@@ -409,6 +416,7 @@ def fetch_artificial_analysis_leaderboard(
     )
     try:
         all_entries: list[ArtificialAnalysisEntry] = []
+        listed_slugs: set[str] = set()
         version: str | None = None
         page = 1
         while True:
@@ -420,13 +428,14 @@ def fetch_artificial_analysis_leaderboard(
             response.raise_for_status()
             quota_remaining = response.headers.get("x-ratelimit-remaining")
             quota_limit = response.headers.get("x-ratelimit-limit")
-            page_version, entries, pagination = _parse_page(response.json())
+            page_version, entries, pagination, listed = _parse_page(response.json())
             if version is not None and page_version != version:
                 raise ValueError(
                     "Artificial Analysis index version changed during fetch"
                 )
             version = page_version
             all_entries.extend(entries)
+            listed_slugs |= listed
             has_more = pagination.get("has_more")
             total_pages = pagination.get("total_pages")
             if not isinstance(has_more, bool) or not isinstance(total_pages, int):
@@ -453,15 +462,20 @@ def fetch_artificial_analysis_leaderboard(
             )
         unique_entries[entry.slug] = entry
     all_entries = list(unique_entries.values())
-    slugs = list(unique_entries)
-    missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(slugs))
+    # Listed-but-unscored models (deprecated or awaiting re-scoring) are present.
+    missing = sorted(set(MODEL_PAPER_IDENTITIES) - listed_slugs)
     # A few withdrawn models are normal; a large gap means a broken response.
     if len(missing) > len(MODEL_PAPER_IDENTITIES) // MAX_MISSING_REVIEWED_DIVISOR:
         raise ValueError(
             "Artificial Analysis is missing reviewed models: " + ",".join(missing)
         )
+    withdrawn: list[str] = []
     for index in INDEXES:
         scored = [entry.slug for entry in all_entries if index.key in entry.scores]
+        if not scored:
+            # Artificial Analysis cleared the whole index (Agentic, 2026-10-29).
+            withdrawn.append(index.key)
+            continue
         if not index.min_expected_models <= len(scored) <= index.max_expected_models:
             raise ValueError(
                 f"Artificial Analysis {index.label} returned {len(scored)} scored "
@@ -473,6 +487,7 @@ def fetch_artificial_analysis_leaderboard(
         quota_remaining=quota_remaining,
         quota_limit=quota_limit,
         missing_reviewed=missing,
+        withdrawn_indexes=withdrawn,
     )
 
 
@@ -783,6 +798,8 @@ class ArtificialAnalysisSyncService:
         )
         try:
             for index in INDEXES:
+                if index.key in leaderboard.withdrawn_indexes:
+                    continue
                 index_stats = self._sync_index(
                     index,
                     leaderboard,

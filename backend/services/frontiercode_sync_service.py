@@ -313,12 +313,7 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "Gemini 4 Argon: our next era of frontier intelligence",
         "2026-09-30",
     ),
-    # Preview release without public weights; flip is_open when weights ship.
-    "Mistral Large 4 (Preview)": external(
-        "https://mistral.ai/news/mistral-large-4/",
-        "Mistral Large 4",
-        "2026-10-06",
-    ),
+    # "Mistral Large 4 (Preview)" left the leaderboard on 2026-10-28.
 }
 
 

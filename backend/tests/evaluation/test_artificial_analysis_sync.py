@@ -816,6 +816,52 @@ def test_fetch_reports_a_few_withdrawn_reviewed_models(monkeypatch):
         )
 
 
+def test_fetch_counts_listed_unscored_models_and_withdrawn_index(monkeypatch):
+    identity = aa.PaperIdentity(arxiv_id="2608.00001")
+    reviewed = {f"reviewed-{index}": identity for index in range(8)}
+    monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", reviewed)
+    monkeypatch.setattr(
+        aa,
+        "INDEXES",
+        tuple(
+            replace(index, min_expected_models=1, max_expected_models=10)
+            for index in aa.INDEXES
+        ),
+    )
+    # Agentic scores are gone for everyone; half the models lost every score.
+    listed = [
+        _api_row(f"reviewed-{index}", agentic=None)
+        if index < 4
+        else _api_row(f"reviewed-{index}", intelligence=None, agentic=None)
+        for index in range(8)
+    ]
+
+    leaderboard = aa.fetch_artificial_analysis_leaderboard(
+        api_key="secret", client=_single_page_client(listed)
+    )
+    assert leaderboard.missing_reviewed == []
+    assert leaderboard.withdrawn_indexes == ["agentic"]
+    assert len(leaderboard.entries) == 4
+
+
+def test_sync_keeps_rows_of_withdrawn_index(monkeypatch):
+    calls = []
+    service = aa.ArtificialAnalysisSyncService.__new__(aa.ArtificialAnalysisSyncService)
+    service.db = _session()
+
+    def fake_sync_index(index, *_args, **_kwargs):
+        calls.append(index.key)
+        return aa.ArtificialAnalysisIndexStats()
+
+    monkeypatch.setattr(service, "_sync_index", fake_sync_index)
+    leaderboard = aa.ArtificialAnalysisLeaderboard(
+        "5", [], withdrawn_indexes=["agentic"]
+    )
+    stats = service.sync(leaderboard, discovery=aa.ArtificialAnalysisDiscovery())
+    assert calls == ["intelligence"]
+    assert "agentic" not in stats.indexes
+
+
 def test_new_index_version_retires_unlisted_older_intelligence_rows(monkeypatch):
     session = _session()
     monkeypatch.setattr(

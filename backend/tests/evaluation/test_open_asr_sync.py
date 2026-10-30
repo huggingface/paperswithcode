@@ -170,6 +170,23 @@ def test_parse_and_fetch_public_leaderboard_contract():
     assert entries[1] == OpenAsrEntry("org/model-2", 2, 4.2, 20.0, True)
 
 
+def test_fetch_accepts_table_and_plot_update_tuple():
+    payload = _payload()
+
+    class FakeClient:
+        def __init__(self, url, *, verbose):
+            pass
+
+        def predict(self, **_kwargs):
+            table = {"datatype": ["str"], "value": payload}
+            plot = {"value": {"type": "plotly", "plot": "{}"}}
+            return (table, plot)
+
+    entries = fetch_open_asr_leaderboard(FakeClient)
+    assert len(entries) == 40
+    assert entries[0] == OpenAsrEntry("org/model-1", 1, 4.1, None, False)
+
+
 def test_parser_rejects_truncated_or_noncontiguous_data():
     with pytest.raises(ValueError, match="expected 40-150"):
         parse_open_asr_leaderboard(_payload(10))

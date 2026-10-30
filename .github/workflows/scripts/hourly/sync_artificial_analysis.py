@@ -28,6 +28,11 @@ class SyncArtificialAnalysisJob(CronJobBase):
             leaderboard.quota_remaining,
             leaderboard.quota_limit,
         )
+        if leaderboard.withdrawn_indexes:
+            self.logger.warning(
+                "artificial_analysis_withdrawn_indexes %s (rows kept)",
+                ",".join(leaderboard.withdrawn_indexes),
+            )
         session = db_manager.session_local()
         try:
             discovery = run_discovery(

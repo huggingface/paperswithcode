@@ -64,6 +64,9 @@ DEFAULT_COLUMNS = [
 
 def _leaderboard_value(payload: Any) -> Any:
     """Accept the current Gradio component-update response shape."""
+    if isinstance(payload, (list, tuple)) and payload:
+        # Since 2026-10-28 the endpoint returns (table update, plot update).
+        payload = payload[0]
     if isinstance(payload, dict):
         value = payload.get("value")
         if isinstance(value, dict) and "headers" in value and "data" in value:
