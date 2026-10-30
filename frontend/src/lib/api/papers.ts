@@ -13,9 +13,9 @@ import type {
   TrendingPaper,
 } from "./papers.types";
 import type { PaginatedResponse, PaperSearchFeedPage, SearchPage } from "./shared.types";
-import { ApiError, type ApiRequest } from "../apiTransport";
+import type { ApiRequest } from "../apiTransport";
 import { paperCuration } from "./curation";
-import { apiFetch, apiRequest } from "./request";
+import { apiRequest, apiRequestOrNull, apiResponse } from "./request";
 
 export interface ListPapersParams {
   page?: number;
@@ -320,8 +320,7 @@ export const papersApi = new PapersApi(apiRequest);
 
 /** An HTML-only external paper's web page as Markdown, prepared on first read. */
 export async function getPaperWebMarkdown(paperId: string): Promise<string> {
-  const response = await apiFetch(`/papers/${encodeURIComponent(paperId)}/web-markdown`);
-  if (!response.ok) throw new ApiError(response, await response.text());
+  const response = await apiResponse(`/papers/${encodeURIComponent(paperId)}/web-markdown`);
   return response.text();
 }
 
@@ -342,9 +341,6 @@ export interface PaperLayout {
 }
 
 /** PDF layout blocks that reader chat citations point at; null when the paper has none. */
-export async function getPaperLayout(routeId: string): Promise<PaperLayout | null> {
-  const response = await apiFetch(`/papers/${encodeURIComponent(routeId)}/layout`);
-  if (response.status === 404) return null;
-  if (!response.ok) throw new ApiError(response, await response.text());
-  return response.json();
+export function getPaperLayout(routeId: string): Promise<PaperLayout | null> {
+  return apiRequestOrNull(`/papers/${encodeURIComponent(routeId)}/layout`);
 }

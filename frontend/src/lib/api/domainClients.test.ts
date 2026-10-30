@@ -4,6 +4,7 @@ import type { ApiRequest } from "../apiTransport";
 import { AccountApi, type UserPreferences } from "./account";
 import { CatalogApi } from "./catalog";
 import { ChatApi } from "./chat";
+import { CodexApi } from "./codex";
 import { EvaluationsApi } from "./evaluations";
 import { OperationsApi } from "./operations";
 import { PapersApi } from "./papers";
@@ -214,19 +215,39 @@ describe("domain API clients", () => {
     });
     expect(request).toHaveBeenNthCalledWith(4, "/admin/autonomous-operations/manual-mode", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: true, expected_revision: 7, confirmation: "SET_MANUAL_MODE" }),
     });
     expect(request).toHaveBeenNthCalledWith(5, "/admin/autonomous-operations/operators/submissions", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: false, expected_revision: 8, confirmation: "SET_OPERATOR_STATE" }),
     });
     expect(request).toHaveBeenNthCalledWith(6, "/admin/autonomous-operations/chat-baseline", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sha: "a".repeat(40), expected_revision: 2, confirmation: "QUALIFY_CHAT_BASELINE" }),
     });
+  });
+
+  it("routes paper-page Codex jobs by kind and curation jobs through one client", async () => {
+    const request = vi.fn().mockResolvedValue({}) as ApiRequest;
+    const codex = new CodexApi(request);
+
+    await codex.startPaperJob("enrich-paper", 42);
+    await codex.getPaperJob("add-evals", "job-1");
+    await codex.cancelPaperJob("add-evals", "job-1");
+    await codex.listJobs(100, { trigger: "admin", status: "" });
+    await codex.setScheduler("pause");
+
+    expect(request).toHaveBeenNthCalledWith(1, "/admin/codex-enrich-paper/jobs", {
+      method: "POST",
+      body: JSON.stringify({ paper_id: 42 }),
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "/admin/codex-add-evals/jobs/job-1");
+    expect(request).toHaveBeenNthCalledWith(3, "/admin/codex-add-evals/jobs/job-1", { method: "DELETE" });
+    expect(request).toHaveBeenNthCalledWith(4, "/admin/codex-curation/jobs?limit=100&trigger=admin", {
+      cache: "no-store",
+    });
+    expect(request).toHaveBeenNthCalledWith(5, "/admin/codex-curation/jobs/scheduler/pause", { method: "POST" });
+    expect(codex.traceUrl("job-1")).toBe("/api/v1/admin/codex-curation/jobs/job-1/trace");
   });
 
   it("owns research trend reads in the stats client", async () => {

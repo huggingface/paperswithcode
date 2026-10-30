@@ -30,7 +30,6 @@ export class OperationsApi {
   ): Promise<AutonomousOperationsResponse> {
     return this.request("/admin/autonomous-operations/manual-mode", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         enabled,
         expected_revision: expectedRevision,
@@ -47,7 +46,6 @@ export class OperationsApi {
   ): Promise<AutonomousOperationsResponse> {
     return this.request(`/admin/autonomous-operations/operators/${operator}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         enabled,
         expected_revision: expectedRevision,
@@ -63,7 +61,6 @@ export class OperationsApi {
   ): Promise<AutonomousOperationsResponse> {
     return this.request("/admin/autonomous-operations/chat-baseline", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         sha,
         expected_revision: expectedRevision,

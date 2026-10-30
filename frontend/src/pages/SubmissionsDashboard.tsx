@@ -10,14 +10,13 @@ import {
   Undo2,
   Loader2,
   RefreshCw,
-  ShieldAlert,
   XCircle,
 } from "lucide-react";
 
 import PendingEditDiff from "@/components/submissions/PendingEditDiff";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
-import { useAuth } from "@/lib/authContext";
+import { getApiErrorMessage } from "@/lib/apiTransport";
 import {
   type PendingEditStatus,
   type PendingEditType,
@@ -105,20 +104,6 @@ function formatRelativeTime(value: string | null | undefined): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function errorDescription(error: unknown, fallback: string): string {
-  const err = error as { response?: string; message?: string };
-  if (err.response) {
-    try {
-      const parsed = JSON.parse(err.response);
-      if (typeof parsed?.detail === "string") return parsed.detail;
-      if (Array.isArray(parsed?.detail) && parsed.detail[0]?.msg) return parsed.detail[0].msg;
-    } catch {
-      return err.response;
-    }
-  }
-  return err.message || fallback;
-}
-
 function statusClass(status: PendingEditStatus): string {
   if (status === "approved") return "approved";
   if (status === "rejected") return "rejected";
@@ -169,29 +154,6 @@ async function fetchSubmissionPage(
   const count = lists.reduce((sum, list) => sum + list.count, 0);
   const loaded = statuses.reduce((sum, status) => sum + (nextOffsets[status] ?? 0), 0);
   return { count, results, nextOffsets: results.length > 0 && loaded < count ? nextOffsets : null };
-}
-
-function AdminPlaceholder() {
-  return (
-    <div className="page">
-      <div className="submission-empty submission-empty-warn">
-        <ShieldAlert size={22} />
-        <h1>Admin access required</h1>
-        <p>Sign in with an allowlisted Hugging Face admin account to review paper edit submissions.</p>
-      </div>
-    </div>
-  );
-}
-
-function LoadingPlaceholder() {
-  return (
-    <div className="page">
-      <div className="submission-loading">
-        <Loader2 className="spin" size={18} />
-        <span>Checking admin session...</span>
-      </div>
-    </div>
-  );
 }
 
 function SubmissionCard({
@@ -263,7 +225,7 @@ function SubmissionCard({
     onError: (error) => {
       toast({
         title: "Could not approve submission",
-        description: errorDescription(error, "Approval failed. Please try again."),
+        description: getApiErrorMessage(error, "Approval failed. Please try again."),
         variant: "destructive",
       });
     },
@@ -281,7 +243,7 @@ function SubmissionCard({
     onError: (error) => {
       toast({
         title: "Could not reject submission",
-        description: errorDescription(error, "Rejection failed. Please try again."),
+        description: getApiErrorMessage(error, "Rejection failed. Please try again."),
         variant: "destructive",
       });
     },
@@ -300,7 +262,7 @@ function SubmissionCard({
     onError: (error) => {
       toast({
         title: "Could not revert edit",
-        description: errorDescription(error, "The paper changed after this edit, or it was already reverted."),
+        description: getApiErrorMessage(error, "The paper changed after this edit, or it was already reverted."),
         variant: "destructive",
       });
     },
@@ -326,7 +288,7 @@ function SubmissionCard({
     onError: (error) => {
       toast({
         title: "Could not revert edits",
-        description: errorDescription(error, "Bulk revert failed. Please try again."),
+        description: getApiErrorMessage(error, "Bulk revert failed. Please try again."),
         variant: "destructive",
       });
     },
@@ -501,12 +463,10 @@ function SubmissionCard({
 }
 
 export default function SubmissionsDashboard() {
-  const { user, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
   const [status, setStatus] = React.useState<PendingEditStatus | "all">("pending");
   const [editType, setEditType] = React.useState<PendingEditType | "all">("all");
   const [autoOnly, setAutoOnly] = React.useState(false);
-  const isAdmin = !!user?.is_admin;
 
   const countsQuery = useQuery({
     queryKey: ["pendingPaperEdits", "counts", editType, autoOnly],
@@ -527,7 +487,6 @@ export default function SubmissionsDashboard() {
         pages.map((page, index) => [COUNT_STATUSES[index], page.count]),
       ) as Record<PendingEditStatus, number>;
     },
-    enabled: isAdmin,
     staleTime: 30 * 1000,
   });
 
@@ -537,7 +496,6 @@ export default function SubmissionsDashboard() {
       fetchSubmissionPage(status === "all" ? COUNT_STATUSES : [status], editType, autoOnly, pageParam),
     initialPageParam: {} as StatusOffsets,
     getNextPageParam: (page) => page.nextOffsets ?? undefined,
-    enabled: isAdmin,
     retry: false,
   });
   const submissions = React.useMemo(
@@ -561,8 +519,7 @@ export default function SubmissionsDashboard() {
     queries: paperIds.map((paperId) => ({
       queryKey: paperQueryKeys.summary(String(paperId)),
       queryFn: () => papersApi.get(String(paperId), false),
-      enabled: isAdmin,
-      staleTime: 5 * 60 * 1000,
+        staleTime: 5 * 60 * 1000,
     })),
   });
 
@@ -581,13 +538,10 @@ export default function SubmissionsDashboard() {
     if (!listQuery.error) return;
     toast({
       title: "Could not load submissions",
-      description: errorDescription(listQuery.error, "Failed to load pending paper edits."),
+      description: getApiErrorMessage(listQuery.error, "Failed to load pending paper edits."),
       variant: "destructive",
     });
   }, [listQuery.error, toast]);
-
-  if (authLoading) return <LoadingPlaceholder />;
-  if (!isAdmin) return <AdminPlaceholder />;
 
   const counts = countsQuery.data;
   const allCount = counts ? counts.pending + counts.approved + counts.rejected : undefined;
@@ -687,7 +641,7 @@ export default function SubmissionsDashboard() {
           <div className="submission-empty submission-empty-warn" role="alert">
             <Inbox size={28} />
             <h2>Could not display submissions.</h2>
-            <p>{errorDescription(listQuery.error, "The submissions response was invalid.")}</p>
+            <p>{getApiErrorMessage(listQuery.error, "The submissions response was invalid.")}</p>
           </div>
         ) : submissions.length === 0 ? (
           <div className="submission-empty">

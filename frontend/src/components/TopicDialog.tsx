@@ -4,11 +4,11 @@ import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, Check, Plus } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { catalogApi } from '@/lib/api/catalog';
+import { hfLoginUrl } from '@/lib/apiUrl';
 import { researchApi, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
 import { stashPendingFollows, stashPendingTopic, useSaveFollows, useSaveTopic, type FollowPick } from '@/lib/researchTopic';
-import { hfLoginUrl } from './HfSignInButton';
 
 // Suggestions fetched per group; each group shows as many as fit in two rows, after everything already followed,
 // and links to its full listing for more.

@@ -9,7 +9,7 @@
 
 import React from "react";
 
-import { authUrl, isAuthDisabled } from "@/lib/apiUrl";
+import { hfLoginUrl as buildHfLoginUrl, isAuthDisabled } from "@/lib/apiUrl";
 
 const HF_LOGO_SRC =
   "/hf-logo.svg?v=20260513b";
@@ -34,21 +34,9 @@ interface HfSignInButtonProps {
   collectEmail?: boolean;
 }
 
-export function hfLoginUrl(
-  returnTo: string,
-  authorizeInference = false,
-  collectEmail = false,
-): string {
-  const endpoint = authUrl("/api/v1/auth/hf/login");
-  const authority = new URL(endpoint, window.location.origin).origin;
-  const target =
-    authority === window.location.origin
-      ? returnTo
-      : new URL(returnTo, window.location.origin).toString();
-  const params = new URLSearchParams({ return_to: target });
-  if (authorizeInference) params.set("authorize_inference", "true");
-  if (collectEmail) params.set("collect_email", "true");
-  return `${endpoint}?${params.toString()}`;
+/** Positional form still used by chat; new callers use `hfLoginUrl` from lib/apiUrl. */
+export function hfLoginUrl(returnTo: string, authorizeInference = false): string {
+  return buildHfLoginUrl(returnTo, { authorizeInference });
 }
 
 const HfSignInButton: React.FC<HfSignInButtonProps> = ({
@@ -61,7 +49,7 @@ const HfSignInButton: React.FC<HfSignInButtonProps> = ({
   if (isAuthDisabled()) return null;
 
   const handleClick = () => {
-    window.location.href = hfLoginUrl(returnTo, authorizeInference, collectEmail);
+    window.location.href = buildHfLoginUrl(returnTo, { authorizeInference, collectEmail });
   };
 
   if (compact) {

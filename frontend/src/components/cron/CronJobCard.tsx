@@ -16,19 +16,22 @@ import {
   TrendingUp,
   XCircle,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
+import { StatusBadge } from "@/components/cron/StatusBadge";
 import { Badge } from "@/components/ui/badge";
-import type {
-  CronHealthAxis,
-  CronJobHealth,
-  CronJobStatus,
-  CronWorkflowStatus,
-  PaperMarkdownJobsResponse,
-  PaperMarkdownBudget,
-  PaperMarkdownRemoteJob,
-  PaperMarkdownJobProfile,
+import {
+  operationsApi,
+  type CronHealthAxis,
+  type CronJobHealth,
+  type CronJobStatus,
+  type CronWorkflowStatus,
+  type PaperMarkdownJobsResponse,
+  type PaperMarkdownBudget,
+  type PaperMarkdownRemoteJob,
+  type PaperMarkdownJobProfile,
 } from "@/lib/api/operations";
-import { formatCronDate } from "@/lib/cronStatus";
+import { formatCronDate, formatUsd, toneClass, type Tone } from "@/lib/cronStatus";
 
 function formatDuration(duration: number | null): string {
   if (duration == null) return "N/A";
@@ -46,8 +49,6 @@ function formatWorkflowStatus(workflow: CronWorkflowStatus): string {
 function metricLabel(key: string): string {
   return key.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
-
-const formatUsd = (value: number) => `$${value.toFixed(2)}`;
 
 function PaperMarkdownBudgetCard({
   title,
@@ -76,9 +77,9 @@ function PaperMarkdownBudgetCard({
             {budget.window === "rolling_30_days" ? "Rolling 30-day window" : "All history · no automatic reset"}
           </div>
         </div>
-        <Badge variant="outline" className={budget.can_launch_planned ? "cron-status--healthy" : "cron-status--broken"}>
+        <StatusBadge tone={budget.can_launch_planned ? "healthy" : "broken"}>
           {planLabel}
-        </Badge>
+        </StatusBadge>
       </div>
       {!unmetered && (
         <div role="progressbar" aria-label={`${title} current budget exposure`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)} className="h-2 rounded bg-muted">
@@ -124,20 +125,16 @@ function Status({ status, isRunning }: { status: CronJobHealth; isRunning: boole
   const StatusIcon = statusIcon[effectiveStatus];
   return (
     <StatusIcon
-      className={`cron-status-icon cron-status--${effectiveStatus}${effectiveStatus === "running" ? " animate-spin" : ""}`}
+      className={`cron-status-icon ${toneClass(effectiveStatus)}${effectiveStatus === "running" ? " animate-spin" : ""}`}
     />
   );
 }
 
 function AxisBadge({ label, axis }: { label: string; axis: CronHealthAxis }) {
   return (
-    <Badge
-      variant="outline"
-      className={`cron-status--${axis.status}`}
-      title={axis.reason}
-    >
+    <StatusBadge tone={axis.status} title={axis.reason}>
       {label}: {axis.status}
-    </Badge>
+    </StatusBadge>
   );
 }
 
@@ -194,7 +191,7 @@ function WorkflowDetails({ workflow }: { workflow: CronWorkflowStatus }) {
             <div className="cron-label mb-1">Failed jobs</div>
             <div className="flex gap-2 flex-wrap">
               {workflow.failed_jobs.map((jobName) => (
-                <Badge key={jobName} variant="outline" className="cron-status--broken">{jobName}</Badge>
+                <StatusBadge key={jobName} tone="broken">{jobName}</StatusBadge>
               ))}
             </div>
           </div>
@@ -217,20 +214,21 @@ function WorkflowDetails({ workflow }: { workflow: CronWorkflowStatus }) {
   );
 }
 
-function remoteStageClass(stage: string): string {
-  if (stage === "COMPLETED") return "cron-status--healthy";
-  if (stage === "ERROR" || stage === "CANCELED") return "cron-status--broken";
-  if (stage === "RUNNING") return "cron-status--running";
-  return "cron-status--unknown";
-}
+const remoteStageTones: Record<string, Tone> = {
+  COMPLETED: "healthy",
+  ERROR: "broken",
+  CANCELED: "broken",
+  RUNNING: "running",
+};
 
-function effectiveOutcomeClass(outcome?: string): string {
-  if (outcome === "success") return "cron-status--healthy";
-  if (outcome === "partial" || outcome === "interrupted") return "cron-status--degraded";
-  if (outcome === "infrastructure_failure" || outcome === "worker_failure") return "cron-status--broken";
-  if (outcome === "active") return "cron-status--running";
-  return "cron-status--unknown";
-}
+const outcomeTones: Record<string, Tone> = {
+  success: "healthy",
+  partial: "degraded",
+  interrupted: "degraded",
+  infrastructure_failure: "broken",
+  worker_failure: "broken",
+  active: "running",
+};
 
 function PaperMarkdownShard({ job }: { job: PaperMarkdownRemoteJob }) {
   const progress = job.progress;
@@ -248,18 +246,18 @@ function PaperMarkdownShard({ job }: { job: PaperMarkdownRemoteJob }) {
           <div className="font-mono text-xs cron-muted truncate">{job.id}</div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className={remoteStageClass(job.stage)}>
+          <StatusBadge tone={remoteStageTones[job.stage] ?? "unknown"}>
             {job.stage.toLowerCase()}
-          </Badge>
+          </StatusBadge>
           {job.effective_outcome && (
-            <Badge variant="outline" className={effectiveOutcomeClass(job.effective_outcome)}>
+            <StatusBadge tone={outcomeTones[job.effective_outcome] ?? "unknown"}>
               output: {job.effective_outcome.replace(/_/g, " ")}
-            </Badge>
+            </StatusBadge>
           )}
           {job.failure_cause && (
-            <Badge variant="outline" className={effectiveOutcomeClass(job.effective_outcome)}>
+            <StatusBadge tone={outcomeTones[job.effective_outcome ?? ""] ?? "unknown"}>
               cause: {job.failure_cause.replace(/_/g, " ")}
-            </Badge>
+            </StatusBadge>
           )}
           {job.url && (
             <a
@@ -415,21 +413,24 @@ export function CronJobCard({
   job,
   expanded,
   onToggle,
-  paperMarkdownJobs,
-  paperMarkdownJobsLoading = false,
-  paperMarkdownJobsError = null,
+  autoRefresh = false,
 }: {
   job: CronJobStatus;
   expanded: boolean;
   onToggle: () => void;
-  paperMarkdownJobs?: PaperMarkdownJobsResponse;
-  paperMarkdownJobsLoading?: boolean;
-  paperMarkdownJobsError?: unknown;
+  autoRefresh?: boolean;
 }) {
   const hasWorkMetrics = Boolean(job.work_metrics && Object.keys(job.work_metrics).length);
   const hasDbMetrics = Boolean(job.db_metrics && Object.keys(job.db_metrics).length);
   const hasRemoteJobs = job.job_name === "paper_markdown_backfill";
-  const livePaperMarkdownBudget = hasRemoteJobs ? paperMarkdownJobs?.budgets.live : undefined;
+  const paperMarkdownJobs = useQuery({
+    queryKey: ["admin", "paperMarkdownJobs"],
+    queryFn: () => operationsApi.getPaperMarkdownJobs(),
+    enabled: hasRemoteJobs,
+    refetchInterval: autoRefresh ? 30000 : false,
+    retry: false,
+  });
+  const livePaperMarkdownBudget = hasRemoteJobs ? paperMarkdownJobs.data?.budgets.live : undefined;
   const livePaperMarkdownUnmetered = livePaperMarkdownBudget?.cost_policy === "unmetered_hf" || livePaperMarkdownBudget?.budget_enforced === false;
   return (
     <div className="cron-job-card">
@@ -441,7 +442,7 @@ export function CronJobCard({
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <h3 className="font-semibold">{job.display_name}</h3>
                 {job.critical && <Badge variant="outline" className="text-[10px] uppercase tracking-wide">Critical</Badge>}
-                {job.lock_stale && <Badge variant="outline" className="cron-status--broken">Held lock</Badge>}
+                {job.lock_stale && <StatusBadge tone="broken">Held lock</StatusBadge>}
                 <AxisBadge label="Execution" axis={job.execution_health} />
                 <AxisBadge label="Output" axis={job.output_health} />
                 {expanded ? <ChevronUp className="h-4 w-4 cron-muted" /> : <ChevronDown className="h-4 w-4 cron-muted" />}
@@ -466,7 +467,7 @@ export function CronJobCard({
               )}
             </div>
           </div>
-          <Badge variant="outline" className={`cron-status--${job.status}`}>{job.status}</Badge>
+          <StatusBadge tone={job.status}>{job.status}</StatusBadge>
         </div>
       </button>
 
@@ -498,9 +499,9 @@ export function CronJobCard({
             {job.workflow_status && <WorkflowDetails workflow={job.workflow_status} />}
             {hasRemoteJobs && (
               <PaperMarkdownJobs
-                monitor={paperMarkdownJobs}
-                loading={paperMarkdownJobsLoading}
-                error={paperMarkdownJobsError}
+                monitor={paperMarkdownJobs.data}
+                loading={paperMarkdownJobs.isLoading}
+                error={paperMarkdownJobs.error}
               />
             )}
             {job.diagnostic_groups && Object.values(job.diagnostic_groups).some((items) => items.length > 0) && (
@@ -530,7 +531,7 @@ export function CronJobCard({
                 <div className="cron-metric-card space-y-3 text-sm">
                   {job.health_findings.filter((finding) => finding.state !== "healthy").map((finding) => (
                     <div key={`${finding.plane}-${finding.contract}`}>
-                      <Badge variant="outline" className={`cron-status--${finding.state}`}>{finding.state}</Badge>{" "}
+                      <StatusBadge tone={finding.state}>{finding.state}</StatusBadge>{" "}
                       <strong>{metricLabel(finding.contract)}</strong>: {finding.summary}
                       {Object.entries(finding.evidence).length > 0 && (
                         <div className="mt-1 text-xs cron-muted">

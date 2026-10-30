@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,19 +18,20 @@ import { CodexJobQueue } from "@/components/admin/CodexJobQueue";
 import { CatalogAuditPanel } from "@/components/admin/CatalogAuditPanel";
 import { chatApi, type ChatSandboxSpendStatus, type ChatWebSearchBudgetStatus } from "@/lib/api/chat";
 import { operationsApi, type CronJobHealth, type CronJobsResponse, type CronJobStatus } from "@/lib/api/operations";
-import { formatCronDate } from "@/lib/cronStatus";
+import { ApiError } from "@/lib/apiTransport";
+import { formatCronDate, formatMicroUsd as usd, toneClass, type Tone } from "@/lib/cronStatus";
 import { useAuth } from "@/lib/authContext";
 import { isStagingEnvironment } from "@/lib/apiUrl";
 import "./CronDashboard.css";
 
-const categoryColors: Record<string, string> = {
-  hourly: "cron-status--running",
-  daily: "cron-status--healthy",
-  weekly: "cron-status--degraded",
-  systemd: "cron-status--running",
+const categoryTones: Record<string, Tone> = {
+  hourly: "running",
+  daily: "healthy",
+  weekly: "degraded",
+  systemd: "running",
 };
 
-const usd = (microusd: number) => `$${(microusd / 1_000_000).toFixed(2)}`;
+const CRON_STATUS_KEY = ["admin", "cronStatus"];
 
 export const ChatComputePanel = ({ data, loading, error }: {
   data?: ChatSandboxSpendStatus;
@@ -129,50 +130,49 @@ export const cronStatusRefetchInterval = (
 
 const CronDashboard = () => {
   const staging = isStagingEnvironment();
+  const queryClient = useQueryClient();
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [manualRefreshPending, setManualRefreshPending] = useState(false);
-  const [refreshToken, setRefreshToken] = useState(0);
   const [chatEnvironmentDraft, setChatEnvironmentDraft] = useState("");
   const [chatEnvironment, setChatEnvironment] = useState("");
   const [expandedJobs, setExpandedJobs] = useState<Set<string>>(new Set());
-  const forceCronRefresh = useRef(false);
   const { user } = useAuth();
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["cronStatus", user?.username],
-    queryFn: () => {
-      const forceRefresh = forceCronRefresh.current;
-      forceCronRefresh.current = false;
-      return operationsApi.getCronStatus(forceRefresh);
-    },
-    enabled: !!user?.is_admin,
+  const { data, isLoading, error } = useQuery({
+    queryKey: CRON_STATUS_KEY,
+    queryFn: () => operationsApi.getCronStatus(),
     refetchInterval: (query) => cronStatusRefetchInterval(query.state.data, autoRefresh),
     retry: false,
   });
-  const paperMarkdownJobsQuery = useQuery({
-    queryKey: ["paperMarkdownJobs", user?.username],
-    queryFn: () => operationsApi.getPaperMarkdownJobs(),
-    enabled: !!user?.is_admin,
-    refetchInterval: autoRefresh ? 30000 : false,
-    retry: false,
-  });
   const chatSpendQuery = useQuery({
-    queryKey: ["chatSandboxSpend", user?.username, chatEnvironment],
+    queryKey: ["admin", "chatSandboxSpend", chatEnvironment],
     queryFn: () => chatApi.getSandboxSpend(chatEnvironment || undefined),
-    enabled: !!user?.is_admin,
     refetchInterval: autoRefresh ? 30000 : false,
     retry: false,
   });
   const webSearchBudgetQuery = useQuery({
-    queryKey: ["chatWebSearchBudget", user?.username],
+    queryKey: ["admin", "chatWebSearchBudget"],
     queryFn: () => chatApi.getWebSearchBudget(),
-    enabled: !!user?.is_admin && staging,
+    enabled: staging,
     refetchInterval: autoRefresh ? 30000 : false,
     retry: false,
   });
+  // Force a fresh CRON snapshot and refetch every other admin panel on screen.
+  const refresh = useMutation({
+    mutationFn: () => Promise.all([
+      queryClient.fetchQuery({
+        queryKey: CRON_STATUS_KEY,
+        queryFn: () => operationsApi.getCronStatus(true),
+        retry: false,
+      }),
+      queryClient.refetchQueries({
+        queryKey: ["admin"],
+        type: "active",
+        predicate: (query) => query.queryKey[1] !== CRON_STATUS_KEY[1],
+      }),
+    ]),
+  });
 
-  const errorStatus = error && typeof error === "object" && "status" in error ? error.status : undefined;
-  const errorMessage = errorStatus === 401
+  const errorMessage = error instanceof ApiError && error.status === 401
     ? "Unauthorized. Sign in with an allowlisted Hugging Face admin account."
     : error instanceof Error ? error.message : undefined;
 
@@ -195,7 +195,7 @@ const CronDashboard = () => {
   const otherJobs = scheduledJobs.filter((job) => !job.critical);
   const manualOperations = data?.manual_operations ?? [];
   const refreshButtonBusy = Boolean(
-    isLoading || manualRefreshPending || data?.refreshing,
+    isLoading || refresh.isPending || data?.refreshing,
   );
 
   const jobsByCategory = otherJobs.reduce((acc, job) => {
@@ -215,38 +215,9 @@ const CronDashboard = () => {
       job={job}
       expanded={expandedJobs.has(job.job_name)}
       onToggle={() => toggleJobExpansion(job.job_name)}
-      paperMarkdownJobs={
-        job.job_name === "paper_markdown_backfill"
-          ? paperMarkdownJobsQuery.data
-          : undefined
-      }
-      paperMarkdownJobsLoading={
-        job.job_name === "paper_markdown_backfill"
-          ? paperMarkdownJobsQuery.isLoading
-          : false
-      }
-      paperMarkdownJobsError={
-        job.job_name === "paper_markdown_backfill"
-          ? paperMarkdownJobsQuery.error
-          : null
-      }
+      autoRefresh={autoRefresh}
     />
   );
-
-  const refreshAll = async () => {
-    setRefreshToken((value) => value + 1);
-    forceCronRefresh.current = true;
-    setManualRefreshPending(true);
-    try {
-      await Promise.all([
-        refetch(),
-        paperMarkdownJobsQuery.refetch(),
-        chatSpendQuery.refetch(),
-      ]);
-    } finally {
-      setManualRefreshPending(false);
-    }
-  };
 
   return (
     <div className="cron-dashboard" data-shadcn>
@@ -275,7 +246,7 @@ const CronDashboard = () => {
                 <RefreshCw className={`h-4 w-4 mr-2 ${autoRefresh ? "animate-spin" : ""}`} />
                 Auto-refresh {autoRefresh ? "ON" : "OFF"}
               </Button>
-              <Button variant="outline" size="sm" onClick={() => void refreshAll()} disabled={refreshButtonBusy}>
+              <Button variant="outline" size="sm" onClick={() => refresh.mutate()} disabled={refreshButtonBusy}>
                 <RefreshCw className={`h-4 w-4 mr-2 ${refreshButtonBusy ? "animate-spin" : ""}`} />
                 Refresh
               </Button>
@@ -404,7 +375,7 @@ const CronDashboard = () => {
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-xl capitalize flex items-center gap-2">
-                        <Badge className={categoryColors[category] ?? categoryColors.hourly}>
+                        <Badge className={toneClass(categoryTones[category] ?? categoryTones.hourly)}>
                           {category}
                         </Badge>
                         <span>Supporting jobs</span>
@@ -475,7 +446,7 @@ const CronDashboard = () => {
           </TabsContent>
 
           <TabsContent value="codex-paper-jobs" className="mt-6">
-            <CodexJobQueue autoRefresh={autoRefresh} refreshToken={refreshToken} />
+            <CodexJobQueue autoRefresh={autoRefresh} />
           </TabsContent>
           <TabsContent value="catalog-audit" className="mt-6">
             <CatalogAuditPanel />

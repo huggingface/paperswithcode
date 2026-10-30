@@ -4,7 +4,8 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Building2, FlaskConical, ListChecks, Mail, Trophy, User, type LucideIcon } from 'lucide-react';
 import { researchApi, type FollowKind, type ResearchFollow } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
-import HfSignInButton, { hfLoginUrl } from './HfSignInButton';
+import { hfLoginUrl } from '@/lib/apiUrl';
+import HfSignInButton from './HfSignInButton';
 import { Switch } from './ui/switch';
 import TopicSettings from './TopicSettings';
 
@@ -132,7 +133,7 @@ export default function ResearchSettings() {
           <Mail aria-hidden="true" />
           {prefs.email ? <>
             <span>Sending to <strong>{prefs.email}</strong></span>
-            <a href={hfLoginUrl('/settings', false, true)}>Refresh from Hugging Face</a>
+            <a href={hfLoginUrl('/settings', { collectEmail: true })}>Refresh from Hugging Face</a>
           </> : <>
             <span>To receive it, allow access to the verified email on your Hugging Face account.</span>
             <HfSignInButton returnTo="/settings" collectEmail label="Allow email access" />

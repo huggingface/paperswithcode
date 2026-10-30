@@ -24,6 +24,10 @@
 const stripTrailingSlash = (value: string): string =>
   value.endsWith("/") ? value.slice(0, -1) : value;
 
+function enabledBuildFlag(value: unknown): boolean {
+  return ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
+}
+
 /**
  * Returns the API origin (scheme+host[:port]) the frontend should target.
  * Empty string means "same origin as the page" — preserved behaviour for
@@ -64,6 +68,33 @@ export function authUrl(path: string): string {
   const raw = import.meta.env.VITE_AUTH_URL?.trim();
   if (!raw) return apiUrl(normalised);
   return `${stripTrailingSlash(raw)}${normalised}`;
+}
+
+export interface HfLoginOptions {
+  authorizeInference?: boolean;
+  collectEmail?: boolean;
+  authorizeBucket?: boolean;
+  bucketCreate?: boolean;
+}
+
+/**
+ * Start Hugging Face sign-in and come back to `returnTo` (a path or URL).
+ * A cross-origin auth authority gets an absolute return URL; a same-origin
+ * one gets `returnTo` unchanged.
+ */
+export function hfLoginUrl(returnTo: string, options: HfLoginOptions = {}): string {
+  const endpoint = authUrl("/api/v1/auth/hf/login");
+  const authority = new URL(endpoint, window.location.origin).origin;
+  const target =
+    authority === window.location.origin
+      ? returnTo
+      : new URL(returnTo, window.location.origin).toString();
+  const params = new URLSearchParams({ return_to: target });
+  if (options.authorizeInference) params.set("authorize_inference", "true");
+  if (options.collectEmail) params.set("collect_email", "true");
+  if (options.authorizeBucket) params.set("authorize_bucket", "true");
+  if (options.bucketCreate) params.set("bucket_create", "true");
+  return `${endpoint}?${params.toString()}`;
 }
 
 /**
@@ -111,10 +142,7 @@ export function assetUrl(value: string | null | undefined): string | null {
  * the backend's session cookie across origins.
  */
 export function isAuthDisabled(): boolean {
-  const raw = import.meta.env.VITE_DISABLE_AUTH;
-  if (!raw) return false;
-  const lowered = String(raw).trim().toLowerCase();
-  return lowered === "1" || lowered === "true" || lowered === "yes";
+  return enabledBuildFlag(import.meta.env.VITE_DISABLE_AUTH);
 }
 
 /**
@@ -124,10 +152,7 @@ export function isAuthDisabled(): boolean {
  * transport implementation and must not make the interface public by itself.
  */
 export function isChatEnabled(): boolean {
-  const raw = import.meta.env.VITE_CHAT_ENABLED;
-  if (!raw) return false;
-  const lowered = String(raw).trim().toLowerCase();
-  return lowered === "1" || lowered === "true" || lowered === "yes";
+  return enabledBuildFlag(import.meta.env.VITE_CHAT_ENABLED);
 }
 
 /**
@@ -142,16 +167,20 @@ export function isChatMirror(): boolean {
   return isAuthDisabled() && !isChatEnabled();
 }
 
-function enabledBuildFlag(value: unknown): boolean {
-  return ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
-}
-
 export function isNativePdfReaderEnabled(): boolean {
   return enabledBuildFlag(import.meta.env.VITE_NATIVE_PDF_READER_ENABLED);
 }
 
 export function isPaperReaderChatEnabled(): boolean {
   return isChatEnabled() && enabledBuildFlag(import.meta.env.VITE_PAPER_READER_CHAT_ENABLED);
+}
+
+export function isCodexAddEvalsEnabled(): boolean {
+  return enabledBuildFlag(import.meta.env.VITE_CODEX_ADD_EVALS_ENABLED);
+}
+
+export function isCodexEnrichPaperEnabled(): boolean {
+  return enabledBuildFlag(import.meta.env.VITE_CODEX_ENRICH_PAPER_ENABLED);
 }
 
 /** `true` for the staging bundle and its canonical deployed hostname. */
@@ -173,8 +202,5 @@ export function isStagingEnvironment(): boolean {
  * not change public URL shape on `paperswithcode.co`.
  */
 export function shouldUseHashRouter(): boolean {
-  const raw = import.meta.env.VITE_USE_HASH_ROUTER;
-  if (!raw) return false;
-  const lowered = String(raw).trim().toLowerCase();
-  return lowered === "1" || lowered === "true" || lowered === "yes";
+  return enabledBuildFlag(import.meta.env.VITE_USE_HASH_ROUTER);
 }

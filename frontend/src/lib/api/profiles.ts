@@ -1,6 +1,5 @@
 import type { OrganizationContributions } from "./catalog.types";
-import { ApiError } from "../apiTransport";
-import { apiFetch } from "./request";
+import { apiResponse } from "./request";
 
 export interface ProfileResponse {
   username: string;
@@ -20,8 +19,7 @@ export interface ProfileResponse {
 
 export const profilesApi = {
   async get(username: string): Promise<ProfileResponse> {
-    const response = await apiFetch(`/profiles/${encodeURIComponent(username)}`);
-    if (!response.ok) throw new ApiError(response, await response.text());
+    const response = await apiResponse(`/profiles/${encodeURIComponent(username)}`);
     const data = await response.json() as ProfileResponse;
     if (!response.redirected) return data;
     const canonical = decodeURIComponent(

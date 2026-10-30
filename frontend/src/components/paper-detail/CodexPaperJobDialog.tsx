@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -13,16 +14,10 @@ import {
 } from "@/components/ui/dialog";
 import {
   AWAITING_MARKDOWN_MESSAGE,
+  codexApi,
   type CodexPaperJob,
-  cancelCodexAddEvalsJob,
-  cancelCodexEnrichPaperJob,
-  getCodexAddEvalsJob,
-  getCodexEnrichPaperJob,
-  startCodexAddEvals,
-  startCodexEnrichPaper,
-} from "@/lib/codexAddEvals";
-
-type CodexPaperJobKind = "add-evals" | "enrich-paper";
+  type CodexPaperJobKind,
+} from "@/lib/api/codex";
 
 const JOB_COPY = {
   "add-evals": {
@@ -42,9 +37,6 @@ const JOB_COPY = {
     progress:
       "Codex is researching the paper and validating results against the configured leaderboards.",
     action: "Run add-evals",
-    start: startCodexAddEvals,
-    get: getCodexAddEvalsJob,
-    cancel: cancelCodexAddEvalsJob,
   },
   "enrich-paper": {
     trigger: "enrich paper",
@@ -62,11 +54,15 @@ const JOB_COPY = {
       "Uncertain URLs and missing taxonomy concepts will be reported rather than guessed. Jobs run one at a time in submission order.",
     progress: "Codex is validating artifacts, taxonomy tags, and thumbnail quality for this paper.",
     action: "Run enrich-paper",
-    start: startCodexEnrichPaper,
-    get: getCodexEnrichPaperJob,
-    cancel: cancelCodexEnrichPaperJob,
   },
 } as const;
+
+const ACTIVE_STATUSES = new Set<CodexPaperJob["status"]>([
+  "queued",
+  "dispatching",
+  "running",
+  "awaiting_markdown",
+]);
 
 interface CodexPaperJobDialogProps {
   kind: CodexPaperJobKind;
@@ -124,37 +120,40 @@ export function CodexPaperJobDialog({
   onComplete,
 }: CodexPaperJobDialogProps) {
   const copy = JOB_COPY[kind];
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [job, setJob] = useState<CodexPaperJob | null>(null);
-  const [starting, setStarting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const completedJobId = useRef<string | null>(null);
-  const waiting = job?.status === "awaiting_markdown";
-  const active =
-    waiting || job?.status === "queued" || job?.status === "dispatching" || job?.status === "running";
-  const jobId = job?.id;
+  const jobKey = (id: string | null) => ["admin", "codexPaperJob", kind, id];
 
-  useEffect(() => {
-    if (!active || !jobId) return;
-    let cancelled = false;
-    const timer = window.setInterval(async () => {
-      try {
-        const next = await copy.get(jobId);
-        if (!cancelled) {
-          setJob(next);
-          setError(null);
-        }
-      } catch (pollError) {
-        if (!cancelled) {
-          setError(pollError instanceof Error ? pollError.message : "Could not check job status.");
-        }
-      }
-    }, waiting ? 60_000 : 2_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [active, waiting, copy, jobId]);
+  const jobQuery = useQuery({
+    queryKey: jobKey(jobId),
+    queryFn: () => codexApi.getPaperJob(kind, jobId!),
+    enabled: jobId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (status === "awaiting_markdown") return 60_000;
+      return status && ACTIVE_STATUSES.has(status) ? 2_000 : false;
+    },
+    retry: false,
+  });
+  const showJob = (next: CodexPaperJob) => {
+    queryClient.setQueryData(jobKey(next.id), next);
+    setJobId(next.id);
+  };
+  const start = useMutation({
+    mutationFn: () => codexApi.startPaperJob(kind, paperId),
+    onSuccess: showJob,
+  });
+  const cancel = useMutation({
+    mutationFn: (id: string) => codexApi.cancelPaperJob(kind, id),
+    onSuccess: showJob,
+  });
+
+  const job = jobId ? jobQuery.data : undefined;
+  const waiting = job?.status === "awaiting_markdown";
+  const active = job ? ACTIVE_STATUSES.has(job.status) : false;
+  const error = (start.error ?? cancel.error ?? jobQuery.error)?.message;
 
   useEffect(() => {
     if (job?.status !== "completed" || completedJobId.current === job.id) return;
@@ -162,32 +161,11 @@ export function CodexPaperJobDialog({
     onComplete();
   }, [job, onComplete]);
 
-  const start = async () => {
-    setStarting(true);
-    setError(null);
-    try {
-      setJob(await copy.start(paperId));
-    } catch (startError) {
-      setError(startError instanceof Error ? startError.message : "Could not start Codex.");
-    } finally {
-      setStarting(false);
-    }
-  };
-
   const reset = () => {
-    setJob(null);
-    setError(null);
+    setJobId(null);
+    start.reset();
+    cancel.reset();
     completedJobId.current = null;
-  };
-
-  const cancel = async () => {
-    if (!job) return;
-    setError(null);
-    try {
-      setJob(await copy.cancel(job.id));
-    } catch (cancelError) {
-      setError(cancelError instanceof Error ? cancelError.message : "Could not cancel Codex.");
-    }
   };
 
   return (
@@ -247,10 +225,10 @@ export function CodexPaperJobDialog({
           <Button variant="outline" onClick={() => setOpen(false)}>
             {active ? "Close" : "Cancel"}
           </Button>
-          {active && <Button variant="outline" onClick={() => void cancel()}>Cancel job</Button>}
+          {active && job && <Button variant="outline" onClick={() => cancel.mutate(job.id)}>Cancel job</Button>}
           {!job && (
-            <Button onClick={start} disabled={starting}>
-              {starting ? "Starting…" : copy.action}
+            <Button onClick={() => start.mutate()} disabled={start.isPending}>
+              {start.isPending ? "Starting…" : copy.action}
             </Button>
           )}
           {job && !active && (

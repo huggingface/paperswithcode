@@ -12,32 +12,27 @@ import {
   XCircle,
 } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
+import { StatusBadge } from "@/components/cron/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { formatCronDate } from "@/lib/cronStatus";
 import {
-  getCodexPaperJobs,
-  retryCodexPaperJob,
-  retryCodexTrace,
-  cancelCodexPaperJob,
-  promoteBenchmarkCandidate,
-  rollbackBenchmarkCandidate,
-  setCodexScheduler,
   AWAITING_MARKDOWN_MESSAGE,
+  codexApi,
   type CodexPaperJob,
   type CodexPaperJobStatus,
-} from "@/lib/codexAddEvals";
+} from "@/lib/api/codex";
+import { ApiError } from "@/lib/apiTransport";
+import { formatCronDate, type Tone } from "@/lib/cronStatus";
 
-const statusStyles: Record<CodexPaperJobStatus, string> = {
-  queued: "cron-status--unknown",
-  dispatching: "cron-status--running",
-  running: "cron-status--running",
-  completed: "cron-status--healthy",
-  failed: "cron-status--broken",
-  canceled: "cron-status--unknown",
-  awaiting_markdown: "cron-status--unknown",
+const statusTones: Record<CodexPaperJobStatus, Tone> = {
+  queued: "unknown",
+  dispatching: "running",
+  running: "running",
+  completed: "healthy",
+  failed: "broken",
+  canceled: "unknown",
+  awaiting_markdown: "unknown",
 };
 
 const statusLabels: Record<CodexPaperJobStatus, string> = {
@@ -68,18 +63,13 @@ const statusIcons: Record<CodexPaperJobStatus, typeof Clock3> = {
   awaiting_markdown: FileClock,
 };
 
-interface CodexJobQueueProps {
-  autoRefresh: boolean;
-  refreshToken: number;
-}
-
 function JobStatus({ status }: { status: CodexPaperJobStatus }) {
   const Icon = statusIcons[status];
   return (
-    <Badge variant="outline" className={statusStyles[status]}>
+    <StatusBadge tone={statusTones[status]}>
       <Icon className={`mr-1 h-3.5 w-3.5 ${status === "dispatching" ? "animate-spin" : ""}`} />
       {statusLabels[status]}
-    </Badge>
+    </StatusBadge>
   );
 }
 
@@ -122,7 +112,7 @@ function SkippedLeaderboards({ mutationResult }: { mutationResult: Record<string
   );
 }
 
-export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps) {
+export function CodexJobQueue({ autoRefresh }: { autoRefresh: boolean }) {
   const queryClient = useQueryClient();
   const [trigger, setTrigger] = useState("");
   const [status, setStatus] = useState("");
@@ -132,24 +122,30 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
   const [promotionInputs, setPromotionInputs] = useState<Record<string, { dataset: string; task: string; metric: string }>>({});
   const filters = { trigger, status, policy_version: policyVersion, cohort_date: cohortDate, review_status: reviewStatus };
   const { data, isLoading, isFetching, error } = useQuery({
-    queryKey: ["codexPaperJobs", refreshToken, filters],
-    queryFn: () => getCodexPaperJobs(100, filters),
+    queryKey: ["admin", "codexPaperJobs", filters],
+    queryFn: () => codexApi.listJobs(100, filters),
     refetchInterval: autoRefresh ? 10_000 : false,
     retry: false,
   });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["codexPaperJobs"] });
-  const retryJob = useMutation({ mutationFn: retryCodexPaperJob, onSuccess: refresh });
-  const cancelJob = useMutation({ mutationFn: cancelCodexPaperJob, onSuccess: refresh });
-  const retryTrace = useMutation({ mutationFn: retryCodexTrace, onSuccess: refresh });
-  const scheduler = useMutation({ mutationFn: setCodexScheduler, onSuccess: refresh });
-  const promoteCandidate = useMutation({
-    mutationFn: ({ id, dataset, task, metric }: { id: string; dataset: string; task: string; metric: string }) =>
-      promoteBenchmarkCandidate(id, { dataset_id: Number(dataset), task_id: Number(task), best_metric: metric.trim() }),
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["admin", "codexPaperJobs"] });
+  const retryJob = useMutation({ mutationFn: (id: string) => codexApi.retryJob(id), onSuccess: refresh });
+  const cancelJob = useMutation({ mutationFn: (id: string) => codexApi.cancelJob(id), onSuccess: refresh });
+  const retryTrace = useMutation({ mutationFn: (id: string) => codexApi.retryTrace(id), onSuccess: refresh });
+  const scheduler = useMutation({
+    mutationFn: (action: "pause" | "resume") => codexApi.setScheduler(action),
     onSuccess: refresh,
   });
-  const rollbackCandidate = useMutation({ mutationFn: rollbackBenchmarkCandidate, onSuccess: refresh });
+  const promoteCandidate = useMutation({
+    mutationFn: ({ id, dataset, task, metric }: { id: string; dataset: string; task: string; metric: string }) =>
+      codexApi.promoteBenchmarkCandidate(id, { dataset_id: Number(dataset), task_id: Number(task), best_metric: metric.trim() }),
+    onSuccess: refresh,
+  });
+  const rollbackCandidate = useMutation({
+    mutationFn: (id: string) => codexApi.rollbackBenchmarkCandidate(id),
+    onSuccess: refresh,
+  });
 
-  const errorStatus = error && typeof error === "object" && "status" in error ? error.status : undefined;
+  const notEnabled = error instanceof ApiError && error.status === 404;
 
   return (
     <Card className="mb-8">
@@ -175,13 +171,13 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
           </div>
         )}
 
-        {error && errorStatus !== 404 && (
+        {error && !notEnabled && (
           <div className="cron-message cron-message--error mb-4">
-            {error instanceof Error ? error.message : "Could not load Codex paper jobs."}
+            {error.message}
           </div>
         )}
 
-        {errorStatus === 404 && (
+        {notEnabled && (
           <p className="py-4 text-sm cron-muted">Codex paper jobs are not enabled in this environment.</p>
         )}
 
@@ -230,7 +226,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                 <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option><option value="hf-trending-cron">HF trending cron</option><option value="benchmark-gap-cron">Benchmark gap cron</option><option value="model-release-radar">Release radar</option>
               </select>
               <select aria-label="Status" className="rounded border px-2 py-1 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}>
-                <option value="">All statuses</option>{Object.keys(statusStyles).map((value) => <option key={value}>{value}</option>)}
+                <option value="">All statuses</option>{Object.keys(statusTones).map((value) => <option key={value}>{value}</option>)}
               </select>
               <input aria-label="Policy version" className="rounded border px-2 py-1 text-sm" placeholder="Policy version" value={policyVersion} onChange={(event) => setPolicyVersion(event.target.value)} />
               <input aria-label="Cohort date" type="date" className="rounded border px-2 py-1 text-sm" value={cohortDate} onChange={(event) => setCohortDate(event.target.value)} />
@@ -369,7 +365,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                           <SkippedLeaderboards mutationResult={stage.mutation_result} />
                           {stage.mutation_result && <details className="mt-2"><summary>Accepted callback result and before/after state</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap">{JSON.stringify(stage.mutation_result, null, 2)}</pre></details>}
                           {stage.trace_status === "complete" && (
-                            <a className="mt-2 inline-flex items-center gap-1 hover:underline" href={`/api/v1/admin/codex-curation/jobs/${stage.id}/trace`} target="_blank" rel="noreferrer">
+                            <a className="mt-2 inline-flex items-center gap-1 hover:underline" href={codexApi.traceUrl(stage.id)} target="_blank" rel="noreferrer">
                               Authenticated trace manifest <ExternalLink className="h-3.5 w-3.5" />
                             </a>
                           )}

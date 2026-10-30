@@ -8,6 +8,7 @@ import { evaluationsApi } from "@/lib/api/evaluations";
 import { papersApi } from "@/lib/api/papers";
 import {
   assetUrl,
+  isCodexEnrichPaperEnabled,
   isNativePdfReaderEnabled,
   isPaperReaderChatEnabled,
   isStagingEnvironment,
@@ -42,8 +43,7 @@ import { PaperMetadataSections } from "@/components/paper-detail/PaperMetadataSe
 import { SignInToEditDialog } from "@/components/paper-detail/SignInToEditDialog";
 import { SavePaperButton } from "@/components/paper-detail/SavePaperButton";
 import { EditableActionButton } from "@/components/paper-detail/EditableActionButton";
-import { CodexEnrichPaperDialog } from "@/components/paper-detail/CodexEnrichPaperDialog";
-import { isCodexEnrichPaperEnabled } from "@/lib/codexAddEvals";
+import { CodexPaperJobDialog } from "@/components/paper-detail/CodexPaperJobDialog";
 import { organizationShortName } from "@/lib/organizationNames";
 import { AuthorAvatar } from "@/components/AuthorAvatar";
 
@@ -597,7 +597,9 @@ const PaperDetailView: React.FC = () => {
             )}
             <PaperAgentEdits paperId={Number(paper.id)} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
-              <CodexEnrichPaperDialog
+              <CodexPaperJobDialog
+                kind="enrich-paper"
+                triggerClassName="action-btn"
                 paperId={Number(paper.id)}
                 paperTitle={paper.title}
                 onComplete={() => void refetch()}

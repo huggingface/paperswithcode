@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -75,6 +76,13 @@ describe("ChatComputePanel", () => {
   });
 });
 
+const renderWithClient = (ui: ReactElement) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const wrap = (node: ReactElement) => <QueryClientProvider client={client}>{node}</QueryClientProvider>;
+  const result = render(wrap(ui));
+  return { ...result, rerender: (next: ReactElement) => result.rerender(wrap(next)) };
+};
+
 describe("CronJobCard health axes", () => {
   const job: CronJobStatus = {
     job_name: "example",
@@ -121,7 +129,7 @@ describe("CronJobCard health axes", () => {
   };
 
   it("renders axes independently and exposes scheduler evidence", () => {
-    const { rerender } = render(
+    const { rerender } = renderWithClient(
       <CronJobCard job={job} expanded={false} onToggle={() => undefined} />,
     );
     expect(screen.getByText("Execution: broken")).toBeInTheDocument();
@@ -145,7 +153,7 @@ describe("CronJobCard health axes", () => {
     expect(screen.getByText("Scheduler evidence")).toBeInTheDocument();
   });
 
-  it("explains paper Markdown spend, reservations, and rolling window", () => {
+  it("explains paper Markdown spend, reservations, and rolling window", async () => {
     const budget = {
       mode: "live" as const,
       cost_policy: "unmetered_hf" as const,
@@ -242,16 +250,16 @@ describe("CronJobCard health axes", () => {
       },
     };
 
-    render(
+    vi.spyOn(operationsApi, "getPaperMarkdownJobs").mockResolvedValue(monitor);
+    renderWithClient(
       <CronJobCard
         job={{ ...job, job_name: "paper_markdown_backfill" }}
         expanded
         onToggle={() => undefined}
-        paperMarkdownJobs={monitor}
       />,
     );
 
-    expect(screen.getByText("Rolling 30-day window")).toBeInTheDocument();
+    expect(await screen.findByText("Rolling 30-day window")).toBeInTheDocument();
     expect(screen.getAllByText("Unmetered HF")).toHaveLength(2);
     expect(screen.getByText("Live GPU policy:").parentElement).toHaveTextContent("unmetered on HF · 1 of 1 planned");
     expect(screen.getByText("All history · no automatic reset")).toBeInTheDocument();
@@ -408,7 +416,7 @@ describe("CronDashboard refresh controls", () => {
     await waitFor(() => expect(refreshButton).toBeEnabled());
 
     act(() => {
-      void queryClient.refetchQueries({ queryKey: ["cronStatus", "nielsr"] });
+      void queryClient.refetchQueries({ queryKey: ["admin", "cronStatus"] });
     });
     await waitFor(() => expect(cronStatus).toHaveBeenCalledTimes(2));
 
@@ -416,6 +424,52 @@ describe("CronDashboard refresh controls", () => {
 
     finishAutomaticRefetch?.(freshSnapshot);
     await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    queryClient.clear();
+  });
+
+  it("forces a fresh CRON snapshot and refetches the other admin panels", async () => {
+    const snapshot = ({
+      timestamp: "2026-08-14T12:00:00Z",
+      jobs: [],
+      manual_operations: [],
+      summary: {
+        total_jobs: 0, scheduled_jobs: 0, manual_jobs: 0,
+        healthy: 0, degraded: 0, broken: 0, running: 0, stuck: 0, unknown: 0,
+        health_score: 100,
+        critical_issues: [],
+        what_to_check_next: "All monitored jobs look healthy",
+        coverage: {
+          registered_scheduled_duties: 0, discovered_scheduled_duties: 0,
+          monitored_duties: 0, coverage_gaps: 0, gap_ids: [],
+        },
+      },
+      snapshot_generated_at: "2026-08-14T12:00:00Z",
+      snapshot_age_seconds: 0,
+      snapshot_stale: false,
+      refreshing: false,
+    } satisfies CronJobsResponse);
+    const cronStatus = vi.spyOn(operationsApi, "getCronStatus").mockResolvedValue(snapshot);
+    const spend = vi.spyOn(chatApi, "getSandboxSpend").mockResolvedValue(status());
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <CronDashboard />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const refreshButton = await screen.findByRole("button", { name: "Refresh" });
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+    expect(cronStatus).toHaveBeenCalledTimes(1);
+    expect(spend).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => expect(cronStatus).toHaveBeenLastCalledWith(true));
+    await waitFor(() => expect(spend).toHaveBeenCalledTimes(2));
+    expect(cronStatus).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(refreshButton).toBeEnabled());
     queryClient.clear();
   });
 });

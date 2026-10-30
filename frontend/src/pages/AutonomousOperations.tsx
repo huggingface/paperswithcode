@@ -9,8 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { operationsApi, type AutonomousOperationsResponse } from "@/lib/api/operations";
-import { useAuth } from "@/lib/authContext";
-import { formatCronDate } from "@/lib/cronStatus";
+import { formatCronDate, toneClass, type Tone } from "@/lib/cronStatus";
 
 const labels: Record<string, string> = {
   submissions: "Submission review",
@@ -19,26 +18,25 @@ const labels: Record<string, string> = {
   chat_reliability: "Chat reliability",
 };
 
-const statusClass: Record<string, string> = {
-  healthy: "cron-status--healthy",
-  degraded: "cron-status--degraded",
-  repairing: "cron-status--running",
-  "rolled-back": "cron-status--broken",
-  manual: "cron-status--degraded",
+const stateTones: Record<AutonomousOperationsResponse["display_state"], Tone> = {
+  healthy: "healthy",
+  degraded: "degraded",
+  repairing: "running",
+  "rolled-back": "broken",
+  manual: "degraded",
 };
 
+const queryKey = ["admin", "autonomousOperations"];
+
 const AutonomousOperations = () => {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [baselineSha, setBaselineSha] = useState("");
   const [manualConfirmation, setManualConfirmation] = useState("");
   const [operatorConfirmations, setOperatorConfirmations] = useState<Record<string, string>>({});
   const [baselineConfirmation, setBaselineConfirmation] = useState("");
-  const queryKey = ["autonomousOperations", user?.username];
   const query = useQuery({
     queryKey,
     queryFn: () => operationsApi.getAutonomousOperations(),
-    enabled: !!user?.is_admin,
     refetchInterval: 30_000,
     retry: false,
   });
@@ -88,7 +86,7 @@ const AutonomousOperations = () => {
         )}
 
         <div className="grid md:grid-cols-4 gap-4">
-          <Card className={statusClass[data.display_state]}><CardHeader><CardTitle className="text-sm">Overall state</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold capitalize">{data.display_state}</div><p className="text-sm">Monitoring {data.monitoring_active ? "active" : "inactive"}</p></CardContent></Card>
+          <Card className={toneClass(stateTones[data.display_state])}><CardHeader><CardTitle className="text-sm">Overall state</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold capitalize">{data.display_state}</div><p className="text-sm">Monitoring {data.monitoring_active ? "active" : "inactive"}</p></CardContent></Card>
           <Card><CardHeader><CardTitle className="text-sm">Codex cost</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">${data.costs.total_usd}</div><p className="text-sm">{data.costs.input_tokens + data.costs.output_tokens} tokens</p></CardContent></Card>
           <Card><CardHeader><CardTitle className="text-sm">Repair lease</CardTitle></CardHeader><CardContent><div className="text-lg font-bold">{data.active_lease ? data.active_lease.owner_operator : "Available"}</div><p className="text-sm">{data.active_lease ? `Expires ${formatCronDate(data.active_lease.expires_at)}` : "No active source repair"}</p></CardContent></Card>
           <Card><CardHeader><CardTitle className="text-sm">Global control</CardTitle></CardHeader><CardContent className="space-y-2"><Input aria-label="Manual mode confirmation" value={manualConfirmation} onChange={(event) => setManualConfirmation(event.target.value)} placeholder="Type SET_MANUAL_MODE" /><Button disabled={update.isPending || manualConfirmation !== "SET_MANUAL_MODE"} onClick={setManualMode}>{data.manual_mode ? "Leave manual mode" : "Enable manual mode"}</Button></CardContent></Card>
@@ -96,7 +94,7 @@ const AutonomousOperations = () => {
 
         <div className="grid md:grid-cols-4 gap-4">
           {data.operators.map((operator) => (
-            <Card key={operator.operator} className={statusClass[operator.status]}>
+            <Card key={operator.operator} className={toneClass(stateTones[operator.status])}>
               <CardHeader><CardTitle className="flex justify-between gap-2"><span>{labels[operator.operator]}</span><Badge>{operator.status}</Badge></CardTitle></CardHeader>
               <CardContent className="space-y-3"><p>{operator.enabled ? "Mutation enabled" : "Mutation disabled"} · monitoring {operator.monitoring_active ? "active" : "unverified"}</p><p className="text-sm">Next scheduled run: {operator.next_scheduled_run ? formatCronDate(operator.next_scheduled_run) : "not scheduled"}</p><Input aria-label={`${labels[operator.operator]} confirmation`} value={operatorConfirmations[operator.operator] ?? ""} onChange={(event) => setOperatorConfirmations((current) => ({ ...current, [operator.operator]: event.target.value }))} placeholder="Type SET_OPERATOR_STATE" /><Button disabled={update.isPending || (data.manual_mode && !operator.enabled) || operatorConfirmations[operator.operator] !== "SET_OPERATOR_STATE"} onClick={() => setOperator(operator.operator, !operator.enabled)}>{operator.enabled ? "Disable" : "Enable"}</Button></CardContent>
             </Card>

@@ -11,8 +11,8 @@ import FeedView from './FeedView';
 const auth = vi.hoisted(() => ({ user: { hf_subject: 'alice', username: 'alice' } as { hf_subject: string; username: string } | null, isLoading: false }));
 vi.mock('@/lib/authContext', () => ({ useAuth: () => auth, useOptionalAuth: () => auth }));
 const login = vi.hoisted(() => ({ hfLoginUrl: vi.fn(() => window.location.href) }));
-vi.mock('@/components/HfSignInButton', async importOriginal => ({
-  ...await importOriginal<typeof import('@/components/HfSignInButton')>(), hfLoginUrl: login.hfLoginUrl,
+vi.mock('@/lib/apiUrl', async importOriginal => ({
+  ...await importOriginal<typeof import('@/lib/apiUrl')>(), hfLoginUrl: login.hfLoginUrl,
 }));
 vi.mock('@/hooks/useIntersectionObserver', () => ({ useIntersectionObserver: () => ({ targetRef: () => {}, isIntersecting: false }) }));
 const paper = { id: '1', arxiv_id: '2610.12345', title: 'A paper', abstract: 'Full abstract.',

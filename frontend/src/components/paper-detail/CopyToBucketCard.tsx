@@ -18,7 +18,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { useToast } from "@/hooks/use-toast";
 import { ApiError } from "@/lib/apiTransport";
 import { papersApi } from "@/lib/api/papers";
-import { authUrl } from "@/lib/apiUrl";
+import { hfLoginUrl } from "@/lib/apiUrl";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 
 type BucketArtifactKind = "pdf" | "model" | "dataset" | "space" | "github";
@@ -361,7 +361,6 @@ export function CopyToBucketCard(props: CopyToBucketCardProps) {
   };
 
   const authorizeBucket = useCallback(() => {
-    const endpoint = authUrl("/api/v1/auth/hf/login");
     const returnUrl = new URL(window.location.href);
     returnUrl.searchParams.set(BUCKET_AUTHORIZATION_PARAM, props.paperId);
     window.sessionStorage.setItem(
@@ -374,12 +373,10 @@ export function CopyToBucketCard(props: CopyToBucketCardProps) {
         selectedIds: Array.from(selectedIds),
       } satisfies PendingBucketAuthorization),
     );
-    const params = new URLSearchParams({
-      return_to: returnUrl.toString(),
-      authorize_bucket: "true",
-    });
-    if (destinationMode === "new") params.set("bucket_create", "true");
-    window.location.assign(`${endpoint}?${params.toString()}`);
+    window.location.assign(hfLoginUrl(returnUrl.toString(), {
+      authorizeBucket: true,
+      bucketCreate: destinationMode === "new",
+    }));
   }, [bucketId, destinationMode, props.paperId, selectedIds, visibility]);
 
   const copyNow = useCallback(async () => {

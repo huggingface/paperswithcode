@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, ApiTransport, getApiErrorMessage, requestJson } from "./apiTransport";
+import { ApiError, ApiTransport, getApiErrorMessage } from "./apiTransport";
 
 describe("API transport", () => {
   beforeEach(() => {
@@ -22,7 +22,28 @@ describe("API transport", () => {
       cache: "default",
       credentials: "include",
     }));
-    expect(new Headers(options?.headers).get("Content-Type")).toBe("application/json");
+    expect(new Headers(options?.headers).has("Content-Type")).toBe(false);
+  });
+
+  it("labels only string bodies as JSON so form uploads keep their boundary", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+    const transport = new ApiTransport("https://example.test");
+
+    await transport.request("/json", { method: "POST", body: JSON.stringify({ a: 1 }) });
+    await transport.request("/upload", { method: "POST", body: new FormData() });
+    await transport.request("/text", {
+      method: "POST",
+      body: "plain",
+      headers: { "Content-Type": "text/plain" },
+    });
+
+    const contentType = (call: number) =>
+      new Headers(fetchMock.mock.calls[call][1]?.headers).get("Content-Type");
+    expect(contentType(0)).toBe("application/json");
+    expect(contentType(1)).toBeNull();
+    expect(contentType(2)).toBe("text/plain");
   });
 
   it("returns undefined for an empty 204 response", async () => {
@@ -81,7 +102,7 @@ describe("API transport", () => {
     window.addEventListener("pwc:catalog-conflict", conflict);
     window.addEventListener("pwc:auth-stale", stale);
 
-    const result = requestJson("https://example.test", "/unrelated", {
+    const result = new ApiTransport("https://example.test").request("/unrelated", {
       method: "POST",
     });
 
@@ -114,7 +135,7 @@ describe("API transport", () => {
     window.addEventListener("pwc:auth-stale", stale);
 
     await expect(
-      requestJson("https://example.test", "/me", { method: "GET" }),
+      new ApiTransport("https://example.test").request("/me", { method: "GET" }),
     ).rejects.toMatchObject({ status: 401 });
 
     expect(stale).not.toHaveBeenCalled();

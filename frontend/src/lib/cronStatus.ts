@@ -1,3 +1,14 @@
+import type { CronJobHealth } from "@/lib/api/operations";
+
+/** Visual severity shared by the admin dashboards' status chips and cards. */
+export type Tone = CronJobHealth;
+
+export const toneClass = (tone: Tone): string => `cron-status--${tone}`;
+
+export const formatUsd = (usd: number): string => `$${usd.toFixed(2)}`;
+
+export const formatMicroUsd = (microusd: number): string => formatUsd(microusd / 1_000_000);
+
 export function formatCronDate(dateString: string | null): string {
   if (!dateString) return "Never";
   const date = new Date(dateString);

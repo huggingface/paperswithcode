@@ -8,6 +8,7 @@ import {
   BrowserRouter,
   HashRouter,
   Navigate,
+  Outlet,
   Route,
   Routes,
   useLocation,
@@ -16,12 +17,11 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 
+import AppErrorBoundary from "@/components/AppErrorBoundary";
 import Header from "@/components/Header";
 import HfSignInButton from "@/components/HfSignInButton";
 import SiteFooter from "@/components/SiteFooter";
 import { Toaster } from "@/components/ui/toaster";
-import { Toaster as SonnerToaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { useScrollToTop } from "@/hooks/useScrollToTop";
 import {
   adminDashboardUrl,
@@ -143,9 +143,9 @@ const AuthGatedRoute: React.FC<{ element: React.ReactNode }> = ({ element }) => 
 
 const AdminGatedRoute: React.FC<{ element: React.ReactNode }> = ({ element }) => {
   const { user, isLoading } = useAuth();
-  const authDisabled = isAuthDisabled();
+  const location = useLocation();
 
-  if (authDisabled) {
+  if (isAuthDisabled()) {
     return <Navigate to="/" replace />;
   }
 
@@ -165,7 +165,7 @@ const AdminGatedRoute: React.FC<{ element: React.ReactNode }> = ({ element }) =>
         <div className="submission-empty submission-empty-warn">
           <h1>Sign in required</h1>
           <p>Sign in with an allowlisted Hugging Face admin account to view admin operations.</p>
-          <HfSignInButton returnTo="/admin-dashboard" />
+          <HfSignInButton returnTo={`${location.pathname}${location.search}`} />
         </div>
       </div>
     );
@@ -211,14 +211,11 @@ const AdminDashboardRoute: React.FC = () => {
   return <AdminGatedRoute element={<CronDashboard />} />;
 };
 
-const Shell: React.FC = () => {
+// Header, search overlay and route error boundary shared by every page except
+// the standalone staging access request. The PDF reader drops the footer.
+const SiteLayout: React.FC<{ reader?: boolean }> = ({ reader = false }) => {
   const [searchOpen, setSearchOpen] = React.useState(false);
-  const location = useLocation();
-
-  useScrollToTop();
-  React.useLayoutEffect(() => {
-    document.getElementById("initial-discovery-footer")?.remove();
-  }, []);
+  const { pathname } = useLocation();
 
   React.useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -231,103 +228,114 @@ const Shell: React.FC = () => {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  if (location.pathname === "/request-access") {
-    return (
+  const header = <Header onOpenSearch={() => setSearchOpen(true)} />;
+  const page = (
+    <AppErrorBoundary resetKey={pathname}>
       <React.Suspense fallback={<RouteFallback />}>
-        <StagingAccessRequestView />
+        <Outlet />
       </React.Suspense>
-    );
-  }
+    </AppErrorBoundary>
+  );
+  const search = searchOpen && (
+    <React.Suspense fallback={null}>
+      <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
+    </React.Suspense>
+  );
 
-  if (location.pathname.startsWith("/pdf/")) {
+  if (reader) {
     return (
       <div className="reader-route-shell">
-        <Header onOpenSearch={() => setSearchOpen(true)} />
-        <div className="reader-route-content">
-          <React.Suspense fallback={<RouteFallback />}>
-            <Routes>
-              <Route
-                path="/pdf/:paperId"
-                element={isNativePdfReaderEnabled() ? <PaperReaderView /> : <NotFound />}
-              />
-            </Routes>
-          </React.Suspense>
-        </div>
-        {searchOpen && (
-          <React.Suspense fallback={null}>
-            <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
-          </React.Suspense>
-        )}
+        {header}
+        <div className="reader-route-content">{page}</div>
+        {search}
       </div>
     );
   }
-
   return (
     <>
-      <Header onOpenSearch={() => setSearchOpen(true)} />
-      <main>
-        <React.Suspense fallback={<RouteFallback />}>
-          <Routes>
-            <Route path="/" element={<FeedView />} />
-            <Route path="/following" element={<FollowingView />} />
-            <Route path="/x-trending" element={<FeedView xTrending />} />
-            {/* Keep new and persisted chats on the same route instance. A new
-                turn replaces /chat with /chat/:sessionId as soon as the server
-                allocates it; sibling routes would unmount ChatView and abort
-                that turn's active SSE request. */}
-            <Route
-              path="/chat/:sessionId?"
-              element={isChatEnabled() ? <ChatView /> : <Navigate to="/" replace />}
-            />
-            <Route
-              path="/share/:shareId"
-              element={isChatEnabled() ? <SharedChatView /> : <NotFound />}
-            />
-            <Route path="/papers" element={<PapersListView />} />
-            <Route path="/papers/:arxivId" element={<LegacyPaperRedirect />} />
-            <Route path="/paper/:arxivId" element={<PaperDetailView />} />
-            <Route path="/tasks" element={<TagsIndexView />} />
-            <Route path="/tasks/:taskSlug" element={<TagBrowseView />} />
-            <Route path="/task/:taskSlug" element={<LegacyTaskRedirect />} />
-            <Route path="/methods" element={<MethodsIndexView />} />
-            <Route path="/methods/:methodSlug" element={<MethodDetailView />} />
-            <Route path="/frameworks" element={<FrameworksIndexView />} />
-            <Route path="/trends" element={<TrendsView />} />
-            <Route path="/conferences" element={<ConferencesIndexView />} />
-            <Route path="/ai-deadlines" element={<AiDeadlinesView />} />
-            <Route path="/conferences/:confSlug" element={<ConferenceDetailView />} />
-            <Route path="/conferences/:confSlug/:taskSlug" element={<ConferenceTaskView />} />
-            <Route path="/organizations" element={<OrganizationsIndexView />} />
-            <Route path="/orgs/:orgSlug" element={<OrganizationDetailView />} />
-            <Route path="/orgs/:orgSlug/:taskSlug" element={<OrganizationTaskView />} />
-            <Route path="/authors/:authorId" element={<AuthorDetailView />} />
-            <Route path="/benchmark/:datasetSlug" element={<BenchmarkDetailView />} />
-            <Route path="/authorize-paper-edit/:authorizationId" element={<AuthorizePaperEditView />} />
-            <Route path="/submit" element={<SubmitView />} />
-            <Route path="/saved" element={<AuthGatedRoute element={<SavedPapersView />} />} />
-            <Route path="/settings" element={<SettingsView />} />
-            <Route path="/privacy" element={<PrivacyView />} />
-            <Route path="/docs/api" element={<ApiDocsView />} />
-            <Route path="/mcp" element={<McpView />} />
-            <Route path="/admin-dashboard" element={<AdminDashboardRoute />} />
-            <Route path="/autonomous-operations" element={<AdminGatedRoute element={<AutonomousOperations />} />} />
-            <Route path="/cron-dashboard" element={<Navigate to="/admin-dashboard" replace />} />
-            <Route path="/submissions" element={<AuthGatedRoute element={<SubmissionsDashboard />} />} />
-            <Route path="/rate-limits" element={<RateLimitsView />} />
-            {/* Curated landing pages must precede the greedy /:username route. */}
-            <Route path="/astra-for-robotics" element={<AstraForRoboticsView />} />
-            <Route path="/:username" element={<UserProfileView />} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-        </React.Suspense>
-      </main>
+      {header}
+      <main>{page}</main>
       <SiteFooter />
-      {searchOpen && (
-        <React.Suspense fallback={null}>
-          <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} />
-        </React.Suspense>
-      )}
+      {search}
     </>
+  );
+};
+
+const Shell: React.FC = () => {
+  useScrollToTop();
+  React.useLayoutEffect(() => {
+    document.getElementById("initial-discovery-footer")?.remove();
+  }, []);
+
+  return (
+    <Routes>
+      <Route
+        path="/request-access"
+        element={
+          <React.Suspense fallback={<RouteFallback />}>
+            <StagingAccessRequestView />
+          </React.Suspense>
+        }
+      />
+      <Route element={<SiteLayout reader />}>
+        <Route
+          path="/pdf/:paperId"
+          element={isNativePdfReaderEnabled() ? <PaperReaderView /> : <NotFound />}
+        />
+      </Route>
+      <Route element={<SiteLayout />}>
+        <Route path="/" element={<FeedView />} />
+        <Route path="/following" element={<FollowingView />} />
+        <Route path="/x-trending" element={<FeedView xTrending />} />
+        {/* Keep new and persisted chats on the same route instance. A new
+            turn replaces /chat with /chat/:sessionId as soon as the server
+            allocates it; sibling routes would unmount ChatView and abort
+            that turn's active SSE request. */}
+        <Route
+          path="/chat/:sessionId?"
+          element={isChatEnabled() ? <ChatView /> : <Navigate to="/" replace />}
+        />
+        <Route
+          path="/share/:shareId"
+          element={isChatEnabled() ? <SharedChatView /> : <NotFound />}
+        />
+        <Route path="/papers" element={<PapersListView />} />
+        <Route path="/papers/:arxivId" element={<LegacyPaperRedirect />} />
+        <Route path="/paper/:arxivId" element={<PaperDetailView />} />
+        <Route path="/tasks" element={<TagsIndexView />} />
+        <Route path="/tasks/:taskSlug" element={<TagBrowseView />} />
+        <Route path="/task/:taskSlug" element={<LegacyTaskRedirect />} />
+        <Route path="/methods" element={<MethodsIndexView />} />
+        <Route path="/methods/:methodSlug" element={<MethodDetailView />} />
+        <Route path="/frameworks" element={<FrameworksIndexView />} />
+        <Route path="/trends" element={<TrendsView />} />
+        <Route path="/conferences" element={<ConferencesIndexView />} />
+        <Route path="/ai-deadlines" element={<AiDeadlinesView />} />
+        <Route path="/conferences/:confSlug" element={<ConferenceDetailView />} />
+        <Route path="/conferences/:confSlug/:taskSlug" element={<ConferenceTaskView />} />
+        <Route path="/organizations" element={<OrganizationsIndexView />} />
+        <Route path="/orgs/:orgSlug" element={<OrganizationDetailView />} />
+        <Route path="/orgs/:orgSlug/:taskSlug" element={<OrganizationTaskView />} />
+        <Route path="/authors/:authorId" element={<AuthorDetailView />} />
+        <Route path="/benchmark/:datasetSlug" element={<BenchmarkDetailView />} />
+        <Route path="/authorize-paper-edit/:authorizationId" element={<AuthorizePaperEditView />} />
+        <Route path="/submit" element={<SubmitView />} />
+        <Route path="/saved" element={<AuthGatedRoute element={<SavedPapersView />} />} />
+        <Route path="/settings" element={<SettingsView />} />
+        <Route path="/privacy" element={<PrivacyView />} />
+        <Route path="/docs/api" element={<ApiDocsView />} />
+        <Route path="/mcp" element={<McpView />} />
+        <Route path="/admin-dashboard" element={<AdminDashboardRoute />} />
+        <Route path="/autonomous-operations" element={<AdminGatedRoute element={<AutonomousOperations />} />} />
+        <Route path="/cron-dashboard" element={<Navigate to="/admin-dashboard" replace />} />
+        <Route path="/submissions" element={<AdminGatedRoute element={<SubmissionsDashboard />} />} />
+        <Route path="/rate-limits" element={<RateLimitsView />} />
+        {/* Curated landing pages must precede the greedy /:username route. */}
+        <Route path="/astra-for-robotics" element={<AstraForRoboticsView />} />
+        <Route path="/:username" element={<UserProfileView />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Routes>
   );
 };
 
@@ -335,14 +343,11 @@ const App: React.FC = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
       <PreferencesProvider>
-        <TooltipProvider>
-          <Router>
-            <Shell />
-          </Router>
-          <Toaster />
-          <SonnerToaster />
-          {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
-        </TooltipProvider>
+        <Router>
+          <Shell />
+        </Router>
+        <Toaster />
+        {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
       </PreferencesProvider>
     </AuthProvider>
   </QueryClientProvider>

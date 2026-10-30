@@ -3,9 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
 import { Check, Plus } from 'lucide-react';
 import { researchApi, type FollowKind } from '@/lib/api/research';
-import { isAuthDisabled } from '@/lib/apiUrl';
+import { hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
-import { hfLoginUrl } from './HfSignInButton';
 
 const HINTS: Record<FollowKind, string> = {
   task: 'Get new papers on this task',

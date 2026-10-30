@@ -19,7 +19,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import type { PaperSubmitPayload, PaperSubmitResponse } from "@/lib/api/papers.types";
 import { papersApi } from "@/lib/api/papers";
-import { authUrl } from "@/lib/apiUrl";
+import { getApiErrorMessage } from "@/lib/apiTransport";
+import { hfLoginUrl } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 import { invalidatePaperFeeds } from "@/lib/queryInvalidation";
 
@@ -80,23 +81,6 @@ function buildPayload(
   if (authors.length > 0) payload.authors = authors;
   if (overrides.datePublished) payload.date_published = overrides.datePublished;
   return payload;
-}
-
-function extractErrorDetail(err: unknown): string {
-  const e = err as { response?: string; message?: string } | undefined;
-  if (!e) return "Submission failed";
-  if (e.response) {
-    try {
-      const parsed = JSON.parse(e.response);
-      if (typeof parsed.detail === "string") return parsed.detail;
-      if (parsed.detail?.message) {
-        return `${parsed.detail.message} See ${parsed.detail.help || "/rate-limits"} for help.`;
-      }
-    } catch {
-      return e.response;
-    }
-  }
-  return e.message || "Submission failed";
 }
 
 const SubmitView: React.FC = () => {
@@ -165,7 +149,7 @@ const SubmitView: React.FC = () => {
       if (data.route_identifier) navigate(`/paper/${data.route_identifier}`);
     },
     onError: (err) => {
-      setErrorMsg(extractErrorDetail(err));
+      setErrorMsg(getApiErrorMessage(err, "Submission failed"));
     },
   });
 
@@ -183,10 +167,7 @@ const SubmitView: React.FC = () => {
         SUBMIT_DRAFT_KEY,
         JSON.stringify({ input, title, abstract, authors, datePublished }),
       );
-      const login = authUrl("/api/v1/auth/hf/login");
-      window.location.assign(
-        `${login}?return_to=${encodeURIComponent(window.location.href)}`,
-      );
+      window.location.assign(hfLoginUrl(window.location.href));
       return;
     }
 
