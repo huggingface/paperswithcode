@@ -39,7 +39,7 @@ def test_backfill_query_is_limited_to_unscanned_trend_population():
     assert "hf_artifacts_scanned_at IS NULL" in sql
     assert "is_latest_version = TRUE" in sql
     assert "source = 'arxiv'" in sql
-    assert "date_published >= :start_date" in sql
+    assert "COALESCE(date_published, created_at::date) >= :start_date" in sql
     assert params == {"batch_size": 123, "start_date": date(2021, 1, 1)}
 
 

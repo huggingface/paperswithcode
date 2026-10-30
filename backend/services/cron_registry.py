@@ -2386,7 +2386,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                 FROM papers
                 WHERE is_latest_version = TRUE
                   AND date_published >= CURRENT_DATE - 6
-                ORDER BY trending_score DESC NULLS LAST, id
+                  -- The home feed lists only trending-scored papers.
+                  AND trending_score IS NOT NULL
+                ORDER BY trending_score DESC, id
                 LIMIT 90
             )
             SELECT (SELECT max(created_at) FROM paper_suggested_questions)

@@ -522,7 +522,9 @@ def fetch_launcher_history(
         finished = _parse_log_timestamp(record.get("at"))
         if finished is None or finished < cutoff:
             continue
-        job_id = str(record.get("health_job") or record.get("job") or "")
+        # `job` is the dashboard id; `health_job` names the log file, which for
+        # lane jobs (e.g. sync_mmeb_v2 -> "v2") is not a dashboard id.
+        job_id = str(record.get("job") or record.get("health_job") or "")
         summary = history.setdefault(
             job_id,
             {

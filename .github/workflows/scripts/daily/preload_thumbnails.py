@@ -239,7 +239,8 @@ class ThumbnailPreloadJob(CronJobBase):
             session.query(DBPaper.id, DBPaper.arxiv_id, DBPaper.version)
             .filter(and_(*filters))
             .order_by(
-                DBPaper.date_published.desc(),
+                # Undated papers must not crowd dated recent papers out of --limit.
+                DBPaper.date_published.desc().nullslast(),
                 DBPaper.id.desc(),
             )
         )

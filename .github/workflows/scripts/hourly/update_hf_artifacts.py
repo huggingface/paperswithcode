@@ -87,12 +87,14 @@ def get_papers_needing_discovery(session, batch_size: int, recent_cutoff) -> lis
         SELECT id, source, arxiv_id, hf_models, hf_datasets, hf_spaces
         FROM papers
         WHERE is_latest_version = TRUE
-          AND date_published >= :recent_cutoff
+          -- Undated imports count from their creation instead of never matching.
+          AND COALESCE(date_published, created_at::date) >= :recent_cutoff
           AND (
               hf_artifacts_scanned_at IS NULL
               OR hf_artifacts_scanned_at < :threshold
           )
-        ORDER BY hf_artifacts_scanned_at NULLS FIRST, date_published DESC
+        ORDER BY hf_artifacts_scanned_at NULLS FIRST,
+                 COALESCE(date_published, created_at::date) DESC
         LIMIT :batch_size
     """)
     rows = session.execute(
@@ -114,9 +116,9 @@ def get_papers_needing_backfill(session, batch_size: int) -> list:
         WHERE is_latest_version = TRUE
           AND source = 'arxiv'
           AND arxiv_id IS NOT NULL
-          AND date_published >= :start_date
+          AND COALESCE(date_published, created_at::date) >= :start_date
           AND hf_artifacts_scanned_at IS NULL
-        ORDER BY date_published ASC, id ASC
+        ORDER BY COALESCE(date_published, created_at::date) ASC, id ASC
         LIMIT :batch_size
     """)
     return session.execute(
@@ -340,7 +342,8 @@ def get_artifacts_needing_refresh(session, batch_size: int, recent_cutoff) -> li
               JOIN papers p ON p.id = pha.paper_id
               WHERE pha.hf_artifact_id = a.id
                 AND p.is_latest_version = TRUE
-                AND p.date_published >= :recent_cutoff
+                AND COALESCE(p.date_published, p.created_at::date)
+                    >= :recent_cutoff
           )
         ORDER BY a.fetched_at NULLS FIRST
         LIMIT :batch_size

@@ -78,6 +78,18 @@ def test_launcher_history_counts_window_streak_and_lock_skips(tmp_path):
     assert history["preload_thumbnails"]["runs"] == 0
 
 
+def test_launcher_history_keys_lane_jobs_by_dashboard_id(tmp_path):
+    launcher = tmp_path / "launcher.jsonl"
+    record = json.loads(_record(10, "exit", "sync_mmeb_v2"))
+    record["health_job"] = "v2"
+    launcher.write_text(json.dumps(record))
+
+    history = fetch_launcher_history(launcher_path=launcher, now=NOW)
+
+    assert history["sync_mmeb_v2"]["runs"] == 1
+    assert "v2" not in history
+
+
 def test_failure_streak_breaks_a_job_that_is_running_now():
     history = {"runs": 11, "failures": 11, "consecutive_failures": 11, "lock_skips": 0}
     result = _evaluate(
