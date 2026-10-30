@@ -5,6 +5,7 @@ import { Flame } from "lucide-react";
 
 import type { MethodIndexEntry } from "@/lib/api/catalog.types";
 import { catalogApi } from "@/lib/api/catalog";
+import { sortAreas } from "@/lib/areas";
 import { slugify } from "@/lib/slug";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
@@ -115,7 +116,7 @@ const MethodsIndexView: React.FC = () => {
       {(areasQ.isLoading || methodsQ.isLoading) ? (
         <AreaDirectorySkeleton tiles={8} tileClassName="h-20" />
       ) : (
-        areasQ.data?.results?.map((area) => {
+        sortAreas(areasQ.data?.results ?? []).map((area) => {
           const methods = grouped?.[area.id] || [];
           if (methods.length === 0) return null;
           const totalPapers = methods.reduce((s, m) => s + (m.paper_count || 0), 0);
