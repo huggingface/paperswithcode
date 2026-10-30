@@ -86,7 +86,9 @@ from sqlalchemy.orm import Session
 
 MAX_NAME_TOKENS = 16
 
-_TOKEN = re.compile(r"[^\W_](?:[\w.+]*[\w+])?")
+# "@" stays inside a token, so metrics such as Pass@1 match only as written.
+_TOKEN = re.compile(r"[^\W_](?:[\w.+@]*[\w+])?")
+_PLAIN_TOKEN = re.compile(r"[^\W_](?:[\w.+]*[\w+])?")
 _SEPARATOR = re.compile(r"[\s\-_/'’]+")
 _QUALIFIER = re.compile(r"\s*(?:\([^()]*\)|\s—\s.*)\s*$")
 _MATH = re.compile(r"\$\$.+?\$\$|\$[^$]+\$|https?://\S+", re.S)
@@ -198,8 +200,8 @@ def _case_sensitive(entity: CatalogEntity, tokens: tuple[str, ...]) -> bool:
     if len(tokens) > 1:
         return False
     token = tokens[0]
-    if re.search(r"\d|[a-z][A-Z]", token):
-        return False  # GSM8K, ImageNet, LLaVA, DeltaNet never spell an ordinary word
+    if re.search(r"\d|[a-z][A-Z]|@", token):
+        return False  # GSM8K, ImageNet, LLaVA, DeltaNet, pass@k never spell an ordinary word
     return not (entity.entity_type == "method" and _PLAIN_WORD.fullmatch(token))
 
 
@@ -527,7 +529,7 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
     if not abstract or not index.surfaces:
         return []
     masked = _masked(abstract)
-    tokens = list(_TOKEN.finditer(masked))
+    tokens = _text_tokens(masked, index)
     words = [t.group() for t in tokens]
     lowered = [w.lower() for w in words]
     candidates: list[Candidate] = []
@@ -729,6 +731,18 @@ def _is_capitalised_plain_word(surface: _Surface, written: str) -> bool:
         and not surface.case_sensitive
         and written[:1].isupper()
     )
+
+
+def _text_tokens(masked: str, index: MentionIndex) -> list[re.Match]:
+    """Keep ``pass@1`` whole when the catalog names it; otherwise ``BLEU@4`` is
+    read as ``BLEU`` and ``4``."""
+    tokens = []
+    for token in _TOKEN.finditer(masked):
+        if "@" in token.group() and (token.group().lower(),) not in index.surfaces:
+            tokens.extend(_PLAIN_TOKEN.finditer(masked, token.start(), token.end()))
+        else:
+            tokens.append(token)
+    return tokens
 
 
 def _longest_match(index, masked, tokens, words, lowered, i):

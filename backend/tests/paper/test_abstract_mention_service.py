@@ -113,6 +113,7 @@ CATALOG = [
     dataset(72, "CIFAR-10"),
     dataset(73, "CIFAR-100"),
     dataset(74, "LIBERO v2"),
+    CatalogEntity("method", 128, "Pass@1", "pass-1", aliases=("pass@k",)),
 ]
 INDEX = build_index(CATALOG)
 
@@ -513,3 +514,12 @@ def test_versioned_names_also_match_with_a_v_prefix():
         ("SQuAD v1.1", "dataset", 97),
         ("SQuAD v2.0", "dataset", 98),
     ]
+
+
+def test_at_metrics_match_only_as_written():
+    assert links("mean pass@1 on AIME and higher Pass@k") == [
+        ("pass@1", "method", 128),
+        ("Pass@k", "method", 128),
+    ]
+    assert links("in pass 1 we pass@10 and email a@b.org") == []
+    assert links("GRPO@4 rollouts") == [("GRPO", "method", 4)]
