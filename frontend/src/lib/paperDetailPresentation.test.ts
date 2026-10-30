@@ -42,11 +42,37 @@ describe("paper detail presentation model", () => {
     ]);
     expect(model.hfArtifactViewer.rows[0].count).toBe(2);
     expect(model.hfArtifactViewer.rows[0].links?.map(({ label }) => label)).toEqual([
-      "model",
-      "second model",
+      "org/model",
+      "org/second-model",
     ]);
     expect(model.paperSourceLabel).toBe("arXiv:2608.00123v2");
     expect(model.citationCopy).toContain("Ada Lovelace and Grace Hopper");
+  });
+
+  it("labels same-named repos from different owners by their repo id", () => {
+    const model = buildPaperDetailPresentation({
+      ...paper,
+      hf_models: ["https://huggingface.co/ATH-MaaS/OvisOCR3"],
+    }, {
+      models: 2,
+      datasets: 1,
+      spaces: 2,
+      modelUrls: ["https://huggingface.co/ATH-MaaS/OvisOCR3", "https://huggingface.co/sekkit/OvisOCR3"],
+      datasetUrls: ["https://huggingface.co/datasets/org/data_set"],
+      spaceUrls: [
+        "https://huggingface.co/spaces/ATH-MaaS/OvisOCR3",
+        "https://huggingface.co/spaces/hugging-apps/ovisocr3",
+      ],
+      isLimited: false,
+      paperExists: true,
+    }, false);
+
+    const labels = model.hfArtifactViewer.rows.map((row) => row.links?.map(({ label }) => label));
+    expect(labels).toEqual([
+      ["ATH-MaaS/OvisOCR3", "sekkit/OvisOCR3"],
+      ["org/data_set"],
+      ["ATH-MaaS/OvisOCR3", "hugging-apps/ovisocr3"],
+    ]);
   });
 
   it("falls back to stored Hub links when the live lookup fails", () => {
