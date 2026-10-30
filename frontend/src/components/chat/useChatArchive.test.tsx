@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
 }));
 
-vi.mock("@/components/ui/use-toast", () => ({
+vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
 vi.mock("@/lib/api/chat", () => ({

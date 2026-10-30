@@ -71,10 +71,11 @@ vi.mock("@/lib/authContext", () => ({
     isLoading: mocks.authLoading,
   }),
 }));
-vi.mock("@/components/ui/use-toast", () => ({
+vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
-vi.mock("@/components/HfSignInButton", () => ({
+vi.mock("@/lib/apiUrl", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/apiUrl")>(),
   hfLoginUrl: mocks.hfLoginUrl,
 }));
 vi.mock("@/lib/chatSessions", async (importOriginal) => {
@@ -278,7 +279,7 @@ describe("ChatView inference authorization", () => {
 
     await waitFor(() => expect(mocks.hfLoginUrl).toHaveBeenCalledWith(
       `/chat/${sessionId}`,
-      true,
+      { authorizeInference: true },
     ));
   });
 
@@ -344,7 +345,7 @@ describe("ChatView inference authorization", () => {
     await user.type(composer, "What is new in vision-language models?");
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
-    await waitFor(() => expect(mocks.hfLoginUrl).toHaveBeenCalledWith("/chat", true));
+    await waitFor(() => expect(mocks.hfLoginUrl).toHaveBeenCalledWith("/chat", { authorizeInference: true }));
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/me/inference-billing"),
       expect.objectContaining({ credentials: "include" }),

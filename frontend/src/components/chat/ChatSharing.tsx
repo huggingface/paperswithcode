@@ -3,7 +3,7 @@ import { Share2 } from "lucide-react";
 
 import { ChatShareDialog } from "./ChatDialogs";
 import { Spinner } from "./icons";
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import { chatApi } from "@/lib/api/chat";
 
 interface ChatSharingProps {

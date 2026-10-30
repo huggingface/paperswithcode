@@ -1,6 +1,6 @@
 import { useCallback, useRef } from "react";
 
-import { hfLoginUrl } from "@/components/HfSignInButton";
+import { hfLoginUrl } from "@/lib/apiUrl";
 import { chatApi } from "@/lib/api/chat";
 import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
 import {
@@ -35,7 +35,7 @@ export function useInferenceAuthorization({
 
   const authorize = useCallback((draft: ChatDraft) => {
     queueAuthorizedChatSend(draft, selectedModel, reasoningEffort);
-    window.location.href = hfLoginUrl(returnTo(), userBilledInference);
+    window.location.href = hfLoginUrl(returnTo(), { authorizeInference: userBilledInference });
   }, [reasoningEffort, returnTo, selectedModel, userBilledInference]);
 
   const restorePrompt = useCallback((draft: ChatDraft, message: string) => {

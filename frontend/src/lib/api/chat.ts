@@ -21,10 +21,8 @@ import type {
   PosterVersionSummary,
   ReasoningEffort,
 } from "./chat.types";
-import { withStaleAuthNotification } from "../apiAuth";
-import { ApiError, type ApiRequest } from "../apiTransport";
-import { apiUrl } from "../apiUrl";
-import { apiFetch, apiRequest } from "./request";
+import type { ApiRequest } from "../apiTransport";
+import { apiFetch, apiRequest, apiResponse } from "./request";
 import {
   chatArtifactFilePath as filePath,
   chatArtifactPath as artifactPath,
@@ -217,13 +215,8 @@ export class ChatApi {
 
   /** One source file as text. */
   getArtifactSource(artifactId: string, versionId: string, path: string): Promise<string> {
-    return withStaleAuthNotification(async () => {
-      const response = await apiFetch(`${versionPath(artifactId, versionId)}/source/${filePath(path)}`, {
-        cache: "no-store",
-      });
-      if (!response.ok) throw new ApiError(response, await response.text());
-      return response.text();
-    });
+    return apiResponse(`${versionPath(artifactId, versionId)}/source/${filePath(path)}`, { cache: "no-store" })
+      .then((response) => response.text());
   }
 
   saveLatexPaper(
@@ -260,16 +253,9 @@ export class ChatApi {
     form.set("expected_parent_version_id", expectedParentVersionId);
     form.set("path", `figures/${figure.name}`);
     form.set("figure", figure);
-    return withStaleAuthNotification(async () => {
-      // The shared transport sets a JSON Content-Type on every request, which
-      // would drop the multipart boundary; the browser must set it for FormData.
-      const response = await fetch(apiUrl(`/api/v1${artifactPath(artifactId)}/figures`), {
-        method: "POST",
-        credentials: "include",
-        body: form,
-      });
-      if (!response.ok) throw new ApiError(response, await response.text());
-      return response.json() as Promise<LatexPaperArtifactDescriptor>;
+    return this.request<LatexPaperArtifactDescriptor>(`${artifactPath(artifactId)}/figures`, {
+      method: "POST",
+      body: form,
     });
   }
 

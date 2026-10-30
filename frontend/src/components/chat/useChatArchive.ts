@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 
-import { useToast } from "@/components/ui/use-toast";
+import { useToast } from "@/hooks/use-toast";
 import { chatApi } from "@/lib/api/chat";
 import { draftFromMessage, latestUserMessage, type ChatDraft, type ChatMessage } from "@/lib/chat";
 
