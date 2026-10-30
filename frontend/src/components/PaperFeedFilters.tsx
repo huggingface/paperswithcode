@@ -1,6 +1,6 @@
 import React from "react";
 
-import { Icon } from "@/components";
+import { Icon } from "@/components/Icon";
 
 const HfMonochromeLogo = () => (
   <span className="hf-resource-logo">

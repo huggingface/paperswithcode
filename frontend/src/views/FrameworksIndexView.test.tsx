@@ -3,7 +3,7 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import { FrameworkCard } from "@/views/FrameworksIndexView";
-import type { Framework } from "@/lib/frameworks";
+import type { Framework } from "@/lib/api/catalog.types";
 
 const framework = (paperCount: number): Framework => ({
   id: "1",

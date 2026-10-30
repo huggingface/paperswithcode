@@ -10,7 +10,7 @@
 
 import React from "react";
 
-import { Icon } from "@/components";
+import { Icon } from "@/components/Icon";
 import { isAuthDisabled } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 import { useBookmarkIds, useToggleBookmark } from "@/hooks/useBookmarks";

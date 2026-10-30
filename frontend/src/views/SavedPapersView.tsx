@@ -14,7 +14,8 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import { PaperCard, TagChip } from "@/components";
+import { PaperCard } from "@/components/PaperCard";
+import { TagChip } from "@/components/Chips";
 import HfSignInButton from "@/components/HfSignInButton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -200,7 +201,7 @@ const SavedPapersView: React.FC = () => {
                       <PaperCard
                         key={paper.id}
                         paper={transformPaperForCard(paper)}
-                        rank={++cardPosition}
+                        priority={cardPosition++ < 3}
                       />
                     ))}
                   </div>

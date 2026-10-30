@@ -13,11 +13,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OrganizationPaperFeed } from "@/components/OrganizationPaperFeed";
 import { catalogApi } from "@/lib/api/catalog";
 
-const useInfiniteOrganizationPapers = vi.fn();
+const usePaperFeedQuery = vi.fn();
 
-vi.mock("@/components", () => ({
-  HuggingFaceLogo: () => <span aria-hidden="true">HF</span>,
+vi.mock("@/components/Icon", () => ({
   Icon: () => <span aria-hidden="true">GitHub</span>,
+}));
+vi.mock("@/components/PaperCard", () => ({
   PaperCard: () => <article>Paper card</article>,
 }));
 vi.mock("@/hooks/useIntersectionObserver", () => ({
@@ -27,8 +28,7 @@ vi.mock("@/hooks/useIntersectionObserver", () => ({
   }),
 }));
 vi.mock("@/hooks/usePapers", () => ({
-  useInfiniteOrganizationPapers: (params: unknown) =>
-    useInfiniteOrganizationPapers(params),
+  usePaperFeedQuery: (key: unknown[]) => usePaperFeedQuery(key),
 }));
 
 const taxonomy = {
@@ -115,7 +115,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  useInfiniteOrganizationPapers.mockReset();
+  usePaperFeedQuery.mockReset();
 });
 
 describe("OrganizationPaperFeed task filtering", () => {
@@ -126,7 +126,7 @@ describe("OrganizationPaperFeed task filtering", () => {
     vi.spyOn(catalogApi, "organizationAreasWithTasks").mockResolvedValue(
       taxonomy,
     );
-    useInfiniteOrganizationPapers.mockReturnValue({
+    usePaperFeedQuery.mockReturnValue({
       data: {
         pages: [
           { count: 3, next_page: null, previous_page: null, results: [] },
@@ -162,13 +162,12 @@ describe("OrganizationPaperFeed task filtering", () => {
         "/orgs/nvidia/image-classification?order_by=date_published",
       );
     });
-    expect(useInfiniteOrganizationPapers).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        organizationSlug: "nvidia",
-        taskSlug: "image-classification",
-        order_by: "date_published",
-      }),
-    );
+    expect(usePaperFeedQuery).toHaveBeenLastCalledWith([
+      "organization-papers-infinite",
+      "nvidia",
+      "image-classification",
+      expect.objectContaining({ order_by: "date_published" }),
+    ]);
   });
 
   it("loads the contribution graph without waiting for organization metadata", async () => {
@@ -178,7 +177,7 @@ describe("OrganizationPaperFeed task filtering", () => {
     vi.spyOn(catalogApi, "organizationAreasWithTasks").mockReturnValue(
       new Promise(() => {}),
     );
-    useInfiniteOrganizationPapers.mockReturnValue({
+    usePaperFeedQuery.mockReturnValue({
       data: undefined,
       error: null,
       isLoading: true,
@@ -202,7 +201,7 @@ describe("OrganizationPaperFeed task filtering", () => {
     vi.spyOn(catalogApi, "organizationAreasWithTasks").mockReturnValue(
       new Promise(() => {}),
     );
-    useInfiniteOrganizationPapers.mockReturnValue({
+    usePaperFeedQuery.mockReturnValue({
       data: {
         pages: [
           { count: 3, next_page: null, previous_page: null, results: [] },

@@ -1,69 +1,40 @@
 import React, { useMemo } from "react";
-import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import { PaperCard } from "@/components";
 import { AuthorAvatar } from "@/components/AuthorAvatar";
-import { PaperDateFilter } from "@/components/PaperDateFilter";
-import { PaperFeedFilters } from "@/components/PaperFeedFilters";
+import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
 import ResearchFollowButton from "@/components/ResearchFollowButton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
-import { useInfinitePapers } from "@/hooks/usePapers";
+import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
+import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { papersApi } from "@/lib/api/papers";
-import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
+import { isNotFound } from "@/lib/apiErrors";
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { transformPaperForCard } from "@/lib/transform";
 import NotFound from "@/pages/NotFound";
 
-type OrderBy = "trending" | "date_published" | "citation_count";
-const SORT_OPTIONS: Array<[OrderBy, string]> = [
-  ["trending", "trending"],
-  ["date_published", "newest"],
-  ["citation_count", "most cited"],
-];
-
-const parseOrderBy = (value: string | null): OrderBy =>
-  value === "date_published" || value === "citation_count" ? value : "trending";
-
 const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const orderBy = parseOrderBy(searchParams.get("order_by"));
-  const hasCode = searchParams.get("has_code") === "true";
-  const hasHfArtifacts = searchParams.get("has_hf_artifacts") === "true";
-  const dateRange = readPaperDateRange(searchParams);
+  const feed = usePaperFeedParams();
+  const { searchParams } = feed;
   const author = useQuery({
     queryKey: ["author", authorId],
     queryFn: () => papersApi.getAuthor(authorId),
   });
-  const papers = useInfinitePapers({
-    author: authorId,
-    page_size: 12,
-    order_by: orderBy,
-    order_dir: "desc",
-    include_resources: true,
-    has_code: hasCode,
-    has_hf_artifacts: hasHfArtifacts,
-    start_date: dateRange.startDate,
-    end_date: dateRange.endDate,
-  });
+  const papers = usePaperFeedQuery(
+    [...paperQueryKeys.feeds.infinite, { author: authorId, ...feed.filters }],
+    (page) => papersApi.list({ ...feed.filters, author: authorId, page, page_size: 12 }),
+  );
 
   const cards = useMemo(
     () => (papers.data?.pages ?? []).flatMap((page) => page.results.map(transformPaperForCard)),
     [papers.data],
   );
 
-  const targetRef = useInfiniteScroll(papers);
   const totalCount = papers.data?.pages[0]?.count ?? 0;
 
-  const setParam = (key: string, value: string | null) => {
-    const updated = new URLSearchParams(searchParams);
-    if (value) updated.set(key, value);
-    else updated.delete(key);
-    setSearchParams(updated);
-  };
-
-  if ((author.error as { status?: number } | null)?.status === 404) {
+  if (isNotFound(author.error)) {
     return <NotFound />;
   }
   // arXiv group authors such as "NVIDIA" are organizations, not people.
@@ -148,34 +119,9 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
         {author.data && <ResearchFollowButton kind="author" entityId={author.data.id} />}
       </header>
 
-      <div className="sort-bar" style={{ alignItems: "center", gap: 16 }}>
-        <div className="paper-feed-toolbar-controls">
-          <div className="sort-options">
-            {SORT_OPTIONS.map(([value, label]) => (
-              <button
-                type="button"
-                key={value}
-                className={`sort-btn ${orderBy === value ? "active" : ""}`}
-                onClick={() => setParam("order_by", value === "trending" ? null : value)}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-          <PaperFeedFilters
-            hasCode={hasCode}
-            hasHfArtifacts={hasHfArtifacts}
-            onHasCodeChange={(active) => setParam("has_code", active ? "true" : null)}
-            onHasHfArtifactsChange={(active) => setParam("has_hf_artifacts", active ? "true" : null)}
-          />
-        </div>
-        <PaperDateFilter
-          startDate={dateRange.startDate}
-          endDate={dateRange.endDate}
-          onChange={(value) => setSearchParams(withPaperDateRange(searchParams, value))}
-        />
+      <PaperFeedToolbar feed={feed} style={{ alignItems: "center", gap: 16 }}>
         <div className="results-count">{totalCount.toLocaleString()} papers</div>
-      </div>
+      </PaperFeedToolbar>
 
       {papers.error ? (
         <Alert variant="destructive">
@@ -184,30 +130,16 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
             <button type="button" onClick={() => void papers.refetch()}>Try again</button>
           </AlertDescription>
         </Alert>
-      ) : papers.isLoading ? (
-        <div className="paper-list">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-40 w-full" />
-          ))}
-        </div>
-      ) : cards.length === 0 ? (
-        <div className="no-results">
-          {author.data?.paper_count === 0
-            ? "No public papers are available."
-            : "No papers found for this selection."}
-        </div>
       ) : (
-        <>
-          <div className="paper-list">
-            {cards.map((paper, index) => (
-              <PaperCard key={paper.id} paper={paper} rank={index + 1} />
-            ))}
-          </div>
-          <div ref={targetRef} style={{ height: 1 }} />
-          {papers.isFetchingNextPage && (
-            <div style={{ padding: "20px 0", textAlign: "center" }}>Loading more…</div>
-          )}
-        </>
+        <PaperFeedList
+          query={papers}
+          cards={cards}
+          empty={
+            author.data?.paper_count === 0
+              ? "No public papers are available."
+              : "No papers found for this selection."
+          }
+        />
       )}
     </div>
   );

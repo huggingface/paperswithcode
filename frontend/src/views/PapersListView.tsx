@@ -1,42 +1,34 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 
-import { Icon, PaperCard, TagChip } from "@/components";
+import { TagChip } from "@/components/Chips";
+import { Icon } from "@/components/Icon";
+import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
 import { catalogApi } from "@/lib/api/catalog";
+import { papersApi } from "@/lib/api/papers";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
-import { useInfinitePapers, useInfinitePaperSearch } from "@/hooks/usePapers";
+import { usePaperFeedQuery } from "@/hooks/usePapers";
+import { PAPER_FEED_SORTS, usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useQuery } from "@tanstack/react-query";
-import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
-import { ApiError } from "@/lib/apiTransport";
-import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
+import { isNotFound } from "@/lib/apiErrors";
+import { formatStarCount } from "@/lib/frameworks";
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { queryCenteredExcerpt } from "@/lib/paperSearchPresentation";
 import { isChatEnabled } from "@/lib/apiUrl";
 
-type SortKey = "trending" | "relevance" | "new" | "cited";
-const ALL_PAPERS_SORT_OPTIONS: Array<[SortKey, string]> = [
-  ["trending", "trending"],
-  ["new", "newest"],
-  ["cited", "most cited"],
-];
-const SEARCH_SORT_OPTIONS: Array<[SortKey, string]> = [
+const SEARCH_SORTS = [
   ["relevance", "relevance"],
-  ["new", "newest"],
-  ["cited", "most cited"],
-];
-
-const formatStarCount = (stars: number) =>
-  new Intl.NumberFormat("en", {
-    notation: stars >= 1000 ? "compact" : "standard",
-    maximumFractionDigits: 1,
-  }).format(stars);
+  ["date_published", "newest"],
+  ["citation_count", "most cited"],
+] as const;
 
 const PapersListView: React.FC = () => {
-  const [searchParams, setSearchParams] = useSearchParams();
+  const feed = usePaperFeedParams();
+  const { searchParams, setSearchParams } = feed;
   const framework = searchParams.get("framework") || undefined;
   const repository = searchParams.get("repository") || undefined;
   const isRepositoryFeed = Boolean(framework || repository);
@@ -68,64 +60,38 @@ const PapersListView: React.FC = () => {
     }
   }, [isSearchMode, searchParams, setSearchParams]);
 
-  const requestedOrder = searchParams.get("order_by");
-  const sortBy: SortKey = requestedOrder === "citation_count"
-    ? "cited"
-    : requestedOrder === "date_published"
-      ? "new"
-      : isSearchMode
-        ? "relevance"
-        : "trending";
-  const dateRange = readPaperDateRange(searchParams);
-  const hasHfArtifacts = searchParams.get("has_hf_artifacts") === "true";
-  const hasCode = !isRepositoryFeed && searchParams.get("has_code") === "true";
+  // Search results default to relevance, which other paper feeds do not offer.
+  const sortBy = isSearchMode && feed.orderBy === "trending" ? "relevance" : feed.orderBy;
+  const hasCode = !isRepositoryFeed && feed.hasCode;
 
-  const setQueryParam = (key: string, value?: string) => {
-    const next = new URLSearchParams(searchParams);
-    if (value) next.set(key, value);
-    else next.delete(key);
-    setSearchParams(next);
-  };
-
-  const setSortBy = (nextSort: SortKey) => {
-    setQueryParam(
-      "order_by",
-      nextSort === "cited" ? "citation_count" : nextSort === "new" ? "date_published" : nextSort,
-    );
-  };
-
-  const orderBy =
-    sortBy === "trending"
-      ? "trending"
-      : sortBy === "cited"
-        ? "citation_count"
-        : "date_published";
-  const regularInfinite = useInfinitePapers({
-    page_size: 20,
-    order_by: orderBy,
-    order_dir: "desc",
+  const listFilters = {
+    ...feed.filters,
+    has_code: hasCode,
     search: isRepositoryFeed ? debouncedSearch || undefined : undefined,
-    start_date: dateRange.startDate,
-    end_date: dateRange.endDate,
-    include_resources: true,
     conference: searchParams.get("conference") || undefined,
     latest_only: searchParams.get("latest_only") !== "false",
-    has_code: hasCode,
-    has_hf_artifacts: hasHfArtifacts,
     framework,
     repository,
-    enabled: !isSearchMode,
-  });
+  };
+  const regularInfinite = usePaperFeedQuery(
+    [...paperQueryKeys.feeds.infinite, listFilters],
+    (page) => papersApi.list({ ...listFilters, page, page_size: 20 }),
+    { enabled: !isSearchMode },
+  );
 
-  const searchInfinite = useInfinitePaperSearch({
+  const searchFilters = {
     q: debouncedSearch.trim(),
-    order_by: sortBy === "cited" ? "citation_count" : sortBy === "new" ? "date_published" : "relevance",
-    start_date: dateRange.startDate,
-    end_date: dateRange.endDate,
+    order_by: sortBy === "trending" ? ("relevance" as const) : sortBy,
+    start_date: feed.dateRange.startDate,
+    end_date: feed.dateRange.endDate,
     has_code: hasCode,
-    has_hf_artifacts: hasHfArtifacts,
-    enabled: isSearchMode,
-  });
+    has_hf_artifacts: feed.hasHfArtifacts,
+  };
+  const searchInfinite = usePaperFeedQuery(
+    [...paperQueryKeys.feeds.search, searchFilters],
+    (page) => papersApi.searchFeed({ ...searchFilters, page, page_size: 20, mode: "hybrid" }),
+    { enabled: isSearchMode && searchFilters.q.length > 0 },
+  );
   const infinite = isSearchMode ? searchInfinite : regularInfinite;
 
   const topTasks = useQuery({
@@ -145,12 +111,10 @@ const PapersListView: React.FC = () => {
     });
   }, [infinite.data, isSearchMode, urlSearch]);
 
-  const sentinelRef = useInfiniteScroll(infinite);
-
   const totalCount = regularInfinite.data?.pages?.[0]?.count ?? 0;
   const scope = regularInfinite.data?.pages?.[0]?.scope;
   const searchMetadata = searchInfinite.data?.pages?.at(-1);
-  const frameworkNotFound = framework && infinite.error instanceof ApiError && infinite.error.status === 404;
+  const frameworkNotFound = framework && isNotFound(infinite.error);
   const headingName = scope?.kind === "framework" ? scope.framework_name : scope?.repository;
 
   return (
@@ -227,9 +191,9 @@ const PapersListView: React.FC = () => {
           )}
         </div>
         <PaperDateFilter
-          startDate={dateRange.startDate}
-          endDate={dateRange.endDate}
-          onChange={(value) => setSearchParams(withPaperDateRange(searchParams, value))}
+          startDate={feed.dateRange.startDate}
+          endDate={feed.dateRange.endDate}
+          onChange={feed.setDateRange}
         />
       </div>
 
@@ -268,85 +232,49 @@ const PapersListView: React.FC = () => {
         </aside>}
 
         <div>
-          <div className="sort-bar">
-            <div className="paper-feed-toolbar-controls">
-              <div className="sort-options">
-                {(isSearchMode ? SEARCH_SORT_OPTIONS : ALL_PAPERS_SORT_OPTIONS).map(([k, l]) => (
-                  <button
-                    key={k}
-                    className={`sort-btn ${sortBy === k ? "active" : ""}`}
-                    onClick={() => setSortBy(k)}
-                  >
-                    {l}
-                  </button>
-                ))}
-              </div>
-              <PaperFeedFilters
-                hasCode={hasCode}
-                hasHfArtifacts={hasHfArtifacts}
-                onHasCodeChange={(checked) => setQueryParam("has_code", checked ? "true" : undefined)}
-                onHasHfArtifactsChange={(checked) => setQueryParam("has_hf_artifacts", checked ? "true" : undefined)}
-                showHasCode={!isRepositoryFeed}
-              />
-            </div>
+          <PaperFeedToolbar
+            feed={feed}
+            sorts={isSearchMode ? SEARCH_SORTS : PAPER_FEED_SORTS}
+            activeSort={sortBy}
+            showDateFilter={false}
+            showHasCode={!isRepositoryFeed}
+          >
             <div className="results-count">{cards.length} loaded</div>
-          </div>
+          </PaperFeedToolbar>
 
           {frameworkNotFound ? (
             <div className="no-results">Framework not found.</div>
-          ) : infinite.error && (
-            <Alert variant="destructive" className="mb-4">
-              <AlertDescription>Failed to load papers. Please try again.</AlertDescription>
-            </Alert>
-          )}
-
-          {!frameworkNotFound && (infinite.isLoading ? (
-            <div className="paper-list">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="paper-card">
-                  <Skeleton className="h-[220px] w-[160px]" />
-                  <div className="paper-body" style={{ flex: 1, gap: 12 }}>
-                    <Skeleton className="h-6 w-3/4" />
-                    <Skeleton className="h-4 w-1/2" />
-                    <Skeleton className="h-12 w-full" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : cards.length === 0 ? (
-            <div className="no-results">
-              <p>No matching papers.</p>
-              {isSearchMode && isChatEnabled() && (
-                <Link to={`/chat?q=${encodeURIComponent(urlSearch.trim())}`}>Ask the assistant instead</Link>
-              )}
-            </div>
           ) : (
             <>
-              <div className="paper-list">
-                {cards.map((p, i) => (
-                  <PaperCard
-                    key={p.id}
-                    paper={p}
-                    rank={i + 1}
-                    highlightQuery={isSearchMode ? urlSearch : undefined}
-                  />
-                ))}
-              </div>
-              <div ref={sentinelRef} style={{ height: 1 }} />
-              {infinite.isFetchingNextPage && (
-                <div style={{ padding: "20px 0", textAlign: "center", color: "var(--ink-faint)" }}>
-                  Loading more…
-                </div>
+              {infinite.error && (
+                <Alert variant="destructive" className="mb-4">
+                  <AlertDescription>Failed to load papers. Please try again.</AlertDescription>
+                </Alert>
               )}
-              {!infinite.hasNextPage && !infinite.isFetchingNextPage && isSearchMode && (
-                <div className="search-results-end">
-                  {searchMetadata?.cap_reached
-                    ? "End of the top 100 results"
-                    : "End of results"}
-                </div>
-              )}
+              <PaperFeedList
+                query={infinite}
+                cards={cards}
+                skeleton="card"
+                highlightQuery={isSearchMode ? urlSearch : undefined}
+                empty={
+                  <>
+                    <p>No matching papers.</p>
+                    {isSearchMode && isChatEnabled() && (
+                      <Link to={`/chat?q=${encodeURIComponent(urlSearch.trim())}`}>Ask the assistant instead</Link>
+                    )}
+                  </>
+                }
+              >
+                {!infinite.hasNextPage && !infinite.isFetchingNextPage && isSearchMode && (
+                  <div className="search-results-end">
+                    {searchMetadata?.cap_reached
+                      ? "End of the top 100 results"
+                      : "End of results"}
+                  </div>
+                )}
+              </PaperFeedList>
             </>
-          ))}
+          )}
         </div>
       </div>
     </div>

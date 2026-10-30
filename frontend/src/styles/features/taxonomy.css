@@ -354,3 +354,43 @@
 
   .tag-hero-meta { gap: 20px; flex-wrap: wrap; }
 }
+/* Area-grouped directory sections (tasks, methods, conferences) */
+.area-section {
+  margin-bottom: 48px;
+  scroll-margin-top: 80px;
+}
+.area-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+.area-section-title {
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin-bottom: 4px;
+}
+.area-section-description {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.area-section-meta,
+.area-directory-footer {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.area-section-meta { white-space: nowrap; }
+.area-directory-footer { margin-top: 24px; }
+.area-directory-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}

@@ -68,7 +68,7 @@ const ConferenceDetailView = React.lazy(() => import("@/views/ConferenceDetailVi
 const ConferenceTaskView = React.lazy(() => import("@/views/ConferenceTaskView"));
 const OrganizationsIndexView = React.lazy(() => import("@/views/OrganizationsIndexView"));
 const OrganizationDetailView = React.lazy(() => import("@/views/OrganizationDetailView"));
-const OrganizationTaskView = React.lazy(() => import("@/views/OrganizationTaskView"));
+const OrganizationTaskView = React.lazy(() => import("@/views/OrganizationDetailView"));
 const AuthorDetailView = React.lazy(() => import("@/views/AuthorDetailView"));
 const MethodDetailView = React.lazy(() => import("@/views/MethodDetailView"));
 const BenchmarkDetailView = React.lazy(() => import("@/views/BenchmarkDetailView"));

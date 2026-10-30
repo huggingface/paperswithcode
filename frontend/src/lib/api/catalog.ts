@@ -8,6 +8,7 @@ import type {
   ConferenceDeadlines,
   Conferences,
   Dataset,
+  FrameworkCatalog,
   Method,
   MethodIndex,
   MethodTrend,
@@ -29,7 +30,6 @@ import type {
 } from "./evaluations.types";
 import type { PaginatedResponse } from "./shared.types";
 import type { ApiRequest } from "../apiTransport";
-import type { FrameworkCatalog } from "../frameworks";
 import { apiRequest } from "./request";
 
 type QueryValue = string | number | boolean | undefined;

@@ -2,32 +2,19 @@ import React, { useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
+import { AreaDirectoryFooter, AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
 import MarkdownText from "@/components/MarkdownText";
 import { catalogApi } from "@/lib/api/catalog";
+import { isNotFound } from "@/lib/apiErrors";
+import { sortAreas } from "@/lib/areas";
 import { chipColors, hueFromSlug } from "@/lib/colors";
+import { CONFERENCE_LISTINGS } from "@/lib/conferenceListings";
+import { formatDateRange } from "@/lib/deadlines";
 import { displayTaskName } from "@/lib/transform";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { safeExternalHref } from "@/lib/safeExternalHref";
-
-const taskKey = (value?: string) => value?.trim().toLowerCase().replace(/[\s_]+/g, "-") ?? "";
-
-const formatDateRange = (start?: string, end?: string) => {
-  if (!start) return null;
-  const startDate = new Date(`${start}T00:00:00`);
-  const endDate = end ? new Date(`${end}T00:00:00`) : null;
-  const monthDay = (d: Date) =>
-    d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-  const year = startDate.getFullYear();
-  if (endDate && endDate.getTime() !== startDate.getTime()) {
-    const sameMonth = startDate.getMonth() === endDate.getMonth();
-    if (sameMonth) {
-      return `${monthDay(startDate).replace(/\d+$/, "").trim()} ${startDate.getDate()}–${endDate.getDate()}, ${year}`;
-    }
-    return `${monthDay(startDate)} – ${monthDay(endDate)}, ${year}`;
-  }
-  return `${monthDay(startDate)}, ${year}`;
-};
+import NotFound from "@/pages/NotFound";
 
 const ConferenceDetailView: React.FC = () => {
   const { confSlug } = useParams<{ confSlug: string }>();
@@ -39,35 +26,15 @@ const ConferenceDetailView: React.FC = () => {
     staleTime: 10 * 60 * 1000,
   });
 
-  const visibleAreas = useMemo(() => {
-    if (!taxonomyQ.data) return [];
-
-    const AREA_ORDER: Record<string, number> = {
-      general: 0,
-      vision: 1,
-      video: 2,
-      language: 3,
-      audio: 4,
-      other: 5,
-    };
-    const rank = (name: string) => AREA_ORDER[taskKey(name)] ?? 999;
-
-    return [...taxonomyQ.data.results].sort((a, b) => {
-      const ra = rank(a.name);
-      const rb = rank(b.name);
-      if (ra !== rb) return ra - rb;
-      return a.name.localeCompare(b.name);
-    });
-  }, [taxonomyQ.data]);
+  const visibleAreas = useMemo(() => sortAreas(taxonomyQ.data?.results ?? []), [taxonomyQ.data]);
 
   const conference = taxonomyQ.data?.conference;
   const totalPapers = taxonomyQ.data?.total_paper_count ?? 0;
-  const oralPapers = taxonomyQ.data?.oral_paper_count ?? 0;
-  const spotlightPapers = taxonomyQ.data?.spotlight_paper_count ?? 0;
-  const outstandingPapers = taxonomyQ.data?.outstanding_paper_count ?? 0;
-  const bestPaperFinalists = taxonomyQ.data?.best_paper_finalist_paper_count ?? 0;
-  const totalTasks = visibleAreas.reduce((s, area) => s + area.tasks.length, 0);
+  const listings = CONFERENCE_LISTINGS.filter(
+    (listing) => (taxonomyQ.data?.[listing.countKey] ?? 0) > 0,
+  );
 
+  if (isNotFound(taxonomyQ.error)) return <NotFound />;
   if (taxonomyQ.error) {
     return (
       <div className="page">
@@ -148,208 +115,65 @@ const ConferenceDetailView: React.FC = () => {
       </div>
 
       {!taxonomyQ.isLoading && totalPapers > 0 && (
-        <section style={{ marginTop: 48, marginBottom: 48 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: "6px 24px",
-              paddingBottom: 12,
-              borderBottom: "1px solid var(--hairline-strong)",
-            }}
-          >
-            <div>
-              <h2
-                style={{
-                  fontFamily: "var(--serif)",
-                  fontSize: 26,
-                  fontWeight: 500,
-                  letterSpacing: "-0.02em",
-                  marginBottom: 4,
-                }}
-              >
-                Browse papers
-              </h2>
-              <div
-                style={{
-                  fontFamily: "var(--serif)",
-                  fontStyle: "italic",
-                  fontSize: 13,
-                  color: "var(--ink-soft)",
-                }}
-              >
-                All accepted papers, plus oral, spotlight, outstanding, and best paper finalists.
-              </div>
-            </div>
-            <div
-              style={{
-                fontFamily: "var(--mono)",
-                fontSize: 11,
-                color: "var(--ink-faint)",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {totalPapers.toLocaleString()} papers
-            </div>
-          </div>
-          <div className="tag-grid">
-            <Link to={`/conferences/${confSlug}/all`} className="tag-cell">
+        <AreaSection
+          title="Browse papers"
+          description="All accepted papers, plus oral, spotlight, outstanding, and best paper finalists."
+          meta={`${totalPapers.toLocaleString()} papers`}
+          style={{ marginTop: 48 }}
+        >
+          {listings.map((listing) => (
+            <Link key={listing.slug} to={`/conferences/${confSlug}/${listing.slug}`} className="tag-cell">
               <div className="name">
-                <span className="dot" style={{ background: "var(--accent)" }}></span>
-                All papers
+                <span className="dot" style={{ background: listing.dotColor }}></span>
+                {listing.label}
               </div>
               <div className="meta">
-                <span>{totalPapers.toLocaleString()} papers</span>
+                <span>{(taxonomyQ.data?.[listing.countKey] ?? 0).toLocaleString()} papers</span>
               </div>
             </Link>
-            {oralPapers > 0 && (
-              <Link to={`/conferences/${confSlug}/oral`} className="tag-cell">
-                <div className="name">
-                  <span className="dot" style={{ background: "#fdbb02" }}></span>
-                  Oral papers
-                </div>
-                <div className="meta">
-                  <span>{oralPapers.toLocaleString()} papers</span>
-                </div>
-              </Link>
-            )}
-            {spotlightPapers > 0 && (
-              <Link to={`/conferences/${confSlug}/spotlight`} className="tag-cell">
-                <div className="name">
-                  <span className="dot" style={{ background: "#fdbb02" }}></span>
-                  Spotlight papers
-                </div>
-                <div className="meta">
-                  <span>{spotlightPapers.toLocaleString()} papers</span>
-                </div>
-              </Link>
-            )}
-            {outstandingPapers > 0 && (
-              <Link to={`/conferences/${confSlug}/outstanding`} className="tag-cell">
-                <div className="name">
-                  <span className="dot" style={{ background: "#c45c26" }}></span>
-                  Outstanding papers
-                </div>
-                <div className="meta">
-                  <span>{outstandingPapers.toLocaleString()} papers</span>
-                </div>
-              </Link>
-            )}
-            {bestPaperFinalists > 0 && (
-              <Link to={`/conferences/${confSlug}/best-paper-finalists`} className="tag-cell">
-                <div className="name">
-                  <span className="dot" style={{ background: "#c9a227" }}></span>
-                  Best paper finalists
-                </div>
-                <div className="meta">
-                  <span>{bestPaperFinalists.toLocaleString()} papers</span>
-                </div>
-              </Link>
-            )}
-          </div>
-        </section>
+          ))}
+        </AreaSection>
       )}
 
       {taxonomyQ.isLoading ? (
-        <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
-          {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i}>
-              <Skeleton className="h-8 w-1/3 mb-4" />
-              <div className="tag-grid">
-                {Array.from({ length: 6 }).map((__, j) => (
-                  <Skeleton key={j} className="h-24" />
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        <AreaDirectorySkeleton tiles={6} tileClassName="h-24" />
       ) : (
         visibleAreas.map((area) => {
           const tasks = area.tasks;
           if (tasks.length === 0) return null;
           const areaPaperCount = tasks.reduce((s, t) => s + (t.paper_count || 0), 0);
           return (
-            <section key={area.id} style={{ marginBottom: 48 }}>
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  justifyContent: "space-between",
-                  flexWrap: "wrap",
-                  gap: "6px 24px",
-                  paddingBottom: 12,
-                  borderBottom: "1px solid var(--hairline-strong)",
-                }}
-              >
-                <div>
-                  <h2
-                    style={{
-                      fontFamily: "var(--serif)",
-                      fontSize: 26,
-                      fontWeight: 500,
-                      letterSpacing: "-0.02em",
-                      marginBottom: 4,
-                    }}
+            <AreaSection
+              key={area.id}
+              title={area.name}
+              description={area.description}
+              meta={`${tasks.length} ${tasks.length === 1 ? "task" : "tasks"} · ${areaPaperCount.toLocaleString()} papers`}
+            >
+              {tasks.map((t) => {
+                const slug = t.slug || "";
+                const c = chipColors(hueFromSlug(slug));
+                return (
+                  <Link
+                    key={t.id}
+                    to={`/conferences/${confSlug}/${slug}`}
+                    className="tag-cell"
                   >
-                    {area.name}
-                  </h2>
-                  {area.description && (
-                    <div
-                      style={{
-                        fontFamily: "var(--serif)",
-                        fontStyle: "italic",
-                        fontSize: 13,
-                        color: "var(--ink-soft)",
-                      }}
-                    >
-                      {area.description}
+                    <div className="name">
+                      <span className="dot" style={{ background: c.dot }}></span>
+                      {displayTaskName(t.name, slug)}
                     </div>
-                  )}
-                </div>
-                <div
-                  style={{
-                    fontFamily: "var(--mono)",
-                    fontSize: 11,
-                    color: "var(--ink-faint)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {tasks.length} {tasks.length === 1 ? "task" : "tasks"} · {areaPaperCount.toLocaleString()} papers
-                </div>
-              </div>
-              <div className="tag-grid">
-                {tasks.map((t) => {
-                  const slug = t.slug || "";
-                  const c = chipColors(hueFromSlug(slug));
-                  return (
-                    <Link
-                      key={t.id}
-                      to={`/conferences/${confSlug}/${slug}`}
-                      className="tag-cell"
-                    >
-                      <div className="name">
-                        <span className="dot" style={{ background: c.dot }}></span>
-                        {displayTaskName(t.name, slug)}
-                      </div>
-                      <div className="meta">
-                        <span>{(t.paper_count ?? 0).toLocaleString()} papers</span>
-                      </div>
-                    </Link>
-                  );
-                })}
-              </div>
-            </section>
+                    <div className="meta">
+                      <span>{(t.paper_count ?? 0).toLocaleString()} papers</span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </AreaSection>
           );
         })
       )}
 
-      {totalTasks > 0 && (
-        <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-faint)", marginTop: 24 }}>
-          {totalTasks} tasks across {visibleAreas.filter((area) => area.tasks.length > 0).length} areas.
-        </div>
-      )}
+      <AreaDirectoryFooter areas={visibleAreas} />
     </div>
   );
 };

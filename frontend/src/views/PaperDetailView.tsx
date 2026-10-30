@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import "./PaperDetailView.css";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { Icon, PaperPreview, SotaBadges } from "@/components";
+import { Icon } from "@/components/Icon";
+import { PaperPreview } from "@/components/PaperPreview";
+import { SotaBadges } from "@/components/SotaBadges";
 import LatexTitle from "@/components/LatexTitle";
 import { evaluationsApi } from "@/lib/api/evaluations";
 import { papersApi } from "@/lib/api/papers";

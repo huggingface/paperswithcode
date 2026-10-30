@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { papersApi } from "@/lib/api/papers";
 import type { Paper } from "@/lib/api/papers.types";
-import { PaperCard } from "@/components";
+import { PaperCard } from "@/components/PaperCard";
 import type { PaperCardProps } from "@/lib/transform";
 
 const paper: PaperCardProps = {
@@ -132,5 +132,32 @@ describe("PaperCard authors", () => {
     const avatars = container.querySelectorAll(".paper-card-author-avatar");
     expect(avatars).toHaveLength(1);
     expect(avatars[0]).toHaveAttribute("src", "https://cdn-avatars.huggingface.co/ada.png");
+  });
+});
+
+describe("PaperCard thumbnails", () => {
+  const renderWithThumbnail = (priority?: boolean) =>
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <PaperCard paper={{ ...paper, thumbnailUrl: "/thumb.png" }} priority={priority} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+  it("loads priority thumbnails eagerly", () => {
+    const { container } = renderWithThumbnail(true);
+    expect(container.querySelector(".paper-thumb-wrap img")).toHaveAttribute("loading", "eager");
+  });
+
+  it("defers other thumbnails until they near the viewport", () => {
+    vi.stubGlobal("IntersectionObserver", class {
+      observe() {}
+      disconnect() {}
+    });
+    const { container } = renderWithThumbnail();
+    vi.unstubAllGlobals();
+    expect(container.querySelector(".paper-thumb-wrap")).toBeInTheDocument();
+    expect(container.querySelector(".paper-thumb-wrap img")).toBeNull();
   });
 });

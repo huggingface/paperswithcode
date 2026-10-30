@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
-import { Icon } from "@/components";
+import { Icon } from "@/components/Icon";
 import { papersApi } from "@/lib/api/papers";
 import type { Paper } from "@/lib/api/papers.types";
 import { isChatEnabled } from "@/lib/apiUrl";

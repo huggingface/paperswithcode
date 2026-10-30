@@ -22,6 +22,8 @@ import { parseParameterFilter } from "@/lib/benchmarkLeaderboard";
 import "@/styles/benchmark-detail.css";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import { slugify } from "@/lib/slug";
+import { isNotFound } from "@/lib/apiErrors";
+import NotFound from "@/pages/NotFound";
 
 function extractSourcePaperRouteId(paperUrl?: string | null): string | null {
   if (!paperUrl) return null;
@@ -212,6 +214,7 @@ const BenchmarkDetailView: React.FC = () => {
     );
   }
 
+  if (isNotFound(datasetQ.error)) return <NotFound />;
   if (datasetQ.error || !datasetQ.data) {
     return (
       <div className="page">

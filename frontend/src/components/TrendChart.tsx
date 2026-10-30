@@ -1,6 +1,28 @@
 import React from "react";
 
-import { formatTrendMonth, type TrendPoint } from "@/lib/trends";
+import type { TrendPoint } from "@/lib/api/stats";
+
+const formatTrendMonth = (month: string): string => {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month);
+  if (!match) return month;
+
+  const [, year, monthNumber] = match;
+  const names = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  return `${names[Number(monthNumber) - 1]} '${year.slice(2)}`;
+};
 
 interface TrendChartProps {
   id: string;

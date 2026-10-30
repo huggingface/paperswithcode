@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { Icon } from "@/components";
+import { Icon } from "@/components/Icon";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { Paper, RelatedPaperRecommendation } from "@/lib/api/papers.types";
 import type { AuthUser } from "@/lib/authContext";

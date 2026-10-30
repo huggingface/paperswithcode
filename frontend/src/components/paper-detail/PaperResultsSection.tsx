@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 
-import { Icon } from "@/components";
+import { Icon } from "@/components/Icon";
 import ClosedSourceEvalBadge from "@/components/ClosedSourceEvalBadge";
 import ExternalSourceEvalBadge from "@/components/ExternalSourceEvalBadge";
 import { Skeleton } from "@/components/ui/skeleton";

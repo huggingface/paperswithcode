@@ -2,39 +2,11 @@ import React from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import { Icon } from "@/components";
+import { Icon } from "@/components/Icon";
 import { catalogApi } from "@/lib/api/catalog";
+import type { Framework, FrameworkPlatform } from "@/lib/api/catalog.types";
 import { chipColors, hueFromSlug } from "@/lib/colors";
-import {
-  PLATFORM_LABELS,
-  type Framework,
-  type FrameworkPlatform,
-} from "@/lib/frameworks";
-
-const sectionHeaderStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "baseline",
-  justifyContent: "space-between",
-  flexWrap: "wrap",
-  gap: "6px 24px",
-  paddingBottom: 12,
-  borderBottom: "1px solid var(--hairline-strong)",
-};
-
-const sectionTitleStyle: React.CSSProperties = {
-  fontFamily: "var(--serif)",
-  fontSize: 26,
-  fontWeight: 500,
-  letterSpacing: "-0.02em",
-  marginBottom: 4,
-};
-
-const sectionBlurbStyle: React.CSSProperties = {
-  fontFamily: "var(--serif)",
-  fontStyle: "italic",
-  fontSize: 13,
-  color: "var(--ink-soft)",
-};
+import { PLATFORM_LABELS } from "@/lib/frameworks";
 
 const categoryTitleStyle: React.CSSProperties = {
   fontFamily: "var(--mono)",
@@ -202,19 +174,12 @@ const FrameworksIndexView: React.FC = () => {
 
       {domains.map((domain) => (
         <section key={domain.slug} style={{ marginBottom: 56 }}>
-          <div style={sectionHeaderStyle}>
+          <div className="area-section-head">
             <div>
-              <h2 style={sectionTitleStyle}>{domain.name}</h2>
-              <div style={sectionBlurbStyle}>{domain.description}</div>
+              <h2 className="area-section-title">{domain.name}</h2>
+              <div className="area-section-description">{domain.description}</div>
             </div>
-            <div
-              style={{
-                fontFamily: "var(--mono)",
-                fontSize: 11,
-                color: "var(--ink-faint)",
-                whiteSpace: "nowrap",
-              }}
-            >
+            <div className="area-section-meta">
               {domain.categories.length}{" "}
               {domain.categories.length === 1 ? "category" : "categories"} ·{" "}
               {domain.categories.reduce((s, c) => s + c.frameworks.length, 0)} frameworks

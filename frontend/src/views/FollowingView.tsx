@@ -1,5 +1,5 @@
-import FeedView from "./FeedView";
+import { HomeFeed } from "./FeedView";
 
 export default function FollowingView() {
-  return <FeedView following />;
+  return <HomeFeed mode="following" />;
 }

@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import TrendChart from "@/components/TrendChart";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchTrends } from "@/lib/trends";
+import { statsApi } from "@/lib/api/stats";
 
 const sectionStyle: React.CSSProperties = {
   maxWidth: 960,
@@ -57,7 +57,7 @@ const chartSkeletonStyle: React.CSSProperties = {
 const TrendsView: React.FC = () => {
   const trendsQuery = useQuery({
     queryKey: ["research-trends"],
-    queryFn: fetchTrends,
+    queryFn: () => statsApi.trends(),
     staleTime: 60 * 60 * 1000,
   });
 

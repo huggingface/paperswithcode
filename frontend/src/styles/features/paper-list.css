@@ -895,3 +895,10 @@ a.paper-resource.is-link:focus-visible {
 .paper-date-popover-single-calendar .paper-date-calendars { display: block; }
 .paper-date-popover-single-calendar .paper-date-navigation { display: block; }
 .paper-date-popover-single-calendar .paper-date-day { width: 36px; height: 36px; }
+.conference-award-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent-text);
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}

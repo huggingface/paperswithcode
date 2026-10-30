@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
-import { Icon } from "@/components";
+import { Icon } from "@/components/Icon";
 import { useToast } from "@/hooks/use-toast";
 import { copyNodeAsPng } from "@/lib/copyScreenshot";
 
