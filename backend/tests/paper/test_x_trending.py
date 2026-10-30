@@ -157,18 +157,24 @@ def test_replace_day_imports_matches_and_reports_unresolved(db):
     assert [entry.paper_id for entry in db.query(PaperXTrending).all()] == [2]
 
 
-def test_feed_orders_by_trending_score_within_shared_window(db):
+def test_feed_orders_by_trending_score_within_publication_window(db):
     replace(
         db,
         date(2026, 10, 29),
         [row(1, arxiv_id="2610.00001"), row(2, arxiv_id="2610.00003")],
     )
-    replace(db, date(2026, 10, 30), [row(1, arxiv_id="2610.00002")])
-    replace(db, date(2026, 10, 1), [row(1, arxiv_id="2610.00004")])
+    replace(
+        db,
+        date(2026, 10, 30),
+        [row(1, arxiv_id="2610.00002"), row(2, arxiv_id="2610.00004")],
+    )
+    # Paper 4 has the top score and was shared this week, but was published
+    # in August, outside the window.
+    db.get(Paper, 4).date_published = date(2026, 8, 1)
+    db.commit()
 
-    window = {"start_date": date(2026, 10, 24), "end_date": date(2026, 10, 30)}
-    # Paper 4 has the top score but was shared outside the window; unscored
-    # paper 3 stays listed after the scored ones.
+    window = {"start_date": date(2026, 8, 25), "end_date": date(2026, 9, 1)}
+    # Unscored paper 3 stays listed after the scored ones.
     assert feed(db, **window) == ["2", "1", "3"]
     assert feed(db) == ["4", "2", "1", "3"]
 

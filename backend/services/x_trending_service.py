@@ -112,16 +112,11 @@ class XTrendingService:
         has_code: bool,
         has_hf_artifacts: bool,
     ) -> Papers:
-        """Papers shared on X within the date window, by trending score.
+        """Papers ever shared on X, published within the window, by trending score.
 
-        The window applies to the day a paper was shared on X, not to its
-        publication date, so older papers that trend again still show.
+        Like the other homepage tabs, the window filters on publication date.
         """
         shared = select(PaperXTrending.paper_id)
-        if start_date is not None:
-            shared = shared.where(PaperXTrending.shared_on >= start_date)
-        if end_date is not None:
-            shared = shared.where(PaperXTrending.shared_on <= end_date)
         # Match the stored paper's arXiv id too, so a newer version that has
         # since become the latest row stays in the feed.
         shared_arxiv_ids = select(DBPaper.arxiv_id).where(
@@ -139,5 +134,7 @@ class XTrendingService:
             ordering=GENERAL_ORDERING,
             has_code=has_code,
             has_hf_artifacts=has_hf_artifacts,
+            start_date=start_date,
+            end_date=end_date,
             include_resources=include_resources,
         )

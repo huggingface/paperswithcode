@@ -535,10 +535,10 @@ def get_x_trending_papers(
     page: int = Query(1, ge=1, le=100, description="Page number (1-based)"),
     page_size: int = Query(30, ge=1, le=100, description="Papers per page"),
     start_date: Optional[date] = Query(
-        None, description="Inclusive earliest day the paper was shared on X"
+        None, description="Inclusive earliest publication date (YYYY-MM-DD)"
     ),
     end_date: Optional[date] = Query(
-        None, description="Inclusive latest day the paper was shared on X"
+        None, description="Inclusive latest publication date (YYYY-MM-DD)"
     ),
     include_resources: bool = Query(
         False, description="Include repositories and project pages"
@@ -551,10 +551,10 @@ def get_x_trending_papers(
     ),
     db: Session = Depends(get_database_session),
 ):
-    """List papers from the daily "AI Papers on X" picks within a date window.
+    """List papers from the daily "AI Papers on X" picks.
 
-    The window filters on the day a paper was shared on X. Papers are ordered
-    by the same trending score as the homepage trending feed.
+    Like the homepage trending feed, the date window filters on publication
+    date and papers are ordered by the same trending score.
     """
     if start_date is not None and end_date is not None and start_date > end_date:
         raise HTTPException(
