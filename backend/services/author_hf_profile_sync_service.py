@@ -12,6 +12,10 @@ account claimed. A claim moves the paper's link from the author matched by name
 the account is seen, and marks the link claimed. Other papers of the name-matched
 author stay where they are, so namesakes never end up on someone's profile. The
 job never moves an account from one author row to another.
+
+An account's row takes the HF full name once the account claims a paper under
+that byline, so someone who changed their name shows it on all their papers,
+including ones published under a former name.
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ class AuthorHfProfileStats:
     claimed: int = 0
     linked: int = 0
     refreshed: int = 0
+    renamed: int = 0
     unchanged: int = 0
     unmatched: int = 0
     conflicts: int = 0
@@ -129,11 +134,12 @@ class AuthorHfProfileSyncService:
             links[key] = None if key in links else (link, author)
         for name, user, status in claims:
             self.stats.claims_seen += 1
-            self._apply_claim(paper, links.get(_name_key(name)), user, status)
+            self._apply_claim(paper, name, links.get(_name_key(name)), user, status)
 
     def _apply_claim(
         self,
         paper: Paper,
+        byline: str,
         name_link: tuple[PaperAuthor, Author] | None,
         user: dict[str, Any],
         status: Any,
@@ -169,6 +175,7 @@ class AuthorHfProfileSyncService:
                 return
             # Refresh the profile (avatar, renamed username, Pro status).
             self._update(owner, profile)
+            self._adopt_full_name(owner, byline, user)
             owner_link = (
                 self.db.query(PaperAuthor)
                 .filter(
@@ -198,8 +205,23 @@ class AuthorHfProfileSyncService:
             self.db.add(owner)
             self.db.flush()
             self.stats.linked += 1
+            self._adopt_full_name(owner, byline, user)
         link.author_id = owner.id
         self._mark_claimed(link)
+
+    def _adopt_full_name(
+        self, author: Author, byline: str, user: dict[str, Any]
+    ) -> None:
+        # Only a full name the account publishes under: HF full names can be
+        # nicknames or handles.
+        fullname = user.get("fullname")
+        if not fullname or _name_key(fullname) != _name_key(byline):
+            return
+        if _name_key(author.name) == _name_key(byline):
+            return
+        author.name = normalize_arxiv_author_name(fullname)
+        self.db.flush()
+        self.stats.renamed += 1
 
     def _mark_claimed(self, link: PaperAuthor) -> None:
         if link.claimed:

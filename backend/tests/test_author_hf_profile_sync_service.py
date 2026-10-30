@@ -64,7 +64,13 @@ def _session() -> Session:
     return session
 
 
-def _claim(name: str, username: str, hf_id: str, avatar: str = "/avatars/a.svg"):
+def _claim(
+    name: str,
+    username: str,
+    hf_id: str,
+    avatar: str = "/avatars/a.svg",
+    fullname: str | None = None,
+):
     return {
         "name": name,
         "status": "claimed_verified",
@@ -72,6 +78,7 @@ def _claim(name: str, username: str, hf_id: str, avatar: str = "/avatars/a.svg")
         "user": {
             "_id": hf_id,
             "user": username,
+            "fullname": fullname,
             "avatarUrl": avatar,
             "isPro": True,
             "type": "user",
@@ -297,3 +304,65 @@ def test_stored_names_are_normalized_and_ambiguous_names_skipped():
     assert session.get(Author, 20).hf_username is None
     assert service.stats.linked == 1
     assert service.stats.unmatched == 1
+
+
+def test_account_takes_its_full_name_from_a_byline_it_claimed():
+    session = _session()
+    session.add(
+        Paper(
+            id=2,
+            arxiv_id="2610.00002",
+            title="New",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.add(Author(id=15, name="Weikun Knaebel"))
+    session.add(PaperAuthor(paper_id=2, author_id=15, author_order=1))
+    session.commit()
+    service = AuthorHfProfileSyncService(session)
+
+    # A former name on the byline leaves the row's name alone.
+    service.sync_paper(
+        _hf_paper(
+            _claim("Weikun Wang", "kunwww", "hf-kunwww", fullname="Weikun Knaebel")
+        )
+    )
+    assert session.get(Author, 12).name == "Weikun Wang"
+
+    service.sync_paper(
+        {
+            "id": "2610.00002",
+            "authors": [
+                _claim(
+                    "WEIKUN  KNAEBEL", "kunwww", "hf-kunwww", fullname="Weikun Knaebel"
+                )
+            ],
+        }
+    )
+
+    assert session.get(Author, 12).name == "Weikun Knaebel"
+    assert _links(session, 2) == {(12, 1, True)}
+    assert (12, 3, True) in _links(session)
+    assert service.stats.renamed == 1
+
+    # Another capitalization of the same name does not flip the row back.
+    service.sync_paper(
+        _hf_paper(
+            _claim("Weikun Knaebel", "kunwww", "hf-kunwww", fullname="Weikun Knaebel")
+        )
+    )
+    assert session.get(Author, 12).name == "Weikun Knaebel"
+    assert service.stats.renamed == 1
+
+
+def test_a_nickname_full_name_never_renames_the_author():
+    session = _session()
+    service = AuthorHfProfileSyncService(session)
+
+    service.sync_paper(
+        _hf_paper(_claim("Weikun Wang", "kunwww", "hf-kunwww", fullname="kun"))
+    )
+
+    assert session.get(Author, 12).name == "Weikun Wang"
+    assert service.stats.renamed == 0
