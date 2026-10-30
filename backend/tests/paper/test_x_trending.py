@@ -176,3 +176,13 @@ def test_feed_orders_by_trending_score_within_shared_window(db):
 def test_input_needs_an_identifier():
     with pytest.raises(ValueError):
         XTrendingPaperInput(rank=1, title="No link")
+
+
+def test_feed_follows_a_newer_version_of_a_shared_paper(db):
+    replace(db, date(2026, 10, 30), [row(1, arxiv_id="2610.00001")])
+    db.get(Paper, 1).is_latest_version = False
+    newer = paper(7, score=5.0, arxiv_id="2610.00001")
+    newer.version = "v2"
+    db.add(newer)
+    db.commit()
+    assert feed(db) == ["7"]

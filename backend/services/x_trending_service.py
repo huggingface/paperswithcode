@@ -8,7 +8,7 @@ they are reported back as unresolved.
 
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.database import Paper as DBPaper, PaperXTrending
@@ -122,9 +122,16 @@ class XTrendingService:
             shared = shared.where(PaperXTrending.shared_on >= start_date)
         if end_date is not None:
             shared = shared.where(PaperXTrending.shared_on <= end_date)
+        # Match the stored paper's arXiv id too, so a newer version that has
+        # since become the latest row stays in the feed.
+        shared_arxiv_ids = select(DBPaper.arxiv_id).where(
+            DBPaper.id.in_(shared), DBPaper.arxiv_id.is_not(None)
+        )
         papers = PaperService(self.db)
         return PaperFeedExecutor(papers).execute(
-            self.db.query(DBPaper).filter(DBPaper.id.in_(shared)),
+            self.db.query(DBPaper).filter(
+                or_(DBPaper.id.in_(shared), DBPaper.arxiv_id.in_(shared_arxiv_ids))
+            ),
             page=page,
             page_size=page_size,
             order_by="trending",
