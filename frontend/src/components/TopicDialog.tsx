@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
 import { ArrowRight, Check, Plus } from 'lucide-react';
@@ -10,8 +10,9 @@ import { displayTaskName } from '@/lib/transform';
 import { stashPendingFollows, stashPendingTopic, useSaveFollows, useSaveTopic, type FollowPick } from '@/lib/researchTopic';
 import { hfLoginUrl } from './HfSignInButton';
 
-// Suggested chips per group, after everything already followed; each group links to its full listing for more.
-const CHIPS_PER_GROUP = 5;
+// Suggestions fetched per group; each group shows as many as fit in two rows, after everything already followed,
+// and links to its full listing for more.
+const SUGGESTIONS_PER_GROUP = 16;
 
 /** Builds the Following feed in a pop-up, so /following shows no input field next to the chat box:
  * a free-text topic plus trending tasks and methods, popular authors, and organizations to follow. Guests sign in on submit, and
@@ -31,12 +32,12 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   const follows = useQuery({ queryKey: ['research-follows', user?.hf_subject], queryFn: researchApi.follows, enabled: !!user });
   const tasks = useQuery({
     queryKey: ['trending-tasks-sidebar'],
-    queryFn: () => catalogApi.trendingTasks({ limit: 8, level: 0 }),
+    queryFn: () => catalogApi.trendingTasks({ limit: SUGGESTIONS_PER_GROUP, level: 0 }),
     staleTime: 10 * 60 * 1000,
   });
   const methods = useQuery({
     queryKey: ['trending-methods-follow'],
-    queryFn: () => catalogApi.trendingMethods({ limit: CHIPS_PER_GROUP }),
+    queryFn: () => catalogApi.trendingMethods({ limit: SUGGESTIONS_PER_GROUP }),
     staleTime: 10 * 60 * 1000,
   });
   // Popular authors and the directory's top organizations, with faces and logos.
@@ -99,23 +100,23 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
     }));
     const items = [
       ...followed,
-      ...suggestions.filter(item => !isFollowed(kind, item.id)).slice(0, CHIPS_PER_GROUP),
+      ...suggestions.filter(item => !isFollowed(kind, item.id)).map(item => ({ ...item, suggested: true })),
     ];
     return items.length > 0 && <div className="topic-dialog-group">
       <h3>{title}</h3>
-      <div className="topic-dialog-chips">
+      <TwoRowChips>
         {items.map(item => {
           const on = isSelected(kind, item.id);
           const name = kind === 'task' ? displayTaskName(item.name, item.slug ?? undefined) : item.name;
           return <button key={item.id} type="button" className="topic-dialog-chip" aria-pressed={on} disabled={saving}
-            onClick={() => toggle(kind, item.id, name)}>
+            data-suggested={'suggested' in item || undefined} onClick={() => toggle(kind, item.id, name)}>
             {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}
             {(kind === 'author' || kind === 'organization') && <ChipImage kind={kind} name={name} src={item.image} />}
             {name}
           </button>;
         })}
         {browse && <Link to={browse.to} className="topic-dialog-browse">{browse.label}<ArrowRight aria-hidden="true" /></Link>}
-      </div>
+      </TwoRowChips>
     </div>;
   };
   return <form className="topic-dialog-form" onSubmit={event => {
@@ -159,6 +160,26 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
       </button>
     </div>
   </form>;
+}
+
+/** Wraps chips, hiding trailing suggestions until followed chips, suggestions, and the browse link fit in two rows. */
+function TwoRowChips({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const box = ref.current;
+    if (!box) return;
+    const fit = () => {
+      const all = [...box.children] as HTMLElement[];
+      const suggested = all.filter(element => element.dataset.suggested);
+      suggested.forEach(element => { element.hidden = false; });
+      const rows = () => new Set(all.filter(element => !element.hidden).map(element => element.offsetTop)).size;
+      for (let i = suggested.length - 1; i >= 0 && rows() > 2; i--) suggested[i].hidden = true;
+    };
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  });
+  return <div ref={ref} className="topic-dialog-chips">{children}</div>;
 }
 
 /** A face for authors and a logo for organizations; authors without a photo show their initials. */

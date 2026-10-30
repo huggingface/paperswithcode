@@ -270,6 +270,7 @@
 .topic-dialog .research-topic-input { min-height: 112px; font-size: 15px; }
 .topic-dialog .research-topic-count { align-self: flex-end; margin: 0; }
 .topic-dialog-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.topic-dialog-chips > [hidden] { display: none; }
 .topic-dialog-chip {
   display: inline-flex;
   align-items: center;

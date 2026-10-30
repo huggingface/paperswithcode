@@ -219,14 +219,20 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   expect(researchApi.setFollow).toHaveBeenCalledWith('organization', '3', true);
 });
 
-it('shows the top five per group with links to browse the rest', async () => {
+it('fills two rows per group with suggestions, then links to browse the rest', async () => {
+  // jsdom has no layout: lay chips out four per row.
+  vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
+    const visible = [...(this.parentElement?.children ?? [])].filter(element => !(element as HTMLElement).hidden);
+    return Math.floor(visible.indexOf(this) / 4) * 30;
+  });
   vi.mocked(researchApi.follows).mockResolvedValue([]);
   vi.mocked(researchApi.following).mockResolvedValue([]);
   vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: Array.from({ length: 8 }, (_, i) => (
     { id: String(i + 1), name: `Task ${i + 1}`, slug: `task-${i + 1}`, share_lift: 2 } as never)), recent_days: 7, baseline_days: 30 });
   renderFeed();
-  expect(await screen.findByRole('button', { name: 'Task 5' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: 'Task 6' })).not.toBeInTheDocument();
+  // Eight tasks and the browse link need three rows, so the last task gives way.
+  expect(await screen.findByRole('button', { name: 'Task 7' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Task 8' })).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Yann LeCun' }).querySelector('img'))
     .toHaveAttribute('src', '/api/v1/authors/266/photo/abc.jpg');
   // Authors without a photo show their initials.
