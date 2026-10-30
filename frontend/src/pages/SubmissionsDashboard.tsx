@@ -19,6 +19,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/authContext";
 import {
+  EDIT_TYPE_META,
   type PendingEditStatus,
   type PendingEditType,
   type PendingPaperEdit,
@@ -31,33 +32,8 @@ import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 25;
 const STATUS_FILTERS: Array<PendingEditStatus | "all"> = ["pending", "approved", "rejected", "all"];
-const EDIT_TYPE_FILTERS: Array<PendingEditType | "all"> = [
-  "all",
-  "tasks",
-  "methods",
-  "evaluations",
-  "repositories",
-  "project_pages",
-  "source_url",
-  "x_threads",
-  "hf_artifacts",
-  "organizations",
-  "new_task",
-  "new_method",
-  "new_benchmark",
-  "new_metric",
-  "new_conference",
-  "new_organization",
-  "new_external_paper",
-];
+const EDIT_TYPE_FILTERS = ["all", ...Object.keys(EDIT_TYPE_META)] as Array<PendingEditType | "all">;
 const COUNT_STATUSES: PendingEditStatus[] = ["pending", "approved", "rejected"];
-const ADMINISTRATIVE_SUGGESTION_TYPES = new Set<PendingEditType>([
-  "new_task",
-  "new_method",
-  "new_benchmark",
-  "new_metric",
-  "new_conference",
-]);
 
 interface ListData {
   count: number;
@@ -71,22 +47,6 @@ function initialsFor(username: string): string {
 function formatLabel(value: string): string {
   return value.replace(/_/g, " ");
 }
-
-function formatEditTypeFilterLabel(value: PendingEditType | "all"): string {
-  return value === "new_external_paper" ? "external paper" : formatLabel(value);
-}
-
-const DIRECTORY_SUGGESTION_LABELS: Partial<
-  Record<PendingEditType, { title: string; subtitle: string }>
-> = {
-  new_task: { title: "New task", subtitle: "Task suggestion" },
-  new_method: { title: "New method", subtitle: "Method suggestion" },
-  new_benchmark: { title: "New benchmark", subtitle: "Benchmark suggestion" },
-  new_metric: { title: "New metric", subtitle: "Metric suggestion" },
-  new_conference: { title: "New conference", subtitle: "Conference suggestion" },
-  new_organization: { title: "New organization", subtitle: "Organization suggestion" },
-  new_external_paper: { title: "External paper", subtitle: "External paper submission" },
-};
 
 function formatRelativeTime(value: string | null | undefined): string {
   if (!value) return "unknown time";
@@ -205,10 +165,8 @@ function SubmissionCard({
   const { toast } = useToast();
   const paperId = submission.paper_id;
   const isDirectorySuggestion = paperId === null;
-  const isAdministrativeSuggestion = ADMINISTRATIVE_SUGGESTION_TYPES.has(
-    submission.edit_type,
-  );
-  const directoryLabels = DIRECTORY_SUGGESTION_LABELS[submission.edit_type] ?? {
+  const isAdministrativeSuggestion = EDIT_TYPE_META[submission.edit_type].administrative;
+  const directoryLabels = EDIT_TYPE_META[submission.edit_type].directory ?? {
     title: "Taxonomy directory",
     subtitle: "Directory suggestion",
   };
@@ -243,11 +201,7 @@ function SubmissionCard({
         refreshEvaluationQueries(queryClient, evaluationChange(
           String(reviewed.paper_id),
           reviewed.current_payload?.evaluations ?? [],
-          reviewed.proposed_payload.operations.map(operation => operation.op === "create"
-            ? { kind: "create", data: operation.data }
-            : operation.op === "update"
-              ? { kind: "update", evaluationId: operation.evaluation_id, data: operation.data }
-              : { kind: "delete", evaluationId: operation.evaluation_id }),
+          reviewed.proposed_payload.operations,
           paper?.arxiv_id ?? undefined,
         ));
       } else if (reviewed.paper_id != null && !isAdministrativeSuggestion) {
@@ -661,7 +615,7 @@ export default function SubmissionsDashboard() {
                 className={cn("sort-btn", editType === item && "active")}
                 onClick={() => setEditType(item)}
               >
-                {formatEditTypeFilterLabel(item)}
+                {item === "all" ? "all" : EDIT_TYPE_META[item].label}
               </button>
             ))}
           </div>

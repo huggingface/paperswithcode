@@ -27,7 +27,7 @@ describe("source URL editing failures", () => {
     const close = vi.fn();
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
-        <EditSourceUrlDialog open onOpenChange={close} paperId="42"
+        <EditSourceUrlDialog onOpenChange={close} paperId="42"
           initialUrl="https://example.test/old" submitMode={submitMode} />
       </QueryClientProvider>,
     );

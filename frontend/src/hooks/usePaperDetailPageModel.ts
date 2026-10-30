@@ -11,7 +11,7 @@ import { evaluationsApi } from "@/lib/api/evaluations";
 import { papersApi } from "@/lib/api/papers";
 import { DEFAULT_SITE_SUFFIX, formatPageTitle } from "@/lib/latexPlainText";
 import { usePreferences } from "@/lib/preferencesContext";
-import { normalizePaperRouteId } from "@/lib/utils";
+import { normalizePaperRouteId, stripArxivVersion } from "@/lib/utils";
 import { buildPaperDetailPresentation } from "@/lib/paperDetailPresentation";
 
 const PAPER_SECTION_IDS = ["tldr", "abstract", "tasks", "methods", "results"] as const;
@@ -34,10 +34,6 @@ export function parsePaperSectionHash(rawHash: string): {
 export const resultsTaskAnchorId = (taskSlug: string) => `results-task-${taskSlug}`;
 export const resultsTaskHash = (taskSlug: string) =>
   `#results?task=${encodeURIComponent(taskSlug)}`;
-
-export function secondaryQueriesReady(enabled: boolean, paperId?: string): boolean {
-  return enabled && Boolean(paperId);
-}
 
 interface ConflictRefreshOptions {
   direct: boolean;
@@ -93,14 +89,14 @@ export function usePaperDetailPageModel(
     return () => window.clearTimeout(timeoutId);
   }, [paper?.id]);
 
-  const secondaryReady = secondaryQueriesReady(secondaryQueriesEnabled, paper?.id);
+  const secondaryReady = secondaryQueriesEnabled && Boolean(paper?.id);
   const hfQuery = useHuggingFaceRepos(
     secondaryQueriesEnabled ? paper?.arxiv_id : undefined,
   );
   const evaluationsQuery = useEvaluationsByPaper(paper?.id, secondaryReady);
   const versionsQuery = useQuery({
     queryKey: [...paperQueryKeys.feeds.versions, paper?.arxiv_id],
-    queryFn: () => papersApi.versions(paper!.arxiv_id!.replace(/v\d+$/, "")),
+    queryFn: () => papersApi.versions(stripArxivVersion(paper!.arxiv_id!)),
     enabled: secondaryReady && Boolean(paper?.arxiv_id),
     staleTime: 10 * 60 * 1000,
   });
@@ -164,10 +160,6 @@ export function usePaperDetailPageModel(
     return [...groups.values()];
   }, [visibleEvaluations]);
 
-  const resultsTaskSlugsKey = useMemo(
-    () => evaluationsByTask.map(({ taskSlug }) => taskSlug ?? "").join("|"),
-    [evaluationsByTask],
-  );
   const presentation = useMemo(
     () => paper ? buildPaperDetailPresentation(paper, hfQuery.data, hfQuery.isLoading) : null,
     [hfQuery.data, hfQuery.isLoading, paper],
@@ -216,7 +208,6 @@ export function usePaperDetailPageModel(
     evaluationsByTask,
     evaluationsQuery.isLoading,
     paper,
-    resultsTaskSlugsKey,
     secondaryReady,
   ]);
 
@@ -225,8 +216,6 @@ export function usePaperDetailPageModel(
     evaluations: evaluationsQuery.data,
     evaluationsByTask,
     evaluationsLoading: evaluationsQuery.isLoading,
-    hfLoading: hfQuery.isLoading,
-    hfRepos: hfQuery.data,
     paper,
     paperError: paperQuery.error,
     paperLoading: paperQuery.isLoading,

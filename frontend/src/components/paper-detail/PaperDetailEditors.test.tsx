@@ -2,16 +2,18 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Paper } from "@/lib/api/papers.types";
-import type { PaperEditSection } from "@/hooks/usePaperEditState";
+import type { PaperEditSection } from "@/lib/paperCuration";
 import { PaperDetailEditors } from "./PaperDetailEditors";
 
-vi.mock("./EditTasksDialog", () => ({ EditTasksDialog: () => <div>tasks editor</div> }));
-vi.mock("./EditMethodsDialog", () => ({ EditMethodsDialog: () => <div>methods editor</div> }));
+vi.mock("./EditTaxonomyTagsDialog", () => ({
+  EditTaxonomyTagsDialog: ({ kind }: { kind: string }) => <div>{kind === "task" ? "tasks" : "methods"} editor</div>,
+}));
 vi.mock("./EditRepositoriesDialog", () => ({ EditRepositoriesDialog: () => <div>repositories editor</div> }));
-vi.mock("./EditProjectPagesDialog", () => ({ EditProjectPagesDialog: () => <div>project-pages editor</div> }));
-vi.mock("./EditEvaluationsDialog", () => ({ EditEvaluationsDialog: () => <div>results editor</div> }));
-vi.mock("./EditSourceUrlDialog", () => ({ EditSourceUrlDialog: () => <div>source-url editor</div> }));
-vi.mock("./EditHfArtifactsDialog", () => ({ EditHfArtifactsDialog: () => <div>hf-artifacts editor</div> }));
+vi.mock("./EditProjectPagesDialog", () => ({ EditProjectPagesDialog: () => <div>project_pages editor</div> }));
+vi.mock("./EditEvaluationsDialog", () => ({ EditEvaluationsDialog: () => <div>evaluations editor</div> }));
+vi.mock("./EditSourceUrlDialog", () => ({ EditSourceUrlDialog: () => <div>source_url editor</div> }));
+vi.mock("./EditHfArtifactsDialog", () => ({ EditHfArtifactsDialog: () => <div>hf_artifacts editor</div> }));
+vi.mock("./EditXThreadsDialog", () => ({ EditXThreadsDialog: () => <div>x_threads editor</div> }));
 vi.mock("./EditOrganizationsDialog", () => ({ EditOrganizationsDialog: () => <div>organizations editor</div> }));
 
 const paper: Paper = {
@@ -33,10 +35,11 @@ describe("PaperDetailEditors", () => {
     "tasks",
     "methods",
     "repositories",
-    "project-pages",
-    "results",
-    "source-url",
-    "hf-artifacts",
+    "project_pages",
+    "evaluations",
+    "source_url",
+    "hf_artifacts",
+    "x_threads",
     "organizations",
   ] satisfies PaperEditSection[])("renders the registered %s editor", (activeEditor) => {
     render(

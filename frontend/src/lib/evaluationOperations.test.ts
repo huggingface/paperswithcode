@@ -5,7 +5,6 @@ import {
   prepareEvaluationDraft,
   validateEvaluationDraft,
   toDirectEvaluationOperations,
-  toPendingEvaluationOperations,
   type EditableEvaluationRow,
 } from "./evaluationOperations";
 
@@ -36,10 +35,10 @@ describe("evaluation operation normalization", () => {
   it("normalizes create values once and both transports preserve them", () => {
     const canonical = normalizeEvaluationOperations([row({})], () => true);
     const create = canonical[0];
-    if (!create || create.kind !== "create") throw new Error("Expected create operation");
+    if (!create || create.op !== "create") throw new Error("Expected create operation");
 
     expect(canonical).toEqual([{
-      kind: "create",
+      op: "create",
       data: {
         task_id: 3,
         dataset_id: 7,
@@ -57,10 +56,6 @@ describe("evaluation operation normalization", () => {
       paper_id: 11,
       ...create.data,
     });
-    expect(toPendingEvaluationOperations(canonical)[0]).toEqual({
-      op: "create",
-      data: create.data,
-    });
   });
 
   it("represents update clears as explicit null fields", () => {
@@ -75,17 +70,14 @@ describe("evaluation operation normalization", () => {
     ], () => true);
 
     expect(canonical[0]).toMatchObject({
-      kind: "update",
-      evaluationId: 19,
+      op: "update",
+      evaluation_id: 19,
       data: { harness: null, num_parameters: null, hf_model_url: null },
     });
     expect(toDirectEvaluationOperations(11, canonical)[0]?.payload).toMatchObject({
       harness: null,
       num_parameters: null,
       hf_model_url: null,
-    });
-    expect(toPendingEvaluationOperations(canonical)[0]).toMatchObject({
-      data: { harness: null, num_parameters: null, hf_model_url: null },
     });
   });
 
@@ -107,12 +99,9 @@ describe("evaluation operation normalization", () => {
       row({ id: "22", operation: "unchanged" }),
     ], () => true);
 
-    expect(canonical).toEqual([{ kind: "delete", evaluationId: 21 }]);
+    expect(canonical).toEqual([{ op: "delete", evaluation_id: 21 }]);
     expect(toDirectEvaluationOperations(11, canonical)).toEqual([
       { operation: "delete", evaluation_id: 21 },
-    ]);
-    expect(toPendingEvaluationOperations(canonical)).toEqual([
-      { op: "delete", evaluation_id: 21 },
     ]);
   });
 });
@@ -139,8 +128,7 @@ describe("lossless evaluation drafts", () => {
     const operations = normalizeEvaluationOperations([updateDraft(changes)], () => true);
     expect(operations[0]).toMatchObject({ data: { metrics: storedEvaluation.metrics } });
     const [direct] = toDirectEvaluationOperations(11, operations);
-    const [pending] = toPendingEvaluationOperations(operations);
-    expect(pending).toEqual({ op: "update", evaluation_id: 19, data: direct.payload });
+    expect(operations[0]).toEqual({ op: "update", evaluation_id: 19, data: direct.payload });
   });
 
   it("keeps zero visible and round-trips it without coercing other stored scores", () => {
@@ -204,7 +192,7 @@ describe("whole draft validation", () => {
     expect(prepareEvaluationDraft([
       row({ operation: "unchanged", metric_name: "", metric_value: "", task_id: "" }),
       row({ operation: "delete", id: "9", task_id: "", dataset_id: "", metric_value: "" }),
-    ], () => false)).toEqual({ valid: true, operations: [{ kind: "delete", evaluationId: 9 }] });
+    ], () => false)).toEqual({ valid: true, operations: [{ op: "delete", evaluation_id: 9 }] });
     expect(prepareEvaluationDraft([row({ operation: "unchanged" })], () => false))
       .toEqual({ valid: true, operations: [] });
   });

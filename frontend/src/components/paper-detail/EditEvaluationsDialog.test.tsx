@@ -3,6 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { catalogApi } from "@/lib/api/catalog";
+import type { Evaluation } from "@/lib/api/evaluations.types";
 import { EditEvaluationsDialog } from "./EditEvaluationsDialog";
 
 const { batch, submit, toast } = vi.hoisted(() => ({
@@ -20,17 +22,19 @@ vi.mock("@/lib/api/catalog", () => ({ catalogApi: {
   ]),
 } }));
 
+const stored: Evaluation = {
+  id: "19", paper_id: "11", task_id: "3", dataset_id: "7",
+  task_name: "Task", dataset_name: "Benchmark", model_name: "Model",
+  metrics: { Accuracy: 0, F1: "88.5" }, best_metric: "Accuracy",
+  is_open: true, uses_additional_data: false, created_at: "", updated_at: "",
+};
+
 function renderDialog(submitMode: "direct" | "pending", isAdmin = false) {
   const onOpenChange = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}>
-    <EditEvaluationsDialog open onOpenChange={onOpenChange} paperId="11" submitMode={submitMode} isAdmin={isAdmin}
-      initialEvaluations={[{
-        id: "19", paper_id: "11", task_id: "3", dataset_id: "7",
-        task_name: "Task", dataset_name: "Benchmark", model_name: "Model",
-        metrics: { Accuracy: 0, F1: "88.5" }, best_metric: "Accuracy",
-        is_open: true, uses_additional_data: false, created_at: "", updated_at: "",
-      }]} />
+    <EditEvaluationsDialog onOpenChange={onOpenChange} paperId="11" submitMode={submitMode} isAdmin={isAdmin}
+      initialEvaluations={[stored]} />
   </QueryClientProvider>);
   return { onOpenChange };
 }
@@ -163,4 +167,24 @@ it("submits a valid deletion even when the removed row has an incomplete score",
   await waitFor(() => expect(batch).toHaveBeenCalledWith(11, [{ operation: "delete", evaluation_id: 19 }]));
   expect(submit).not.toHaveBeenCalled();
   confirm.mockRestore();
+});
+
+it("starts from evaluations that finish loading after the editor opened", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const dialog = (evaluations: Evaluation[]) => (
+    <QueryClientProvider client={client}>
+      <EditEvaluationsDialog onOpenChange={vi.fn()} paperId="11" initialEvaluations={evaluations} />
+    </QueryClientProvider>
+  );
+  const { rerender } = render(dialog([]));
+  expect(screen.getByText("No evaluation results yet")).toBeInTheDocument();
+  rerender(dialog([stored]));
+  expect(await screen.findByPlaceholderText("Model name")).toHaveValue("Model");
+});
+
+it("reports a metric lookup failure instead of an empty metric list", async () => {
+  vi.mocked(catalogApi.leaderboardMetrics).mockRejectedValueOnce(new Error("offline"));
+  renderDialog("direct");
+  expect(await screen.findByText("Could not load metrics")).toBeInTheDocument();
+  expect(screen.queryByText("No configured metrics")).not.toBeInTheDocument();
 });

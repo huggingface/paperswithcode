@@ -5,6 +5,11 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/** Drop an arXiv version suffix: `2606.02800v2` -> `2606.02800`. */
+export function stripArxivVersion(arxivId: string): string {
+  return arxivId.replace(/v\d+$/i, "");
+}
+
 /** Normalize `/paper/:id` route segments (e.g. `2606-02800` -> `2606.02800`). */
 export function normalizePaperRouteId(routeId: string): string {
   const trimmed = routeId.trim();

@@ -17,7 +17,6 @@ import {
   refreshAfterCatalogConflict,
   resultsTaskAnchorId,
   resultsTaskHash,
-  secondaryQueriesReady,
 } from "./usePaperDetailPageModel";
 
 beforeEach(() => {
@@ -43,12 +42,6 @@ describe("paper detail page model", () => {
       "results-task-image-classification",
     );
     expect(resultsTaskHash("visual qa")).toBe("#results?task=visual%20qa");
-  });
-
-  it("enables secondary queries only after a paper is ready", () => {
-    expect(secondaryQueriesReady(false, "17")).toBe(false);
-    expect(secondaryQueriesReady(true, undefined)).toBe(false);
-    expect(secondaryQueriesReady(true, "17")).toBe(true);
   });
 
   it("refreshes visible data and primes direct-edit conflict state", () => {

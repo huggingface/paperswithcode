@@ -1,10 +1,8 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import {
-  parseFreshAuthEditSection,
-  usePaperEditState,
-} from "./usePaperEditState";
+import { isPaperEditSection } from "@/lib/paperCuration";
+import { usePaperEditState } from "./usePaperEditState";
 
 describe("usePaperEditState", () => {
   it("keeps at most one editor active", () => {
@@ -30,21 +28,23 @@ describe("usePaperEditState", () => {
   });
 });
 
-describe("parseFreshAuthEditSection", () => {
+describe("isPaperEditSection", () => {
   it.each([
-    ["tasks", "tasks"],
-    ["methods", "methods"],
-    ["evaluations", "results"],
-    ["repositories", "repositories"],
-    ["project_pages", "project-pages"],
-    ["hf_artifacts", "hf-artifacts"],
-    ["organizations", "organizations"],
-    ["source_url", "source-url"],
-  ] as const)("maps %s to %s", (storedSection, editor) => {
-    expect(parseFreshAuthEditSection(storedSection)).toBe(editor);
+    "tasks",
+    "methods",
+    "evaluations",
+    "repositories",
+    "project_pages",
+    "hf_artifacts",
+    "organizations",
+    "source_url",
+    "x_threads",
+  ])("accepts the stored API section %s as an editor ID", (storedSection) => {
+    expect(isPaperEditSection(storedSection)).toBe(true);
   });
 
   it("ignores unknown stored sections", () => {
-    expect(parseFreshAuthEditSection("unknown")).toBeNull();
+    expect(isPaperEditSection("unknown")).toBe(false);
+    expect(isPaperEditSection("project-pages")).toBe(false);
   });
 });

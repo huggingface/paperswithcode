@@ -1,16 +1,28 @@
 import { authUrl } from "./apiUrl";
 import { ApiError } from "./apiTransport";
 
-export type PaperEditSection =
-  | "tasks"
-  | "methods"
-  | "organizations"
-  | "repositories"
-  | "project_pages"
-  | "hf_artifacts"
-  | "source_url"
-  | "x_threads"
-  | "evaluations";
+/** Curation sections, as named by the API, with their reader-facing labels. */
+export const PAPER_EDIT_SECTION_LABELS = {
+  tasks: "tasks",
+  methods: "methods",
+  organizations: "organizations",
+  repositories: "GitHub repositories",
+  project_pages: "project pages",
+  hf_artifacts: "Hugging Face artifacts",
+  source_url: "source URL",
+  x_threads: "X threads",
+  evaluations: "evaluation results",
+} as const;
+
+/** A curation section; also the paper page's editor ID. */
+export type PaperEditSection = keyof typeof PAPER_EDIT_SECTION_LABELS;
+
+export function isPaperEditSection(value: string): value is PaperEditSection {
+  return Object.prototype.hasOwnProperty.call(PAPER_EDIT_SECTION_LABELS, value);
+}
+
+/** Session key naming the editor to reopen after a fresh sign-in. */
+export const FRESH_AUTH_EDIT_KEY = "pwc:fresh-auth-edit";
 
 type Request = <T>(endpoint: string, options?: RequestInit) => Promise<T>;
 type FreshAuthRecovery = (section: PaperEditSection) => void;
@@ -30,7 +42,7 @@ const FRESH_AUTH_MUTATION_KEY = "pwc:fresh-auth-mutation";
 
 function redirectToFreshAuth(section: PaperEditSection): void {
   if (typeof window === "undefined") return;
-  sessionStorage.setItem("pwc:fresh-auth-edit", section);
+  sessionStorage.setItem(FRESH_AUTH_EDIT_KEY, section);
   const login = authUrl("/api/v1/auth/hf/login");
   window.location.assign(`${login}?return_to=${encodeURIComponent(window.location.href)}`);
 }
@@ -192,7 +204,7 @@ export class PaperCurationCoordinator {
     });
     this.clearAttempt({ headers: draft.options.headers });
     sessionStorage.removeItem(FRESH_AUTH_MUTATION_KEY);
-    sessionStorage.removeItem("pwc:fresh-auth-edit");
+    sessionStorage.removeItem(FRESH_AUTH_EDIT_KEY);
     return result;
   }
 

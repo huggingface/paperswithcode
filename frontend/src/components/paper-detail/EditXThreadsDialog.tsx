@@ -1,24 +1,11 @@
-import { getApiErrorMessage } from "@/lib/apiTransport";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Check, Loader2, Plus, Trash2 } from "lucide-react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
-import { useToast } from "@/hooks/use-toast";
 import { papersApi } from "@/lib/api/papers";
-import { submissionsApi } from "@/lib/api/submissions";
-import { reportSubmission } from "@/lib/submissionOutcome";
-import { refreshPaperQueries } from "@/lib/queryInvalidation";
+import { PaperEditDialogShell } from "./PaperEditDialogShell";
+import { usePaperSectionEdit, type PaperSectionEditorProps } from "./usePaperSectionEdit";
 
 const MAX_X_THREADS = 10;
 // Mirrors backend/services/x_thread_service.py so typos are caught before saving.
@@ -29,18 +16,11 @@ function postId(url: string): string | null {
   return X_POST_URL.exec(url.trim())?.[1] ?? null;
 }
 
-interface EditXThreadsDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  paperId: string;
-  arxivId?: string;
+interface EditXThreadsDialogProps extends PaperSectionEditorProps {
   initialUrls: string[];
-  submitMode?: "direct" | "pending";
-  isAuthor?: boolean;
 }
 
 export function EditXThreadsDialog({
-  open,
   onOpenChange,
   paperId,
   arxivId,
@@ -51,60 +31,19 @@ export function EditXThreadsDialog({
   const [urls, setUrls] = useState<string[]>(initialUrls);
   const [newUrl, setNewUrl] = useState("");
   const [inputError, setInputError] = useState<string | null>(null);
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  // Seed only when the dialog opens so background refetches keep local edits.
-  const hasSeededRef = useRef(false);
-  useEffect(() => {
-    if (!open) {
-      hasSeededRef.current = false;
-      return;
-    }
-    if (hasSeededRef.current) return;
-    hasSeededRef.current = true;
-    setUrls(initialUrls);
-    setNewUrl("");
-    setInputError(null);
-  }, [open, initialUrls]);
-
-  const mutation = useMutation({
-    mutationFn: async (next: string[]) => {
-      if (submitMode === "pending") {
-        const submitted = await submissionsApi.submit({
-          paper_id: parseInt(paperId),
-          edit_type: "x_threads",
-          proposed_payload: { x_threads: next },
-        });
-        reportSubmission(submitted, {
-          toast,
-          queryClient,
-          paperIds: [paperId, arxivId],
-          queuedDescription:
-            "Thanks! An admin will review your proposed X threads shortly.",
-        });
-        return null;
-      }
-      return papersApi.updateXThreads(paperId, next);
+  const save = usePaperSectionEdit({
+    editType: "x_threads",
+    paperId,
+    arxivId,
+    submitMode,
+    messages: {
+      proposal: "X threads",
+      noun: "X threads",
+      failure: "Failed to update X threads.",
     },
-    onSuccess: (updatedPaper) => {
-      if (submitMode !== "pending" && updatedPaper) {
-        refreshPaperQueries(queryClient, updatedPaper, [paperId, arxivId]);
-      }
-      onOpenChange(false);
-    },
-    onError: (err: unknown) => {
-      toast({
-        title: submitMode === "pending" ? "Could not submit edit" : "Could not save X threads",
-        description: getApiErrorMessage(
-          err,
-          submitMode === "pending"
-            ? "Failed to submit your edit. Please try again."
-            : "Failed to update X threads.",
-        ),
-        variant: "destructive",
-      });
-    },
+    toPendingPayload: (next: string[]) => ({ x_threads: next }),
+    applyDirect: (next) => papersApi.updateXThreads(paperId, next),
+    onClose: () => onOpenChange(false),
   });
 
   // Folds the typed-but-not-added URL into the list; null means it is invalid.
@@ -149,7 +88,7 @@ export function EditXThreadsDialog({
       initialUrls.some((url) => !next.some((candidate) => postId(candidate) === postId(url))) &&
       !window.confirm("Remove one or more X threads from this paper?")
     ) return;
-    mutation.mutate(next);
+    save.mutate(next);
   };
 
   const hasChange = useMemo(() => {
@@ -158,106 +97,88 @@ export function EditXThreadsDialog({
   }, [urls, newUrl, initialUrls]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[600px]">
-        <DialogHeader>
-          <DialogTitle>Edit X threads</DialogTitle>
-          <DialogDescription>
-            Link posts on X (formerly Twitter) in which the authors introduce this paper. A
-            preview of each post is shown on the paper page.
-          </DialogDescription>
-        </DialogHeader>
-        {submitMode === "pending" && <PendingEditNotice isAuthor={isAuthor} />}
-
-        <div className="space-y-2">
-          <label className="text-sm font-medium" htmlFor="x-thread-url">Add X post URL</label>
-          <div className="flex space-x-2">
-            <Input
-              id="x-thread-url"
-              type="url"
-              placeholder="https://x.com/user/status/1234567890"
-              value={newUrl}
-              onChange={(event) => {
-                setNewUrl(event.target.value);
-                setInputError(null);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  handleAdd();
-                }
-              }}
-              aria-invalid={Boolean(inputError)}
-              className="flex-1"
-            />
-            <Button onClick={handleAdd} size="sm" disabled={!newUrl.trim()}>
-              <Plus className="w-4 h-4 mr-1" />
-              Add
-            </Button>
-          </div>
-          {inputError && <p className="text-xs text-destructive">{inputError}</p>}
-        </div>
-
-        <div className="py-4 overflow-y-auto max-h-[350px]">
-          {urls.length > 0 ? (
-            <div className="space-y-2">
-              {urls.map((url, index) => (
-                <div key={url} className="flex items-center space-x-2 p-3 bg-muted/30 rounded-lg">
-                  <span className="flex-1 min-w-0 truncate text-sm font-medium">{url}</span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-2"
-                    disabled={index === 0}
-                    onClick={() => move(index, -1)}
-                    aria-label="Move up"
-                  >
-                    <ArrowUp className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-2"
-                    disabled={index === urls.length - 1}
-                    onClick={() => move(index, 1)}
-                    aria-label="Move down"
-                  >
-                    <ArrowDown className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-8 px-2 text-destructive hover:text-destructive"
-                    onClick={() => setUrls(urls.filter((candidate) => candidate !== url))}
-                    aria-label="Remove X thread"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="text-center py-8 text-sm text-muted-foreground">No X threads linked yet</p>
-          )}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={handleSave} disabled={mutation.isPending || !hasChange}>
-            {mutation.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                {submitMode === "pending" ? "Submitting..." : "Saving..."}
-              </>
-            ) : (
-              <>
-                <Check className="w-4 h-4 mr-2" />
-                {submitMode === "pending" ? "Submit for review" : "Save Changes"}
-              </>
-            )}
+    <PaperEditDialogShell
+      title="Edit X threads"
+      description="Link posts on X (formerly Twitter) in which the authors introduce this paper. A preview of each post is shown on the paper page."
+      className="max-w-2xl max-h-[600px]"
+      submitMode={submitMode}
+      isAuthor={isAuthor}
+      onOpenChange={onOpenChange}
+      onSave={handleSave}
+      isSaving={save.isPending}
+      saveDisabled={!hasChange}
+    >
+      <div className="space-y-2">
+        <label className="text-sm font-medium" htmlFor="x-thread-url">Add X post URL</label>
+        <div className="flex space-x-2">
+          <Input
+            id="x-thread-url"
+            type="url"
+            placeholder="https://x.com/user/status/1234567890"
+            value={newUrl}
+            onChange={(event) => {
+              setNewUrl(event.target.value);
+              setInputError(null);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleAdd();
+              }
+            }}
+            aria-invalid={Boolean(inputError)}
+            className="flex-1"
+          />
+          <Button onClick={handleAdd} size="sm" disabled={!newUrl.trim()}>
+            <Plus className="w-4 h-4 mr-1" />
+            Add
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+        {inputError && <p className="text-xs text-destructive">{inputError}</p>}
+      </div>
+
+      <div className="py-4 overflow-y-auto max-h-[350px]">
+        {urls.length > 0 ? (
+          <div className="space-y-2">
+            {urls.map((url, index) => (
+              <div key={url} className="flex items-center space-x-2 p-3 bg-muted/30 rounded-lg">
+                <span className="flex-1 min-w-0 truncate text-sm font-medium">{url}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2"
+                  disabled={index === 0}
+                  onClick={() => move(index, -1)}
+                  aria-label="Move up"
+                >
+                  <ArrowUp className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2"
+                  disabled={index === urls.length - 1}
+                  onClick={() => move(index, 1)}
+                  aria-label="Move down"
+                >
+                  <ArrowDown className="w-4 h-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-destructive hover:text-destructive"
+                  onClick={() => setUrls(urls.filter((candidate) => candidate !== url))}
+                  aria-label="Remove X thread"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-center py-8 text-sm text-muted-foreground">No X threads linked yet</p>
+        )}
+      </div>
+    </PaperEditDialogShell>
   );
 }

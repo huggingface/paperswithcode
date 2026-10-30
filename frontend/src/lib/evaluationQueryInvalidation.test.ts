@@ -40,17 +40,17 @@ describe("evaluation cache reconciliation", () => {
   it("invalidates old/new leaderboard rows, rank-bearing papers and summaries for a move", () => {
     const { client, entries, unrelated } = setup();
     refreshEvaluationQueries(client, evaluationChange("42", before, [
-      { kind: "update", evaluationId: 1, data: { task_id: 30, dataset_id: 300 } },
+      { op: "update", evaluation_id: 1, data: { task_id: 30, dataset_id: 300, metrics: {} } },
     ], "2401.00001"));
     entries.forEach(({ key }) => expect(client.getQueryState(key)?.isInvalidated, JSON.stringify(key)).toBe(true));
     unrelated.forEach(({ key }) => expect(client.getQueryState(key)?.isInvalidated, JSON.stringify(key)).toBe(false));
   });
 
-  it.each(["create", "delete"] as const)("refreshes a cached benchmark revisited after %s", async kind => {
+  it.each(["create", "delete"] as const)("refreshes a cached benchmark revisited after %s", async op => {
     const { client } = setup();
-    refreshEvaluationQueries(client, evaluationChange("42", before, kind === "create"
-      ? [{ kind, data: { task_id: 10, dataset_id: 100 } }]
-      : [{ kind, evaluationId: 1 }]));
+    refreshEvaluationQueries(client, evaluationChange("42", before, op === "create"
+      ? [{ op, data: { task_id: 10, dataset_id: 100, metrics: {} } }]
+      : [{ op, evaluation_id: 1 }]));
     const queryFn = vi.fn().mockResolvedValue([{ score: 99 }]);
     expect(await client.fetchQuery({ queryKey: ["dataset-evals", "100"], queryFn })).toEqual([{ score: 99 }]);
     expect(queryFn).toHaveBeenCalledOnce();
@@ -67,7 +67,7 @@ it("refreshes competing paper results and details without staling unrelated pape
   client.setQueryData(["paper-arxiv", "peer-arxiv"], { id: "43" });
   client.setQueryData(["evaluations", "paper", "44"], [{ ...peer, paper_id: "44", task_id: "20" }]);
   client.setQueryData(["paper", "44"], { id: "44" });
-  refreshEvaluationQueries(client, evaluationChange("42", before, [{ kind: "delete", evaluationId: 1 }]));
+  refreshEvaluationQueries(client, evaluationChange("42", before, [{ op: "delete", evaluation_id: 1 }]));
   for (const key of [["evaluations", "paper", "43"], ["paper", "43"], ["paper-arxiv", "peer-arxiv"]]) {
     expect(client.getQueryState(key)?.isInvalidated).toBe(true);
   }

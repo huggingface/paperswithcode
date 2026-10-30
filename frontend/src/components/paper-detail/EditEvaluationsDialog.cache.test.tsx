@@ -21,7 +21,7 @@ function setup(mode: "direct" | "pending" = "direct") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 300_000 } } });
   keys.forEach(key => client.setQueryData(key, [row]));
   const close = vi.fn();
-  render(<QueryClientProvider client={client}><EditEvaluationsDialog open onOpenChange={close} paperId="42" initialEvaluations={[row]} submitMode={mode} /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><EditEvaluationsDialog onOpenChange={close} paperId="42" initialEvaluations={[row]} submitMode={mode} /></QueryClientProvider>);
   return { client, close };
 }
 beforeEach(() => {

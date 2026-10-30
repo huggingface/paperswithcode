@@ -42,7 +42,6 @@ function renderDialog(initialOrganizationIds: number[] = [], submitMode: "direct
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
       <EditOrganizationsDialog
-        open
         onOpenChange={onOpenChange}
         paperId="42"
         initialOrganizationIds={initialOrganizationIds}
@@ -116,7 +115,7 @@ describe("EditOrganizationsDialog", () => {
    const client = renderDialog();
    const user = userEvent.setup();
    await user.click(await screen.findByRole("checkbox", { name: "NVIDIA" }));
-   await user.click(screen.getByRole("button", { name: "Save changes" }));
+   await user.click(screen.getByRole("button", { name: "Save Changes" }));
    await waitFor(() => expect(client.getQueryData(["paper", "42"])).toEqual({ id: "42", title: "Updated" }));
    expect(client.getQueryState(["organization-papers-infinite", "nvidia"])?.isInvalidated).toBe(true);
  });
@@ -125,7 +124,7 @@ describe("EditOrganizationsDialog", () => {
    const client = renderDialog([], "pending");
    const user = userEvent.setup();
    await user.click(await screen.findByRole("checkbox", { name: "NVIDIA" }));
-   await user.click(screen.getByRole("button", { name: "Submit test edit" }));
+   await user.click(screen.getByRole("button", { name: "Submit for review" }));
    await waitFor(() => expect(submit).toHaveBeenCalled());
    expect(updatePaperOrganizations).not.toHaveBeenCalled();
    expect(client.getQueryData(["paper", "42"])).toEqual({ id: "42", title: "Original" });
@@ -179,11 +178,11 @@ describe("EditOrganizationsDialog", () => {
    expect(client.getQueryState(["paper", "42"])?.isInvalidated).toBe(true);
  });
 
- it("holds Save changes until a filled-in suggestion is submitted or cleared", async () => {
+ it("holds Save Changes until a filled-in suggestion is submitted or cleared", async () => {
    const user = userEvent.setup();
    renderDialog();
    await screen.findByText("NVIDIA");
-   const save = screen.getByRole("button", { name: "Save changes" });
+   const save = screen.getByRole("button", { name: "Save Changes" });
    await user.type(screen.getByRole("searchbox", { name: "Search organizations" }), "General Reasoning");
    expect(save).toBeEnabled();
 

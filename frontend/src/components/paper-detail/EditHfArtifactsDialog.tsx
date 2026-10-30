@@ -1,39 +1,16 @@
-import { getApiErrorMessage } from "@/lib/apiTransport";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, Check, Plus, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { papersApi } from "@/lib/api/papers";
-import { submissionsApi } from "@/lib/api/submissions";
-import { reportSubmission } from "@/lib/submissionOutcome";
-import { refreshPaperQueries } from "@/lib/queryInvalidation";
-import { useToast } from "@/hooks/use-toast";
-import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
+import type { PendingEditOf } from "@/lib/pendingEdits";
+import { PaperEditDialogShell } from "./PaperEditDialogShell";
+import { usePaperSectionEdit, type PaperSectionEditorProps } from "./usePaperSectionEdit";
 
-export interface HfArtifactsPayload {
-  hf_models: string[];
-  hf_datasets: string[];
-  hf_spaces: string[];
-}
+type HfArtifactsPayload = PendingEditOf<"hf_artifacts">["proposed_payload"];
 
-interface EditHfArtifactsDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  paperId: string;
-  arxivId?: string;
+interface EditHfArtifactsDialogProps extends PaperSectionEditorProps {
   initialArtifacts: HfArtifactsPayload;
-  onSuccess?: () => void;
-  submitMode?: "direct" | "pending";
-  isAuthor?: boolean;
 }
 
 type ArtifactBucket = keyof HfArtifactsPayload;
@@ -80,12 +57,10 @@ function payloadsEqual(a: HfArtifactsPayload, b: HfArtifactsPayload): boolean {
 }
 
 export function EditHfArtifactsDialog({
-  open,
   onOpenChange,
   paperId,
   arxivId,
   initialArtifacts,
-  onSuccess,
   submitMode = "direct",
   isAuthor = false,
 }: EditHfArtifactsDialogProps) {
@@ -95,70 +70,19 @@ export function EditHfArtifactsDialog({
     hf_datasets: "",
     hf_spaces: "",
   });
-  const queryClient = useQueryClient();
-  const { toast } = useToast();
-
-  const hasSeededRef = useRef(false);
-  useEffect(() => {
-    if (!open) {
-      hasSeededRef.current = false;
-      return;
-    }
-    if (hasSeededRef.current) return;
-    hasSeededRef.current = true;
-    setEditedArtifacts(initialArtifacts);
-    setNewUrls({ hf_models: "", hf_datasets: "", hf_spaces: "" });
-  }, [open, initialArtifacts]);
-
-  const updateArtifactsMutation = useMutation({
-    mutationFn: async ({ paperId, artifacts }: { paperId: string; artifacts: HfArtifactsPayload }) => {
-      if (submitMode === "pending") {
-        const submitted = await submissionsApi.submit({
-          paper_id: parseInt(paperId),
-          edit_type: "hf_artifacts",
-          proposed_payload: artifacts,
-        });
-        reportSubmission(submitted, {
-          toast,
-          queryClient,
-          paperIds: [paperId, arxivId],
-          queuedDescription:
-            "Thanks! An admin will review your proposed Hugging Face artifact changes shortly.",
-        });
-        return null;
-      }
-      return papersApi.updateHfArtifacts(paperId, artifacts);
+  const save = usePaperSectionEdit({
+    editType: "hf_artifacts",
+    paperId,
+    arxivId,
+    submitMode,
+    messages: {
+      proposal: "Hugging Face artifact changes",
+      noun: "Hugging Face artifacts",
+      failure: "Failed to update Hugging Face artifacts.",
     },
-    onSuccess: (updatedPaper) => {
-      if (submitMode === "pending") {
-        onSuccess?.();
-        onOpenChange(false);
-        setNewUrls({ hf_models: "", hf_datasets: "", hf_spaces: "" });
-        return;
-      }
-      if (updatedPaper) {
-        refreshPaperQueries(queryClient, updatedPaper, [paperId, arxivId]);
-      }
-      onSuccess?.();
-      onOpenChange(false);
-      setNewUrls({ hf_models: "", hf_datasets: "", hf_spaces: "" });
-    },
-    onError: (err: unknown) => {
-      const description = getApiErrorMessage(
-        err,
-        submitMode === "pending"
-          ? "Failed to submit your edit. Please try again."
-          : "Failed to update Hugging Face artifacts.",
-      );
-      toast({
-        title:
-          submitMode === "pending"
-            ? "Could not submit edit"
-            : "Could not save Hugging Face artifacts",
-        description,
-        variant: "destructive",
-      });
-    },
+    toPendingPayload: (artifacts: HfArtifactsPayload) => artifacts,
+    applyDirect: (artifacts) => papersApi.updateHfArtifacts(paperId, artifacts),
+    onClose: () => onOpenChange(false),
   });
 
   const getArtifactsForSubmission = (): HfArtifactsPayload | null => {
@@ -216,7 +140,7 @@ export function EditHfArtifactsDialog({
       removes &&
       !window.confirm("Remove one or more Hugging Face artifact links?")
     ) return;
-    updateArtifactsMutation.mutate({ paperId, artifacts: next });
+    save.mutate(next);
   };
 
   const hasChange = useMemo(() => {
@@ -239,92 +163,70 @@ export function EditHfArtifactsDialog({
   }, [editedArtifacts, newUrls, initialArtifacts]);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[700px]">
-        <DialogHeader>
-          <DialogTitle>Edit Hugging Face Artifacts</DialogTitle>
-          <DialogDescription>
-            Add or remove linked Hugging Face models, datasets, and Spaces for this paper.
-          </DialogDescription>
-        </DialogHeader>
-        {submitMode === "pending" && <PendingEditNotice isAuthor={isAuthor} />}
-
-        <div className="space-y-6 py-2 overflow-y-auto max-h-[460px]">
-          {BUCKET_CONFIG.map(({ key, label, placeholder }) => (
-            <div key={key} className="space-y-2">
-              <label className="text-sm font-medium">{label}</label>
-              <div className="flex space-x-2">
-                <Input
-                  type="url"
-                  placeholder={placeholder}
-                  value={newUrls[key]}
-                  onChange={(e) =>
-                    setNewUrls((prev) => ({ ...prev, [key]: e.target.value }))
+    <PaperEditDialogShell
+      title="Edit Hugging Face Artifacts"
+      description="Add or remove linked Hugging Face models, datasets, and Spaces for this paper."
+      className="max-w-2xl max-h-[700px]"
+      submitMode={submitMode}
+      isAuthor={isAuthor}
+      onOpenChange={onOpenChange}
+      onSave={handleSave}
+      isSaving={save.isPending}
+      saveDisabled={!hasChange}
+    >
+      <div className="space-y-6 py-2 overflow-y-auto max-h-[460px]">
+        {BUCKET_CONFIG.map(({ key, label, placeholder }) => (
+          <div key={key} className="space-y-2">
+            <label className="text-sm font-medium">{label}</label>
+            <div className="flex space-x-2">
+              <Input
+                type="url"
+                placeholder={placeholder}
+                value={newUrls[key]}
+                onChange={(e) =>
+                  setNewUrls((prev) => ({ ...prev, [key]: e.target.value }))
+                }
+                onKeyPress={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddUrl(key);
                   }
-                  onKeyPress={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddUrl(key);
-                    }
-                  }}
-                  className="flex-1"
-                />
-                <Button onClick={() => handleAddUrl(key)} size="sm" disabled={!newUrls[key].trim()}>
-                  <Plus className="w-4 h-4 mr-1" />
-                  Add
-                </Button>
-              </div>
-              {editedArtifacts[key].length > 0 ? (
-                <div className="space-y-2">
-                  {editedArtifacts[key].map((url) => (
-                    <div
-                      key={url}
-                      className="flex items-center space-x-2 p-3 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors"
-                    >
-                      <span className="text-sm font-medium text-paper-blue truncate flex-1">
-                        {url}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveUrl(key, url)}
-                        className="h-8 px-2 text-destructive hover:text-destructive"
-                        title={`Remove ${label.toLowerCase()} URL`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs text-muted-foreground">No {label.toLowerCase()} linked yet.</div>
-              )}
+                }}
+                className="flex-1"
+              />
+              <Button onClick={() => handleAddUrl(key)} size="sm" disabled={!newUrls[key].trim()}>
+                <Plus className="w-4 h-4 mr-1" />
+                Add
+              </Button>
             </div>
-          ))}
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={updateArtifactsMutation.isPending || !hasChange}
-          >
-            {updateArtifactsMutation.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                {submitMode === "pending" ? "Submitting..." : "Saving..."}
-              </>
+            {editedArtifacts[key].length > 0 ? (
+              <div className="space-y-2">
+                {editedArtifacts[key].map((url) => (
+                  <div
+                    key={url}
+                    className="flex items-center space-x-2 p-3 bg-muted/30 rounded-lg hover:bg-muted/50 transition-colors"
+                  >
+                    <span className="text-sm font-medium text-paper-blue truncate flex-1">
+                      {url}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveUrl(key, url)}
+                      className="h-8 px-2 text-destructive hover:text-destructive"
+                      title={`Remove ${label.toLowerCase()} URL`}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <>
-                <Check className="w-4 h-4 mr-2" />
-                {submitMode === "pending" ? "Submit for review" : "Save Changes"}
-              </>
+              <div className="text-xs text-muted-foreground">No {label.toLowerCase()} linked yet.</div>
             )}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </div>
+        ))}
+      </div>
+    </PaperEditDialogShell>
   );
 }

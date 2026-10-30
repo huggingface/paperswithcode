@@ -1,41 +1,26 @@
-import { invalidatePaperDetails, invalidatePaperFeeds, refreshPaperQueries } from "@/lib/queryInvalidation";
-import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/queryInvalidation";
+import { useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
-import { submissionsApi } from "@/lib/api/submissions";
-import { reportSubmission } from "@/lib/submissionOutcome";
 import { useToast } from "@/hooks/use-toast";
-import { PendingEditNotice } from "./PendingEditNotice";
+import { PaperEditDialogShell } from "./PaperEditDialogShell";
 import { SuggestOrganizationForm } from "./SuggestOrganizationForm";
+import { usePaperSectionEdit, type PaperSectionEditorProps } from "./usePaperSectionEdit";
 
-interface Props {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  paperId: string;
+interface Props extends PaperSectionEditorProps {
   initialOrganizationIds: number[];
-  submitMode: "direct" | "pending";
-  isAuthor?: boolean;
 }
 
 export const EditOrganizationsDialog = ({
-  open,
   onOpenChange,
   paperId,
+  arxivId,
   initialOrganizationIds,
-  submitMode,
+  submitMode = "direct",
   isAuthor,
 }: Props) => {
   const [selected, setSelected] = useState<number[]>(initialOrganizationIds);
@@ -44,16 +29,9 @@ export const EditOrganizationsDialog = ({
   const [suggestionUnsent, setSuggestionUnsent] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  useEffect(() => {
-    if (open) {
-      setSelected(initialOrganizationIds);
-      setSearchQuery("");
-    }
-  }, [initialOrganizationIds, open]);
   const organizations = useQuery({
     queryKey: ["organizations", "curation"],
     queryFn: () => catalogApi.organizations(false),
-    enabled: open,
   });
   const displayedOrganizations = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
@@ -71,130 +49,110 @@ export const EditOrganizationsDialog = ({
       .sort((a, b) => rank(a.name) - rank(b.name))
       .map(({ organization }) => organization);
   }, [organizations.data?.results, searchQuery]);
-  const save = useMutation({
-    mutationFn: async () => {
-      const removes = initialOrganizationIds.some((id) => !selected.includes(id));
-      if (
-        removes &&
-        !window.confirm(
-          "Remove one or more organizations from this paper? Destructive edits may require a fresh sign-in.",
-        )
-      ) {
-        return;
-      }
-      if (submitMode === "pending") {
-        const submitted = await submissionsApi.submit({
-          paper_id: Number(paperId),
-          edit_type: "organizations",
-          proposed_payload: { organization_ids: selected },
-        });
-        reportSubmission(submitted, {
-          toast,
-          queryClient,
-          paperIds: [paperId],
-          queuedDescription: "Thanks! An admin will review your proposed organization changes shortly.",
-        });
-        return null;
-      } else {
-        return papersApi.updateOrganizations(paperId, selected);
-      }
+  const save = usePaperSectionEdit({
+    editType: "organizations",
+    paperId,
+    arxivId,
+    submitMode,
+    messages: {
+      proposal: "organization changes",
+      noun: "organizations",
+      failure: "Failed to update organizations.",
     },
-    onSuccess: (updatedPaper) => {
-      if (updatedPaper === undefined) return;
-      if (updatedPaper) refreshPaperQueries(queryClient, updatedPaper, [paperId]);
-      onOpenChange(false);
-    },
+    toPendingPayload: (organizationIds: number[]) => ({ organization_ids: organizationIds }),
+    applyDirect: (organizationIds) => papersApi.updateOrganizations(paperId, organizationIds),
+    onClose: () => onOpenChange(false),
   });
+  const handleSave = () => {
+    if (
+      initialOrganizationIds.some((id) => !selected.includes(id)) &&
+      !window.confirm(
+        "Remove one or more organizations from this paper? Destructive edits may require a fresh sign-in.",
+      )
+    ) return;
+    save.mutate(selected);
+  };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Edit organizations</DialogTitle>
-          <DialogDescription>
-            Associate organizations with this paper. If one is missing, search for it and suggest it for review.
-          </DialogDescription>
-        </DialogHeader>
-        {submitMode === "pending" && <PendingEditNotice isAuthor={isAuthor} />}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            aria-label="Search organizations"
-            placeholder="Search organizations..."
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            className="pl-9 pr-9"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={() => setSearchQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
-              aria-label="Clear organization search"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
-        <div className="max-h-80 space-y-2 overflow-auto">
-          {displayedOrganizations.map((organization) => {
-            const id = Number(organization.id);
-            return (
-              <label key={organization.id} className="flex items-center gap-2 rounded border p-2">
-                <input
-                  type="checkbox"
-                  checked={selected.includes(id)}
-                  onChange={(event) =>
-                    setSelected((current) =>
-                      event.target.checked
-                        ? [...current, id]
-                        : current.filter((value) => value !== id),
-                    )
-                  }
-                />
-                {organization.name}
-              </label>
-            );
-          })}
-          {!organizations.isLoading && displayedOrganizations.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              {searchQuery.trim()
-                ? `No organizations found matching "${searchQuery.trim()}"`
-                : "No organizations available"}
-            </p>
-          )}
-        </div>
-        {!organizations.isLoading && displayedOrganizations.length === 0 && searchQuery.trim() && (
-          <SuggestOrganizationForm
-            key={searchQuery.trim()}
-            paperId={paperId}
-            initialName={searchQuery.trim()}
-            onApplied={(name) => {
-              // Close first: the refetched paper would otherwise reset this dialog
-              // and show the new organization unchecked, so saving would drop it.
-              onOpenChange(false);
-              toast({ title: "Organization added", description: `Added "${name}" to this paper.` });
-              invalidatePaperDetails(queryClient, [paperId]);
-              invalidatePaperFeeds(queryClient);
-              void queryClient.invalidateQueries({ queryKey: ["organizations"] });
-            }}
-            onUnsentChange={setSuggestionUnsent}
-          />
+    <PaperEditDialogShell
+      title="Edit organizations"
+      description="Associate organizations with this paper. If one is missing, search for it and suggest it for review."
+      submitMode={submitMode}
+      isAuthor={isAuthor}
+      onOpenChange={onOpenChange}
+      onSave={handleSave}
+      isSaving={save.isPending}
+      saveDisabled={suggestionUnsent}
+    >
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          type="search"
+          aria-label="Search organizations"
+          placeholder="Search organizations..."
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          className="pl-9 pr-9"
+        />
+        {searchQuery && (
+          <button
+            type="button"
+            onClick={() => setSearchQuery("")}
+            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+            aria-label="Clear organization search"
+          >
+            <X className="h-4 w-4" />
+          </button>
         )}
-        {suggestionUnsent && (
-          <p className="text-sm text-muted-foreground">
-            Submit the organization above, or clear the search, before saving.
+      </div>
+      <div className="max-h-80 space-y-2 overflow-auto">
+        {displayedOrganizations.map((organization) => {
+          const id = Number(organization.id);
+          return (
+            <label key={organization.id} className="flex items-center gap-2 rounded border p-2">
+              <input
+                type="checkbox"
+                checked={selected.includes(id)}
+                onChange={(event) =>
+                  setSelected((current) =>
+                    event.target.checked
+                      ? [...current, id]
+                      : current.filter((value) => value !== id),
+                  )
+                }
+              />
+              {organization.name}
+            </label>
+          );
+        })}
+        {!organizations.isLoading && displayedOrganizations.length === 0 && (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            {searchQuery.trim()
+              ? `No organizations found matching "${searchQuery.trim()}"`
+              : "No organizations available"}
           </p>
         )}
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending || suggestionUnsent}>
-            {submitMode === "pending" ? "Submit test edit" : "Save changes"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </div>
+      {!organizations.isLoading && displayedOrganizations.length === 0 && searchQuery.trim() && (
+        <SuggestOrganizationForm
+          key={searchQuery.trim()}
+          paperId={paperId}
+          initialName={searchQuery.trim()}
+          onApplied={(name) => {
+            // Close: these checkboxes predate the new organization, so saving would drop it.
+            onOpenChange(false);
+            toast({ title: "Organization added", description: `Added "${name}" to this paper.` });
+            invalidatePaperDetails(queryClient, [paperId]);
+            invalidatePaperFeeds(queryClient);
+            void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+          }}
+          onUnsentChange={setSuggestionUnsent}
+        />
+      )}
+      {suggestionUnsent && (
+        <p className="text-sm text-muted-foreground">
+          Submit the organization above, or clear the search, before saving.
+        </p>
+      )}
+    </PaperEditDialogShell>
   );
 };

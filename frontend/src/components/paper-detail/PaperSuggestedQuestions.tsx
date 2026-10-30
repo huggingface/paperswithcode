@@ -6,10 +6,11 @@ import { papersApi } from "@/lib/api/papers";
 import type { Paper } from "@/lib/api/papers.types";
 import { isChatEnabled } from "@/lib/apiUrl";
 import { resetReaderSession } from "@/lib/paperReader";
+import { stripArxivVersion } from "@/lib/utils";
 
 /** The general chat has no paper scope, so name the paper in the prompt. */
 function generalChatPrompt(paper: Paper, question: string): string {
-  const reference = paper.arxiv_id ? ` (arXiv:${paper.arxiv_id.replace(/v\d+$/i, "")})` : "";
+  const reference = paper.arxiv_id ? ` (arXiv:${stripArxivVersion(paper.arxiv_id)})` : "";
   return `About the paper "${paper.title}"${reference}: ${question}`;
 }
 

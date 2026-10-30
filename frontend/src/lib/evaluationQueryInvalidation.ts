@@ -1,6 +1,7 @@
 import type { Evaluation } from "@/lib/api/evaluations.types";
 import type { QueryClient } from "@tanstack/react-query";
 import type { Dataset, TaskPage, TrendingBenchmarksResponse } from "@/lib/api/catalog.types";
+import type { PendingEvaluationOperation } from "@/lib/pendingEdits";
 import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/queryInvalidation";
 
 type EvaluationContext = {
@@ -19,22 +20,18 @@ export interface EvaluationChange {
 export function evaluationChange(
   paperId: string,
   before: EvaluationContext[],
-  operations: Array<
-    | { kind: "create"; data: EvaluationContext }
-    | { kind: "update"; evaluationId: number; data: EvaluationContext }
-    | { kind: "delete"; evaluationId: number }
-  >,
+  operations: PendingEvaluationOperation[],
   arxivId?: string,
 ): EvaluationChange {
   const changedIds = new Set(operations.flatMap(operation =>
-    operation.kind === "create" ? [] : [String(operation.evaluationId)],
+    operation.op === "create" ? [] : [String(operation.evaluation_id)],
   ));
   return {
     paperId,
     arxivId,
     contexts: [
       ...before.filter(row => row.id !== undefined && changedIds.has(String(row.id))),
-      ...operations.flatMap(operation => operation.kind === "delete" ? [] : [operation.data]),
+      ...operations.flatMap(operation => operation.op === "delete" ? [] : [operation.data]),
     ],
   };
 }

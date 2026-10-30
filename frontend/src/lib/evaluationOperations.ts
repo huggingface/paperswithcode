@@ -1,4 +1,5 @@
 import type { Evaluation } from "./api/evaluations.types";
+import type { EvaluationData, PendingEvaluationOperation } from "./pendingEdits";
 
 export interface EditableEvaluationRow {
   id?: string;
@@ -14,7 +15,7 @@ export interface EditableEvaluationRow {
   num_parameters: string;
   hf_model_url: string;
   is_open: boolean;
-  operation?: "create" | "update" | "delete" | "unchanged";
+  operation: "create" | "update" | "delete" | "unchanged";
 }
 
 /** Keep the full score dictionary while exposing one selected score to the editor. */
@@ -51,34 +52,12 @@ function editedMetrics(row: EditableEvaluationRow, metricName: string): Evaluati
   return metrics;
 }
 
-interface EvaluationData extends Record<string, unknown> {
-  task_id: number;
-  dataset_id: number;
-  model_name?: string;
-  harness?: string | null;
-  metrics: Evaluation["metrics"];
-  best_metric: string;
-  best_rank?: number;
-  num_parameters?: number | null;
-  hf_model_url?: string | null;
-  is_open: boolean;
-}
-
-export type EvaluationOperation =
-  | { kind: "create"; data: EvaluationData }
-  | { kind: "update"; evaluationId: number; data: EvaluationData }
-  | { kind: "delete"; evaluationId: number };
-
+/** Wire shape of `POST /evaluations/batch`. */
 export type DirectEvaluationOperation = {
   operation: "create" | "update" | "delete";
   evaluation_id?: number;
   payload?: Record<string, unknown>;
 };
-
-export type PendingEvaluationOperation =
-  | { op: "create"; data: EvaluationData }
-  | { op: "update"; evaluation_id: number; data: EvaluationData }
-  | { op: "delete"; evaluation_id: number };
 
 type SupportsHarness = (taskId: string, datasetId: string) => boolean;
 
@@ -110,7 +89,7 @@ function isIdentifier(value: string | undefined): boolean {
 export function validateEvaluationDraft(rows: EditableEvaluationRow[]): EvaluationDraftError[] {
   const errors: EvaluationDraftError[] = [];
   rows.forEach((row, rowIndex) => {
-    if (!row.operation || row.operation === "unchanged") return;
+    if (row.operation === "unchanged") return;
     const add = (field: EvaluationDraftError["field"], message: string) => {
       errors.push({ rowIndex, field, message });
     };
@@ -139,7 +118,7 @@ export function validateEvaluationDraft(rows: EditableEvaluationRow[]): Evaluati
 
 export type PreparedEvaluationDraft =
   | { valid: false; errors: EvaluationDraftError[] }
-  | { valid: true; operations: EvaluationOperation[] };
+  | { valid: true; operations: PendingEvaluationOperation[] };
 
 export function prepareEvaluationDraft(
   rows: EditableEvaluationRow[],
@@ -153,11 +132,11 @@ export function prepareEvaluationDraft(
 function normalizeEvaluationOperations(
   rows: EditableEvaluationRow[],
   supportsHarness: SupportsHarness,
-): EvaluationOperation[] {
-  const operations: EvaluationOperation[] = [];
+): PendingEvaluationOperation[] {
+  const operations: PendingEvaluationOperation[] = [];
   for (const row of rows) {
     if (row.operation === "delete") {
-      operations.push({ kind: "delete", evaluationId: Number(row.id) });
+      operations.push({ op: "delete", evaluation_id: Number(row.id) });
       continue;
     }
     if (row.operation !== "create" && row.operation !== "update") continue;
@@ -179,7 +158,7 @@ function normalizeEvaluationOperations(
       const numParameters = nullableNonNegativeInteger(row.num_parameters);
       const modelUrl = nullableString(row.hf_model_url);
       operations.push({
-        kind: "create",
+        op: "create",
         data: {
           ...common,
           ...(modelName ? { model_name: modelName } : {}),
@@ -193,8 +172,8 @@ function normalizeEvaluationOperations(
     }
 
     operations.push({
-      kind: "update",
-      evaluationId: Number(row.id),
+      op: "update",
+      evaluation_id: Number(row.id),
       data: {
         ...common,
         ...(modelName ? { model_name: modelName } : {}),
@@ -210,36 +189,16 @@ function normalizeEvaluationOperations(
 
 export function toDirectEvaluationOperations(
   paperId: number,
-  operations: EvaluationOperation[],
+  operations: PendingEvaluationOperation[],
 ): DirectEvaluationOperation[] {
   return operations.map((operation) => {
-    if (operation.kind === "delete") {
-      return { operation: "delete", evaluation_id: operation.evaluationId };
+    switch (operation.op) {
+      case "delete":
+        return { operation: "delete", evaluation_id: operation.evaluation_id };
+      case "update":
+        return { operation: "update", evaluation_id: operation.evaluation_id, payload: operation.data };
+      case "create":
+        return { operation: "create", payload: { paper_id: paperId, ...operation.data } };
     }
-    return {
-      operation: operation.kind,
-      ...(operation.kind === "update" ? { evaluation_id: operation.evaluationId } : {}),
-      payload: operation.kind === "create"
-        ? { paper_id: paperId, ...operation.data }
-        : operation.data,
-    };
-  });
-}
-
-export function toPendingEvaluationOperations(
-  operations: EvaluationOperation[],
-): PendingEvaluationOperation[] {
-  return operations.map((operation) => {
-    if (operation.kind === "delete") {
-      return { op: "delete", evaluation_id: operation.evaluationId };
-    }
-    if (operation.kind === "update") {
-      return {
-        op: "update",
-        evaluation_id: operation.evaluationId,
-        data: operation.data,
-      };
-    }
-    return { op: "create", data: operation.data };
   });
 }

@@ -3,6 +3,7 @@ import type { HuggingFaceRepoCounts } from "@/hooks/useHuggingFaceRepos";
 import { copyableLeaderboardRanks } from "./leaderboardBadges";
 import { safeExternalHref } from "./safeExternalHref";
 import { summarizeRepos } from "./transform";
+import { stripArxivVersion } from "./utils";
 
 export interface HuggingFaceArtifactsViewer {
   isLoading: boolean;
@@ -125,7 +126,7 @@ export function buildPaperDetailPresentation(
     datasets: links.datasets.map(({ href }) => href),
     spaces: links.spaces.map(({ href }) => href),
   };
-  const canonicalArxivId = paper.arxiv_id?.replace(/v\d+$/, "") ?? null;
+  const canonicalArxivId = paper.arxiv_id != null ? stripArxivVersion(paper.arxiv_id) : null;
   const hfArtifactViewer: HuggingFaceArtifactsViewer = paper.arxiv_id
     ? {
         isLoading: hfLoading,
