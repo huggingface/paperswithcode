@@ -165,7 +165,8 @@ export function EditTasksDialog({
     // Apply the new task list to the paper detail cache *before* the network
     // round-trip so the chip the user just unchecked disappears immediately.
     // The dialog also closes here, then the canonical server response
-    // reconciles the cache in `onSuccess` (or rolls back on `onError`).
+    // reconciles the cache and confirms in `onSuccess` (or rolls back on
+    // `onError`).
     onMutate: async ({ taskIds }) => {
       if (submitMode === "pending") {
         // Pending submissions don't touch live data, so skip the optimistic
@@ -205,23 +206,23 @@ export function EditTasksDialog({
         });
       });
 
+      onSuccess?.();
+      onOpenChange(false);
+
+      return { snapshots };
+    },
+    onSuccess: (updatedPaper, { taskIds }) => {
+      if (submitMode === "pending") {
+        onSuccess?.();
+        onOpenChange(false);
+        return;
+      }
       toast({
         title: "Tasks updated",
         description: `Saved ${taskIds.length} task${
           taskIds.length === 1 ? "" : "s"
         } for this paper.`,
       });
-      onSuccess?.();
-      onOpenChange(false);
-
-      return { snapshots };
-    },
-    onSuccess: (updatedPaper) => {
-      if (submitMode === "pending") {
-        onSuccess?.();
-        onOpenChange(false);
-        return;
-      }
       if (updatedPaper) {
         refreshPaperQueries(queryClient, updatedPaper, [paperId, arxivId]);
       }

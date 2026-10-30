@@ -1,12 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setStoredAdminToken } from "./adminAuth";
 import { ApiError, ApiTransport, getApiErrorMessage, requestJson } from "./apiTransport";
 
 describe("API transport", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    setStoredAdminToken("");
   });
 
   it("constructs the URL and parses a successful JSON response", async () => {
@@ -57,8 +55,8 @@ describe("API transport", () => {
     expect(new Headers(options?.headers).get("Accept")).toBe("text/event-stream");
   });
 
-  it("includes browser credentials and the stored admin credential", async () => {
-    setStoredAdminToken("secret-admin-token");
+  it("includes browser credentials and never sends an admin token", async () => {
+    window.localStorage.setItem("cronAdminToken", "secret-admin-token");
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), { status: 200 }),
     );
@@ -67,9 +65,8 @@ describe("API transport", () => {
 
     const options = fetchMock.mock.calls[0][1];
     expect(options?.credentials).toBe("include");
-    expect(new Headers(options?.headers).get("X-Admin-Token")).toBe(
-      "secret-admin-token",
-    );
+    expect(new Headers(options?.headers).has("X-Admin-Token")).toBe(false);
+    window.localStorage.removeItem("cronAdminToken");
   });
 
   it("returns a typed error without applying browser policy", async () => {

@@ -5,7 +5,7 @@ import { PaperCard } from "@/components";
 import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useInfinitePapers } from "@/hooks/usePapers";
 import { DEFAULT_SITE_SUFFIX, formatPageTitle } from "@/lib/latexPlainText";
 import { transformPaperForCard } from "@/lib/transform";
@@ -157,9 +157,6 @@ const AstraForRoboticsView: React.FC = () => {
     has_code: hasCode,
     has_hf_artifacts: hasHfArtifacts,
   });
-  const { targetRef, isIntersecting } = useIntersectionObserver({
-    rootMargin: "200px",
-  });
 
   useEffect(() => {
     document.title = formatPageTitle("GPT-6 Astra for Robotics");
@@ -168,11 +165,7 @@ const AstraForRoboticsView: React.FC = () => {
     };
   }, []);
 
-  useEffect(() => {
-    if (isIntersecting && papersQ.hasNextPage && !papersQ.isFetchingNextPage) {
-      papersQ.fetchNextPage();
-    }
-  }, [isIntersecting, papersQ.hasNextPage, papersQ.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const targetRef = useInfiniteScroll(papersQ);
 
   const cards = useMemo(
     () =>

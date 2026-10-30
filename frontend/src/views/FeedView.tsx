@@ -33,7 +33,7 @@ import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { useInfinitePapers } from "@/hooks/usePapers";
 import { papersApi } from "@/lib/api/papers";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -447,12 +447,7 @@ const FeedView: React.FC<{ following?: boolean; xTrending?: boolean }> = ({ foll
     : (xTrending ? xFeed.data : publicFeed.data)?.pages.flatMap(page => page.results.map(paper => ({ ...transformPaperForCard(paper), followReasons: undefined }))) ?? [],
   [following, xTrending, followedFeed.data, xFeed.data, publicFeed.data]);
 
-  const { targetRef: sentinelRef, isIntersecting } = useIntersectionObserver({ rootMargin: "400px" });
-  useEffect(() => {
-    if (isIntersecting && infinite.hasNextPage && !infinite.isFetchingNextPage) {
-      infinite.fetchNextPage();
-    }
-  }, [isIntersecting, infinite.hasNextPage, infinite.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sentinelRef = useInfiniteScroll(infinite, "400px");
 
   const isLoading = infinite.isLoading || (following && auth?.isLoading);
   const error = infinite.error;

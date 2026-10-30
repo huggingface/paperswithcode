@@ -1,4 +1,3 @@
-import { getStoredAdminToken } from "./adminAuth";
 
 const LOG_API_REQUESTS = import.meta.env.DEV;
 
@@ -85,13 +84,9 @@ export class ApiTransport {
       const { headers, ...requestOptions } = options ?? {};
       const method = (requestOptions.method ?? "GET").toUpperCase();
       const defaultCache: RequestCache = method === "GET" ? "default" : "no-store";
-      const adminToken = getStoredAdminToken();
       const requestHeaders = new Headers(headers);
       if (!requestHeaders.has("Content-Type")) {
         requestHeaders.set("Content-Type", "application/json");
-      }
-      if (adminToken && !requestHeaders.has("X-Admin-Token")) {
-        requestHeaders.set("X-Admin-Token", adminToken);
       }
       const response = await fetch(url, {
         ...requestOptions,

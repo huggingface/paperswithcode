@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
@@ -9,7 +9,7 @@ import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import ResearchFollowButton from "@/components/ResearchFollowButton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useInfinitePapers } from "@/hooks/usePapers";
 import { papersApi } from "@/lib/api/papers";
 import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
@@ -47,19 +47,13 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
     start_date: dateRange.startDate,
     end_date: dateRange.endDate,
   });
-  const { targetRef, isIntersecting } = useIntersectionObserver({ rootMargin: "200px" });
 
   const cards = useMemo(
     () => (papers.data?.pages ?? []).flatMap((page) => page.results.map(transformPaperForCard)),
     [papers.data],
   );
 
-  // Also rerun when results change: a filter change can leave the sentinel visible.
-  useEffect(() => {
-    if (isIntersecting && papers.hasNextPage && !papers.isFetchingNextPage) {
-      papers.fetchNextPage();
-    }
-  }, [isIntersecting, papers.hasNextPage, papers.isFetchingNextPage, cards.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const targetRef = useInfiniteScroll(papers);
   const totalCount = papers.data?.pages[0]?.count ?? 0;
 
   const setParam = (key: string, value: string | null) => {

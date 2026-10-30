@@ -12,6 +12,7 @@
 
 import React from "react";
 import posthog from "posthog-js";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { authApi, type AuthUser } from "./api/auth";
 import { authUrl } from "./apiUrl";
@@ -41,6 +42,8 @@ function consumeSignupMarker(): boolean {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = React.useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
+  const queryClient = useQueryClient();
+  const previousUserRef = React.useRef<AuthUser | null>(null);
 
   const refresh = React.useCallback(async () => {
     setIsLoading(true);
@@ -82,6 +85,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       posthog.capture("signup_completed", { auth_provider: "huggingface" });
     }
   }, [user]);
+
+  // Drop the signed-out user's cached data (bookmarks, follows, sessions).
+  React.useEffect(() => {
+    if (previousUserRef.current && !user) void queryClient.resetQueries();
+    previousUserRef.current = user;
+  }, [queryClient, user]);
 
   React.useEffect(() => {
     const handler = () => {

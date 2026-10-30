@@ -92,6 +92,39 @@ beforeEach(() => {
 });
 
 describe("SubmissionsDashboard", () => {
+  it("pages every status by offset instead of growing the request limit", async () => {
+    const rowsFor = (status: "pending" | "approved" | "rejected", parity: number) =>
+      Array.from({ length: status === "rejected" ? 0 : 30 }, (_, index) => ({
+        ...externalPaperSubmission,
+        id: 2 * index + parity + 1,
+        status,
+        created_at: new Date(Date.UTC(2026, 7, 10) - (2 * index + parity) * 60_000).toISOString(),
+      }));
+    const rows = { pending: rowsFor("pending", 0), approved: rowsFor("approved", 1), rejected: rowsFor("rejected", 0) };
+    listPendingPaperEdits.mockImplementation(
+      async ({ status, limit, offset }: { status: keyof typeof rows; limit: number; offset: number }) => ({
+        count: rows[status].length,
+        results: rows[status].slice(offset, offset + limit),
+      }),
+    );
+
+    renderDashboard();
+    const [allStatuses] = await screen.findAllByRole("button", { name: /^all/ });
+    await userEvent.click(allStatuses);
+    expect(await screen.findByText("Showing 25 of 60 submissions")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Load more" }));
+    expect(await screen.findByText("Showing 50 of 60 submissions")).toBeInTheDocument();
+
+    const pageCalls = listPendingPaperEdits.mock.calls.map(([params]) => params).filter((params) => params.limit !== 1);
+    expect(pageCalls.every((params) => params.limit === 25)).toBe(true);
+    const nextPage = pageCalls.slice(-3);
+    expect(nextPage.map((params) => [params.status, params.offset])).toEqual([
+      ["pending", 13],
+      ["approved", 12],
+      ["rejected", 0],
+    ]);
+  });
+
   it("shows a controlled error when pending-edit data is malformed", async () => {
     listPendingPaperEdits.mockRejectedValue(
       new Error("Malformed pending-edit payload: proposed_payload.task_ids: Required"),

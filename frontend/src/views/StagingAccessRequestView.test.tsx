@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -31,9 +32,11 @@ describe("StagingAccessRequestView", () => {
       } as Response);
 
     render(
-      <AuthProvider>
-        <StagingAccessRequestView />
-      </AuthProvider>,
+      <QueryClientProvider client={new QueryClient()}>
+        <AuthProvider>
+          <StagingAccessRequestView />
+        </AuthProvider>
+      </QueryClientProvider>,
     );
 
     expect(await screen.findByDisplayValue("verified-user")).toHaveAttribute("readonly");

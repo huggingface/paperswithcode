@@ -9,7 +9,7 @@ import MarkdownText from "@/components/MarkdownText";
 import { catalogApi } from "@/lib/api/catalog";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { useInfiniteConferencePapers } from "@/hooks/usePapers";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
@@ -105,13 +105,8 @@ const ConferenceTaskView: React.FC = () => {
     enabled: !!confSlug,
   });
 
-  const { targetRef: sentinelRef, isIntersecting } = useIntersectionObserver({ rootMargin: "200px" });
 
-  useEffect(() => {
-    if (isIntersecting && papersQ.hasNextPage && !papersQ.isFetchingNextPage) {
-      papersQ.fetchNextPage();
-    }
-  }, [isIntersecting, papersQ.hasNextPage, papersQ.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sentinelRef = useInfiniteScroll(papersQ);
 
   useEffect(() => {
     window.scrollTo(0, 0);

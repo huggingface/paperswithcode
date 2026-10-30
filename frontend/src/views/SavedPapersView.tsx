@@ -73,6 +73,9 @@ const SavedPapersView: React.FC = () => {
     );
   }
 
+  // Position across all task groups, so only the first cards on the page load eagerly.
+  let cardPosition = 0;
+
   return (
     <div className="page">
       <div className="feed-header">
@@ -197,7 +200,7 @@ const SavedPapersView: React.FC = () => {
                       <PaperCard
                         key={paper.id}
                         paper={transformPaperForCard(paper)}
-                        rank={1}
+                        rank={++cardPosition}
                       />
                     ))}
                   </div>

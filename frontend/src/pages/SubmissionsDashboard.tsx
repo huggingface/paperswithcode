@@ -3,7 +3,7 @@ import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/queryInvalidation";
 import React from "react";
 import "./SubmissionsDashboard.css";
-import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   Inbox,
@@ -40,6 +40,8 @@ const EDIT_TYPE_FILTERS: Array<PendingEditType | "all"> = [
   "project_pages",
   "source_url",
   "x_threads",
+  "hf_artifacts",
+  "organizations",
   "new_task",
   "new_method",
   "new_benchmark",
@@ -131,40 +133,42 @@ function sortByCreatedDesc(rows: PendingPaperEdit[]): PendingPaperEdit[] {
   return [...rows].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
-async function fetchSubmissions(
-  status: PendingEditStatus | "all",
-  editType: PendingEditType | "all",
-  visibleLimit: number,
-  autoOnly: boolean,
-): Promise<ListData> {
-  const edit_type = editType === "all" ? undefined : editType;
-  const reviewed_by_kind = autoOnly ? "auto" : undefined;
-  if (status !== "all") {
-    return submissionsApi.list({
-      status,
-      edit_type,
-      reviewed_by_kind,
-      limit: visibleLimit,
-      offset: 0,
-    });
-  }
+type StatusOffsets = Partial<Record<PendingEditStatus, number>>;
 
-  const pages = await Promise.all(
-    COUNT_STATUSES.map((itemStatus) =>
+interface SubmissionPage extends ListData {
+  nextOffsets: StatusOffsets | null;
+}
+
+// One page of the newest submissions across `statuses`. Each status list is
+// sorted newest first, so merging the next PAGE_SIZE rows of every list and
+// keeping the newest PAGE_SIZE gives the exact next page; each status offset
+// advances only by the rows it contributed.
+async function fetchSubmissionPage(
+  statuses: PendingEditStatus[],
+  editType: PendingEditType | "all",
+  autoOnly: boolean,
+  offsets: StatusOffsets,
+): Promise<SubmissionPage> {
+  const lists = await Promise.all(
+    statuses.map((status) =>
       submissionsApi.list({
-        status: itemStatus,
-        edit_type,
-        reviewed_by_kind,
-        limit: visibleLimit,
-        offset: 0,
+        status,
+        edit_type: editType === "all" ? undefined : editType,
+        reviewed_by_kind: autoOnly ? "auto" : undefined,
+        limit: PAGE_SIZE,
+        offset: offsets[status] ?? 0,
       }),
     ),
   );
-
-  return {
-    count: pages.reduce((sum, page) => sum + page.count, 0),
-    results: sortByCreatedDesc(pages.flatMap((page) => page.results)).slice(0, visibleLimit),
-  };
+  const results = sortByCreatedDesc(lists.flatMap((list) => list.results)).slice(0, PAGE_SIZE);
+  const nextOffsets: StatusOffsets = {};
+  statuses.forEach((status, index) => {
+    const taken = results.filter((row) => lists[index].results.includes(row)).length;
+    nextOffsets[status] = (offsets[status] ?? 0) + taken;
+  });
+  const count = lists.reduce((sum, list) => sum + list.count, 0);
+  const loaded = statuses.reduce((sum, status) => sum + (nextOffsets[status] ?? 0), 0);
+  return { count, results, nextOffsets: results.length > 0 && loaded < count ? nextOffsets : null };
 }
 
 function AdminPlaceholder() {
@@ -502,12 +506,7 @@ export default function SubmissionsDashboard() {
   const [status, setStatus] = React.useState<PendingEditStatus | "all">("pending");
   const [editType, setEditType] = React.useState<PendingEditType | "all">("all");
   const [autoOnly, setAutoOnly] = React.useState(false);
-  const [visibleLimit, setVisibleLimit] = React.useState(PAGE_SIZE);
   const isAdmin = !!user?.is_admin;
-
-  React.useEffect(() => {
-    setVisibleLimit(PAGE_SIZE);
-  }, [status, editType, autoOnly]);
 
   const countsQuery = useQuery({
     queryKey: ["pendingPaperEdits", "counts", editType, autoOnly],
@@ -532,23 +531,30 @@ export default function SubmissionsDashboard() {
     staleTime: 30 * 1000,
   });
 
-  const listQuery = useQuery({
-    queryKey: ["pendingPaperEdits", { status, editType, visibleLimit, autoOnly }],
-    queryFn: () => fetchSubmissions(status, editType, visibleLimit, autoOnly),
+  const listQuery = useInfiniteQuery({
+    queryKey: ["pendingPaperEdits", { status, editType, autoOnly }],
+    queryFn: ({ pageParam }) =>
+      fetchSubmissionPage(status === "all" ? COUNT_STATUSES : [status], editType, autoOnly, pageParam),
+    initialPageParam: {} as StatusOffsets,
+    getNextPageParam: (page) => page.nextOffsets ?? undefined,
     enabled: isAdmin,
     retry: false,
   });
+  const submissions = React.useMemo(
+    () => listQuery.data?.pages.flatMap((page) => page.results) ?? [],
+    [listQuery.data],
+  );
 
   const paperIds = React.useMemo(
     () =>
       Array.from(
         new Set(
-          (listQuery.data?.results ?? [])
+          submissions
             .map((row) => row.paper_id)
             .filter((paperId): paperId is number => paperId != null),
         ),
       ).sort((a, b) => a - b),
-    [listQuery.data?.results],
+    [submissions],
   );
 
   const paperQueries = useQueries({
@@ -591,9 +597,7 @@ export default function SubmissionsDashboard() {
     rejected: counts?.rejected,
     all: allCount,
   };
-  const submissions = listQuery.data?.results ?? [];
-  const totalCount = listQuery.data?.count ?? 0;
-  const hasMore = submissions.length < totalCount;
+  const totalCount = listQuery.data?.pages[0]?.count ?? 0;
 
   return (
     <div className="page submissions-page">
@@ -722,14 +726,14 @@ export default function SubmissionsDashboard() {
             <p>
               Showing {submissions.length} of {totalCount} submissions
             </p>
-            {hasMore && (
+            {listQuery.hasNextPage && (
               <button
                 type="button"
                 className="feedback-link"
-                onClick={() => setVisibleLimit((value) => value + PAGE_SIZE)}
+                onClick={() => listQuery.fetchNextPage()}
                 disabled={listQuery.isFetching}
               >
-                {listQuery.isFetching && <Loader2 className="spin" size={14} />}
+                {listQuery.isFetchingNextPage && <Loader2 className="spin" size={14} />}
                 Load more
               </button>
             )}

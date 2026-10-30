@@ -1,6 +1,6 @@
 import ResearchFollowButton from "@/components/ResearchFollowButton";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 
@@ -14,7 +14,7 @@ import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { slugify } from "@/lib/slug";
 import { transformPaperForCard } from "@/lib/transform";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { resolveInternalPath } from "@/lib/internalLinks";
@@ -114,12 +114,7 @@ const MethodDetailView: React.FC = () => {
     return all.map(transformPaperForCard);
   }, [papersQ.data]);
 
-  const { targetRef: sentinelRef, isIntersecting } = useIntersectionObserver({ rootMargin: "200px" });
-  useEffect(() => {
-    if (isIntersecting && papersQ.hasNextPage && !papersQ.isFetchingNextPage) {
-      papersQ.fetchNextPage();
-    }
-  }, [isIntersecting, papersQ.hasNextPage, papersQ.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sentinelRef = useInfiniteScroll(papersQ);
 
   if (methodQ.isLoading) {
     return (

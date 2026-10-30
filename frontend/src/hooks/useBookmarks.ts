@@ -8,8 +8,8 @@ import { paperQueryKeys } from "@/lib/paperQueryKeys";
  * Save button flips state without a round-trip.
  *
  * If the user is not signed in, `toggle()` redirects to the HF OAuth login
- * (same pattern as `HfSignInButton`) so the user lands back on the page they
- * came from.
+ * with Saved Papers authorization and resumes the save when the user lands
+ * back on the page they came from.
  */
 
 import React from "react";
@@ -18,7 +18,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { accountApi } from "@/lib/api/account";
 import type { BookmarkIdsResponse } from "@/lib/api/account.types";
 import { ApiError } from "@/lib/apiTransport";
-import { apiUrl, isAuthDisabled } from "@/lib/apiUrl";
+import { isAuthDisabled } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 import {
   SAVED_PAPERS_AUTHORIZED_PARAM,
@@ -132,13 +132,7 @@ export function useToggleBookmark() {
     (paperId: string | number, isBookmarked: boolean) => {
       if (!user) {
         if (isAuthDisabled()) return;
-        const returnTo =
-          typeof window !== "undefined"
-            ? window.location.pathname + window.location.search
-            : "/";
-        window.location.href = apiUrl(
-          `/api/v1/auth/hf/login?return_to=${encodeURIComponent(returnTo)}`,
-        );
+        authorizeSavedPapers({ paperId, isBookmarked });
         return;
       }
       mutation.mutate({ paperId, isBookmarked });

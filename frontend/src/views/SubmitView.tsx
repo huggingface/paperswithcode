@@ -21,6 +21,7 @@ import type { PaperSubmitPayload, PaperSubmitResponse } from "@/lib/api/papers.t
 import { papersApi } from "@/lib/api/papers";
 import { authUrl } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
+import { invalidatePaperFeeds } from "@/lib/queryInvalidation";
 
 const SUBMIT_DRAFT_KEY = "pwc:paper-submit-draft";
 
@@ -147,15 +148,7 @@ const SubmitView: React.FC = () => {
         mutation.reset();
         return;
       }
-      queryClient.invalidateQueries({ queryKey: ["papers"], refetchType: "none" });
-      queryClient.invalidateQueries({
-        queryKey: ["papers-infinite"],
-        refetchType: "none",
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["trending-papers"],
-        refetchType: "none",
-      });
+      invalidatePaperFeeds(queryClient);
       const importedNewVersion = data.refreshed && data.created && data.latest_version;
       toast({
         title: importedNewVersion

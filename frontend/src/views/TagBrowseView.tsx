@@ -24,7 +24,7 @@ import { usePreferences } from "@/lib/preferencesContext";
 import { slugify } from "@/lib/slug";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { useInfiniteTaskPapers } from "@/hooks/usePapers";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
@@ -321,12 +321,7 @@ const TagBrowseView: React.FC = () => {
     return Object.values(counts).sort((a, b) => b.count - a.count).slice(0, 8);
   }, [papersQ.data]);
 
-  const { targetRef: sentinelRef, isIntersecting } = useIntersectionObserver({ rootMargin: "200px" });
-  useEffect(() => {
-    if (isIntersecting && papersQ.hasNextPage && !papersQ.isFetchingNextPage) {
-      papersQ.fetchNextPage();
-    }
-  }, [isIntersecting, papersQ.hasNextPage, papersQ.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sentinelRef = useInfiniteScroll(papersQ);
 
   if (pageQ.isLoading) {
     return (

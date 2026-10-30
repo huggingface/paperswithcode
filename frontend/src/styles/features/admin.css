@@ -1,0 +1,38 @@
+/* Admin gate and dashboard placeholders, shared by App route gates and admin pages. */
+.submission-loading,
+.submission-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 240px;
+  padding: 32px;
+  text-align: center;
+  color: var(--ink-faint);
+}
+.submission-loading {
+  min-height: 160px;
+  flex-direction: row;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.submission-empty h1,
+.submission-empty h2 {
+  font-family: var(--serif);
+  font-weight: 500;
+  color: var(--ink);
+}
+.submission-empty p {
+  max-width: 460px;
+  color: var(--ink-soft);
+}
+.submission-empty a {
+  color: var(--accent-text);
+  text-decoration: underline;
+}
+.submission-empty-warn {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+}

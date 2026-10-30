@@ -14,7 +14,7 @@ import {
   type SearchableSelectOption,
 } from "@/components/ui/searchable-select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { useInfiniteOrganizationPapers } from "@/hooks/usePapers";
 import { catalogApi } from "@/lib/api/catalog";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
@@ -66,15 +66,8 @@ export const OrganizationPaperFeed: React.FC<{
     end_date: dateRange.endDate,
     enabled: !!organizationSlug,
   });
-  const { targetRef, isIntersecting } = useIntersectionObserver({
-    rootMargin: "200px",
-  });
 
-  useEffect(() => {
-    if (isIntersecting && papersQ.hasNextPage && !papersQ.isFetchingNextPage) {
-      papersQ.fetchNextPage();
-    }
-  }, [isIntersecting, papersQ.hasNextPage, papersQ.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const targetRef = useInfiniteScroll(papersQ);
 
   useEffect(() => {
     setLogoFailed(false);

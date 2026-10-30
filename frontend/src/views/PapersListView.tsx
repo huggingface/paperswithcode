@@ -6,7 +6,7 @@ import { catalogApi } from "@/lib/api/catalog";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { useInfinitePapers, useInfinitePaperSearch } from "@/hooks/usePapers";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useQuery } from "@tanstack/react-query";
@@ -145,12 +145,7 @@ const PapersListView: React.FC = () => {
     });
   }, [infinite.data, isSearchMode, urlSearch]);
 
-  const { targetRef: sentinelRef, isIntersecting } = useIntersectionObserver({ rootMargin: "200px" });
-  useEffect(() => {
-    if (isIntersecting && infinite.hasNextPage && !infinite.isFetchingNextPage) {
-      infinite.fetchNextPage();
-    }
-  }, [isIntersecting, infinite.hasNextPage, infinite.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sentinelRef = useInfiniteScroll(infinite);
 
   const totalCount = regularInfinite.data?.pages?.[0]?.count ?? 0;
   const scope = regularInfinite.data?.pages?.[0]?.scope;

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, ArrowLeft, ShieldAlert } from "lucide-react";
 import { Link } from "react-router-dom";
+import "./CronDashboard.css";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
