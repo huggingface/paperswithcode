@@ -291,6 +291,7 @@ def test_generate_draft_keeps_github_targets_with_mixed_official_remotes(monkeyp
         SimpleNamespace(name="Benchmark", slug="benchmark"),
     )
     monkeypatch.setattr(service, "resolve_paper", lambda *args: (paper, "2601.00001"))
+    monkeypatch.setattr(service, "contributor_evaluation_ids", lambda *args: set())
     db = Mock()
     db.execute.side_effect = [
         Mock(**{"all.return_value": [row]}),

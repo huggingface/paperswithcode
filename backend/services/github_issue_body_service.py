@@ -19,6 +19,7 @@ from backend.models.database import (
     Repository,
     Task,
 )
+from backend.services.contributor_evaluations import contributor_evaluation_ids
 from backend.services.metric_value_service import parse_metric_value
 from backend.utils.paper_reference import resolve_paper
 
@@ -411,9 +412,16 @@ def generate_github_issue_draft(
     native_rows = db.execute(
         native_statement.order_by(Task.name, Dataset.name, Evaluation.id)
     ).all()
-    native_evaluations = [_evaluation_from_row(row) for row in native_rows]
+    contributed = contributor_evaluation_ids(db, [paper.id])
+    native_evaluations = [
+        _evaluation_from_row(row) for row in native_rows if row[0].id not in contributed
+    ]
     if not native_evaluations:
         scope = f" for task {task_slug}" if task_slug else ""
+        if native_rows:
+            raise ValueError(
+                f"All paper-native evaluations{scope} came from contributors"
+            )
         raise ValueError(f"No paper-native evaluations found{scope}")
 
     task_counts = Counter(

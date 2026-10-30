@@ -15,6 +15,7 @@ from backend.models.database import (
     PaperRepository,
     Repository,
 )
+from backend.services.contributor_evaluations import contributor_evaluation_ids
 from backend.services.github_issue_body_service import normalize_repository_url
 from backend.services.github_issue_publish_service import _is_excluded_repository
 
@@ -30,9 +31,13 @@ class OutreachPaper:
 def candidates(
     db: Session, settled_before: datetime
 ) -> dict[str, dict[int, OutreachPaper]]:
+    # Rows the paper's authors added themselves are not ours to announce.
     native = (
         select(Evaluation.paper_id, func.max(Evaluation.created_at).label("last_added"))
-        .where(~Evaluation.external)
+        .where(
+            ~Evaluation.external,
+            Evaluation.id.not_in(contributor_evaluation_ids(db)),
+        )
         .group_by(Evaluation.paper_id)
         .subquery()
     )
