@@ -4,7 +4,7 @@ description: >-
   Process the user's X (Twitter) bookmarks into Papers with Code: find every
   bookmarked post that announces a paper, index missing arXiv papers, add
   non-arXiv releases as external papers, enrich each paper (code, project page,
-  HF artifacts, tags, thumbnail), and link the author's announcement thread to
+  HF artifacts, tags, thumbnail), and link the announcement thread to
   the paper's X threads section. Use whenever the user asks to check, sweep,
   triage, or process their X/Twitter bookmarks, or to make sure bookmarked paper
   tweets are indexed, enriched, or have their X threads added.
@@ -102,17 +102,19 @@ links a repository the page lacks).
 
 ## 5. Link the X threads
 
-Policy (user decision): link only posts **by the paper's authors or by its own
-organization** that introduce the paper. Never link outside accounts.
+Policy (user decision, 2026-10-30): link posts that introduce, announce or
+substantively explain the paper. The poster may be an author, the paper's own
+organization, or an outside account such as a paper curator (@_akhaliq,
+@omarsar0) whose post describes this paper.
 
 - The thread is the conversation root: if the bookmark is mid-thread, link the
   root post of the same author. Use the quoted original when the bookmark is a
   quote-tweet by someone else.
 - When a co-author quote-tweets the original author's announcement, link the
   original.
-- The poster must be an author (`author_matches` in the triage output, or check
-  the paper's author list by name or handle) or the organization's verified
-  account. If the match is uncertain, look at the profile bio before linking.
+- Prefer the authors' or organization's own announcement when one exists
+  (`author_matches` in the triage output); a substantive outside post can be
+  linked next to it.
 - Skip replies in other people's conversations, bare posts without content
   about the paper ("out now!"), and posts covering several papers without
   linking this one.
