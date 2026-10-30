@@ -531,3 +531,28 @@ def test_x_trending_job_dispatches_before_daily_and_backlog(queue_db):
     db.flush()
 
     assert CodexPaperJobService._next_scheduled_row(db) is rows[3]
+
+
+def test_x_trending_priority_survives_versions_and_skips_external(queue_db):
+    db = queue_db
+    old = paper(db, 1)
+    x_trending(db, old.id)
+    old.is_latest_version = False
+    newer = Paper(
+        id=2,
+        arxiv_id=old.arxiv_id,
+        title="Paper 1 v2",
+        source="arxiv",
+        is_latest_version=True,
+    )
+    external = Paper(id=3, title="Blog", source="external", is_latest_version=True)
+    db.add_all([newer, external])
+    db.flush()
+    x_trending(db, external.id, rank=2)
+    db.commit()
+    svc, jobs = service(db, [], 2)
+
+    svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
+
+    calls = [call.kwargs for call in jobs.enqueue.call_args_list]
+    assert [(call["paper_id"], call["priority"]) for call in calls] == [(2, 5)]

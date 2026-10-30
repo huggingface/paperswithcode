@@ -4,8 +4,8 @@ HF daily papers and papers trending on X (the daily "AI Papers on X" sheet)
 jump the curation queue; X-trending papers go first.
 """
 
-from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from backend.models.database import (
     Paper,
@@ -19,11 +19,34 @@ X_TRENDING_PRIORITY = 5
 DAILY_PRIORITY = 10
 
 
+def _x_trending_by_arxiv_id():
+    """Shared arXiv ids with their last shared day and best sheet rank.
+
+    Keyed by arXiv id so a newer version keeps priority, and limited to
+    arXiv papers: external ones keep their own auto-curation path.
+    """
+    shared = aliased(Paper)
+    return (
+        select(
+            shared.arxiv_id,
+            func.max(PaperXTrending.shared_on).label("shared_on"),
+            func.min(PaperXTrending.rank).label("rank"),
+        )
+        .join(shared, shared.id == PaperXTrending.paper_id)
+        .where(shared.arxiv_id.isnot(None))
+        .group_by(shared.arxiv_id)
+    )
+
+
 def is_priority_paper():
-    """SQL clause: the paper is an HF daily paper or has trended on X."""
+    """SQL clause: the paper is an HF daily paper or an arXiv paper trending on X."""
+    x_trending = _x_trending_by_arxiv_id().subquery()
     return or_(
         Paper.hf_daily_featured_on.isnot(None),
-        Paper.id.in_(select(PaperXTrending.paper_id)),
+        and_(
+            Paper.arxiv_id.isnot(None),
+            Paper.arxiv_id.in_(select(x_trending.c.arxiv_id)),
+        ),
     )
 
 
@@ -60,19 +83,10 @@ def pending_x_trending_papers(db: Session):
 
     Most recently shared first, then by best sheet rank.
     """
-    shared = (
-        db.query(
-            PaperXTrending.paper_id,
-            func.max(PaperXTrending.shared_on).label("shared_on"),
-            func.min(PaperXTrending.rank).label("rank"),
-        )
-        .group_by(PaperXTrending.paper_id)
-        .subquery()
-    )
+    shared = _x_trending_by_arxiv_id().subquery()
     return (
         pending_daily_papers(db)
-        .join(shared, shared.c.paper_id == Paper.id)
-        .filter(Paper.arxiv_id.isnot(None))
+        .join(shared, shared.c.arxiv_id == Paper.arxiv_id)
         .order_by(shared.c.shared_on.desc(), shared.c.rank, Paper.id)
         .with_entities(Paper, shared.c.shared_on)
     )
