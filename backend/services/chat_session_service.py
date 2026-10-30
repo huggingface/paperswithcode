@@ -1075,6 +1075,64 @@ class ChatSessionService:
         self.db.flush()
         return session
 
+    def _replay_admission(
+        self,
+        session: ChatSession,
+        existing: ChatMessageRecord,
+        mode: TurnMode,
+        executor_reservation: ChatTurnReservation | None,
+        *,
+        attach_only: bool,
+        replay_assistant: ReplayAssistant | None = None,
+    ) -> TurnAdmission:
+        """Rebuild an already-admitted turn from its persisted user message.
+
+        Mode and runtime identity match a fresh admission so stream policy such
+        as private-paper redaction never sees a weaker replayed turn.
+        ``paper_descriptor`` stays empty: only executing turns send it.
+        """
+        return TurnAdmission(
+            session_id=session.id,
+            turn_id=existing.turn_id,
+            user_message_id=existing.id,
+            selected_model=existing.model or session.selected_model,
+            model_route=(
+                existing.model_route or self._validate_model(session.selected_model)[1]
+            ),
+            sdk_session_id=session.sdk_session_id,
+            sdk_project_key=session.sdk_project_key,
+            agent_harness=getattr(session, "agent_harness", "claude"),
+            is_first_turn=existing.sequence == 1,
+            replay_assistant=replay_assistant,
+            prompt_revision=existing.revision,
+            execution_backend=session.execution_backend,
+            app_release_id=(
+                getattr(existing, "app_release_id", None) or self.settings.release_id
+            ),
+            image_version=getattr(existing, "sandbox_image_version", None) or "",
+            worker_contract_version=self._durable_worker_contract(
+                getattr(existing, "worker_contract_version", None)
+            ),
+            pwc_cli_version=getattr(existing, "pwc_cli_version", None) or "",
+            system_prompt_sha256=getattr(existing, "system_prompt_sha256", None) or "",
+            web_search_enabled=getattr(existing, "web_search_enabled", False),
+            reasoning_effort=getattr(existing, "reasoning_effort", "high"),
+            reader_mode=mode.reader_mode,
+            poster_mode=mode.poster_mode,
+            paper_artifacts_enabled=mode.paper_artifacts_enabled,
+            attach_only=attach_only,
+            executor_transport=(
+                executor_reservation.transport
+                if executor_reservation is not None
+                else "legacy"
+            ),
+            executor_reservation_revision=(
+                executor_reservation.revision
+                if executor_reservation is not None
+                else None
+            ),
+        )
+
     def _resolve_replay(
         self,
         session: ChatSession | None,
@@ -1132,43 +1190,12 @@ class ChatSessionService:
         ):
             return _ReplayOutcome(
                 kind="admitted",
-                admission=TurnAdmission(
-                    session_id=session.id,
-                    turn_id=existing.turn_id,
-                    user_message_id=existing.id,
-                    selected_model=existing.model or session.selected_model,
-                    model_route=(
-                        existing.model_route
-                        or self._validate_model(session.selected_model)[1]
-                    ),
-                    sdk_session_id=session.sdk_session_id,
-                    sdk_project_key=session.sdk_project_key,
-                    agent_harness=getattr(session, "agent_harness", "claude"),
-                    is_first_turn=existing.sequence == 1,
-                    prompt_revision=existing.revision,
-                    execution_backend=session.execution_backend,
-                    app_release_id=(
-                        getattr(existing, "app_release_id", None)
-                        or self.settings.release_id
-                    ),
-                    worker_contract_version=self._durable_worker_contract(
-                        getattr(existing, "worker_contract_version", None)
-                    ),
-                    web_search_enabled=existing_web_search_enabled,
-                    reasoning_effort=existing_reasoning_effort,
-                    reader_mode=mode.reader_mode,
-                    poster_mode=mode.poster_mode,
+                admission=self._replay_admission(
+                    session,
+                    existing,
+                    mode,
+                    executor_reservation,
                     attach_only=True,
-                    executor_transport=(
-                        executor_reservation.transport
-                        if executor_reservation is not None
-                        else "legacy"
-                    ),
-                    executor_reservation_revision=(
-                        executor_reservation.revision
-                        if executor_reservation is not None
-                        else None
-                    ),
                 ),
             )
         assistant = self.db.execute(
@@ -1181,49 +1208,18 @@ class ChatSessionService:
         if assistant:
             return _ReplayOutcome(
                 kind="admitted",
-                admission=TurnAdmission(
-                    session_id=session.id,
-                    turn_id=existing.turn_id,
-                    user_message_id=existing.id,
-                    selected_model=existing.model or session.selected_model,
-                    model_route=(
-                        existing.model_route
-                        or self._validate_model(session.selected_model)[1]
-                    ),
-                    sdk_session_id=session.sdk_session_id,
-                    sdk_project_key=session.sdk_project_key,
-                    agent_harness=getattr(session, "agent_harness", "claude"),
-                    is_first_turn=existing.sequence == 1,
+                admission=self._replay_admission(
+                    session,
+                    existing,
+                    mode,
+                    executor_reservation,
+                    attach_only=self.settings.chat_durable_turn_dispatch_enabled,
                     replay_assistant=ReplayAssistant(
                         content=assistant.content,
                         followups=list(assistant.followups or []),
                         finish_reason=(
                             getattr(assistant, "finish_reason", None) or "success"
                         ),
-                    ),
-                    prompt_revision=existing.revision,
-                    execution_backend=session.execution_backend,
-                    app_release_id=(
-                        getattr(existing, "app_release_id", None)
-                        or self.settings.release_id
-                    ),
-                    worker_contract_version=self._durable_worker_contract(
-                        getattr(existing, "worker_contract_version", None)
-                    ),
-                    web_search_enabled=existing_web_search_enabled,
-                    reasoning_effort=existing_reasoning_effort,
-                    reader_mode=mode.reader_mode,
-                    poster_mode=mode.poster_mode,
-                    attach_only=self.settings.chat_durable_turn_dispatch_enabled,
-                    executor_transport=(
-                        executor_reservation.transport
-                        if executor_reservation is not None
-                        else "legacy"
-                    ),
-                    executor_reservation_revision=(
-                        executor_reservation.revision
-                        if executor_reservation is not None
-                        else None
                     ),
                 ),
             )

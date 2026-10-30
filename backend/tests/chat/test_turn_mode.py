@@ -149,11 +149,16 @@ def test_replay_mode_uses_persisted_request_and_bound_paper(reader, poster):
         update={
             "chat_artifacts_enabled": True,
             "chat_posterly_enabled": True,
+            "chat_latex_paper_enabled": True,
+            "chat_latex_compiler_jobs_enabled": True,
             "chat_executor_remote_transport_enabled": False,
         }
     )
     session = _session(settings, primary_paper_id=42 if reader else None)
     existing = SimpleNamespace(
+        sandbox_image_version="image-7",
+        pwc_cli_version="cli-3",
+        system_prompt_sha256="prompt-sha",
         id=uuid.uuid4(),
         turn_id=uuid.uuid4(),
         status="complete",
@@ -180,5 +185,10 @@ def test_replay_mode_uses_persisted_request_and_bound_paper(reader, poster):
     )
     assert admission.reader_mode is reader
     assert admission.poster_mode is poster
+    # Replays share the fresh turn's paper policy, so redaction stays on.
+    assert admission.paper_artifacts_enabled is not reader
+    assert admission.image_version == "image-7"
+    assert admission.pwc_cli_version == "cli-3"
+    assert admission.system_prompt_sha256 == "prompt-sha"
     assert admission.replay_assistant.content == "saved answer"
     assert db.added == []
