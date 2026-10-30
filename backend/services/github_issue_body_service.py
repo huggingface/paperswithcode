@@ -412,7 +412,7 @@ def generate_github_issue_draft(
     native_rows = db.execute(
         native_statement.order_by(Task.name, Dataset.name, Evaluation.id)
     ).all()
-    contributed = contributor_evaluation_ids(db, [paper.id])
+    contributed = contributor_evaluation_ids(db)
     native_evaluations = [
         _evaluation_from_row(row) for row in native_rows if row[0].id not in contributed
     ]

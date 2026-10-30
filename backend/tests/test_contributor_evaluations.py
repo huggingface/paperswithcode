@@ -37,7 +37,7 @@ def test_contributor_ids_are_rows_an_edit_added_not_rows_it_touched():
             {"evaluations": [{"id": 46210}, {"id": 9}]},
         ),
     ]
-    assert contributor_evaluation_ids(db, [85681]) == {46210, 46211}
+    assert contributor_evaluation_ids(db) == {46210, 46211}
 
 
 def evaluation_row(evaluation_id):

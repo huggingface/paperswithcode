@@ -1,7 +1,5 @@
 """Evaluation rows that contributors added through the paper-page editor."""
 
-from collections.abc import Iterable
-
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -19,10 +17,12 @@ def snapshot_evaluation_ids(snapshot) -> set[int]:
     return {int(row["id"]) for row in snapshot or [] if row.get("id") is not None}
 
 
-def contributor_evaluation_ids(
-    db: Session, paper_ids: Iterable[int] | None = None
-) -> set[int]:
-    """Ids of evaluations created by a contributor edit or an approved queued edit."""
+def contributor_evaluation_ids(db: Session) -> set[int]:
+    """Ids of evaluations created by a contributor edit or an approved queued edit.
+
+    Not filtered by paper: rows can move to another paper after the edit, and
+    approval events do not always record a paper id.
+    """
     approved_edits = select(PendingPaperEdit.catalog_event_id).where(
         PendingPaperEdit.edit_type == "evaluations",
         PendingPaperEdit.status == "approved",
@@ -37,8 +37,6 @@ def contributor_evaluation_ids(
             CatalogMutationEvent.id.in_(approved_edits),
         ),
     )
-    if paper_ids is not None:
-        statement = statement.where(CatalogMutationEvent.paper_id.in_(list(paper_ids)))
     return {
         evaluation_id
         for before, after in db.execute(statement)
