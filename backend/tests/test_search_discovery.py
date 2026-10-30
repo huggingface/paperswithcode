@@ -467,6 +467,7 @@ def test_missing_entity_and_unknown_top_level_are_real_404s(client, monkeypatch)
         "/pdf/2606.23050",
         "/privacy",
         "/rate-limits",
+        "/x-trending",
         "/autonomous-operations",
         "/authorize-paper-edit/00000000-0000-0000-0000-000000000001",
     ],
