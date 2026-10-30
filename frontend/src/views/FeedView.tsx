@@ -1,7 +1,7 @@
 import FollowingIntro from "@/components/FollowingIntro";
 import TopicDialog from "@/components/TopicDialog";
 import { isAuthDisabled } from "@/lib/apiUrl";
-import { clearPendingTopic, readPendingFollows, readPendingTopic, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
+import { clearPendingTopic, readPendingFollows, readPendingTopic, useResearchFollows, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi, type FollowKind } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -35,6 +35,7 @@ import type { Paper } from "@/lib/api/papers.types";
 import type { PaginatedResponse } from "@/lib/api/shared.types";
 import { papersApi } from "@/lib/api/papers";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
+import { catalogQueryKeys, researchQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -350,9 +351,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
 
   // Sidebar: top tasks by paper count.
   const topTasks = useQuery({
-    queryKey: ["top-tasks-sidebar"],
+    queryKey: catalogQueryKeys.topTasksSidebar,
     queryFn: () => catalogApi.topTasks(8),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   // Sidebar: tasks whose share of recent papers is rising vs their baseline.
@@ -361,7 +362,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const trendingTasks = useQuery({
     queryKey: ["trending-tasks-sidebar"],
     queryFn: () => catalogApi.trendingTasks({ limit: 8, level: 0 }),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const topicOnly = following && searchParams.get("only") === "topic";
@@ -385,13 +386,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     },
     { enabled: !following || !!user, initialPage: following ? 0 : 1 },
   );
-  const follows = useQuery({
-    queryKey: ["research-follows", user?.hf_subject],
-    queryFn: researchApi.follows,
-    enabled: following && !!user,
-  });
+  const follows = useResearchFollows(following);
   const topic = useQuery({
-    queryKey: ["research-topic", user?.hf_subject],
+    queryKey: researchQueryKeys.topic(user?.hf_subject),
     queryFn: researchApi.topic,
     enabled: following && !!user,
     refetchInterval: query => query.state.data && ["pending", "running"].includes(query.state.data.status) ? 10000 : false,
@@ -404,7 +401,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const wasBuilding = useRef(false);
   useEffect(() => {
     if (wasBuilding.current && !topicBuilding) {
-      void queryClient.invalidateQueries({ queryKey: [...paperQueryKeys.feeds.following, user?.hf_subject] });
+      void queryClient.invalidateQueries({ queryKey: researchQueryKeys.feed(user?.hf_subject) });
     }
     wasBuilding.current = topicBuilding;
   }, [topicBuilding, queryClient, user?.hf_subject]);

@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { PaperEditDialogShell } from "./PaperEditDialogShell";
 import { SuggestOrganizationForm } from "./SuggestOrganizationForm";
 import { usePaperSectionEdit, type PaperSectionEditorProps } from "./usePaperSectionEdit";
+import { catalogQueryKeys } from "@/lib/api/queryKeys";
 
 interface Props extends PaperSectionEditorProps {
   initialOrganizationIds: number[];
@@ -30,7 +31,7 @@ export const EditOrganizationsDialog = ({
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const organizations = useQuery({
-    queryKey: ["organizations", "curation"],
+    queryKey: [...catalogQueryKeys.organizations, "curation"],
     queryFn: () => catalogApi.organizations(false),
   });
   const displayedOrganizations = useMemo(() => {
@@ -143,7 +144,7 @@ export const EditOrganizationsDialog = ({
             toast({ title: "Organization added", description: `Added "${name}" to this paper.` });
             invalidatePaperDetails(queryClient, [paperId]);
             invalidatePaperFeeds(queryClient);
-            void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+            void queryClient.invalidateQueries({ queryKey: catalogQueryKeys.organizations });
           }}
           onUnsentChange={setSuggestionUnsent}
         />

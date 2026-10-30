@@ -21,6 +21,7 @@ import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { isLongOrganizationName, organizationShortName } from "@/lib/organizationNames";
 import NotFound from "@/pages/NotFound";
+import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 export const OrganizationPaperFeed: React.FC<{
   organizationSlug: string;
@@ -31,14 +32,14 @@ export const OrganizationPaperFeed: React.FC<{
   const { searchParams } = feed;
   const [logoFailed, setLogoFailed] = useState(false);
   const organizationQ = useQuery({
-    queryKey: ["organization", organizationSlug],
+    queryKey: catalogQueryKeys.organization(organizationSlug),
     queryFn: () => catalogApi.getOrganization(organizationSlug),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   const taxonomyQ = useQuery({
     queryKey: ["organization-areas-with-tasks", organizationSlug],
     queryFn: () => catalogApi.organizationAreasWithTasks(organizationSlug),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   const papersQ = usePaperFeedQuery(
     [...paperQueryKeys.feeds.organization, organizationSlug, taskSlug, feed.filters],

@@ -66,6 +66,5 @@ describe("MCP health", () => {
     expect(options.retry).toBe(false);
     expect(options.staleTime).toBe(30_000);
     expect(options.refetchInterval).toBe(60_000);
-    expect(options.refetchOnWindowFocus).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { OrganizationContributions } from "@/lib/api/catalog.types";
 import { catalogApi } from "@/lib/api/catalog";
+import { TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const CELL_SIZE = 12;
@@ -213,7 +214,7 @@ export const OrganizationContributionGraph: React.FC<{
   const contributionsQ = useQuery({
     queryKey: ["organization-contributions", organizationSlug],
     queryFn: () => catalogApi.organizationContributions(organizationSlug),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   if (contributionsQ.isLoading) {

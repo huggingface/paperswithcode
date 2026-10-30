@@ -14,6 +14,7 @@ import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import NotFound from "@/pages/NotFound";
+import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 // Award announcements, keyed by `${conference}/${listing}`.
 const AWARD_ANNOUNCEMENTS: Record<string, string> = {
@@ -40,14 +41,14 @@ const ConferenceTaskView: React.FC = () => {
     queryKey: ["conference", confSlug],
     queryFn: () => catalogApi.getConference(confSlug!),
     enabled: !!confSlug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const taskQ = useQuery({
-    queryKey: ["task", taskSlug],
+    queryKey: catalogQueryKeys.task(taskSlug),
     queryFn: () => catalogApi.getTask(taskSlug!),
     enabled: !!taskSlug && !listing,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const papersQ = usePaperFeedQuery(

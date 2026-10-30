@@ -34,7 +34,6 @@ const SavedPapersView: React.FC = () => {
     queryFn: () => accountApi.getBookmarks(),
     enabled: !!user,
     staleTime: 30 * 1000,
-    refetchOnWindowFocus: false,
   });
   const bucketAuthorizationRequired =
     query.error instanceof ApiError &&

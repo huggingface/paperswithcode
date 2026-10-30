@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import NotFound from "@/pages/NotFound";
+import { TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const ConferenceDetailView: React.FC = () => {
   const { confSlug } = useParams<{ confSlug: string }>();
@@ -23,7 +24,7 @@ const ConferenceDetailView: React.FC = () => {
     queryKey: ["conference-areas-with-tasks", confSlug],
     queryFn: () => catalogApi.conferenceAreasWithTasks(confSlug!),
     enabled: !!confSlug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const visibleAreas = useMemo(() => sortAreas(taxonomyQ.data?.results ?? []), [taxonomyQ.data]);

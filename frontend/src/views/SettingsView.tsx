@@ -18,14 +18,15 @@ import { chatApi } from "@/lib/api/chat";
 import { ApiError } from "@/lib/apiTransport";
 import { isChatEnabled } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
-import { DEFAULT_SITE_SUFFIX, formatPageTitle } from "@/lib/latexPlainText";
+import { formatPageTitle } from "@/lib/latexPlainText";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import {
   OPENROUTER_CREDENTIAL_QUERY_KEY,
   resetTimeLabels,
   useOpenRouterCredential,
   useOpenRouterUsage,
 } from "@/lib/openrouter";
-import { usePreferences } from "@/lib/preferencesContext";
+import { usePreferences } from "@/lib/preferences";
 
 const OPENROUTER_KEY_SETTINGS_URL = "https://openrouter.ai/settings/keys";
 
@@ -156,12 +157,7 @@ const SettingsView: React.FC = () => {
     ),
   });
 
-  React.useEffect(() => {
-    document.title = formatPageTitle("Settings");
-    return () => {
-      document.title = DEFAULT_SITE_SUFFIX;
-    };
-  }, []);
+  useDocumentTitle(formatPageTitle("Settings"));
 
   return (
     <div className="page">
@@ -470,7 +466,7 @@ const SettingsView: React.FC = () => {
             id="hide-closed-source-evals"
             checked={preferences.hide_closed_source_evals}
             onCheckedChange={(checked) => {
-              void setHideClosedSourceEvals(Boolean(checked));
+              setHideClosedSourceEvals(Boolean(checked));
             }}
           />
         </div>

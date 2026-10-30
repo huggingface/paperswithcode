@@ -1,4 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
+import { TEN_MINUTES } from '@/lib/api/queryKeys';
+import { stripArxivVersion } from '@/lib/utils';
 
 export interface HuggingFaceRepoCounts {
   models: number;
@@ -13,8 +15,6 @@ export interface HuggingFaceRepoCounts {
   isLimited: boolean; // Indicates if counts might be higher than displayed
   paperExists: boolean; // Whether huggingface.co/papers/<id> exists
 }
-
-const canonicalArxivId = (arxivId: string) => arxivId.replace(/v\d+$/, "");
 
 const HF_URL_PREFIX: Record<'models' | 'datasets' | 'spaces', string> = {
   models: 'https://huggingface.co/',
@@ -53,7 +53,7 @@ const repoUrlsFromRepos = (
 
 const checkPaperExists = async (arxivId: string): Promise<boolean> => {
   try {
-    const response = await fetch(`https://huggingface.co/api/papers/${canonicalArxivId(arxivId)}`);
+    const response = await fetch(`https://huggingface.co/api/papers/${stripArxivVersion(arxivId)}`);
     return response.ok;
   } catch {
     return false;
@@ -61,7 +61,7 @@ const checkPaperExists = async (arxivId: string): Promise<boolean> => {
 };
 
 const fetchHuggingFaceRepos = async (arxivId: string): Promise<HuggingFaceRepoCounts> => {
-  const id = canonicalArxivId(arxivId);
+  const id = stripArxivVersion(arxivId);
 
   const [reposData, paperExists] = await Promise.all([
     fetch(`https://huggingface.co/api/arxiv/${id}/repos`)
@@ -113,7 +113,7 @@ export const useHuggingFaceRepos = (arxivId: string | null | undefined) => {
     queryKey: ['huggingface-repos', arxivId],
     queryFn: () => fetchHuggingFaceRepos(arxivId!),
     enabled: !!arxivId,
-    staleTime: 10 * 60 * 1000, // 10 minutes (longer cache due to more expensive operation)
+    staleTime: TEN_MINUTES,
     retry: 1,
   });
 };

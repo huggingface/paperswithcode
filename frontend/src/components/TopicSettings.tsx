@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { researchApi, TOPIC_MAX_LENGTH, type FollowKind, type ResearchTopic } from '@/lib/api/research';
+import { researchQueryKeys } from '@/lib/api/queryKeys';
 import { useAuth } from '@/lib/authContext';
 import { useSaveTopic } from '@/lib/researchTopic';
 
@@ -23,9 +24,8 @@ export default function TopicSettings() {
   const { user } = useAuth();
   const location = useLocation();
   const input = useRef<HTMLTextAreaElement>(null);
-  const queryKey = ['research-topic', user?.hf_subject];
   const topic = useQuery({
-    queryKey,
+    queryKey: researchQueryKeys.topic(user?.hf_subject),
     queryFn: researchApi.topic,
     enabled: !!user,
     // Poll while the backfill runs so progress and the first matches show up.

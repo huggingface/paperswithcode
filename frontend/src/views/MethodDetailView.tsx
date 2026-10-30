@@ -21,30 +21,31 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { resolveInternalPath } from "@/lib/internalLinks";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import NotFound from "@/pages/NotFound";
+import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const MethodDetailView: React.FC = () => {
   const { methodSlug } = useParams<{ methodSlug: string }>();
   const feed = usePaperFeedParams();
 
   const methodQ = useQuery({
-    queryKey: ["method", methodSlug],
+    queryKey: catalogQueryKeys.method(methodSlug),
     queryFn: () => catalogApi.getMethod(methodSlug!),
     enabled: !!methodSlug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const areasQ = useQuery({
-    queryKey: ["areas-all"],
+    queryKey: catalogQueryKeys.areas,
     queryFn: () => catalogApi.listAreas({ page_size: 50, ordering: "name" }),
     enabled: !!methodQ.data?.area_id,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const trendQ = useQuery({
     queryKey: ["method-trend", methodSlug],
     queryFn: () => catalogApi.methodTrend(methodSlug!),
     enabled: !!methodSlug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const papersQ = usePaperFeedQuery(
@@ -58,7 +59,7 @@ const MethodDetailView: React.FC = () => {
     queryKey: ["related-methods", methodSlug],
     queryFn: () => catalogApi.relatedMethods(methodSlug!),
     enabled: !!methodSlug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const cards = useMemo(

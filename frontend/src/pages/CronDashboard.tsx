@@ -23,6 +23,7 @@ import { formatCronDate, formatMicroUsd as usd, toneClass, type Tone } from "@/l
 import { useAuth } from "@/lib/authContext";
 import { isStagingEnvironment } from "@/lib/apiUrl";
 import "./CronDashboard.css";
+import { adminQueryKeys } from "@/lib/api/queryKeys";
 
 const categoryTones: Record<string, Tone> = {
   hourly: "running",
@@ -30,8 +31,6 @@ const categoryTones: Record<string, Tone> = {
   weekly: "degraded",
   systemd: "running",
 };
-
-const CRON_STATUS_KEY = ["admin", "cronStatus"];
 
 export const ChatComputePanel = ({ data, loading, error }: {
   data?: ChatSandboxSpendStatus;
@@ -138,19 +137,19 @@ const CronDashboard = () => {
   const { user } = useAuth();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: CRON_STATUS_KEY,
+    queryKey: adminQueryKeys.cronStatus,
     queryFn: () => operationsApi.getCronStatus(),
     refetchInterval: (query) => cronStatusRefetchInterval(query.state.data, autoRefresh),
     retry: false,
   });
   const chatSpendQuery = useQuery({
-    queryKey: ["admin", "chatSandboxSpend", chatEnvironment],
+    queryKey: adminQueryKeys.chatSandboxSpend(chatEnvironment),
     queryFn: () => chatApi.getSandboxSpend(chatEnvironment || undefined),
     refetchInterval: autoRefresh ? 30000 : false,
     retry: false,
   });
   const webSearchBudgetQuery = useQuery({
-    queryKey: ["admin", "chatWebSearchBudget"],
+    queryKey: adminQueryKeys.chatWebSearchBudget,
     queryFn: () => chatApi.getWebSearchBudget(),
     enabled: staging,
     refetchInterval: autoRefresh ? 30000 : false,
@@ -160,16 +159,16 @@ const CronDashboard = () => {
   const refresh = useMutation({
     mutationFn: () => Promise.all([
       // Cancel an in-flight auto refresh so it cannot absorb the forced fetch.
-      queryClient.cancelQueries({ queryKey: CRON_STATUS_KEY }).then(() =>
+      queryClient.cancelQueries({ queryKey: adminQueryKeys.cronStatus }).then(() =>
         queryClient.fetchQuery({
-          queryKey: CRON_STATUS_KEY,
+          queryKey: adminQueryKeys.cronStatus,
           queryFn: () => operationsApi.getCronStatus(true),
           retry: false,
         })),
       queryClient.refetchQueries({
-        queryKey: ["admin"],
+        queryKey: adminQueryKeys.all,
         type: "active",
-        predicate: (query) => query.queryKey[1] !== CRON_STATUS_KEY[1],
+        predicate: (query) => query.queryKey[1] !== adminQueryKeys.cronStatus[1],
       }),
     ]),
   });

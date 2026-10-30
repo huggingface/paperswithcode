@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from "react";
+import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
@@ -6,7 +6,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { papersApi } from "@/lib/api/papers";
-import { DEFAULT_SITE_SUFFIX, formatPageTitle } from "@/lib/latexPlainText";
+import { formatPageTitle } from "@/lib/latexPlainText";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { transformPaperForCard } from "@/lib/transform";
 
@@ -139,12 +140,7 @@ const AstraForRoboticsView: React.FC = () => {
       papersApi.list({ ...feed.filters, task: TASK_SLUG, method: METHOD_SLUG, page, page_size: 12 }),
   );
 
-  useEffect(() => {
-    document.title = formatPageTitle("GPT-6 Astra for Robotics");
-    return () => {
-      document.title = DEFAULT_SITE_SUFFIX;
-    };
-  }, []);
+  useDocumentTitle(formatPageTitle("GPT-6 Astra for Robotics"));
 
   const cards = useMemo(
     () =>

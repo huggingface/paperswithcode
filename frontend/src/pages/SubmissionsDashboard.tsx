@@ -28,6 +28,7 @@ import type { Paper } from "@/lib/api/papers.types";
 import { catalogApi } from "@/lib/api/catalog";
 import { submissionsApi } from "@/lib/api/submissions";
 import { cn } from "@/lib/utils";
+import { submissionQueryKeys } from "@/lib/api/queryKeys";
 
 const PAGE_SIZE = 25;
 const STATUS_FILTERS: Array<PendingEditStatus | "all"> = ["pending", "approved", "rejected", "all"];
@@ -146,8 +147,7 @@ function SubmissionCard({
 
   const invalidateAfterReview = React.useCallback(
     (reviewed: PendingPaperEdit) => {
-      queryClient.invalidateQueries({ queryKey: ["pendingPaperEdits"] });
-      queryClient.invalidateQueries({ queryKey: ["pendingPaperEdit", reviewed.id] });
+      queryClient.invalidateQueries({ queryKey: submissionQueryKeys.pendingEdits });
       if (reviewed.paper_id != null && reviewed.edit_type !== "evaluations") {
         invalidatePaperDetails(queryClient, [String(reviewed.paper_id), paper?.arxiv_id]);
       }
@@ -206,7 +206,7 @@ function SubmissionCard({
   const revertMutation = useMutation<unknown, unknown, void>({
     mutationFn: () => catalogApi.rollbackEvent(submission.catalog_event_id as string),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["pendingPaperEdits"] });
+      queryClient.invalidateQueries({ queryKey: submissionQueryKeys.pendingEdits });
       if (submission.paper_id != null) {
         invalidatePaperDetails(queryClient, [String(submission.paper_id), paper?.arxiv_id]);
         invalidatePaperFeeds(queryClient);
@@ -230,7 +230,7 @@ function SubmissionCard({
     mutationFn: (suspend) =>
       submissionsApi.revertAutoApproved(submission.hf_subject as string, { suspend }),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ["pendingPaperEdits"] });
+      queryClient.invalidateQueries({ queryKey: submissionQueryKeys.pendingEdits });
       invalidatePaperFeeds(queryClient);
       toast({
         title: `Reverted ${result.reverted} edits by @${submission.hf_username}`,
@@ -423,7 +423,7 @@ export default function SubmissionsDashboard() {
   const [autoOnly, setAutoOnly] = React.useState(false);
 
   const countsQuery = useQuery({
-    queryKey: ["pendingPaperEdits", "counts", editType, autoOnly],
+    queryKey: [...submissionQueryKeys.pendingEdits, "counts", editType, autoOnly],
     queryFn: async () => {
       const edit_type = editType === "all" ? undefined : editType;
       const pages = await Promise.all(
@@ -445,7 +445,7 @@ export default function SubmissionsDashboard() {
   });
 
   const listQuery = useInfiniteQuery({
-    queryKey: ["pendingPaperEdits", { status, editType, autoOnly }],
+    queryKey: [...submissionQueryKeys.pendingEdits, { status, editType, autoOnly }],
     queryFn: ({ pageParam }) =>
       fetchSubmissionPage(status === "all" ? COUNT_STATUSES : [status], editType, autoOnly, pageParam),
     initialPageParam: {} as StatusOffsets,

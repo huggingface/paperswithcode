@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { operationsApi, type AutonomousOperationsResponse } from "@/lib/api/operations";
 import { formatCronDate, toneClass, type Tone } from "@/lib/cronStatus";
+import { adminQueryKeys } from "@/lib/api/queryKeys";
 
 const labels: Record<string, string> = {
   submissions: "Submission review",
@@ -26,8 +27,6 @@ const stateTones: Record<AutonomousOperationsResponse["display_state"], Tone> = 
   manual: "degraded",
 };
 
-const queryKey = ["admin", "autonomousOperations"];
-
 const AutonomousOperations = () => {
   const queryClient = useQueryClient();
   const [baselineSha, setBaselineSha] = useState("");
@@ -35,7 +34,7 @@ const AutonomousOperations = () => {
   const [operatorConfirmations, setOperatorConfirmations] = useState<Record<string, string>>({});
   const [baselineConfirmation, setBaselineConfirmation] = useState("");
   const query = useQuery({
-    queryKey,
+    queryKey: adminQueryKeys.autonomousOperations,
     queryFn: () => operationsApi.getAutonomousOperations(),
     refetchInterval: 30_000,
     retry: false,
@@ -43,7 +42,7 @@ const AutonomousOperations = () => {
   const update = useMutation({
     mutationFn: (operation: () => Promise<AutonomousOperationsResponse>) => operation(),
     onSuccess: (data) => {
-      queryClient.setQueryData(queryKey, data);
+      queryClient.setQueryData(adminQueryKeys.autonomousOperations, data);
       setManualConfirmation("");
       setOperatorConfirmations({});
       setBaselineConfirmation("");

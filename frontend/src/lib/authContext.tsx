@@ -2,9 +2,9 @@
  * Auth context backed by the `/api/v1/auth/me` endpoint.
  *
  * The session is held server-side in an httpOnly `pwc_session` cookie set by
- * the HF OAuth callback (see `backend/routers/auth.py`). The frontend simply
- * asks `/auth/me` whether the cookie is valid and caches the result in a
- * React context so any component can read `useAuth()`.
+ * the HF OAuth callback (see `backend/routers/auth.py`). The frontend asks
+ * `/auth/me` whether the cookie is valid and keeps the answer in the query
+ * cache so any component can read `useAuth()`.
  *
  * A custom `pwc:auth-stale` window event lets the canonical API transport
  * tell us when a write returned 401 so we can clear local state.
@@ -12,9 +12,10 @@
 
 import React from "react";
 import posthog from "posthog-js";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { authApi, type AuthUser } from "./api/auth";
+import { authQueryKeys } from "./api/queryKeys";
 import { authUrl } from "./apiUrl";
 
 export type { AuthUser } from "./api/auth";
@@ -40,17 +41,19 @@ function consumeSignupMarker(): boolean {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [user, setUser] = React.useState<AuthUser | null>(null);
-  const [isLoading, setIsLoading] = React.useState(true);
   const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: authQueryKeys.me,
+    queryFn: () => authApi.getCurrentUser(),
+    staleTime: Infinity,
+  });
+  const user = query.data ?? null;
   const previousUserRef = React.useRef<AuthUser | null>(null);
+  const { refetch } = query;
 
   const refresh = React.useCallback(async () => {
-    setIsLoading(true);
-    const next = await authApi.getCurrentUser();
-    setUser(next);
-    setIsLoading(false);
-  }, []);
+    await refetch();
+  }, [refetch]);
 
   const logout = React.useCallback(async () => {
     const endpoint = authUrl("/api/v1/auth/logout");
@@ -66,12 +69,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     await authApi.logout();
-    setUser(null);
-  }, []);
-
-  React.useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    queryClient.setQueryData(authQueryKeys.me, null);
+  }, [queryClient]);
 
   React.useEffect(() => {
     if (!import.meta.env.VITE_POSTHOG_PROJECT_TOKEN) return;
@@ -88,21 +87,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Drop the signed-out user's cached data (bookmarks, follows, sessions).
   React.useEffect(() => {
-    if (previousUserRef.current && !user) void queryClient.resetQueries();
+    if (previousUserRef.current && !user) {
+      void queryClient.resetQueries({ predicate: (cached) => cached.queryKey[0] !== authQueryKeys.me[0] });
+    }
     previousUserRef.current = user;
   }, [queryClient, user]);
 
   React.useEffect(() => {
-    const handler = () => {
-      setUser(null);
-    };
+    const handler = () => queryClient.setQueryData(authQueryKeys.me, null);
     window.addEventListener(AUTH_STALE_EVENT, handler);
     return () => window.removeEventListener(AUTH_STALE_EVENT, handler);
-  }, []);
+  }, [queryClient]);
 
   const value = React.useMemo<AuthContextValue>(
-    () => ({ user, isLoading, refresh, logout }),
-    [user, isLoading, refresh, logout],
+    () => ({ user, isLoading: query.isPending, refresh, logout }),
+    [user, query.isPending, refresh, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

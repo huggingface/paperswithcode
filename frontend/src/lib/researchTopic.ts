@@ -1,6 +1,50 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { researchApi, type FollowKind } from '@/lib/api/research';
+import { researchQueryKeys } from '@/lib/api/queryKeys';
 import { useOptionalAuth } from '@/lib/authContext';
+
+/** Refreshes what a follow or topic change affects. */
+function invalidateResearch(client: QueryClient, subject: string | undefined, { follows }: { follows: boolean }) {
+  return Promise.all([
+    follows && client.invalidateQueries({ queryKey: researchQueryKeys.follows(subject) }),
+    client.invalidateQueries({ queryKey: researchQueryKeys.feed(subject) }),
+    // Following something turns the weekly email on by default.
+    client.invalidateQueries({ queryKey: researchQueryKeys.email(subject) }),
+  ]);
+}
+
+/** What the signed-in account follows. */
+export function useResearchFollows(enabled = true) {
+  const user = useOptionalAuth()?.user;
+  return useQuery({
+    queryKey: researchQueryKeys.follows(user?.hf_subject),
+    queryFn: researchApi.follows,
+    enabled: enabled && !!user,
+  });
+}
+
+export interface FollowChange {
+  kind: FollowKind;
+  entityId: string | number;
+  follow: boolean;
+}
+
+/** Follows or unfollows one entity. `onChanged` runs before the refreshed follows arrive;
+ * with `awaitRefresh` the mutation stays pending until they do. */
+export function useSetFollow<Change extends FollowChange = FollowChange>(
+  { onChanged, awaitRefresh = false }: { onChanged?: (change: Change) => void; awaitRefresh?: boolean } = {},
+) {
+  const user = useOptionalAuth()?.user;
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ kind, entityId, follow }: Change) => researchApi.setFollow(kind, entityId, follow),
+    onSuccess: async (_, change) => {
+      onChanged?.(change);
+      const refresh = invalidateResearch(client, user?.hf_subject, { follows: true });
+      if (awaitRefresh) await refresh;
+    },
+  });
+}
 
 /** Saves (or, with `null`, removes) the signed-in account's topic and refreshes what depends on it. */
 export function useSaveTopic(onSaved?: () => void) {
@@ -9,13 +53,11 @@ export function useSaveTopic(onSaved?: () => void) {
   return useMutation({
     mutationFn: async (text: string | null) => text === null ? (await researchApi.clearTopic(), null) : researchApi.setTopic(text),
     onSuccess: data => {
-      client.setQueryData(['research-topic', user?.hf_subject], data);
+      client.setQueryData(researchQueryKeys.topic(user?.hf_subject), data);
       // Any saved topic supersedes one a guest stashed before signing in.
       clearPendingTopic();
       onSaved?.();
-      void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
-      // Following something turns the weekly email on by default.
-      void client.invalidateQueries({ queryKey: ['research-email', user?.hf_subject] });
+      void invalidateResearch(client, user?.hf_subject, { follows: false });
     },
   });
 }
@@ -57,11 +99,7 @@ export function useSaveFollows() {
       if (failure) throw failure.reason;
     },
     onSuccess: () => clearPendingFollows(),
-    onSettled: () => {
-      void client.invalidateQueries({ queryKey: ['research-follows', user?.hf_subject] });
-      void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
-      void client.invalidateQueries({ queryKey: ['research-email', user?.hf_subject] });
-    },
+    onSettled: () => void invalidateResearch(client, user?.hf_subject, { follows: true }),
   });
 }
 

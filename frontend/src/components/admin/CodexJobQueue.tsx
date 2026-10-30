@@ -24,6 +24,7 @@ import {
 } from "@/lib/api/codex";
 import { ApiError } from "@/lib/apiTransport";
 import { formatCronDate, type Tone } from "@/lib/cronStatus";
+import { adminQueryKeys } from "@/lib/api/queryKeys";
 
 const statusTones: Record<CodexPaperJobStatus, Tone> = {
   queued: "unknown",
@@ -122,12 +123,12 @@ export function CodexJobQueue({ autoRefresh }: { autoRefresh: boolean }) {
   const [promotionInputs, setPromotionInputs] = useState<Record<string, { dataset: string; task: string; metric: string }>>({});
   const filters = { trigger, status, policy_version: policyVersion, cohort_date: cohortDate, review_status: reviewStatus };
   const { data, isLoading, isFetching, error } = useQuery({
-    queryKey: ["admin", "codexPaperJobs", filters],
+    queryKey: [...adminQueryKeys.codexPaperJobs, filters],
     queryFn: () => codexApi.listJobs(100, filters),
     refetchInterval: autoRefresh ? 10_000 : false,
     retry: false,
   });
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["admin", "codexPaperJobs"] });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: adminQueryKeys.codexPaperJobs });
   const retryJob = useMutation({ mutationFn: (id: string) => codexApi.retryJob(id), onSuccess: refresh });
   const cancelJob = useMutation({ mutationFn: (id: string) => codexApi.cancelJob(id), onSuccess: refresh });
   const retryTrace = useMutation({ mutationFn: (id: string) => codexApi.retryTrace(id), onSuccess: refresh });

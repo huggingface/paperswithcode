@@ -8,7 +8,8 @@ import { hfLoginUrl } from '@/lib/apiUrl';
 import { researchApi, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
-import { stashPendingFollows, stashPendingTopic, useSaveFollows, useSaveTopic, type FollowPick } from '@/lib/researchTopic';
+import { researchQueryKeys, TEN_MINUTES } from '@/lib/api/queryKeys';
+import { stashPendingFollows, stashPendingTopic, useResearchFollows, useSaveFollows, useSaveTopic, type FollowPick } from '@/lib/researchTopic';
 
 // Suggestions fetched per group; each group shows as many as fit in two rows, after everything already followed,
 // and links to its full listing for more.
@@ -28,23 +29,23 @@ export default function TopicDialog({ open, onOpenChange }: { open: boolean; onO
 function TopicDialogForm({ onDone }: { onDone: () => void }) {
   const { user } = useAuth();
   const location = useLocation();
-  const topic = useQuery({ queryKey: ['research-topic', user?.hf_subject], queryFn: researchApi.topic, enabled: !!user });
-  const follows = useQuery({ queryKey: ['research-follows', user?.hf_subject], queryFn: researchApi.follows, enabled: !!user });
+  const topic = useQuery({ queryKey: researchQueryKeys.topic(user?.hf_subject), queryFn: researchApi.topic, enabled: !!user });
+  const follows = useResearchFollows();
   const tasks = useQuery({
     queryKey: ['trending-tasks-follow'],
     queryFn: () => catalogApi.trendingTasks({ limit: SUGGESTIONS_PER_GROUP, level: 0 }),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   const methods = useQuery({
     queryKey: ['trending-methods-follow'],
     queryFn: () => catalogApi.trendingMethods({ limit: SUGGESTIONS_PER_GROUP }),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   // Popular authors and the directory's top organizations, with faces and logos.
   const suggestions = useQuery({
     queryKey: ['research-follow-suggestions'],
     queryFn: researchApi.followSuggestions,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   const suggested = (items: FollowSuggestion[] = []) =>
     items.map(item => ({ id: String(item.entity_id), name: item.name, image: item.image_url }));

@@ -6,6 +6,7 @@ import type { Method, Task } from "@/lib/api/catalog.types";
 import { catalogApi } from "@/lib/api/catalog";
 import type { NamedItem } from "@/lib/pendingEdits";
 import { DiffColumn, EmptyInline } from "./shared";
+import { catalogQueryKeys } from "@/lib/api/queryKeys";
 
 export function EntitySetDiff({
   currentItems,
@@ -16,7 +17,7 @@ export function EntitySetDiff({
 }: {
   currentItems: NamedItem[];
   proposedIds: number[];
-  queryPrefix: string;
+  queryPrefix: "task" | "method" | "organization";
   fetchEntity?: (id: string) => Promise<Task | Method>;
   knownNames?: Map<number, string>;
 }) {
@@ -27,7 +28,7 @@ export function EntitySetDiff({
 
   const entityQueries = useQueries({
     queries: fetchEntity ? ids.map((id) => ({
-      queryKey: [queryPrefix, String(id)],
+      queryKey: catalogQueryKeys[queryPrefix](String(id)),
       queryFn: () => fetchEntity(String(id)),
       staleTime: 5 * 60 * 1000,
     })) : [],
@@ -87,7 +88,7 @@ export function OrganizationSetDiff({
   proposedIds: number[];
 }) {
   const organizations = useQuery({
-    queryKey: ["organizations", "submission-diff"],
+    queryKey: [...catalogQueryKeys.organizations, "submission-diff"],
     queryFn: () => catalogApi.organizations(),
     staleTime: 5 * 60 * 1000,
   });

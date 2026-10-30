@@ -12,6 +12,7 @@ import { AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
 import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 import { TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
 import { useHashScrollOnReady } from "@/hooks/useHashScrollOnReady";
+import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 /**
  * Methods index — methods grouped by `area_id`, sorted by trend score desc
@@ -19,9 +20,9 @@ import { useHashScrollOnReady } from "@/hooks/useHashScrollOnReady";
  */
 const MethodsIndexView: React.FC = () => {
   const areasQ = useQuery({
-    queryKey: ["areas-all"],
+    queryKey: catalogQueryKeys.areas,
     queryFn: () => catalogApi.listAreas({ page_size: 50, ordering: "name" }),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   // Use the compact directory projection so card rendering does not download
@@ -29,12 +30,12 @@ const MethodsIndexView: React.FC = () => {
   const methodsQ = useQuery({
     queryKey: ["methods-all"],
     queryFn: async () => (await catalogApi.methodIndex()).results,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   const trendingQ = useQuery({
     queryKey: ["trending-methods-directory"],
     queryFn: () => catalogApi.trendingMethods({ limit: 12 }),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const trendingItems = useMemo(() => {

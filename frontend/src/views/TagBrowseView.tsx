@@ -23,7 +23,7 @@ import { isNotFound } from "@/lib/apiErrors";
 import { assetUrl } from "@/lib/apiUrl";
 import { formatStarCount } from "@/lib/frameworks";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
-import { usePreferences } from "@/lib/preferencesContext";
+import { usePreferences } from "@/lib/preferences";
 import { slugify } from "@/lib/slug";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
@@ -31,6 +31,7 @@ import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import NotFound from "@/pages/NotFound";
+import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const SUBTASK_BENCH_PREVIEW = 3;
 
@@ -206,10 +207,10 @@ const TagBrowseView: React.FC = () => {
   // benchmark preview per child. This replaces the previous fan-out of six+
   // independent task/dataset queries on initial load (see Speed plan §1).
   const pageQ = useQuery({
-    queryKey: ["task-page", taskSlug, bestModelIsOpen],
+    queryKey: [...catalogQueryKeys.taskPage, taskSlug, bestModelIsOpen],
     queryFn: () => catalogApi.taskPage(taskSlug!, { is_open: bestModelIsOpen }),
     enabled: !!taskSlug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   useEffect(() => {
@@ -221,7 +222,7 @@ const TagBrowseView: React.FC = () => {
   }, [navigate, pageQ.data?.task.slug, searchParams, taskSlug]);
 
   const benchmarkTrendsQ = useQuery({
-    queryKey: ["task-benchmark-trends", taskSlug, bestModelIsOpen],
+    queryKey: [...catalogQueryKeys.taskBenchmarkTrends, taskSlug, bestModelIsOpen],
     queryFn: () =>
       catalogApi.trendingBenchmarks(taskSlug!, {
         limit: 100,
@@ -229,7 +230,7 @@ const TagBrowseView: React.FC = () => {
         is_open: bestModelIsOpen,
       }),
     enabled: !!taskSlug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   // Subtasks (child tasks). Classic LM is the historical catch-all, so keep it

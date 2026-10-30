@@ -27,7 +27,7 @@ vi.mock("@/lib/authContext", () => ({
   useOptionalAuth: () => mockAuth.state,
 }));
 
-vi.mock("@/lib/preferencesContext", () => ({
+vi.mock("@/lib/preferences", () => ({
   usePreferences: () => ({
     preferences: { hideClosedSourceEvals: false },
     setHideClosedSourceEvals: vi.fn(),

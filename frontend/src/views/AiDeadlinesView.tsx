@@ -18,6 +18,7 @@ import {
   nextUpcomingDeadline,
   urgencyColor,
 } from "@/lib/deadlines";
+import { TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const Toggle: React.FC<{
   id: string;
@@ -207,7 +208,7 @@ const AiDeadlinesView: React.FC = () => {
   const deadlinesQ = useQuery({
     queryKey: ["conference-deadlines"],
     queryFn: () => catalogApi.conferenceDeadlines(),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const toggleDomain = (tag: string) => {

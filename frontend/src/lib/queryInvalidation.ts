@@ -5,6 +5,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { Evaluation } from "@/lib/api/evaluations.types";
 import type { Paper } from "@/lib/api/papers.types";
 import type { PaginatedResponse } from "@/lib/api/shared.types";
+import { evaluationQueryKeys } from "@/lib/api/queryKeys";
 
 /**
  * Reconcile React Query caches after a paper edit mutation.
@@ -117,15 +118,8 @@ export function refreshPaperQueries(
       updatedPaper.title,
     );
 
-  queryClient.setQueriesData({ queryKey: ["evaluations"] }, patcher);
-  queryClient.setQueriesData({ queryKey: ["dataset-evals"] }, patcher);
-
-  queryClient.invalidateQueries({
-    queryKey: ["evaluations"],
-    refetchType: "none",
-  });
-  queryClient.invalidateQueries({
-    queryKey: ["dataset-evals"],
-    refetchType: "none",
-  });
+  for (const queryKey of [evaluationQueryKeys.all, evaluationQueryKeys.byDatasetAll]) {
+    queryClient.setQueriesData({ queryKey }, patcher);
+    void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+  }
 }

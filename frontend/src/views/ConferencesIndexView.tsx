@@ -8,6 +8,7 @@ import { formatDateRange } from "@/lib/deadlines";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
 import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
+import { TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const resolveConferenceYear = (conf: Conference): number => {
   if (conf.year != null) return conf.year;
@@ -30,7 +31,7 @@ const ConferencesIndexView: React.FC = () => {
   const conferencesQ = useQuery({
     queryKey: ["conferences"],
     queryFn: () => catalogApi.conferences(),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const groupedByYear = useMemo(() => {

@@ -9,10 +9,12 @@ import { useHuggingFaceRepos } from "@/hooks/useHuggingFaceRepos";
 import { usePaper } from "@/hooks/usePapers";
 import { evaluationsApi } from "@/lib/api/evaluations";
 import { papersApi } from "@/lib/api/papers";
-import { DEFAULT_SITE_SUFFIX, formatPageTitle } from "@/lib/latexPlainText";
-import { usePreferences } from "@/lib/preferencesContext";
+import { formatPageTitle } from "@/lib/latexPlainText";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { usePreferences } from "@/lib/preferences";
 import { normalizePaperRouteId, stripArxivVersion } from "@/lib/utils";
 import { buildPaperDetailPresentation } from "@/lib/paperDetailPresentation";
+import { TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const PAPER_SECTION_IDS = ["tldr", "abstract", "tasks", "methods", "results"] as const;
 export type PaperSectionId = (typeof PAPER_SECTION_IDS)[number];
@@ -74,13 +76,7 @@ export function usePaperDetailPageModel(
     });
   }, [arxivId, navigate, rawArxivId]);
 
-  useEffect(() => {
-    if (!paper?.title) return;
-    document.title = paper.page_title || formatPageTitle(paper.title);
-    return () => {
-      document.title = DEFAULT_SITE_SUFFIX;
-    };
-  }, [paper?.page_title, paper?.title]);
+  useDocumentTitle(paper?.title && (paper.page_title || formatPageTitle(paper.title)));
 
   useEffect(() => {
     setSecondaryQueriesEnabled(false);
@@ -98,13 +94,13 @@ export function usePaperDetailPageModel(
     queryKey: [...paperQueryKeys.feeds.versions, paper?.arxiv_id],
     queryFn: () => papersApi.versions(stripArxivVersion(paper!.arxiv_id!)),
     enabled: secondaryReady && Boolean(paper?.arxiv_id),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   const relatedQuery = useQuery({
     queryKey: [...paperQueryKeys.feeds.related, paper?.id],
     queryFn: () => papersApi.related(paper!.arxiv_id || paper!.id, 4),
     enabled: secondaryReady,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   useEffect(() => {

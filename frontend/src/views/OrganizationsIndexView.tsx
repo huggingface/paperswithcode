@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { Organization } from "@/lib/api/catalog.types";
 import { catalogApi } from "@/lib/api/catalog";
 import "./Organizations.css";
+import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 type SortMode = "trending" | "papers" | "name";
 
@@ -39,9 +40,9 @@ const OrganizationsIndexView: React.FC = () => {
   const sort = parseSort(params.get("sort"));
   const query = params.get("q") ?? "";
   const organizationsQ = useQuery({
-    queryKey: ["organizations", "featured"],
+    queryKey: [...catalogQueryKeys.organizations, "featured"],
     queryFn: () => catalogApi.organizationIndex(),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const setView = (next: { sort?: SortMode; query?: string }) => {

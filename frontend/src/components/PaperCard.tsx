@@ -12,6 +12,7 @@ import { papersApi } from "@/lib/api/papers";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import type { PaperCardProps } from "@/lib/transform";
+import { TEN_MINUTES } from "@/lib/api/queryKeys";
 
 // Official multi-color Hugging Face logo. Kept as a standalone component
 // because the shared `Icon` renders single-color `currentColor` paths, while
@@ -118,7 +119,7 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
     queryClient.prefetchQuery({
       queryKey: paperQueryKeys.detail(paper.id),
       queryFn: () => papersApi.get(paper.id, true),
-      staleTime: 10 * 60 * 1000,
+      staleTime: TEN_MINUTES,
     });
   }, [paper.id, queryClient]);
   const visibleAuthors = paper.authors.slice(0, 3).map((name, index) => {

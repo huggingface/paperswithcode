@@ -19,6 +19,7 @@ import { formatStarCount } from "@/lib/frameworks";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { queryCenteredExcerpt } from "@/lib/paperSearchPresentation";
 import { isChatEnabled } from "@/lib/apiUrl";
+import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const SEARCH_SORTS = [
   ["relevance", "relevance"],
@@ -95,10 +96,10 @@ const PapersListView: React.FC = () => {
   const infinite = isSearchMode ? searchInfinite : regularInfinite;
 
   const topTasks = useQuery({
-    queryKey: ["top-tasks-sidebar"],
+    queryKey: catalogQueryKeys.topTasksSidebar,
     queryFn: () => catalogApi.topTasks(8),
     enabled: !isRepositoryFeed && !isSearchMode,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const cards = useMemo(() => {

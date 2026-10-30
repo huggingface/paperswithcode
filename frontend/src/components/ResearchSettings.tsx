@@ -3,7 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Building2, FlaskConical, ListChecks, Mail, Trophy, User, type LucideIcon } from 'lucide-react';
 import { researchApi, type FollowKind, type ResearchFollow } from '@/lib/api/research';
+import { researchQueryKeys } from '@/lib/api/queryKeys';
 import { useAuth } from '@/lib/authContext';
+import { useResearchFollows, useSetFollow, type FollowChange } from '@/lib/researchTopic';
 import { hfLoginUrl } from '@/lib/apiUrl';
 import HfSignInButton from './HfSignInButton';
 import { Switch } from './ui/switch';
@@ -24,23 +26,16 @@ function FollowList({ follows }: { follows: ResearchFollow[] }) {
   const client = useQueryClient();
   // Unfollowed rows stay until the page is left, so a misclick can be undone in place.
   const [unfollowed, setUnfollowed] = useState<ResearchFollow[]>([]);
-  const change = useMutation({
-    mutationFn: ({ follow, enabled }: { follow: ResearchFollow; enabled: boolean }) =>
-      researchApi.setFollow(follow.kind, follow.entity_id, enabled),
-    onSuccess: (_, { follow, enabled }) => {
-      // Update the cached list in the same render as `unfollowed` so a row never flips state late.
-      const queryKey = ['research-follows', user?.hf_subject];
-      client.setQueryData<ResearchFollow[]>(queryKey, current => enabled
-        ? [...(current ?? []), follow]
-        : (current ?? []).filter(f => followKey(f) !== followKey(follow)));
-      setUnfollowed(rows => [
-        ...rows.filter(r => followKey(r) !== followKey(follow)),
-        ...(enabled ? [] : [follow]),
-      ]);
-      void client.invalidateQueries({ queryKey });
-      void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
-    },
-  });
+  const change = useSetFollow<FollowChange & { row: ResearchFollow }>({ onChanged: ({ row, follow }) => {
+    // Update the cached list in the same render as `unfollowed` so a row never flips state late.
+    client.setQueryData<ResearchFollow[]>(researchQueryKeys.follows(user?.hf_subject), current => follow
+      ? [...(current ?? []), row]
+      : (current ?? []).filter(f => followKey(f) !== followKey(row)));
+    setUnfollowed(current => [
+      ...current.filter(r => followKey(r) !== followKey(row)),
+      ...(follow ? [] : [row]),
+    ]);
+  } });
   const active = new Set(follows.map(followKey));
   const rows = [...follows, ...unfollowed.filter(f => !active.has(followKey(f)))];
   if (!rows.length) return <EmptyFollows />;
@@ -59,7 +54,7 @@ function FollowList({ follows }: { follows: ResearchFollow[] }) {
             </div>
             <button type="button" className={following ? 'research-follow-action' : 'research-follow-action is-refollow'}
               disabled={change.isPending} aria-label={`${following ? 'Unfollow' : 'Follow'} ${f.name}`}
-              onClick={() => change.mutate({ follow: f, enabled: !following })}>
+              onClick={() => change.mutate({ kind: f.kind, entityId: f.entity_id, follow: !following, row: f })}>
               {following ? 'Unfollow' : 'Follow again'}
             </button>
           </li>;
@@ -84,8 +79,8 @@ function EmptyFollows() {
 export default function ResearchSettings() {
   const { user } = useAuth();
   const client = useQueryClient();
-  const follows = useQuery({ queryKey: ['research-follows', user?.hf_subject], queryFn: researchApi.follows, enabled: !!user });
-  const emailKey = ['research-email', user?.hf_subject];
+  const follows = useResearchFollows();
+  const emailKey = researchQueryKeys.email(user?.hf_subject);
   const email = useQuery({ queryKey: emailKey, queryFn: researchApi.email, enabled: !!user });
   const update = useMutation({ mutationFn: researchApi.setEmail, onSuccess: data => client.setQueryData(emailKey, data) });
   const count = follows.data?.length ?? 0;

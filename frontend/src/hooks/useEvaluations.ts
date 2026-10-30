@@ -4,13 +4,14 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { evaluationsApi } from '@/lib/api/evaluations';
+import { evaluationQueryKeys } from "@/lib/api/queryKeys";
 
 /**
  * Fetch all evaluations for a specific paper
  */
 export function useEvaluationsByPaper(paperId: string | undefined, enabled: boolean = true) {
   return useQuery({
-    queryKey: ['evaluations', 'paper', paperId],
+    queryKey: evaluationQueryKeys.byPaper(paperId),
     queryFn: () => {
       if (!paperId) throw new Error('Paper ID is required');
       return evaluationsApi.byPaper(paperId);

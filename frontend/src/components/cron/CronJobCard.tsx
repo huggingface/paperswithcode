@@ -32,6 +32,7 @@ import {
   type PaperMarkdownJobProfile,
 } from "@/lib/api/operations";
 import { formatCronDate, formatUsd, toneClass, type Tone } from "@/lib/cronStatus";
+import { adminQueryKeys } from "@/lib/api/queryKeys";
 
 function formatDuration(duration: number | null): string {
   if (duration == null) return "N/A";
@@ -424,7 +425,7 @@ export function CronJobCard({
   const hasDbMetrics = Boolean(job.db_metrics && Object.keys(job.db_metrics).length);
   const hasRemoteJobs = job.job_name === "paper_markdown_backfill";
   const paperMarkdownJobs = useQuery({
-    queryKey: ["admin", "paperMarkdownJobs"],
+    queryKey: adminQueryKeys.paperMarkdownJobs,
     queryFn: () => operationsApi.getPaperMarkdownJobs(),
     enabled: hasRemoteJobs,
     refetchInterval: autoRefresh ? 30000 : false,

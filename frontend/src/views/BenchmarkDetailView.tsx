@@ -7,7 +7,7 @@ import type { Task } from "@/lib/api/catalog.types";
 import type { LeaderboardMetric, MetricDirections } from "@/lib/api/evaluations.types";
 import { catalogApi } from "@/lib/api/catalog";
 import { evaluationsApi } from "@/lib/api/evaluations";
-import { usePreferences } from "@/lib/preferencesContext";
+import { usePreferences } from "@/lib/preferences";
 import { formatMetricValue } from "@/lib/utils";
 import { deriveLeaderboardPresentation, resolveLeaderboardTask } from "@/lib/leaderboardPresentation";
 import BenchmarkTable from "@/components/benchmark/BenchmarkTable";
@@ -24,6 +24,7 @@ import { safeExternalHref } from "@/lib/safeExternalHref";
 import { slugify } from "@/lib/slug";
 import { isNotFound } from "@/lib/apiErrors";
 import NotFound from "@/pages/NotFound";
+import { catalogQueryKeys, evaluationQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 function extractSourcePaperRouteId(paperUrl?: string | null): string | null {
   if (!paperUrl) return null;
@@ -75,8 +76,7 @@ const BenchmarkDetailView: React.FC = () => {
   // dataset → paper waterfall into a single round trip.
   const datasetQ = useQuery({
     queryKey: [
-      "dataset",
-      datasetSlug,
+      ...catalogQueryKeys.dataset(datasetSlug),
       "with-paper",
       taskSlugFromQuery,
       preferences.hide_closed_source_evals ? "open" : "all",
@@ -87,7 +87,7 @@ const BenchmarkDetailView: React.FC = () => {
       is_open: preferences.hide_closed_source_evals ? true : undefined,
     }),
     enabled: !!datasetSlug,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   // Fetch every evaluation on this dataset once. Metric switching is purely
@@ -97,17 +97,17 @@ const BenchmarkDetailView: React.FC = () => {
   // different from the tab the user clicked (e.g. an F1-primary row that
   // also carries Recall/Precision values).
   const evalsQ = useQuery({
-    queryKey: ["dataset-evals", datasetQ.data?.id],
+    queryKey: evaluationQueryKeys.byDataset(datasetQ.data?.id),
     queryFn: () => evaluationsApi.byDataset(datasetQ.data!.id),
     enabled: !!datasetQ.data?.id,
     staleTime: 5 * 60 * 1000,
   });
 
   const datasetTasksQ = useQuery<Task[]>({
-    queryKey: ["dataset-tasks", datasetQ.data?.id],
+    queryKey: [...catalogQueryKeys.datasetTasks, datasetQ.data?.id],
     queryFn: () => catalogApi.datasetTasks(datasetQ.data!.id),
     enabled: !!datasetQ.data?.id,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const directionsQ = useQuery<MetricDirections>({
@@ -125,7 +125,7 @@ const BenchmarkDetailView: React.FC = () => {
 
   const benchmarkTrendsQ = useQuery({
     queryKey: [
-      "task-benchmark-trends",
+      ...catalogQueryKeys.taskBenchmarkTrends,
       currentTaskId,
       preferences.hide_closed_source_evals ? true : undefined,
     ],
@@ -136,7 +136,7 @@ const BenchmarkDetailView: React.FC = () => {
         is_open: preferences.hide_closed_source_evals ? true : undefined,
       }),
     enabled: !!currentTaskId && !!datasetQ.data?.id,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const benchmarkTrend = useMemo(
@@ -154,7 +154,7 @@ const BenchmarkDetailView: React.FC = () => {
     queryKey: ["leaderboard-metrics", datasetQ.data?.id, currentTaskId],
     queryFn: () => catalogApi.leaderboardMetrics(datasetQ.data!.id, currentTaskId!),
     enabled: !!datasetQ.data?.id && !!currentTaskId,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const model = deriveLeaderboardPresentation({
@@ -199,10 +199,10 @@ const BenchmarkDetailView: React.FC = () => {
   }, [highlightEvalId, evalsQ.data]);
 
   const areaQ = useQuery({
-    queryKey: ["area", primaryTask?.area_id],
+    queryKey: catalogQueryKeys.area(primaryTask?.area_id),
     queryFn: () => catalogApi.getArea(primaryTask!.area_id!),
     enabled: !!primaryTask?.area_id,
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   if (datasetQ.isLoading) {
@@ -367,7 +367,7 @@ const BenchmarkDetailView: React.FC = () => {
               type="button"
               className="bm-hidden-closed-action"
               onClick={() => {
-                void setHideClosedSourceEvals(false);
+                setHideClosedSourceEvals(false);
               }}
             >
               Show closed-source
@@ -506,7 +506,7 @@ const BenchmarkDetailView: React.FC = () => {
                   className="bm-closed-toggle-switch"
                   checked={!preferences.hide_closed_source_evals}
                   onCheckedChange={(checked) => {
-                    void setHideClosedSourceEvals(!checked);
+                    setHideClosedSourceEvals(!checked);
                   }}
                   aria-label="Show closed-source models"
                 />

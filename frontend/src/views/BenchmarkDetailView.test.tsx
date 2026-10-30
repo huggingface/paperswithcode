@@ -8,7 +8,7 @@ import { evaluationsApi } from "@/lib/api/evaluations";
 import type { Evaluation } from "@/lib/api/evaluations.types";
 import BenchmarkDetailView from "@/views/BenchmarkDetailView";
 
-vi.mock("@/lib/preferencesContext", () => ({
+vi.mock("@/lib/preferences", () => ({
   usePreferences: () => ({
     preferences: { hide_closed_source_evals: false },
     setHideClosedSourceEvals: vi.fn(),

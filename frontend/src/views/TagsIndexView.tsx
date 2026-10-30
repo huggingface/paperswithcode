@@ -13,6 +13,7 @@ import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 import { TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
 import { useHashScrollOnReady } from "@/hooks/useHashScrollOnReady";
 import { sortAreas } from "@/lib/areas";
+import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 /**
  * Browse page: render the backend areas verbatim, each with their tasks.
@@ -25,17 +26,17 @@ const TagsIndexView: React.FC = () => {
   const taxonomyQ = useQuery({
     queryKey: ["areas-with-tasks"],
     queryFn: () => catalogApi.areasWithTasks(),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   const trendingQ = useQuery({
     queryKey: ["trending-tasks-directory"],
     queryFn: () => catalogApi.trendingTasks({ limit: 12, min_recent_papers: 10 }),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
   const areasQ = useQuery({
-    queryKey: ["areas-all"],
+    queryKey: catalogQueryKeys.areas,
     queryFn: () => catalogApi.listAreas({ page_size: 50, ordering: "name" }),
-    staleTime: 10 * 60 * 1000,
+    staleTime: TEN_MINUTES,
   });
 
   const trendingItems = useMemo(() => {

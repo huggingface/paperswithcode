@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { catalogApi } from "@/lib/api/catalog";
 import type { EvaluationSnapshot, PendingEditOf } from "@/lib/pendingEdits";
 import { EmptyInline, Field } from "./shared";
+import { catalogQueryKeys } from "@/lib/api/queryKeys";
 
 function useCatalogNames(
   kind: "task" | "dataset",
@@ -13,7 +14,7 @@ function useCatalogNames(
 ): Map<number, string> {
   return useQueries({
     queries: ids.map((id) => ({
-      queryKey: [kind, String(id)],
+      queryKey: catalogQueryKeys[kind](String(id)),
       queryFn: () => fetchEntity(String(id)),
       staleTime: 5 * 60 * 1000,
     })),

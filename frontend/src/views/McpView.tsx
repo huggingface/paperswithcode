@@ -2,7 +2,8 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, Check, Copy, ExternalLink, Github } from "lucide-react";
 
-import { DEFAULT_SITE_SUFFIX, formatPageTitle } from "@/lib/latexPlainText";
+import { formatPageTitle } from "@/lib/latexPlainText";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { mcpEndpoint, mcpHealthQueryOptions } from "@/lib/mcp";
 
 import "@/views/McpView.css";
@@ -119,12 +120,7 @@ const McpView: React.FC = () => {
   const [client, setClient] = React.useState<ClientKey>("chatgpt");
   const selected = CLIENTS.find((item) => item.key === client) ?? CLIENTS[0];
 
-  React.useEffect(() => {
-    document.title = formatPageTitle("MCP Server");
-    return () => {
-      document.title = DEFAULT_SITE_SUFFIX;
-    };
-  }, []);
+  useDocumentTitle(formatPageTitle("MCP Server"));
 
   return (
     <article className="page mcp-page">

@@ -9,6 +9,7 @@ import {
   type Operation,
   type Schema,
 } from "@/lib/api/publicDocs";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import "./ApiDocsView.css";
 
 const LANGUAGES = ["curl", "Python", "JavaScript"];
@@ -212,13 +213,7 @@ function Endpoint({ path, operation }: { path: string; operation: Operation }) {
 
 export default function ApiDocsView() {
   const { data, isPending, isError, refetch } = useQuery(publicSpecQuery);
-  useEffect(() => {
-    const previous = document.title;
-    document.title = "API documentation — Papers With Code";
-    return () => {
-      document.title = previous;
-    };
-  }, []);
+  useDocumentTitle("API documentation — Papers With Code", { restorePrevious: true });
   useEffect(() => {
     if (!data || !window.location.hash) return;
     const frame = requestAnimationFrame(() => {

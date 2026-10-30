@@ -1,14 +1,10 @@
 import React from "react";
 
-import { DEFAULT_SITE_SUFFIX, formatPageTitle } from "@/lib/latexPlainText";
+import { formatPageTitle } from "@/lib/latexPlainText";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 
 const PrivacyView: React.FC = () => {
-  React.useEffect(() => {
-    document.title = formatPageTitle("Privacy Policy");
-    return () => {
-      document.title = DEFAULT_SITE_SUFFIX;
-    };
-  }, []);
+  useDocumentTitle(formatPageTitle("Privacy Policy"));
 
   return (
     <article className="page legal-page">

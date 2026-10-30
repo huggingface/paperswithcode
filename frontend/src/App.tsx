@@ -31,7 +31,6 @@ import {
   shouldUseHashRouter,
 } from "@/lib/apiUrl";
 import { AuthProvider, useAuth } from "@/lib/authContext";
-import { PreferencesProvider } from "@/lib/preferencesContext";
 
 // HF Static Spaces (a) boot the iframe at `/index.html` and (b) return a
 // hard 404 for any deep link, so on those builds we switch to `HashRouter`.
@@ -342,13 +341,11 @@ const Shell: React.FC = () => {
 const App: React.FC = () => (
   <QueryClientProvider client={queryClient}>
     <AuthProvider>
-      <PreferencesProvider>
-        <Router>
-          <Shell />
-        </Router>
-        <Toaster />
-        {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
-      </PreferencesProvider>
+      <Router>
+        <Shell />
+      </Router>
+      <Toaster />
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
     </AuthProvider>
   </QueryClientProvider>
 );
