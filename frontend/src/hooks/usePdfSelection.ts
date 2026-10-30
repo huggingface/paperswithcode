@@ -17,7 +17,6 @@ export interface UsePdfSelectionOptions {
   routeId: string;
   paperVersion: string;
   numPages?: number;
-  resetKey?: string | number;
   onSelect?: (selection: PaperSelectionDraft) => void;
   onError?: (message: string) => void;
 }
@@ -28,7 +27,6 @@ export function usePdfSelection({
   routeId,
   paperVersion,
   numPages,
-  resetKey,
   onSelect,
   onError,
 }: UsePdfSelectionOptions) {
@@ -51,7 +49,7 @@ export function usePdfSelection({
     window.clearTimeout(fallbackTimer.current);
     cancelAnimationFrame(commitFrame.current);
     commitFrame.current = 0;
-  }, [routeId, paperVersion, resetKey]);
+  }, [routeId, paperVersion]);
 
   useEffect(() => {
     if (!enabled) {

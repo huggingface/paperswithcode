@@ -87,7 +87,8 @@ vi.mock("react-pdf", () => ({
     },
 }));
 
-import { highlightPdfText, PdfViewer } from "./PdfViewer";
+import { PdfViewer } from "./PdfViewer";
+import { highlightPdfText } from "./usePdfSearch";
 
 const render = (ui: React.ReactElement) => renderWithoutQueries(ui, {
   wrapper: ({ children }) => <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>,
@@ -560,6 +561,18 @@ describe("PdfViewer resize rendering", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Paper content is still being prepared. Please try again later.",
     );
+  });
+
+  it("reloads the document from scratch on Retry", () => {
+    render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" />);
+    fireEvent.click(screen.getByRole("button", { name: "Fail PDF" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("The PDF source could not be loaded in this browser.");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Load long PDF" }));
+    expect(screen.getByRole("region", { name: "Paper PDF" }).querySelectorAll("[data-page]")).toHaveLength(13);
   });
 
   it("provides application-owned canvas controls for a private paper preview", async () => {

@@ -13,7 +13,7 @@ import { assetUrl, isPaperReaderChatEnabled } from "@/lib/apiUrl";
 import { chatApi } from "@/lib/api/chat";
 import type { PaperSelectionDraft } from "@/lib/chat";
 import { safeExternalHref } from "@/lib/safeExternalHref";
-import { externalPaperWebPage } from "@/lib/paperReader";
+import { externalPaperWebPage, readerCollapsedKey, readerPageKey, readerSessionKey } from "@/lib/paperReader";
 import { normalizePaperRouteId } from "@/lib/utils";
 import { ChatExperience } from "@/views/ChatView";
 import { PdfCitationContext, type PdfCitationTarget } from "@/components/chat/PdfCitationContext";
@@ -23,12 +23,9 @@ import { getPaperLayout } from "@/lib/api/papers";
 const DEFAULT_RATIO = 66;
 const CHAT_TRANSITION_MS = 240;
 const RATIO_KEY = "pwc:reader:split-ratio";
-const sessionKey = (routeId: string) => `pwc:reader:session:${routeId}`;
-const collapsedKey = (routeId: string) => `pwc:reader:assistant-collapsed:${routeId}`;
-const pageKey = (routeId: string) => `pwc:reader:page:${routeId}`;
 
 function storedPage(routeId: string): number {
-  const value = Number(sessionStorage.getItem(pageKey(routeId)));
+  const value = Number(sessionStorage.getItem(readerPageKey(routeId)));
   return Number.isInteger(value) && value > 0 ? value : 1;
 }
 
@@ -109,10 +106,9 @@ export function readerToolbarResources(paper: Paper | undefined): PdfToolbarReso
   return resources;
 }
 
-function PaperReaderExperience() {
+// Keyed by routeId, so another paper starts from its own stored reader state.
+function PaperReaderExperience({ routeId }: { routeId: string }) {
   const navigate = useNavigate();
-  const { paperId: rawRouteId } = useParams<{ paperId: string }>();
-  const routeId = normalizePaperRouteId(rawRouteId ?? "").replace(/v\d+$/i, "");
   const query = usePaper(routeId, Boolean(routeId));
   const availabilityQuery = useQuery({
     queryKey: ["chatAvailability"],
@@ -135,12 +131,12 @@ function PaperReaderExperience() {
   const canonicalRoute = paper?.arxiv_id?.replace(/v\d+$/i, "") || routeId;
   const closeReader = useCallback(() => navigate(`/paper/${canonicalRoute}`), [canonicalRoute, navigate]);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(() => {
-    const stored = sessionStorage.getItem(sessionKey(routeId));
+    const stored = sessionStorage.getItem(readerSessionKey(routeId));
     return stored || undefined;
   });
   const [ratio, setRatio] = useState(storedRatio);
   const [collapsed, setCollapsed] = useState(
-    () => sessionStorage.getItem(collapsedKey(routeId)) === "1",
+    () => sessionStorage.getItem(readerCollapsedKey(routeId)) === "1",
   );
   const [mobileTab, setMobileTab] = useState<"paper" | "assistant">("paper");
   const [paperSelection, setPaperSelection] = useState<PaperSelectionDraft | undefined>();
@@ -149,7 +145,7 @@ function PaperReaderExperience() {
   const [webPageReady, setWebPageReady] = useState(false);
   const markWebPageReady = useCallback(() => setWebPageReady(true), []);
   const [selectionStatus, setSelectionStatus] = useState("");
-  const [initialPage, setInitialPage] = useState(() => storedPage(routeId));
+  const [initialPage] = useState(() => storedPage(routeId));
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
   const [resizeActive, setResizeActive] = useState(false);
   const [chatTransitionActive, setChatTransitionActive] = useState(false);
@@ -164,19 +160,18 @@ function PaperReaderExperience() {
   const resizeFrame = useRef(0);
   const pendingClientX = useRef(0);
   const pendingRatio = useRef(ratio);
-  const currentPageRef = useRef(storedPage(routeId));
+  const currentPageRef = useRef(initialPage);
   const paperVersionRef = useRef(paper?.version);
   const artifactPanel = useArtifactPanel();
   const resetArtifactPanel = artifactPanel.reset;
-  const artifactSessionRef = useRef(`${routeId}:${activeSessionId ?? "new"}`);
+  const artifactSessionRef = useRef(activeSessionId);
   const desktopSplit = workspaceWidth >= 840;
 
   useEffect(() => {
-    const next = `${routeId}:${activeSessionId ?? "new"}`;
-    if (artifactSessionRef.current === next) return;
-    artifactSessionRef.current = next;
+    if (artifactSessionRef.current === activeSessionId) return;
+    artifactSessionRef.current = activeSessionId;
     resetArtifactPanel();
-  }, [activeSessionId, resetArtifactPanel, routeId]);
+  }, [activeSessionId, resetArtifactPanel]);
 
   useEffect(() => {
     if (paper?.version && paperVersionRef.current && paper.version !== paperVersionRef.current) {
@@ -185,22 +180,6 @@ function PaperReaderExperience() {
     }
     paperVersionRef.current = paper?.version;
   }, [paper?.version]);
-
-  useEffect(() => {
-    window.clearTimeout(chatTransitionTimer.current);
-    setChatTransitionActive(false);
-    const storedSession = sessionStorage.getItem(sessionKey(routeId));
-    setActiveSessionId(storedSession || undefined);
-    setCollapsed(sessionStorage.getItem(collapsedKey(routeId)) === "1");
-    setMobileTab("paper");
-    setWebPageReady(false);
-    setPaperSelection(undefined);
-    setPdfHighlight(undefined);
-    setSelectionStatus("");
-    const nextPage = storedPage(routeId);
-    currentPageRef.current = nextPage;
-    setInitialPage(nextPage);
-  }, [routeId]);
 
   useEffect(() => () => {
     window.clearTimeout(chatTransitionTimer.current);
@@ -304,7 +283,7 @@ function PaperReaderExperience() {
     window.clearTimeout(chatTransitionTimer.current);
     setChatTransitionActive(true);
     setCollapsed(next);
-    sessionStorage.setItem(collapsedKey(routeId), next ? "1" : "0");
+    sessionStorage.setItem(readerCollapsedKey(routeId), next ? "1" : "0");
     chatTransitionTimer.current = window.setTimeout(
       () => setChatTransitionActive(false),
       CHAT_TRANSITION_MS + 40,
@@ -322,11 +301,11 @@ function PaperReaderExperience() {
   }, [collapsed]);
   const selectSession = (id: string) => {
     setActiveSessionId(id);
-    sessionStorage.setItem(sessionKey(routeId), id);
+    sessionStorage.setItem(readerSessionKey(routeId), id);
   };
   const newChat = () => {
     setActiveSessionId(undefined);
-    sessionStorage.removeItem(sessionKey(routeId));
+    sessionStorage.removeItem(readerSessionKey(routeId));
     setPaperSelection(undefined);
     setSelectionStatus("");
   };
@@ -441,7 +420,7 @@ function PaperReaderExperience() {
             highlight={pdfHighlight}
             onPageChange={(page) => {
               currentPageRef.current = page;
-              sessionStorage.setItem(pageKey(routeId), String(page));
+              sessionStorage.setItem(readerPageKey(routeId), String(page));
             }}
           />
         )}
@@ -498,7 +477,8 @@ function PaperReaderExperience() {
 
 export default function PaperReaderView() {
   const { paperId = "" } = useParams<{ paperId: string }>();
+  const routeId = normalizePaperRouteId(paperId).replace(/v\d+$/i, "");
   return <ArtifactPanelProvider workspaceKey={`reader:${paperId}`}>
-    <PaperReaderExperience />
+    <PaperReaderExperience key={routeId} routeId={routeId} />
   </ArtifactPanelProvider>;
 }

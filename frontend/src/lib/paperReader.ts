@@ -49,12 +49,17 @@ export function paperReaderRoute(paper: Paper, fallbackRoute: string): string | 
   return safeExternalHref(paper.url_pdf) && route ? `/pdf/${route}` : null;
 }
 
+// Per-paper reader state in sessionStorage, keyed by the reader route ID.
+export const readerSessionKey = (readerId: string) => `pwc:reader:session:${readerId}`;
+export const readerCollapsedKey = (readerId: string) => `pwc:reader:assistant-collapsed:${readerId}`;
+export const readerPageKey = (readerId: string) => `pwc:reader:page:${readerId}`;
+
 /** Opens the reader on page 1 with a fresh, expanded assistant. */
 export function resetReaderSession(readerRoute: string): void {
   const readerId = readerRoute.slice("/pdf/".length);
-  sessionStorage.removeItem(`pwc:reader:session:${readerId}`);
-  sessionStorage.removeItem(`pwc:reader:assistant-collapsed:${readerId}`);
-  sessionStorage.removeItem(`pwc:reader:page:${readerId}`);
+  sessionStorage.removeItem(readerSessionKey(readerId));
+  sessionStorage.removeItem(readerCollapsedKey(readerId));
+  sessionStorage.removeItem(readerPageKey(readerId));
 }
 
 const CANONICAL_HEADER = /^Title: [^\n]*\n\nURL Source: [^\n]*\n\nMarkdown Content:\n/;
