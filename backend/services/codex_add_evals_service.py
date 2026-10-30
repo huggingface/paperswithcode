@@ -40,6 +40,7 @@ from backend.models.database import (
     PaperCurationWorkflow,
     TrendingModelCandidate,
 )
+from backend.services.curation_priority_service import is_priority_paper
 from backend.services.curation_thumbnail_queue_service import (
     queue_missing_paper_thumbnail,
     serialize_thumbnail,
@@ -924,7 +925,7 @@ class CodexPaperJobService:
 
     @staticmethod
     def _next_scheduled_row(db: Session) -> PaperCurationJob | None:
-        """Choose ready daily work first, then keep spare workers busy."""
+        """Choose ready daily and X-trending work first, then keep workers busy."""
         daily = (
             db.query(PaperCurationJob)
             .join(Paper, Paper.id == PaperCurationJob.paper_id)
@@ -933,14 +934,14 @@ class CodexPaperJobService:
                 PaperCurationWorkflow.id == PaperCurationJob.parent_workflow_id,
             )
             .filter(
-                Paper.hf_daily_featured_on.isnot(None),
+                is_priority_paper(),
                 PaperCurationJob.trigger.in_({"hf-daily-cron", "hf-trending-cron"}),
                 PaperCurationJob.status == "queued",
                 PaperCurationWorkflow.status.in_({"queued", "running"}),
             )
             .order_by(
                 PaperCurationJob.priority,
-                Paper.hf_daily_featured_on.desc(),
+                Paper.hf_daily_featured_on.desc().nullslast(),
                 PaperCurationJob.created_at,
                 PaperCurationJob.id,
             )

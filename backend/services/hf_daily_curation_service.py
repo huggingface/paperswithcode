@@ -31,8 +31,12 @@ from backend.services.codex_add_evals_service import (
     operator_retryable,
 )
 from backend.services.curation_priority_service import (
+    DAILY_PRIORITY,
+    X_TRENDING_PRIORITY,
     has_pending_daily_papers,
+    is_priority_paper,
     pending_daily_papers,
+    pending_x_trending_papers,
 )
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.codex_curation_callback_service import (
@@ -169,7 +173,7 @@ class HFDailyCurationService:
         if daily_only:
             query = query.join(
                 Paper, Paper.id == PaperCurationWorkflow.paper_id
-            ).filter(Paper.hf_daily_featured_on.isnot(None))
+            ).filter(is_priority_paper())
         workflows = (
             query.order_by(
                 PaperCurationWorkflow.updated_at,
@@ -552,6 +556,18 @@ class HFDailyCurationService:
                     paper.hf_daily_featured_on or cohort_date, cohort_date
                 )
         self.db.flush()
+        # Papers trending on X are admitted ahead of the HF daily cohort.
+        x_trending = [
+            (shared_on, order, paper.arxiv_id)
+            for order, (paper, shared_on) in enumerate(
+                pending_x_trending_papers(self.db)
+            )
+        ]
+        x_trending_ids = {arxiv_id for _, _, arxiv_id in x_trending}
+        discovered = x_trending + [
+            entry for entry in discovered if entry[2] not in x_trending_ids
+        ]
+        seen |= x_trending_ids
         for paper in pending_daily_papers(self.db).order_by(
             Paper.hf_daily_featured_on.desc(), Paper.id
         ):
@@ -578,7 +594,7 @@ class HFDailyCurationService:
                 .filter(
                     PaperCurationWorkflow.status == "queued",
                     PaperCurationWorkflow.source_candidate_id.is_(None),
-                    Paper.hf_daily_featured_on.is_(None),
+                    ~is_priority_paper(),
                     ~active_job,
                 )
             ):
@@ -651,6 +667,9 @@ class HFDailyCurationService:
         admission_capacity = min(capacity, reconcile_limit)
 
         for cohort_date, order, arxiv_id in discovered:
+            priority = (
+                X_TRENDING_PRIORITY if arxiv_id in x_trending_ids else DAILY_PRIORITY
+            )
             paper = (
                 self.db.query(Paper)
                 .filter(Paper.arxiv_id == arxiv_id, Paper.is_latest_version)
@@ -682,14 +701,14 @@ class HFDailyCurationService:
                         )
                         .all()
                     ):
-                        job.priority = 10
+                        job.priority = min(job.priority, priority)
                         job.cohort_date = cohort_date
                     if (
                         existing.status == "deferred"
                         and existing.deferred_reason in {"queue_cap", "canary_cap"}
                         and create_capacity > 0
                     ):
-                        self._enqueue_workflow(existing, paper, priority=10)
+                        self._enqueue_workflow(existing, paper, priority=priority)
                         create_capacity -= 1
                         admission_capacity -= 1
                         summary["released_deferred"] += 1
@@ -749,7 +768,7 @@ class HFDailyCurationService:
             self.db.add(workflow)
             self.db.flush()
             if workflow.status == "queued":
-                self._enqueue_workflow(workflow, paper, priority=10)
+                self._enqueue_workflow(workflow, paper, priority=priority)
 
         # Resume source-ready historical work too; blocked daily papers must
         # not prevent it from using capacity left after daily admission. Existing

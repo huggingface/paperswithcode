@@ -9,7 +9,12 @@ import pytest
 from sqlalchemy import Column, MetaData, String, Table, create_engine
 from sqlalchemy.orm import Session
 
-from backend.models.database import Paper, PaperCurationJob, PaperCurationWorkflow
+from backend.models.database import (
+    Paper,
+    PaperCurationJob,
+    PaperCurationWorkflow,
+    PaperXTrending,
+)
 from backend.services.hf_daily_curation_service import HFDailyCurationService
 
 
@@ -18,7 +23,7 @@ def queue_db():
     engine = create_engine("sqlite://")
     metadata = MetaData()
     # Only storage is simplified; service queries and ORM mappings are real.
-    for model in (Paper, PaperCurationJob, PaperCurationWorkflow):
+    for model in (Paper, PaperCurationJob, PaperCurationWorkflow, PaperXTrending):
         columns = []
         for column in model.__table__.columns:
             kind = column.type
@@ -436,3 +441,93 @@ def test_daily_retry_consumes_admission_capacity(queue_db, backfill_reason, capa
     assert jobs.enqueue.call_count == max(0, capacity - 1)
     if capacity == 2:
         assert jobs.enqueue.call_args.kwargs["paper_id"] == old.paper_id
+
+
+def x_trending(db, paper_id, shared_on=date(2026, 10, 9), rank=1):
+    db.add(PaperXTrending(shared_on=shared_on, paper_id=paper_id, rank=rank))
+    db.flush()
+
+
+def test_x_trending_admitted_before_hf_daily_cohort(queue_db):
+    db = queue_db
+    daily = paper(db, 1)
+    older = paper(db, 2)
+    newer = paper(db, 3)
+    x_trending(db, older.id, shared_on=date(2026, 9, 1))
+    x_trending(db, newer.id, rank=4)
+    db.commit()
+    svc, jobs = service(db, [daily.arxiv_id], 2)
+
+    svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
+
+    # The most recently shared X papers take the capacity, at X priority, even
+    # though they are not HF daily papers.
+    calls = [call.kwargs for call in jobs.enqueue.call_args_list]
+    assert [(call["paper_id"], call["priority"]) for call in calls] == [
+        (newer.id, 5),
+        (older.id, 5),
+    ]
+
+
+def test_queued_job_promoted_when_trending_on_x(queue_db):
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 10, 8)
+    current = workflow(db, fresh.id, status="queued")
+    job = PaperCurationJob(
+        id=uuid.uuid4(),
+        paper_id=fresh.id,
+        parent_workflow_id=current.id,
+        kind="add-evals",
+        status="queued",
+        priority=10,
+        cohort_date=current.cohort_date,
+        trigger="hf-daily-cron",
+    )
+    db.add(job)
+    x_trending(db, fresh.id)
+    db.commit()
+    svc, jobs = service(db, [fresh.arxiv_id], 1)
+    observed = []
+    original_flush = db.flush
+
+    def flush(*args, **kwargs):
+        observed.append(job.priority)
+        return original_flush(*args, **kwargs)
+
+    db.flush = flush
+
+    svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
+
+    assert 5 in observed
+    jobs.enqueue.assert_not_called()
+
+
+def test_x_trending_job_dispatches_before_daily_and_backlog(queue_db):
+    from backend.services.codex_add_evals_service import CodexPaperJobService
+
+    db = queue_db
+    rows = {}
+    for number, priority, featured in [
+        (1, 100, None),
+        (2, 10, date(2026, 10, 9)),
+        (3, 5, None),
+    ]:
+        item = paper(db, number)
+        item.hf_daily_featured_on = featured
+        current = workflow(db, item.id, status="queued")
+        rows[number] = PaperCurationJob(
+            id=uuid.uuid4(),
+            paper_id=item.id,
+            parent_workflow_id=current.id,
+            kind="enrich-paper",
+            status="queued",
+            priority=priority,
+            cohort_date=current.cohort_date,
+            trigger="hf-daily-cron",
+        )
+        db.add(rows[number])
+    x_trending(db, 3)
+    db.flush()
+
+    assert CodexPaperJobService._next_scheduled_row(db) is rows[3]

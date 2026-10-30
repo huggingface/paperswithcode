@@ -17,6 +17,7 @@ from backend.models.database import (
     PaperCurationJob,
     PaperCurationSchedulerState,
     PaperCurationWorkflow,
+    PaperXTrending,
     TrendingModelCandidate,
 )
 from backend.services.codex_add_evals_service import CodexPaperJobService
@@ -47,6 +48,7 @@ def completion(monkeypatch, tmp_path):
                 TrendingModelCandidate,
                 PaperCurationJob,
                 PaperCurationWorkflow,
+                PaperXTrending,
                 PaperCurationSchedulerState,
             )
         ],
