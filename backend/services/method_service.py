@@ -574,7 +574,7 @@ class MethodService:
                 .filter(
                     or_(
                         DBMethod.slug == method_name.lower(),
-                        DBMethod.name.ilike(method_name),
+                        func.lower(DBMethod.name) == method_name.lower(),
                     )
                 )
                 .first()
@@ -893,7 +893,7 @@ class MethodService:
                     .filter(
                         or_(
                             DBMethod.slug == method_id.lower(),
-                            DBMethod.name.ilike(method_id),
+                            func.lower(DBMethod.name) == method_id.lower(),
                         )
                     )
                     .first()
@@ -969,7 +969,7 @@ class MethodService:
                     .filter(
                         or_(
                             DBMethod.slug == method_id.lower(),
-                            DBMethod.name.ilike(method_id),
+                            func.lower(DBMethod.name) == method_id.lower(),
                         )
                     )
                     .first()
@@ -1034,7 +1034,7 @@ class MethodService:
                     .filter(
                         or_(
                             DBMethod.slug == method_id.lower(),
-                            DBMethod.name.ilike(method_id),
+                            func.lower(DBMethod.name) == method_id.lower(),
                         )
                     )
                     .first()
@@ -1101,7 +1101,7 @@ class MethodService:
                     .filter(
                         or_(
                             DBMethod.slug == method_id.lower(),
-                            DBMethod.name.ilike(method_id),
+                            func.lower(DBMethod.name) == method_id.lower(),
                         )
                     )
                     .first()

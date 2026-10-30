@@ -80,6 +80,16 @@ class TaskService:
         )
         return operation(identifier)
 
+    def _require_db_task(self, identifier: str) -> DBTask:
+        """Resolve a task by numeric id or slug, raising when it does not exist."""
+        if str(identifier).isdigit():
+            db_task = self.db.query(DBTask).filter(DBTask.id == int(identifier)).first()
+        else:
+            db_task = self._get_db_task_by_slug(str(identifier))
+        if db_task is None:
+            raise PaperNotFoundError(f"Task '{identifier}' not found")
+        return db_task
+
     def _get_db_task_by_slug(self, slug: str) -> Optional[DBTask]:
         for candidate in task_slug_candidates(slug):
             task = self.db.query(DBTask).filter(DBTask.slug == candidate).first()
@@ -501,27 +511,14 @@ class TaskService:
             PaperNotFoundError: If parent task not found
             DatabaseError: If database query fails
         """
-        try:
-            # Verify parent task exists
-            parent_task = (
-                self.db.query(DBTask).filter(DBTask.id == int(task_id)).first()
-            )
-            if not parent_task:
-                raise PaperNotFoundError(f"Task with ID {task_id} not found")
-
-            # Get children
-            return self.get_tasks(
-                page=page,
-                page_size=page_size,
-                parent_id=int(task_id),
-                order_by="name",
-                order_dir="asc",
-            )
-
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve child tasks: {str(e)}")
+        parent_task = self._require_db_task(task_id)
+        return self.get_tasks(
+            page=page,
+            page_size=page_size,
+            parent_id=parent_task.id,
+            order_by="name",
+            order_dir="asc",
+        )
 
     def get_task_parents(self, task_id: str) -> List[Task]:
         """
@@ -537,11 +534,8 @@ class TaskService:
             PaperNotFoundError: If task not found
             DatabaseError: If database query fails
         """
+        db_task = self._require_db_task(task_id)
         try:
-            db_task = self.db.query(DBTask).filter(DBTask.id == int(task_id)).first()
-            if not db_task:
-                raise PaperNotFoundError(f"Task with ID {task_id} not found")
-
             parents = []
             current = db_task
 
@@ -566,8 +560,6 @@ class TaskService:
 
             return parents
 
-        except PaperNotFoundError:
-            raise
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve parent tasks: {str(e)}")
 

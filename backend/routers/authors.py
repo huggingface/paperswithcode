@@ -16,7 +16,7 @@ from backend.models.papers import (
     Papers,
 )
 from backend.services.author_service import AuthorService
-from backend.utils.exceptions import PaperNotFoundError, DatabaseError
+from backend.utils.exceptions import PaperNotFoundError
 from backend.utils.organization_logos import organization_logo_extension
 
 router = APIRouter()
@@ -74,31 +74,21 @@ def get_authors(
     - Paper count statistics
     - Pagination metadata (next/previous page numbers)
     """
-    try:
-        author_service = AuthorService(db)
-
-        if search:
-            # Use search functionality for better results
-            return author_service.search_authors(
-                query=search,
-                page=page,
-                page_size=page_size,
-                hf_users_only=hf_users_only,
-            )
-        else:
-            # Regular listing with filters
-            return author_service.get_authors(
-                page=page,
-                page_size=page_size,
-                hf_users_only=hf_users_only,
-                order_by=order_by,
-                order_dir=order_dir,
-            )
-
-    except DatabaseError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    author_service = AuthorService(db)
+    if search:
+        return author_service.search_authors(
+            query=search,
+            page=page,
+            page_size=page_size,
+            hf_users_only=hf_users_only,
+        )
+    return author_service.get_authors(
+        page=page,
+        page_size=page_size,
+        hf_users_only=hf_users_only,
+        order_by=order_by,
+        order_dir=order_dir,
+    )
 
 
 @router.get(
@@ -130,16 +120,7 @@ def get_author(
     - `400 Bad Request`: Invalid author ID format
     - `500 Internal Server Error`: Database or server error
     """
-    try:
-        author_service = AuthorService(db)
-        return author_service.get_author_by_id(author_id)
-
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except DatabaseError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    return AuthorService(db).get_author_by_id(author_id)
 
 
 @router.get(
@@ -226,20 +207,11 @@ def get_author_papers(
     - `400 Bad Request`: Invalid author ID or query parameters
     - `500 Internal Server Error`: Database or server error
     """
-    try:
-        author_service = AuthorService(db)
-        return author_service.get_author_papers(
-            author_id=author_id,
-            page=page,
-            page_size=page_size,
-            latest_only=latest_only,
-            order_by=order_by,
-            order_dir=order_dir,
-        )
-
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except DatabaseError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+    return AuthorService(db).get_author_papers(
+        author_id=author_id,
+        page=page,
+        page_size=page_size,
+        latest_only=latest_only,
+        order_by=order_by,
+        order_dir=order_dir,
+    )

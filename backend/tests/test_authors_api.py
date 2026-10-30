@@ -404,3 +404,18 @@ def test_authors_ordering(client, sample_authors):
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_author_database_failures_do_not_leak_error_text(client, monkeypatch):
+    from backend.services.author_service import AuthorService
+    from backend.utils.exceptions import DatabaseError
+
+    def fail(*_args, **_kwargs):
+        raise DatabaseError("SELECT secret FROM authors")
+
+    monkeypatch.setattr(AuthorService, "get_author_by_id", fail)
+
+    response = client.get("/api/v1/authors/1")
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Internal server error"}

@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any, Tuple
 import httpx
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.models.database import Paper as DBPaper
 from backend.utils.exceptions import DatabaseError
@@ -26,6 +27,10 @@ SEMANTIC_SCHOLAR_BASE_URL = "https://api.semanticscholar.org/graph/v1"
 REQUEST_TIMEOUT = 30.0
 RATE_LIMIT_DELAY = 1.0  # Delay between requests to respect rate limits (1 req/sec)
 CITATION_UPDATE_INTERVAL = timedelta(days=7)  # Update citations weekly
+
+
+class SemanticScholarUnavailableError(Exception):
+    """Semantic Scholar could not answer, so the lookup result is unknown."""
 
 
 class SemanticScholarService:
@@ -58,29 +63,27 @@ class SemanticScholarService:
             params: Query parameters
 
         Returns:
-            JSON response data or None if request failed
+            JSON response data, or None when Semantic Scholar rejects the lookup
+
+        Raises:
+            SemanticScholarUnavailableError: On rate limiting, server errors, or
+                transport failures, where absence of data is not evidence.
         """
         try:
             async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
                 response = await client.get(url, headers=self.headers, params=params)
+        except httpx.HTTPError as error:
+            raise SemanticScholarUnavailableError(str(error)) from error
 
-                # Handle rate limiting
-                if response.status_code == 429:
-                    logger.warning("Rate limited by Semantic Scholar API, waiting...")
-                    await asyncio.sleep(RATE_LIMIT_DELAY * 2)
-                    return None
-
-                if response.status_code == 200:
-                    return response.json()
-                else:
-                    logger.warning(
-                        f"Semantic Scholar API request failed: {response.status_code}"
-                    )
-                    return None
-
-        except Exception as e:
-            logger.error(f"Error making request to Semantic Scholar API: {str(e)}")
-            return None
+        if response.status_code == 200:
+            return response.json()
+        if response.status_code == 429:
+            await asyncio.sleep(RATE_LIMIT_DELAY * 2)
+            raise SemanticScholarUnavailableError("rate limited")
+        if response.status_code >= 500:
+            raise SemanticScholarUnavailableError(f"HTTP {response.status_code}")
+        logger.warning(f"Semantic Scholar API request failed: {response.status_code}")
+        return None
 
     async def search_paper_by_title(self, title: str) -> Optional[Dict[str, Any]]:
         """
@@ -237,7 +240,7 @@ class SemanticScholarService:
                 )
                 return False
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             logger.error(
                 f"Error updating citation count for paper {db_paper.arxiv_id}: {str(e)}"
             )
@@ -274,8 +277,15 @@ class SemanticScholarService:
 
             updated_count = 0
             for paper in papers_to_update:
-                if await self.update_paper_citation_count(paper):
-                    updated_count += 1
+                try:
+                    if await self.update_paper_citation_count(paper):
+                        updated_count += 1
+                except SemanticScholarUnavailableError as error:
+                    # Leave the paper untouched so the next batch retries it.
+                    logger.warning(
+                        f"Stopping citation batch, Semantic Scholar unavailable: {error}"
+                    )
+                    break
 
                 # Rate limiting
                 await asyncio.sleep(RATE_LIMIT_DELAY)

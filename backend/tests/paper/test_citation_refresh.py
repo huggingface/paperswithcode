@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, date, datetime, timedelta
 
+import httpx
 import pytest
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.dialects.postgresql import ARRAY
@@ -376,3 +377,78 @@ def test_cron_batch_rolls_back_when_commit_fails():
     ):
         PaperCitationRefreshService(FailingSession()).update_batch([])
     assert events == ["commit", "rollback"]
+
+
+def test_semantic_scholar_outage_keeps_existing_identity(tmp_path, monkeypatch):
+    from backend.services import semantic_scholar_service as s2
+
+    Session = _session_factory(tmp_path, "s2-outage.db")
+    db = Session()
+    db.add(
+        Paper(
+            id=1,
+            title="Attention Is All You Need",
+            arxiv_id="1706.03762",
+            version="v1",
+            is_latest_version=True,
+            semantic_scholar_id="s2-attention",
+            citation_count=10,
+        )
+    )
+    db.commit()
+
+    responses = iter([httpx.Response(429), httpx.Response(503)])
+    transport = httpx.MockTransport(lambda _request: next(responses))
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        s2.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr(s2, "RATE_LIMIT_DELAY", 0)
+
+    service = SemanticScholarService(db)
+    assert asyncio.run(service.batch_update_citation_counts(limit=10)) == 0
+    with pytest.raises(s2.SemanticScholarUnavailableError):
+        asyncio.run(service.get_paper_by_semantic_scholar_id("s2-attention"))
+
+    paper = db.get(Paper, 1)
+    assert paper.semantic_scholar_id == "s2-attention"
+    assert paper.citation_updated_at is None
+    assert paper.citation_count == 10
+    db.close()
+
+
+def test_semantic_scholar_not_found_marks_paper_processed(tmp_path, monkeypatch):
+    from backend.services import semantic_scholar_service as s2
+
+    Session = _session_factory(tmp_path, "s2-missing.db")
+    db = Session()
+    db.add(
+        Paper(
+            id=1,
+            title="Unknown Paper",
+            arxiv_id="2601.00001",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    db.commit()
+
+    def respond(request):
+        if request.url.path.endswith("/paper/search"):
+            return httpx.Response(200, json={"data": []})
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(respond)
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(
+        s2.httpx,
+        "AsyncClient",
+        lambda **kwargs: real_client(transport=transport, **kwargs),
+    )
+    monkeypatch.setattr(s2, "RATE_LIMIT_DELAY", 0)
+
+    assert asyncio.run(SemanticScholarService(db).batch_update_citation_counts()) == 0
+    assert db.get(Paper, 1).citation_updated_at is not None
+    db.close()

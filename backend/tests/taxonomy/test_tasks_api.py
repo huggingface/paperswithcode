@@ -20,6 +20,7 @@ from backend.main import create_app
 from backend.models.database import (
     Base,
     Area as DBArea,
+    Method as DBMethod,
     Dataset as DBDataset,
     Evaluation as DBEvaluation,
     Paper as DBPaper,
@@ -1269,3 +1270,39 @@ def test_tasks_search_uses_displayed_name_only(client, tasks_with_image_keyword)
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+
+def test_task_children_and_parents_accept_slugs(client):
+    db = TestingSessionLocal()
+    db.add_all(
+        [
+            DBTask(id=900, name="Vision", slug="vision", level=0),
+            DBTask(id=901, name="Detection", slug="detection", level=1, parent_id=900),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    children = client.get("/api/v1/tasks/vision/children")
+    assert children.status_code == 200
+    assert [task["id"] for task in children.json()["results"]] == ["901"]
+
+    parents = client.get("/api/v1/tasks/detection/parents")
+    assert parents.status_code == 200
+    assert [task["id"] for task in parents.json()] == ["900"]
+
+
+def test_task_children_and_parents_return_404_for_unknown_slug(client):
+    assert client.get("/api/v1/tasks/missing-task/children").status_code == 404
+    assert client.get("/api/v1/tasks/missing-task/parents").status_code == 404
+
+
+def test_method_lookup_treats_like_wildcards_literally(client):
+    db = TestingSessionLocal()
+    db.add(DBMethod(id=950, name="Dropout", slug="dropout"))
+    db.commit()
+    db.close()
+
+    assert client.get("/api/v1/methods/DROPOUT").json()["name"] == "Dropout"
+    assert client.get("/api/v1/methods/%25").status_code == 404
+    assert client.get("/api/v1/methods/drop_ut").status_code == 404

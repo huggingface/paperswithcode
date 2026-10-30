@@ -48,10 +48,7 @@ from backend.services.pending_edit_service import (
 )
 from backend.utils.auth import require_hf_admin, require_user
 from backend.utils.client_ip import get_proxied_client_ip
-from backend.utils.exceptions import (
-    DatabaseError,
-    PaperNotFoundError,
-)
+from backend.utils.exceptions import PaperNotFoundError
 
 
 EditType = Literal[
@@ -269,8 +266,6 @@ def submit_pending_paper_edit(
         raise HTTPException(status_code=404, detail=str(exc))
     except PendingEditError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except DatabaseError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
     return _to_response(row)
 
 
@@ -402,8 +397,6 @@ def approve_pending_paper_edit(
         raise HTTPException(status_code=404, detail=str(exc))
     except PendingEditError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except DatabaseError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
     return _to_response(row)
 
 

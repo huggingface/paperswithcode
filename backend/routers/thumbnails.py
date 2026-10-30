@@ -221,12 +221,6 @@ async def generate_thumbnail(
 
     except PaperNotFoundError:
         raise HTTPException(status_code=404, detail="Paper not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to generate thumbnail: {str(e)}"
-        )
 
 
 @router.get("/status/{paper_id}")
@@ -287,10 +281,6 @@ def get_thumbnail_status(
 
     except PaperNotFoundError:
         raise HTTPException(status_code=404, detail="Paper not found")
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to check thumbnail status: {str(e)}"
-        )
 
 
 @router.get("/cache/stats", dependencies=[Depends(require_admin)])
