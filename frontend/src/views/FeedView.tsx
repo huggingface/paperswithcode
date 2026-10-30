@@ -31,6 +31,8 @@ import {
 } from "@/lib/chatSessions";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { useInfinitePapers } from "@/hooks/usePapers";
+import { papersApi } from "@/lib/api/papers";
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -303,7 +305,7 @@ const FOLLOW_KIND_LABELS: Record<FollowKind, string> = {
 };
 const FOLLOW_KIND_ORDER = Object.keys(FOLLOW_KIND_LABELS) as FollowKind[];
 
-const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
+const FeedView: React.FC<{ following?: boolean; xTrending?: boolean }> = ({ following = false, xTrending = false }) => {
   const navigate = useNavigate();
   const auth = useOptionalAuth();
   const user = auth?.user;
@@ -311,14 +313,14 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   // Following defaults to its 30-day match window; the other tabs default to a week.
   const dateRange = readHomepagePaperDateRange(searchParams, undefined, following ? "month" : "week");
 
-  // The home feed only offers trending and following; newest and most cited
-  // stay on the other paper feeds.
-  const showTrending = () => {
+  // The home feed only offers trending, following and trending on X; newest
+  // and most cited stay on the other paper feeds.
+  const showTab = (path: string) => {
     const next = new URLSearchParams(searchParams);
     next.delete("order_by");
     next.delete("only");
     const query = next.toString();
-    navigate(query ? `/?${query}` : "/");
+    navigate(query ? `${path}?${query}` : path);
   };
 
   const topicFilterHref = (active: boolean) => {
@@ -346,13 +348,22 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   });
 
   const publicFeed = useInfinitePapers({
-    enabled: !following,
+    enabled: !following && !xTrending,
     page_size: 30,
     order_by: "trending",
     order_dir: "desc",
     start_date: dateRange.startDate,
     end_date: dateRange.endDate,
     include_resources: true,
+  });
+
+  const xFeedFilters = { start_date: dateRange.startDate, end_date: dateRange.endDate };
+  const xFeed = useInfiniteQuery({
+    queryKey: [...paperQueryKeys.feeds.xTrending, xFeedFilters],
+    queryFn: ({ pageParam }) => papersApi.xTrending({ ...xFeedFilters, page: pageParam, page_size: 30, include_resources: true }),
+    initialPageParam: 1,
+    getNextPageParam: last => last.next_page ?? undefined,
+    enabled: xTrending,
   });
 
   const topicOnly = following && searchParams.get("only") === "topic";
@@ -430,11 +441,11 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   );
   // Keep the follows section up while auth or follows load so the domain lists never flash in.
   const showFollowsSidebar = following && (!!auth?.isLoading || (!!user && !noFollows));
-  const infinite = following ? followedFeed : publicFeed;
+  const infinite = following ? followedFeed : xTrending ? xFeed : publicFeed;
   const cards = useMemo(() => following
     ? followedFeed.data?.pages.flatMap(page => page.map(entry => ({ ...transformPaperForCard(entry.paper), followReasons: entry.reasons }))) ?? []
-    : publicFeed.data?.pages.flatMap(page => page.results.map(paper => ({ ...transformPaperForCard(paper), followReasons: undefined }))) ?? [],
-  [following, followedFeed.data, publicFeed.data]);
+    : (xTrending ? xFeed.data : publicFeed.data)?.pages.flatMap(page => page.results.map(paper => ({ ...transformPaperForCard(paper), followReasons: undefined }))) ?? [],
+  [following, xTrending, followedFeed.data, xFeed.data, publicFeed.data]);
 
   const { targetRef: sentinelRef, isIntersecting } = useIntersectionObserver({ rootMargin: "400px" });
   useEffect(() => {
@@ -453,7 +464,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
           <h1 className="feed-title">
             Trending <em>Research</em>
           </h1>
-          <div className="feed-subtitle">Curated daily from arXiv and Hugging Face</div>
+          <div className="feed-subtitle">{xTrending ? "Papers people share most on X, picked daily" : "Curated daily from arXiv and Hugging Face"}</div>
         </div>
       </div>
 
@@ -565,13 +576,9 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
             <div className="sort-bar home-feed-sort-bar">
               <div className="paper-feed-toolbar-controls">
                 <div className="sort-options">
-                  <button className={`sort-btn ${following ? "" : "active"}`} onClick={showTrending}>trending</button>
-                  <button className={`sort-btn ${following ? "active" : ""}`} onClick={() => {
-                    const next = new URLSearchParams(searchParams);
-                    next.delete("order_by");
-                    const query = next.toString();
-                    navigate(query ? `/following?${query}` : "/following");
-                  }}>following</button>
+                  <button className={`sort-btn ${following || xTrending ? "" : "active"}`} onClick={() => showTab("/")}>trending</button>
+                  <button className={`sort-btn ${xTrending ? "active" : ""}`} onClick={() => showTab("/x-trending")}>trending (X)</button>
+                  <button className={`sort-btn ${following ? "active" : ""}`} onClick={() => showTab("/following")}>following</button>
                 </div>
               </div>
               <PaperDateFilter
@@ -643,7 +650,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                 ))}
               </div>
             ) : cards.length === 0 ? (error ? null :
-              <div className="no-results">{topicOnly ? <>No papers about your topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(true)}>edit your topic</button>.</> : following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
+              <div className="no-results">{topicOnly ? <>No papers about your topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(true)}>edit your topic</button>.</> : following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : xTrending ? "No papers shared on X in this window." : "No papers in this window."}</div>
             ) : (
               <>
                 <div className="paper-list">

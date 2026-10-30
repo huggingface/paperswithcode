@@ -1,12 +1,13 @@
 """Repository, Hugging Face artifact, project page, and model release persistence models."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -392,6 +393,29 @@ class PaperXThread(Base):
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class PaperXTrending(Base):
+    """A paper on one day's "AI Papers on X" sheet, with its top post's reach."""
+
+    __tablename__ = "paper_x_trending"
+
+    shared_on: Mapped[date] = mapped_column(Date, primary_key=True)
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("papers.id", ondelete="CASCADE"),
+        primary_key=True,
+        index=True,
+    )
+    rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    post_url: Mapped[Optional[str]] = mapped_column(String(500))
+    post_author: Mapped[Optional[str]] = mapped_column(String(64))
+    like_count: Mapped[Optional[int]] = mapped_column(Integer)
+    repost_count: Mapped[Optional[int]] = mapped_column(Integer)
+    view_count: Mapped[Optional[int]] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -173,6 +173,11 @@ export class PapersApi {
     });
   }
 
+  /** Papers from the daily "AI Papers on X" picks; dates filter the day each was shared. */
+  xTrending(params?: Pick<PaperFeedParams, "page" | "page_size" | "include_resources" | "has_code" | "has_hf_artifacts" | "start_date" | "end_date">): Promise<PaginatedResponse<Paper>> {
+    return this.request(`/papers/x-trending${query(params)}`);
+  }
+
   forTask(
     taskId: string,
     params?: PaperFeedParams & { repository_limit?: number },

@@ -54,6 +54,8 @@ from backend.services.paper_service import (
     PaperService,
 )
 from backend.services.paper_reference_service import PaperReferenceService
+from backend.services.x_trending_service import XTrendingService
+from backend.models.x_trending import XTrendingDayInput, XTrendingDayResult
 from backend.models.public_paper_metadata import PublicPaperMetadata
 from backend.services.public_paper_metadata_service import (
     PublicMetadataError,
@@ -522,6 +524,66 @@ def search_papers_feed(
         has_code=has_code,
         has_hf_artifacts=has_hf_artifacts,
     )
+
+
+@router.get(
+    "/papers/x-trending",
+    response_model=Papers,
+    summary="Papers trending on X, ordered by trending score",
+)
+def get_x_trending_papers(
+    page: int = Query(1, ge=1, le=100, description="Page number (1-based)"),
+    page_size: int = Query(30, ge=1, le=100, description="Papers per page"),
+    start_date: Optional[date] = Query(
+        None, description="Inclusive earliest day the paper was shared on X"
+    ),
+    end_date: Optional[date] = Query(
+        None, description="Inclusive latest day the paper was shared on X"
+    ),
+    include_resources: bool = Query(
+        False, description="Include repositories and project pages"
+    ),
+    has_code: bool = Query(
+        False, description="Only include papers with a linked GitHub repository"
+    ),
+    has_hf_artifacts: bool = Query(
+        False, description="Only include papers with linked Hugging Face artifacts"
+    ),
+    db: Session = Depends(get_database_session),
+):
+    """List papers from the daily "AI Papers on X" picks within a date window.
+
+    The window filters on the day a paper was shared on X. Papers are ordered
+    by the same trending score as the homepage trending feed.
+    """
+    if start_date is not None and end_date is not None and start_date > end_date:
+        raise HTTPException(
+            status_code=422, detail="start_date must be on or before end_date"
+        )
+    return XTrendingService(db).feed(
+        page=page,
+        page_size=page_size,
+        start_date=start_date,
+        end_date=end_date,
+        include_resources=include_resources,
+        has_code=has_code,
+        has_hf_artifacts=has_hf_artifacts,
+    )
+
+
+@router.put(
+    "/papers/x-trending/{shared_on}",
+    response_model=XTrendingDayResult,
+    summary="Replace one day's papers trending on X",
+    dependencies=[Depends(require_admin)],
+)
+async def put_x_trending_day(
+    payload: XTrendingDayInput,
+    shared_on: date = Path(..., description="Day the papers were shared (YYYY-MM-DD)"),
+    db: Session = Depends(get_database_session),
+):
+    """Store one sheet tab. Missing arXiv papers are imported first."""
+    return await XTrendingService(db).replace_day(shared_on, payload.papers)
 
 
 @router.post(
