@@ -1617,7 +1617,7 @@ def production_codex_values(
         "PWC_CODEX_JOBS_TOKEN": decoded_value(legacy["PWC_HF_TOKEN"]),
         **production_codex_image_values(),
         "PWC_CODEX_JOBS_CLI_VERSION": "0.75.0",
-        "PWC_CODEX_JOBS_MODEL": "gpt-5.6-luna",
+        "PWC_CODEX_JOBS_MODEL": "gpt-6-luna",
         "PWC_CODEX_JOBS_REASONING_EFFORT": "medium",
         "PWC_CODEX_JOBS_MAX_ACTIVE": "4",
         "PWC_CODEX_JOBS_MAX_SCHEDULED_ACTIVE": "3",

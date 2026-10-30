@@ -131,7 +131,7 @@ def test_launcher_uses_one_pinned_cpu_job_and_only_scoped_remote_secrets():
     serialized = json.dumps(call["env"])
     assert "DATABASE" not in serialized
     assert "hf-launch-only" not in json.dumps(call)
-    assert call["env"]["PWC_SUBMISSION_MODEL"] == "gpt-5.6-luna"
+    assert call["env"]["PWC_SUBMISSION_MODEL"] == "gpt-6-luna"
     assert call["env"]["PWC_SUBMISSION_REASONING_EFFORT"] == "medium"
 
 
@@ -326,7 +326,7 @@ def test_remote_worker_posts_one_canonical_signed_callback(tmp_path):
                 "OPENAI_API_KEY": "remote-test-key",
                 "PWC_CODEX_EXECUTABLE": str(fake_codex),
                 "PWC_SUBMISSION_MANIFEST": json.dumps(value),
-                "PWC_SUBMISSION_MODEL": "gpt-5.6-luna",
+                "PWC_SUBMISSION_MODEL": "gpt-6-luna",
                 "PWC_SUBMISSION_REASONING_EFFORT": "medium",
                 "PWC_SUBMISSION_BUDGET_USD": "1",
                 "PWC_SUBMISSION_INPUT_USD_PER_MILLION": "1",

@@ -61,7 +61,7 @@ WEB_SEARCH_QUERIES = (
     "releases open-weights AI model",
     "launches new image, video, speech or robotics foundation model",
 )
-RELEASE_EXTRACTION_MODEL = "gpt-5.6-luna"
+RELEASE_EXTRACTION_MODEL = "gpt-6-luna"
 
 _LEAD_VERB = re.compile(
     r"^(?:introducing|announcing|meet|releasing|launching|say hello to)\s+(?:the\s+)?",

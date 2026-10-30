@@ -2,7 +2,7 @@
 
 Fills `paper_suggested_questions` for the papers visitors see first (the
 home feed's first pages, then the first page of every task and method page)
-so their paper pages show questions without waiting on gpt-5.6-luna. Papers
+so their paper pages show questions without waiting on gpt-6-luna. Papers
 that already have questions are skipped; `--limit` bounds generations per run.
 Needs PWC_OPENAI_API_KEY; `--dry-run` only counts the work.
 """

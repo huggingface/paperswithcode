@@ -1,4 +1,4 @@
-"""Starter questions for a paper page, generated once with gpt-5.6-luna.
+"""Starter questions for a paper page, generated once with gpt-6-luna.
 
 The first request for a paper generates three short questions from its title
 and abstract and stores them; later requests read the stored row. A
@@ -22,7 +22,7 @@ from backend.services.paper_tldr_service import RESPONSES_URL
 
 logger = logging.getLogger(__name__)
 
-MODEL = "gpt-5.6-luna"
+MODEL = "gpt-6-luna"
 QUESTION_COUNT = 3
 MAX_CONCURRENT_GENERATIONS = 4
 _generation_slots = threading.BoundedSemaphore(MAX_CONCURRENT_GENERATIONS)

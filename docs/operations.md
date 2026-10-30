@@ -634,7 +634,7 @@ Configuration is fail-closed. Production direct apply requires all of:
   `hf_xet` runtime never returns its memory to a long-lived API worker);
 - an immutable curator image: either a registry digest or a content-versioned
   public Docker Space plus its exact 40-character Hub revision;
-- pinned model `gpt-5.6-luna`, medium reasoning, and Codex CLI version.
+- pinned model `gpt-6-luna`, medium reasoning, and Codex CLI version.
 
 The production image is published to the Hugging Face container registry as
 `cr.hf.co/nielsr/pwc-codex-curator` and pinned by its runner tag plus digest

@@ -225,7 +225,7 @@ def test_runner_uses_server_model_sanitized_env_and_argument_array(db):
     call = executor.calls[0]
     assert isinstance(call["command"], list)
     assert call["command"][0:2] == ["/opt/pwc/bin/codex", "exec"]
-    assert call["command"][call["command"].index("--model") + 1] == "gpt-5.6-luna"
+    assert call["command"][call["command"].index("--model") + 1] == "gpt-6-luna"
     assert 'model_reasoning_effort="medium"' in call["command"]
     assert "shell_environment_policy.inherit=none" in call["command"]
     assert "--skip-git-repo-check" in call["command"]

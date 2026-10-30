@@ -56,7 +56,7 @@ _CHAT_EVIDENCE_IDENTIFIER = re.compile(
 )
 _SECRET_PREFIXES = ("sk-", "hf_", "bearer", "eyj")
 _MODEL_ALIASES = {
-    "diagnosis": ("gpt-5.6-luna", "medium"),
+    "diagnosis": ("gpt-6-luna", "medium"),
     "independent_review": ("gpt-5.6-terra", "high"),
 }
 _RESULT_STATUSES = {"completed", "rejected"}

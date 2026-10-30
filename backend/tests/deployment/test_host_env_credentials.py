@@ -85,7 +85,7 @@ def test_production_codex_credentials_are_mapped_without_enabling_base_flags():
         "PWC_CODEX_JOBS_IMAGE": CURATOR_IMAGE,
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",
         "PWC_CODEX_JOBS_CLI_VERSION": "0.75.0",
-        "PWC_CODEX_JOBS_MODEL": "gpt-5.6-luna",
+        "PWC_CODEX_JOBS_MODEL": "gpt-6-luna",
         "PWC_CODEX_JOBS_REASONING_EFFORT": "medium",
         "PWC_CODEX_JOBS_MAX_ACTIVE": "4",
         "PWC_CODEX_JOBS_MAX_SCHEDULED_ACTIVE": "3",

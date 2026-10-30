@@ -1,13 +1,13 @@
-"""Feed-style paper TL;DRs generated with gpt-5.6-luna.
+"""Feed-style paper TL;DRs generated with gpt-6-luna.
 
 The few-shot examples are TL;DR posts by @shumpeiMaxwell on X, used as the
-target voice. The same prompt produced the 2026-10-12 catalog backfill, so
-daily imports stay consistent with it.
+target voice. The same prompt (then on gpt-5.6-luna) produced the 2026-10-12
+catalog backfill, so daily imports stay consistent with it.
 """
 
 import httpx
 
-MODEL = "gpt-5.6-luna"
+MODEL = "gpt-6-luna"
 RESPONSES_URL = "https://api.openai.com/v1/responses"
 
 SYSTEM_PROMPT = """You write one-paragraph TL;DRs of AI research papers, in the exact voice of the examples below.

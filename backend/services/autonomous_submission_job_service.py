@@ -29,7 +29,7 @@ items = manifest["items"]
 if (
     len(items) > 25
     or manifest.get("model_alias") != "luna-medium"
-    or os.environ.get("PWC_SUBMISSION_MODEL") != "gpt-5.6-luna"
+    or os.environ.get("PWC_SUBMISSION_MODEL") != "gpt-6-luna"
     or os.environ.get("PWC_SUBMISSION_REASONING_EFFORT") != "medium"
 ):
     raise SystemExit("invalid submission manifest")
@@ -302,7 +302,7 @@ class AutonomousSubmissionJobService:
             image=image,
             command=["python", "-c", REMOTE_SUBMISSION_WORKER],
             env={
-                "PWC_SUBMISSION_MODEL": "gpt-5.6-luna",
+                "PWC_SUBMISSION_MODEL": "gpt-6-luna",
                 "PWC_SUBMISSION_REASONING_EFFORT": "medium",
                 "PWC_SUBMISSION_CODEX_TIMEOUT": str(
                     settings.autonomous_submission_codex_timeout_seconds

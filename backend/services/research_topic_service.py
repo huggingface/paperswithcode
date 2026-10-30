@@ -65,7 +65,7 @@ STALE_CLAIM = timedelta(minutes=30)
 RETRY_AFTER = timedelta(minutes=10)
 PREVIEW_DEPTH = 30
 LABEL_MIN_LENGTH = 60
-LABEL_MODEL = "gpt-5.6-luna"
+LABEL_MODEL = "gpt-6-luna"
 LABEL_TIMEOUT = 10
 
 LABEL_PROMPT = (

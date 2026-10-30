@@ -241,7 +241,7 @@ class Settings(BaseSettings, ChatSettings):
     codex_jobs_api_url: str = Field(default="https://paperswithcode.co/api/v1")
     codex_jobs_timeout_seconds: int = Field(default=5400, ge=300, le=14400)
     codex_jobs_cli_version: str = Field(default="0.75.0")
-    codex_jobs_model: str = Field(default="gpt-5.6-luna")
+    codex_jobs_model: str = Field(default="gpt-6-luna")
     codex_jobs_reasoning_effort: str = Field(default="medium")
     # AI conference deadline research runs off-box on Hugging Face Jobs (Claude
     # Agent SDK); only the validated, bounded DB writes happen on the VPS.

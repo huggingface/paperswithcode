@@ -246,7 +246,7 @@ uv run --env-file backend/keys.env python -m backend.scripts.enqueue_benchmark_g
 ```
 
 `warm_paper_suggested_questions.py` pre-generates the three paper-page
-suggested questions (gpt-5.6-luna, stored in `paper_suggested_questions`) for
+suggested questions (gpt-6-luna, stored in `paper_suggested_questions`) for
 the papers visitors see first: the first three pages of the home feed's
 default view (trending, past week) and the first page of every task and method
 page (trending, busiest pages first). Papers that already have questions are
@@ -307,7 +307,7 @@ against `papers.source_url`, paper titles, `model_releases`, and
 `model_release_radar_unindexed` warning. Releases from any other lab (for example Reflection's Beam,
 Aleph Alpha's Kolibri, or Meta's Muse Wonder) are found through a web news
 search: four Exa news queries over the last three days (`EXA_API_KEY`, about
-$0.09 per run) whose deduplicated headlines `gpt-5.6-luna` turns into
+$0.09 per run) whose deduplicated headlines `gpt-6-luna` turns into
 (lab, model, date, cited hits) releases (`OPENAI_API_KEY`). A web signal links
 the lab's own announcement page when one of the hits is from the lab, and a
 news article otherwise. Pass `--skip-web-search` to scan only the feeds and
@@ -342,7 +342,7 @@ pages for papers that still have `urls_extracted = false`. It is unscheduled
 
 `import_hf_daily_papers.py` runs hourly, imports the current day's Hugging Face
 papers that are not yet in the database, and auto-tags tasks/methods using
-keyword matching. New papers get a feed-style TL;DR from `gpt-5.6-luna`
+keyword matching. New papers get a feed-style TL;DR from `gpt-6-luna`
 (`backend/services/paper_tldr_service.py`, needs `PWC_OPENAI_API_KEY`); if that
 key is missing or the call fails, the Hugging Face `ai_summary` is stored instead.
 Each run also fills a TL;DR for up to 50 latest-version papers that have an
