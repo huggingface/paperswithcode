@@ -4,6 +4,12 @@ export const SUGGESTED_CHAT_PROMPTS = [
   "What's the state-of-the-art for real-time object detection?",
 ] as const;
 
+export const READER_CHAT_PROMPTS = [
+  "Summarize the main contributions",
+  "Explain in simple terms",
+  "Identify the main limitations",
+];
+
 // Openings Tab completes before the visitor reaches a catalog name.
 const QUESTION_STARTERS = [
   ...SUGGESTED_CHAT_PROMPTS,

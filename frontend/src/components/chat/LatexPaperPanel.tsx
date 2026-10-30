@@ -1,38 +1,28 @@
 import React from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileCode2, FilePlus2, Pencil, Save, Trash2, X } from "lucide-react";
 
-import { apiUrl } from "@/lib/apiUrl";
-import type { ArtifactBlock } from "@/lib/chat";
-import type { LatexPaperArtifactDescriptor, LatexPaperHistoryPage, LatexPaperVersionDescriptor } from "@/lib/chatSessions";
+import { chatApi } from "@/lib/api/chat";
+import { chatArtifactUrls } from "@/lib/chatArtifactUrls";
+import type { LatexPaperVersionDescriptor } from "@/lib/api/chat.types";
+import { ApiError } from "@/lib/apiTransport";
+import { chatArtifactKeys } from "@/lib/chatSessionQueries";
 import { PdfViewer } from "@/components/pdf/PdfViewer";
 import { LatexSourceEditor } from "./LatexSourceEditor";
 import { useArtifactPanel } from "./useArtifactPanel";
-
-interface PaperManifest {
-  root_document: string;
-  files: Array<{ path: string; media_type: string }>;
-}
 
 interface Draft {
   parentVersionId: string;
   files: Record<string, string>;
 }
 
-function sourceUrl(artifactId: string, versionId: string, path: string): string {
-  return apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(artifactId)}/versions/${encodeURIComponent(versionId)}/source/${path.split("/").map(encodeURIComponent).join("/")}`);
-}
-
-function figureUrl(artifactId: string, versionId: string, path: string): string {
-  return apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(artifactId)}/versions/${encodeURIComponent(versionId)}/figures/${path.split("/").map(encodeURIComponent).join("/")}`);
-}
-
-function pdfExportUrl(artifactId: string): string {
-  return apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(artifactId)}/export/pdf`);
-}
-
-function sourceZipExportUrl(artifactId: string, versionId: string): string {
-  return apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(artifactId)}/versions/${encodeURIComponent(versionId)}/export/source.zip`);
+/** The backend's `detail.message` for a refused paper change, else the fallback. */
+function paperErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiError)) return error instanceof Error ? error.message : fallback;
+  const detail = error.detail;
+  return typeof detail === "object" && detail !== null && "message" in detail && typeof detail.message === "string"
+    ? detail.message
+    : fallback;
 }
 
 function draftKey(artifactId: string): string {
@@ -62,10 +52,11 @@ function provenanceLabel(version: LatexPaperVersionDescriptor): string {
 }
 
 export const LatexPaperPanel: React.FC<{
-  block: ArtifactBlock;
+  artifactId: string;
+  title: string;
   forceDialog?: boolean;
   readerFallback?: boolean;
-}> = ({ block, forceDialog = false }) => {
+}> = ({ artifactId, title, forceDialog = false }) => {
   const panel = useArtifactPanel();
   const queryClient = useQueryClient();
   const closePanel = panel.close;
@@ -158,42 +149,26 @@ export const LatexPaperPanel: React.FC<{
   }, [draftIsDirty]);
 
   const descriptorQuery = useQuery({
-    queryKey: ["chat-latex-paper", block.artifact_id],
-    queryFn: async () => {
-      const response = await fetch(apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id!)}`), {
-        credentials: "include", cache: "no-store",
-      });
-      if (!response.ok) throw new Error("Could not load paper details");
-      return response.json() as Promise<LatexPaperArtifactDescriptor>;
-    },
-    enabled: Boolean(block.artifact_id), staleTime: 5_000,
+    queryKey: chatArtifactKeys.latexPaper(artifactId),
+    queryFn: () => chatApi.getLatexPaper(artifactId),
+    staleTime: 5_000,
   });
   const descriptor = descriptorQuery.data;
   const source = descriptor?.source_head;
   const preview = descriptor?.preview_head;
   const historyQuery = useQuery({
-    queryKey: ["chat-latex-paper-history", block.artifact_id, historyCursor],
-    queryFn: async () => {
-      const params = new URLSearchParams({ limit: "20" });
-      if (historyCursor) params.set("cursor", historyCursor);
-      const response = await fetch(apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id!)}/versions?${params}`), {
-        credentials: "include", cache: "no-store",
-      });
-      if (!response.ok) throw new Error("Could not load paper history");
-      return response.json() as Promise<LatexPaperHistoryPage>;
-    },
-    enabled: historyOpen && Boolean(block.artifact_id), staleTime: Number.POSITIVE_INFINITY,
+    queryKey: chatArtifactKeys.history(artifactId, historyCursor),
+    queryFn: () => chatApi.getLatexPaperHistory(artifactId, historyCursor),
+    enabled: historyOpen, staleTime: Number.POSITIVE_INFINITY,
   });
+  const sourceVersionId = source?.version_id;
+  const filesTabVersionId = panel.state.tab === "files" ? sourceVersionId : undefined;
   const manifestQuery = useQuery({
-    queryKey: ["chat-latex-paper-manifest", block.artifact_id, source?.version_id],
-    queryFn: async () => {
-      const response = await fetch(apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id!)}/versions/${encodeURIComponent(source!.version_id)}/manifest`), {
-        credentials: "include", cache: "no-store",
-      });
-      if (!response.ok) throw new Error("Could not load paper files");
-      return response.json() as Promise<PaperManifest>;
-    },
-    enabled: panel.state.tab === "files" && Boolean(source?.version_id), staleTime: Number.POSITIVE_INFINITY,
+    queryKey: chatArtifactKeys.manifest(artifactId, sourceVersionId),
+    queryFn: filesTabVersionId
+      ? () => chatApi.getLatexPaperManifest(artifactId, filesTabVersionId)
+      : skipToken,
+    staleTime: Number.POSITIVE_INFINITY,
   });
   const textFiles = manifestQuery.data?.files.filter((file) => (
     file.media_type === "text/x-tex" || file.media_type === "application/x-bibtex"
@@ -202,15 +177,12 @@ export const LatexPaperPanel: React.FC<{
     file.media_type === "image/png" || file.media_type === "image/jpeg" || file.media_type === "application/pdf"
   )) ?? [];
   const sourceFilesQuery = useQuery({
-    queryKey: ["chat-latex-paper-source-files", block.artifact_id, source?.version_id],
-    queryFn: async () => Object.fromEntries(await Promise.all(textFiles.map(async (file) => {
-      const response = await fetch(sourceUrl(block.artifact_id!, source!.version_id, file.path), {
-        credentials: "include", cache: "no-store",
-      });
-      if (!response.ok) throw new Error("Could not load paper source");
-      return [file.path, await response.text()] as const;
-    }))),
-    enabled: panel.state.tab === "files" && Boolean(source?.version_id && textFiles.length),
+    queryKey: chatArtifactKeys.sourceFiles(artifactId, sourceVersionId),
+    queryFn: filesTabVersionId && textFiles.length
+      ? async () => Object.fromEntries(await Promise.all(textFiles.map(async (file) => (
+          [file.path, await chatApi.getArtifactSource(artifactId, filesTabVersionId, file.path)] as const
+        ))))
+      : skipToken,
     staleTime: Number.POSITIVE_INFINITY,
   });
   React.useEffect(() => { setCheckedOut(false); }, [source?.version_id]);
@@ -221,7 +193,7 @@ export const LatexPaperPanel: React.FC<{
     let stale = false;
     let recoveredParent = source.version_id;
     try {
-      const stored = window.localStorage.getItem(draftKey(block.artifact_id!));
+      const stored = window.localStorage.getItem(draftKey(artifactId));
       const draft = stored ? JSON.parse(stored) as Draft : null;
       if (draft?.files && typeof draft.files === "object") {
         recovered = draft.files;
@@ -237,116 +209,86 @@ export const LatexPaperPanel: React.FC<{
     setCheckedOut(true);
     if (stale) setEditorError("This local draft is based on an older paper version. Copy or discard it before saving the latest version.");
     if (!panel.state.sourceFile || !recovered[panel.state.sourceFile]) panel.setSourceFile(manifestQuery.data?.root_document ?? null);
-  }, [block.artifact_id, manifestQuery.data?.root_document, panel, source?.version_id, sourceFilesQuery.data]);
+  }, [artifactId, manifestQuery.data?.root_document, panel, source?.version_id, sourceFilesQuery.data]);
   React.useEffect(() => {
-    if (!draftParent || !block.artifact_id) return;
-    const key = draftKey(block.artifact_id);
+    if (!draftParent) return;
+    const key = draftKey(artifactId);
     if (!draftIsDirty) { window.localStorage.removeItem(key); return; }
     window.localStorage.setItem(key, JSON.stringify({ parentVersionId: draftParent, files } satisfies Draft));
-  }, [block.artifact_id, draftIsDirty, draftParent, files]);
+  }, [artifactId, draftIsDirty, draftParent, files]);
+
+  const showSaved = (saved: typeof descriptor) => {
+    queryClient.setQueryData(chatArtifactKeys.latexPaper(artifactId), saved);
+    void queryClient.invalidateQueries({ queryKey: chatArtifactKeys.manifest(artifactId) });
+    void queryClient.invalidateQueries({ queryKey: chatArtifactKeys.sourceFiles(artifactId) });
+  };
 
   const saveMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: () => {
       if (!source?.version_id) throw new Error("Paper source is not ready to save");
-      const response = await fetch(apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id!)}/save-compile`), {
-        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ expected_parent_version_id: source.version_id, files: Object.entries(files).map(([path, content]) => ({ path, content })) }),
-      });
-      const body = await response.json().catch(() => null) as LatexPaperArtifactDescriptor | { detail?: { message?: string } } | null;
-      if (!response.ok) throw new Error((body as { detail?: { message?: string } } | null)?.detail?.message ?? "Could not save paper");
-      return body as LatexPaperArtifactDescriptor;
+      return chatApi.saveLatexPaper(artifactId, source.version_id, files);
     },
     onSuccess: (saved) => {
-      queryClient.setQueryData(["chat-latex-paper", block.artifact_id], saved);
-      queryClient.invalidateQueries({ queryKey: ["chat-latex-paper-manifest", block.artifact_id] });
-      queryClient.invalidateQueries({ queryKey: ["chat-latex-paper-source-files", block.artifact_id] });
+      showSaved(saved);
       initializedVersion.current = saved.source_head?.version_id ?? null;
       setBaseline(files);
       setDraftParent(saved.source_head?.version_id ?? null);
-      window.localStorage.removeItem(draftKey(block.artifact_id!));
+      window.localStorage.removeItem(draftKey(artifactId));
       setEditorError(null);
       setStaleDraft(false);
       panel.setTab("preview");
     },
-    onError: (error) => setEditorError(error instanceof Error ? error.message : "Could not save paper"),
+    onError: (error) => setEditorError(paperErrorMessage(error, "Could not save paper")),
   });
 
   const restoreMutation = useMutation({
-    mutationFn: async (sourceVersionId: string) => {
+    mutationFn: (sourceVersionId: string) => {
       if (!source?.version_id) throw new Error("Paper source is not ready to restore");
-      const response = await fetch(apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id!)}/versions/restore`), {
-        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source_version_id: sourceVersionId, expected_parent_version_id: source.version_id }),
-      });
-      const body = await response.json().catch(() => null) as LatexPaperArtifactDescriptor | { detail?: { message?: string } } | null;
-      if (!response.ok) throw new Error((body as { detail?: { message?: string } } | null)?.detail?.message ?? "Could not restore paper version");
-      return body as LatexPaperArtifactDescriptor;
+      return chatApi.restoreLatexPaperVersion(artifactId, sourceVersionId, source.version_id);
     },
     onSuccess: (restored) => {
-      queryClient.setQueryData(["chat-latex-paper", block.artifact_id], restored);
-      queryClient.invalidateQueries({ queryKey: ["chat-latex-paper-history", block.artifact_id] });
-      queryClient.invalidateQueries({ queryKey: ["chat-latex-paper-manifest", block.artifact_id] });
-      queryClient.invalidateQueries({ queryKey: ["chat-latex-paper-source-files", block.artifact_id] });
+      showSaved(restored);
+      void queryClient.invalidateQueries({ queryKey: chatArtifactKeys.history(artifactId) });
       initializedVersion.current = null;
       setCheckedOut(false);
       setHistoryCursor(null);
       setEditorError(null);
       panel.setTab("preview");
     },
-    onError: (error) => setEditorError(error instanceof Error ? error.message : "Could not restore paper version"),
+    onError: (error) => setEditorError(paperErrorMessage(error, "Could not restore paper version")),
   });
 
   const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: (file: File) => {
       if (!source?.version_id) throw new Error("Paper source is not ready to upload a figure");
       if (draftIsDirty) throw new Error("Save or discard text edits before uploading a figure");
-      const form = new FormData();
-      form.set("expected_parent_version_id", source.version_id);
-      form.set("path", `figures/${file.name}`);
-      form.set("figure", file);
-      const response = await fetch(apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id!)}/figures`), {
-        method: "POST", credentials: "include", body: form,
-      });
-      const body = await response.json().catch(() => null) as LatexPaperArtifactDescriptor | { detail?: { message?: string } } | null;
-      if (!response.ok) throw new Error((body as { detail?: { message?: string } } | null)?.detail?.message ?? "Could not upload figure");
-      return body as LatexPaperArtifactDescriptor;
+      return chatApi.uploadLatexPaperFigure(artifactId, source.version_id, file);
     },
     onSuccess: (uploaded) => {
-      queryClient.setQueryData(["chat-latex-paper", block.artifact_id], uploaded);
-      queryClient.invalidateQueries({ queryKey: ["chat-latex-paper-manifest", block.artifact_id] });
-      queryClient.invalidateQueries({ queryKey: ["chat-latex-paper-source-files", block.artifact_id] });
+      showSaved(uploaded);
       setEditorError(null);
     },
-    onError: (error) => setEditorError(error instanceof Error ? error.message : "Could not upload figure"),
+    onError: (error) => setEditorError(paperErrorMessage(error, "Could not upload figure")),
   });
 
   const refreshMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch(apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id!)}/refresh-compile`), {
-        method: "POST", credentials: "include",
-      });
-      if (!response.ok) throw new Error("Could not refresh paper compilation");
-      return response.json() as Promise<LatexPaperArtifactDescriptor>;
-    },
-    onSuccess: (updated) => queryClient.setQueryData(["chat-latex-paper", block.artifact_id], updated),
+    mutationFn: () => chatApi.refreshLatexPaperCompile(artifactId),
+    onSuccess: (updated) => queryClient.setQueryData(chatArtifactKeys.latexPaper(artifactId), updated),
   });
   const refreshCompile = refreshMutation.mutate;
-  const sourceVersionId = source?.version_id;
   const sourceCompileStatus = source?.compile_status;
   React.useEffect(() => {
-    if (!sourceVersionId || !block.artifact_id || !["queued", "compiling"].includes(sourceCompileStatus ?? "")) return;
+    if (!sourceVersionId || !["queued", "compiling"].includes(sourceCompileStatus ?? "")) return;
     const timer = window.setTimeout(() => refreshCompile(), 2_000);
     return () => window.clearTimeout(timer);
-  }, [block.artifact_id, refreshCompile, sourceCompileStatus, sourceVersionId]);
+  }, [refreshCompile, sourceCompileStatus, sourceVersionId]);
 
   const sourcePath = panel.state.sourceFile ?? manifestQuery.data?.root_document ?? null;
   const canEdit = descriptor?.editing_enabled === true && Boolean(source?.version_id) && checkedOut && !staleDraft && !saveMutation.isPending;
   const historyVersionNumbers = new Map(
     historyQuery.data?.items.map((version) => [version.version_id, version.version]) ?? [],
   );
-  const previewUrl = preview
-    ? apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id!)}/versions/${encodeURIComponent(preview.version_id)}/preview`)
-    : null;
+  const previewUrl = preview ? chatArtifactUrls.preview(artifactId, preview.version_id) : null;
   const outOfDate = Boolean(source && preview && source.version_id !== preview.version_id);
   const guardDirty = () => !draftIsDirty || window.confirm("Leave this view? Unsaved paper edits remain in this browser.");
   const selectTab = (tab: "preview" | "files") => {
@@ -386,7 +328,7 @@ export const LatexPaperPanel: React.FC<{
   };
   const discardStaleDraft = () => {
     if (!staleDraft || !window.confirm("Discard this stale local draft?")) return;
-    window.localStorage.removeItem(draftKey(block.artifact_id!));
+    window.localStorage.removeItem(draftKey(artifactId));
     setFiles(baseline);
     setDraftParent(source?.version_id ?? null);
     setStaleDraft(false);
@@ -422,7 +364,7 @@ export const LatexPaperPanel: React.FC<{
     <header>
       <div>
         <span>Private paper</span>
-        <h2 id="latex-paper-title">{block.title}</h2>
+        <h2 id="latex-paper-title">{title}</h2>
         <p className="chat-paper-status" role="status" aria-live="polite">
           {source ? `Source v${source.version} · ${source.compile_status}` : "Preparing paper source"}
           {outOfDate ? " · Preview out of date" : ""}
@@ -443,7 +385,7 @@ export const LatexPaperPanel: React.FC<{
         ? descriptorQuery.isError
           ? <div role="alert">Could not load paper details. <button type="button" onClick={() => void descriptorQuery.refetch()}>Retry paper details</button></div>
           : previewUrl
-            ? <PdfViewer key={preview?.version_id} url={previewUrl} downloadUrl={pdfExportUrl(block.artifact_id!)} paperKey={`${block.artifact_id}:${preview?.version_id}`} paperTitle={block.title} paperHref="/chat" chrome="canvas" />
+            ? <PdfViewer key={preview?.version_id} url={previewUrl} downloadUrl={chatArtifactUrls.pdfExport(artifactId)} paperKey={`${artifactId}:${preview?.version_id}`} paperTitle={title} paperHref="/chat" chrome="canvas" />
             : !source
               ? <p role="status">Paper source and compiled preview are not available yet.</p>
               : source.compile_status === "failed"
@@ -460,7 +402,7 @@ export const LatexPaperPanel: React.FC<{
                 event.currentTarget.value = "";
                 if (file) uploadMutation.mutate(file);
               }} /></label>}
-              {figureFiles.map((file) => source && <a key={file.path} href={figureUrl(block.artifact_id!, source.version_id, file.path)} download>{file.path}</a>)}
+              {figureFiles.map((file) => source && <a key={file.path} href={chatArtifactUrls.file(artifactId, source.version_id, "figures", file.path)} download>{file.path}</a>)}
             </nav>
             <div className="latex-editor-column">
               {sourcePath && files[sourcePath] !== undefined
@@ -485,10 +427,10 @@ export const LatexPaperPanel: React.FC<{
           {version.provenance?.restored_from_version_id && <span>Restored from {version.provenance.restored_from_version_id}</span>}
           {version.provenance?.change_summary && <p>{version.provenance.change_summary}</p>}
           {version.provenance?.reference_changes.map((change) => <p key={change}>{change}</p>)}
-          <a href={sourceZipExportUrl(block.artifact_id!, version.version_id)} download>Source ZIP</a>
+          <a href={chatArtifactUrls.sourceZip(artifactId, version.version_id)} download>Source ZIP</a>
           {descriptor?.editing_enabled && source?.version_id && version.version_id !== source.version_id && <button type="button" disabled={restoreMutation.isPending || draftIsDirty} onClick={() => restoreMutation.mutate(version.version_id)}>Restore version {version.version}</button>}
         </article>)}
-        {historyQuery.data?.next_cursor && <button type="button" onClick={() => setHistoryCursor(historyQuery.data!.next_cursor ?? null)}>Load older versions</button>}
+        {historyQuery.data?.next_cursor && <button type="button" onClick={() => setHistoryCursor(historyQuery.data?.next_cursor ?? null)}>Load older versions</button>}
       </section>}
     </div>
     <footer>
@@ -507,7 +449,7 @@ export const LatexPaperPanel: React.FC<{
         {source?.compile_status === "failed" && !source.repair_exhausted && <button type="button" onClick={askAiToFix}>Ask AI to fix</button>}
         {source?.compile_status === "failed" && source.repair_exhausted && <span role="status">AI repair attempts exhausted</span>}
         {panel.state.tab === "files" && canEdit && <button type="button" disabled={!draftIsDirty} onClick={() => saveMutation.mutate()}><Save />{saveMutation.isPending ? "Saving…" : "Save & Compile"}</button>}
-        {source && <a href={sourceZipExportUrl(block.artifact_id!, source.version_id)} download><FileCode2 /> Source ZIP</a>}
+        {source && <a href={chatArtifactUrls.sourceZip(artifactId, source.version_id)} download><FileCode2 /> Source ZIP</a>}
       </div>
     </footer>
   </section>;

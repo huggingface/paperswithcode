@@ -4,7 +4,7 @@ import { Share2 } from "lucide-react";
 import { ChatShareDialog } from "./ChatDialogs";
 import { Spinner } from "./icons";
 import { useToast } from "@/components/ui/use-toast";
-import { createOrRefreshShare } from "@/lib/chatSessions";
+import { chatApi } from "@/lib/api/chat";
 
 interface ChatSharingProps {
   sessionId: string;
@@ -32,7 +32,7 @@ export function ChatSharing({
     )) return;
     setPending(true);
     try {
-      const result = await createOrRefreshShare(sessionId);
+      const result = await chatApi.createOrRefreshShare(sessionId);
       const url = new URL(result.public_path, window.location.origin).toString();
       try {
         if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");

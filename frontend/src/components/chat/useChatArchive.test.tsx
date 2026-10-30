@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,10 +14,18 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/components/ui/use-toast", () => ({
   useToast: () => ({ toast: mocks.toast }),
 }));
-vi.mock("@/lib/chatSessions", () => ({
-  archiveOldChats: mocks.archiveOld,
-  archiveOldestChats: mocks.archiveOldest,
+vi.mock("@/lib/api/chat", () => ({
+  chatApi: {
+    archiveOldChats: mocks.archiveOld,
+    archiveOldestChats: mocks.archiveOldest,
+  },
 }));
+
+const wrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
+    {children}
+  </QueryClientProvider>
+);
 
 describe("useChatArchive", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -33,7 +43,7 @@ describe("useChatArchive", () => {
       refreshSessions,
       resetChat,
       restoreDraft,
-    }));
+    }), { wrapper });
 
     await act(() => result.current.archiveOldest());
 
@@ -53,7 +63,7 @@ describe("useChatArchive", () => {
       refreshSessions: vi.fn().mockResolvedValue(undefined),
       resetChat,
       restoreDraft: vi.fn(),
-    }));
+    }), { wrapper });
 
     await act(() => result.current.archiveOld());
 

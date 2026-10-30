@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ChatStreamError } from "./chat";
 import { ChatTurn } from "./chatTurn";
 
@@ -38,5 +38,38 @@ describe("ChatTurn terminal ownership", () => {
     expect(turn.reject(new ChatStreamError("Idle", "chat_not_busy"), true)).toBe("completed");
     expect(turn.streamFailed).toBe(false);
     expect(turn.admissionRejected).toBe(false);
+  });
+
+  it("keeps one phase from start to settlement", () => {
+    const turn = new ChatTurn();
+    expect(turn.phase).toEqual({ status: "idle" });
+    turn.start([], "session-1");
+    turn.observe({ type: "stream_start", request_id: "request-1", session_id: "session-1" });
+    expect(turn.phase).toMatchObject({ status: "streaming", streamStart: { providerExecuted: true }, terminal: "pending" });
+    turn.observe({ type: "done" });
+    turn.finish();
+    expect(turn.phase).toMatchObject({ status: "settled", terminal: "complete" });
+    expect(turn.busy).toBe(false);
+    expect(turn.sawTerminalEvent).toBe(true);
+    expect(turn.streamFailed).toBe(false);
+
+    turn.start([], "session-1");
+    turn.observe({ type: "error", message: "Failed", code: "provider_error" });
+    expect(turn.phase).toMatchObject({ status: "streaming", terminal: "error" });
+    expect(turn.streamFailed).toBe(true);
+    expect(turn.shouldRefreshProvider).toBe(false);
+  });
+
+  it("notifies subscribers only when the shown conversation changes", () => {
+    const turn = new ChatTurn();
+    const listener = vi.fn();
+    turn.subscribe(listener);
+    const before = turn.getSnapshot();
+    turn.restore([{ id: "m1", role: "user", text: "Hidden" }]);
+    expect(listener).not.toHaveBeenCalled();
+    expect(turn.getSnapshot()).toBe(before);
+    turn.restore([{ id: "m1", role: "user", text: "Shown" }], { show: true, view: { sessionError: "" } });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(turn.getSnapshot().messages).toEqual([{ id: "m1", role: "user", text: "Shown" }]);
   });
 });

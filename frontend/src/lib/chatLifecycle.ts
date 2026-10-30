@@ -7,19 +7,57 @@ const LIFECYCLE_STATUS = {
   connecting_model: "Connecting to model…",
 } as const;
 
-type ChatLifecyclePhase =
-  | "idle"
-  | "streaming"
-  | "complete"
-  | "failed"
-  | "stopped";
-
+/** The visible projection of one turn. Turn status lives in `ChatTurn.phase`. */
 export interface ChatLifecycleState {
   messages: ChatMessage[];
   sessionId: string | null;
   title: string;
-  phase: ChatLifecyclePhase;
 }
+
+/** How the stream loop treats each event, besides reducing it into messages. */
+export interface ChatEventTraits {
+  /** Smooth streaming: deltas coalesce into frames, structural events flush them. */
+  presentation: "delta" | "structural" | "silent";
+  /** The delayed "Preparing research workspace…" status. */
+  workspaceStatus: "arm" | "clear" | null;
+  /** Terminal events close the turn's browser latency record. */
+  terminal: "complete" | "error" | null;
+}
+
+const traits = (
+  presentation: ChatEventTraits["presentation"],
+  workspaceStatus: ChatEventTraits["workspaceStatus"] = null,
+  terminal: ChatEventTraits["terminal"] = null,
+): ChatEventTraits => ({ presentation, workspaceStatus, terminal });
+
+export const EVENT_TRAITS: Readonly<Record<ChatEvent["type"], ChatEventTraits>> = {
+  stream_start: traits("silent"),
+  sandbox_start: traits("silent", "arm"),
+  sandbox_ready: traits("silent", "clear"),
+  workspace_ready: traits("silent", "clear"),
+  lifecycle: traits("structural", "clear"),
+  compaction_status: traits("structural"),
+  session_title_start: traits("silent"),
+  session_title_delta: traits("silent"),
+  session_title_done: traits("silent"),
+  reasoning_start: traits("structural", "clear"),
+  reasoning_delta: traits("delta", "clear"),
+  reasoning_end: traits("structural"),
+  tool_call: traits("structural", "clear"),
+  tool_call_start: traits("structural", "clear"),
+  tool_call_arguments_delta: traits("delta", "clear"),
+  tool_call_arguments_done: traits("structural", "clear"),
+  tool_result: traits("structural"),
+  app_start: traits("structural", "clear"),
+  app_result: traits("structural", "clear"),
+  artifact_start: traits("structural", "clear"),
+  artifact_ready: traits("structural", "clear"),
+  artifact_error: traits("structural", "clear"),
+  paper_artifact: traits("structural"),
+  answer_delta: traits("delta", "clear"),
+  done: traits("structural", "clear", "complete"),
+  error: traits("structural", "clear", "error"),
+};
 
 export type ChatLifecycleAction =
   | { type: "start"; messages: ChatMessage[]; sessionId: string | null }
@@ -36,11 +74,10 @@ export const initialChatLifecycle = (): ChatLifecycleState => ({
   messages: [],
   sessionId: null,
   title: "",
-  phase: "idle",
 });
 
-function findLastMatchingIndex<T>(
-  items: T[],
+export function findLastMatchingIndex<T>(
+  items: readonly T[],
   predicate: (item: T) => boolean,
 ): number {
   for (let index = items.length - 1; index >= 0; index -= 1) {
@@ -359,7 +396,6 @@ function reduceEvent(
     case "done":
       return {
         ...state,
-        phase: "complete",
         messages: patchLast(state.messages, (message) => ({
           ...message,
           streaming: false,
@@ -379,7 +415,6 @@ function reduceEvent(
     case "error":
       return {
         ...state,
-        phase: "failed",
         messages: patchLast(state.messages, (message) => ({
           ...message,
           streaming: false,
@@ -427,7 +462,6 @@ export function chatLifecycleReducer(
         messages: action.messages,
         sessionId: action.sessionId,
         title: "",
-        phase: "streaming",
       };
     case "event":
       return reduceEvent(state, action.event);
@@ -436,7 +470,6 @@ export function chatLifecycleReducer(
         messages: action.messages,
         sessionId: action.sessionId,
         title: state.title,
-        phase: "idle",
       };
     case "workspace_status":
       return {
@@ -455,13 +488,12 @@ export function chatLifecycleReducer(
     case "settle":
       return {
         ...state,
-        phase: "idle",
         messages: patchLast(state.messages, (message) => (
           message.streaming ? { ...message, streaming: false, compacting: false } : message
         )),
       };
     case "stop":
-      return { ...state, messages: stopMessages(state.messages), phase: "stopped" };
+      return { ...state, messages: stopMessages(state.messages) };
     case "toggle_block":
       return { ...state, messages: toggleChatBlock(state.messages, action.messageId, action.blockIndex) };
     case "reset":

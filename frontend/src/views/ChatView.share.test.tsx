@@ -81,10 +81,7 @@ vi.mock("@/lib/chatSessions", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/chatSessions")>();
   return {
     ...original,
-    getSession: mocks.getSession,
     listSessions: mocks.listSessions,
-    getChatModels: mocks.getChatModels,
-    createOrRefreshShare: mocks.createShare,
     toUiMessages: () => mocks.messages,
   };
 });
@@ -137,6 +134,9 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   vi.unstubAllEnvs();
+  vi.spyOn(chatApi, "getSession").mockImplementation((id) => mocks.getSession(id));
+  vi.spyOn(chatApi, "getModels").mockImplementation(() => mocks.getChatModels());
+  vi.spyOn(chatApi, "createOrRefreshShare").mockImplementation((id) => mocks.createShare(id));
   vi.spyOn(chatApi, "getOpenAIUsage").mockResolvedValue({ used_percent: 0, remaining_percent: 100, resets_at: "2026-11-01T00:00:00Z", available: true, as_of: "2026-10-03T00:00:00Z" });
   mocks.busy = false;
   mocks.activeSessionId = null;

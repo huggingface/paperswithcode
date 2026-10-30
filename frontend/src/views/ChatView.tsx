@@ -1,15 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MoreVertical, X } from "lucide-react";
 
 import { useChatViewportHeight } from "@/hooks/useChatViewportHeight";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 
 import { ChatComposerSurface } from "@/components/chat/ChatComposerSurface";
 import { ChatConversation } from "@/components/chat/ChatConversation";
@@ -19,26 +12,31 @@ import {
 } from "@/components/chat/ChatDialogs";
 import { ChatSessionNavigation } from "@/components/chat/ChatSessionNavigation";
 import { ChatSharing } from "@/components/chat/ChatSharing";
-import { ArtifactWorkspace } from "@/components/chat/ArtifactWorkspace";
+import {
+  ChatEmptyState,
+  GeneralArtifactProvider,
+  GeneralArtifactWorkspace,
+  OpenAICreditsNotice,
+  OpenReaderLink,
+  ReaderChatMenu,
+} from "@/components/chat/ChatPageChrome";
 import { LatexPaperArtifact } from "@/components/chat/LatexPaperArtifact";
-import { ArtifactPanelProvider, canNavigateAwayFromArtifact } from "@/components/chat/useArtifactPanel";
 import { useChatArchive } from "@/components/chat/useChatArchive";
+import { useChatAutoSend } from "@/components/chat/useChatAutoSend";
+import { usePublicShareRedirect } from "@/components/chat/usePublicShareRedirect";
+import { useChatModelSelection } from "@/components/chat/useChatModelSelection";
+import { useChatSessionActions, useChatSessionCache } from "@/components/chat/useChatSessionActions";
+import { useInferenceAuthorization } from "@/components/chat/useInferenceAuthorization";
 import { PanelIcon, Spinner } from "@/components/chat/icons";
-import { hfLoginUrl } from "@/components/HfSignInButton";
 import { useChat } from "@/hooks/useChat";
 import { DEFAULT_REASONING_EFFORT, isChatLive, type ChatDraft, type PaperSelectionDraft } from "@/lib/chat";
 import {
-  CHAT_AUTO_SEND_KEY,
-  CHAT_AUTH_ATTEMPTED_KEY,
-  CHAT_DRAFT_KEY,
-  CHAT_MODEL_KEY,
-  CHAT_REASONING_EFFORT_KEY,
   clearQueuedChatLaunch,
   readQueuedChatLaunch,
+  stopChatAutoSend,
 } from "@/lib/chatLaunch";
-import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
-import { emptyChatDraft, parseChatDraft } from "@/lib/paperSelection";
-import { chatApi } from "@/lib/api/chat";
+import { READER_CHAT_PROMPTS, SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
+import { emptyChatDraft } from "@/lib/paperSelection";
 import { ApiError } from "@/lib/apiTransport";
 import { isStagingEnvironment } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
@@ -46,45 +44,26 @@ import {
   OPENROUTER_CREDENTIAL_QUERY_KEY,
   useOpenRouterCredential,
 } from "@/lib/openrouter";
-import {
-  OPENAI_USAGE_QUERY_KEY,
-  dismissOpenAICreditsNotice,
-  openAiCreditsNotice,
-  readDismissedOpenAICreditsNotice,
-  useOpenAIUsage,
-} from "@/lib/openaiCredits";
+import { OPENAI_USAGE_QUERY_KEY } from "@/lib/openaiCredits";
 import {
   DEFAULT_CHAT_MODEL,
-  PRODUCTION_FALLBACK_CHAT_MODELS,
-  STAGING_FALLBACK_CHAT_MODELS,
-  type ChatModelChoice,
-  type ChatSession,
-  type ChatSessionDetail,
   type LatexPaperArtifactDescriptor,
-  getChatModels,
-  getSession,
-  isSponsoredChatModel,
-  providerForChatModel,
-  removeSession,
   toUiMessages,
-  updateSession,
 } from "@/lib/chatSessions";
 
-import { chatSessionKeys, chatSessionListQuery, chatSessionQuery } from "@/lib/chatSessionQueries";
+import { chatAvailabilityQuery, chatSessionListQuery, chatSessionQuery } from "@/lib/chatSessionQueries";
 
-const emptyDraft = emptyChatDraft;
-const READER_PROMPTS = [
-  "Summarize the main contributions",
-  "Explain in simple terms",
-  "Identify the main limitations",
-];
-const readStoredDraft = (): ChatDraft | null => {
-  const raw = sessionStorage.getItem(CHAT_DRAFT_KEY);
-  if (!raw) return null;
-  try {
-    return parseChatDraft(JSON.parse(raw), raw);
-  } catch { /* Legacy storage contained only the text. */ }
-  return emptyDraft(raw);
+
+/** In the reader, the PDF owns the selection: the composer draft carries only text and mentions. */
+const withReaderSelection = (
+  draft: ChatDraft,
+  readerOwnsSelection: boolean,
+  paperSelection: PaperSelectionDraft | undefined,
+): ChatDraft => {
+  if (!readerOwnsSelection) return draft;
+  return paperSelection
+    ? { ...draft, paperSelection }
+    : { text: draft.text, paperMentions: draft.paperMentions };
 };
 
 export interface ChatExperienceProps {
@@ -100,21 +79,9 @@ export interface ChatExperienceProps {
   onReaderClose?: () => void;
 }
 
-const GeneralArtifactProvider: React.FC<{
-  enabled: boolean;
-  workspaceKey: string;
-  children: React.ReactNode;
-  onAskAiFix?: (prompt: string) => void;
-}> = ({ enabled, workspaceKey, children, onAskAiFix }) => enabled
-  ? <ArtifactPanelProvider workspaceKey={workspaceKey} onAskAiFix={onAskAiFix}>{children}</ArtifactPanelProvider>
-  : <>{children}</>;
 
-const GeneralArtifactWorkspace: React.FC<{
-  enabled: boolean;
-  children: React.ReactNode;
-}> = ({ enabled, children }) => enabled
-  ? <ArtifactWorkspace variant="chat">{children}</ArtifactWorkspace>
-  : <>{children}</>;
+
+
 
 const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   mode = "general",
@@ -131,81 +98,56 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   const { sessionId: paramSessionId } = useParams<{ sessionId: string }>();
   const routeSessionId = suppliedSessionId ?? (mode === "general" ? paramSessionId : undefined);
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const { user, isLoading: authLoading } = useAuth();
   const queryClient = useQueryClient();
   const userId = user?.hf_subject ?? null;
   const staging = isStagingEnvironment();
   const availabilityQuery = useQuery({
-    queryKey: ["chatAvailability"],
-    queryFn: () => chatApi.getAvailability(),
-    refetchInterval: 30000,
-    retry: false,
+    ...chatAvailabilityQuery(),
     enabled: isChatLive() && Boolean(user),
   });
-  const chatPaused = availabilityQuery.data?.status === "paused"
-    || (mode === "paper" && availabilityQuery.data?.paper_reader_chat_enabled === false);
+  const availability = availabilityQuery.data;
+  const chatPaused = availability?.status === "paused"
+    || (mode === "paper" && availability?.paper_reader_chat_enabled === false);
   const sessionsQuery = useQuery({ ...chatSessionListQuery(userId), enabled: Boolean(user) && !authLoading });
   const sessions = sessionsQuery.data ?? [];
+  const { markSessionBusy, patchSession, refreshSessions } = useChatSessionCache(userId);
   const [streamedArtifact, setStreamedArtifact] = useState<{ sessionId: string; descriptor: LatexPaperArtifactDescriptor } | null>(null);
   const [sessionError, setSessionError] = useState("");
-  const setSessions = (update: (previous: ChatSession[]) => ChatSession[]) => {
-    queryClient.setQueryData<ChatSession[]>(chatSessionKeys.list(userId), (previous) => update(previous ?? []));
-  };
-  const patchSession = (id: string, patch: Partial<ChatSessionDetail>) => {
-    setSessions((previous) => previous.map((session) => session.id === id ? { ...session, ...patch } : session));
-    queryClient.setQueryData<ChatSessionDetail>(chatSessionKeys.detail(userId, id), (previous) => (
-      previous ? { ...previous, ...patch } : previous
-    ));
-  };
-  const queuedLaunchRef = useRef(readQueuedChatLaunch());
-  // Queued launch controls belong to the chat the launch returns to.
-  const requestedModelRef = useRef(searchParams.get("model") || queuedLaunchRef.current?.model);
-  const [models, setModels] = useState<ChatModelChoice[]>(
-    staging ? STAGING_FALLBACK_CHAT_MODELS : PRODUCTION_FALLBACK_CHAT_MODELS,
-  );
-  const [selectedModel, setSelectedModel] = useState(
-    requestedModelRef.current || DEFAULT_CHAT_MODEL,
-  );
-  const selectedProvider = providerForChatModel(models, selectedModel);
-  const selectedSponsored = isSponsoredChatModel(models, selectedModel);
-  const userBilledInference = selectedProvider === "huggingface" && !selectedSponsored;
-  const openRouterCredentialQuery = useOpenRouterCredential(
-    Boolean(user && selectedProvider === "openrouter"),
-  );
-  const openAiUsageQuery = useOpenAIUsage(
-    isChatLive() && Boolean(user) && selectedProvider === "openai",
-  );
-  const [dismissedCreditsNotice, setDismissedCreditsNotice] = useState(
-    () => readDismissedOpenAICreditsNotice(),
-  );
-  const creditsNotice = openAiCreditsNotice(
-    openAiUsageQuery.data,
-    selectedProvider,
-    dismissedCreditsNotice,
-  );
-  const [draft, setDraft] = useState<ChatDraft>(() => emptyDraft());
-  const reasoningEffort = DEFAULT_REASONING_EFFORT;
-  // Web search has no user control: every turn uses it whenever the deployment offers it.
-  const webSearchEnabled = Boolean(availabilityQuery.data?.web_search_available);
-  const [pendingAutoDraft, setPendingAutoDraft] = useState<ChatDraft>(() => {
-    const queryPrompt = searchParams.get("q")?.trim();
-    if (queryPrompt) return emptyDraft(queryPrompt);
-    return queuedLaunchRef.current?.draft ?? emptyDraft();
-  });
-  const autoSendStartedRef = useRef(false);
-  const inferenceConnectedRef = useRef(false);
-  const inferenceCheckPendingRef = useRef(false);
-  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 900);
-  const manualTitleLockRef = useRef<Set<string>>(new Set());
+  const [queuedLaunch] = useState(readQueuedChatLaunch);
   const routeSessionIdRef = useRef(routeSessionId);
   routeSessionIdRef.current = routeSessionId;
+  // Queued launch controls belong to the chat the launch returns to.
+  const model = useChatModelSelection({
+    userId,
+    signedIn: Boolean(user),
+    authLoading,
+    requestedModel: searchParams.get("model") || queuedLaunch?.model,
+    routeSessionIdRef,
+  });
+  const { selectedModel, setSelectedModel } = model;
+  const openRouterCredentialQuery = useOpenRouterCredential(
+    Boolean(user && model.provider === "openrouter"),
+  );
+  const [draft, setDraft] = useState<ChatDraft>(() => emptyChatDraft());
+  const reasoningEffort = DEFAULT_REASONING_EFFORT;
+  // Web search has no user control: every turn uses it whenever the deployment offers it.
+  const webSearchEnabled = Boolean(availability?.web_search_available);
+  const [pendingAutoDraft, setPendingAutoDraft] = useState<ChatDraft>(() => {
+    const queryPrompt = searchParams.get("q")?.trim();
+    if (queryPrompt) return emptyChatDraft(queryPrompt);
+    return queuedLaunch?.draft ?? emptyChatDraft();
+  });
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 900);
+  const manualTitleLockRef = useRef<Set<string>>(new Set());
   // Tracks whether the selected route has initialized its transcript and controls.
   // Persisted data belongs to queries; the active transcript belongs to useChat.
   const [initializedRoute, setInitializedRoute] = useState<string | null | undefined>(undefined);
-  const refreshSessions = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: chatSessionKeys.list(userId) });
-  }, [queryClient, userId]);
+  const showDraft = useCallback((nextDraft: ChatDraft) => {
+    setDraft(nextDraft);
+    onPaperSelectionChange?.(nextDraft.paperSelection);
+  }, [onPaperSelectionChange]);
   const chat = useChat({
     sessionId: routeSessionId ?? null,
     initialModel: selectedModel,
@@ -221,21 +163,11 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       return detail;
     },
     onSessionId: (id, originSessionId, configuration) => {
-      void queryClient.cancelQueries({ queryKey: chatSessionKeys.list(userId) });
-      const now = new Date().toISOString();
-      setSessions((previous) => previous.some((session) => session.id === id)
-        ? previous.map((session) => session.id === id ? { ...session, is_busy: true } : session)
-        : [{
-            id,
-            title: "New chat",
-            selected_model: configuration?.model ?? selectedModel,
-            created_at: now,
-            updated_at: now,
-            message_count: 1,
-            is_busy: true,
-            web_search_enabled: configuration?.webSearchEnabled ?? webSearchEnabled,
-            reasoning_effort: configuration?.reasoningEffort ?? reasoningEffort,
-          }, ...previous]);
+      markSessionBusy(id, {
+        model: configuration?.model ?? selectedModel,
+        webSearchEnabled: configuration?.webSearchEnabled ?? webSearchEnabled,
+        reasoningEffort: configuration?.reasoningEffort ?? reasoningEffort,
+      });
       if ((routeSessionIdRef.current ?? null) === originSessionId && id !== originSessionId) {
         if (mode === "paper") onReaderSessionId?.(id);
         else navigate(`/chat/${id}`, { replace: true });
@@ -255,122 +187,50 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     onPaperArtifact: (event, sessionId) => {
       if (sessionId) setStreamedArtifact({ sessionId, descriptor: event.descriptor });
     },
-    onInterrupted: (interruptedDraft) => {
-      setDraft(interruptedDraft);
-      onPaperSelectionChange?.(interruptedDraft.paperSelection);
-    },
+    onInterrupted: showDraft,
   });
   const sendChat = chat.send;
 
   useEffect(() => {
-    if (!chat.capacityRequest) return;
-    setDraft(chat.capacityRequest.draft);
-    onPaperSelectionChange?.(chat.capacityRequest.draft.paperSelection);
-  }, [chat.capacityRequest, onPaperSelectionChange]);
+    if (chat.capacityRequest) showDraft(chat.capacityRequest.draft);
+  }, [chat.capacityRequest, showDraft]);
 
-  const authorizeInference = useCallback((nextDraft: ChatDraft) => {
-    sessionStorage.setItem(CHAT_DRAFT_KEY, JSON.stringify(nextDraft));
-    sessionStorage.setItem(CHAT_MODEL_KEY, selectedModel);
-    sessionStorage.setItem(CHAT_REASONING_EFFORT_KEY, reasoningEffort);
-    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
-    sessionStorage.setItem(CHAT_AUTH_ATTEMPTED_KEY, "1");
-    const returnTo = mode === "paper" && primaryPaper
+  const authorizationReturnPath = useCallback(() => (
+    mode === "paper" && primaryPaper
       ? `/pdf/${primaryPaper.routeId}`
       : routeSessionIdRef.current
         ? `/chat/${routeSessionIdRef.current}`
-        : "/chat";
-    window.location.href = hfLoginUrl(returnTo, userBilledInference);
-  }, [mode, primaryPaper, reasoningEffort, selectedModel, userBilledInference]);
-
-  const restoreAuthorizationPrompt = useCallback((nextDraft: ChatDraft, message: string) => {
-    sessionStorage.setItem(CHAT_DRAFT_KEY, JSON.stringify(nextDraft));
-    sessionStorage.setItem(CHAT_MODEL_KEY, selectedModel);
-    sessionStorage.removeItem(CHAT_AUTO_SEND_KEY);
-    sessionStorage.removeItem(CHAT_AUTH_ATTEMPTED_KEY);
-    setPendingAutoDraft(emptyDraft());
-    setDraft(nextDraft);
-    onPaperSelectionChange?.(nextDraft.paperSelection);
+        : "/chat"
+  ), [mode, primaryPaper]);
+  const restoreUnsentPrompt = useCallback((nextDraft: ChatDraft, message: string) => {
+    setPendingAutoDraft(emptyChatDraft());
+    showDraft(nextDraft);
     setSessionError(message);
-  }, [onPaperSelectionChange, selectedModel]);
+  }, [showDraft]);
+  const authorization = useInferenceAuthorization({
+    returnTo: authorizationReturnPath,
+    selectedModel,
+    reasoningEffort,
+    userBilledInference: model.userBilledInference,
+    onPromptRestored: restoreUnsentPrompt,
+  });
+  const { authorizeSend, restorePrompt } = authorization;
 
+  const readerOwnsSelection = Boolean(onPaperSelectionChange);
   const send = useCallback(async (nextDraft: ChatDraft) => {
-    const payload = onPaperSelectionChange
-      ? (paperSelection ? { ...nextDraft, paperSelection } : { text: nextDraft.text, paperMentions: nextDraft.paperMentions })
-      : nextDraft;
-    if (!user) {
-      authorizeInference(payload);
-      return;
-    }
-    if (userBilledInference && !inferenceConnectedRef.current) {
-      if (inferenceCheckPendingRef.current) return;
-      inferenceCheckPendingRef.current = true;
-      try {
-        const billing = await chatApi.getInferenceBilling();
-        if (!billing.connected) {
-          if (sessionStorage.getItem(CHAT_AUTH_ATTEMPTED_KEY) === "1") {
-            restoreAuthorizationPrompt(
-              payload,
-              "Hugging Face inference authorization was not completed. Your prompt is ready to retry.",
-            );
-            return;
-          }
-          authorizeInference(payload);
-          return;
-        }
-        inferenceConnectedRef.current = true;
-      } catch (error) {
-        restoreAuthorizationPrompt(
-          payload,
-          error instanceof Error
-            ? error.message
-            : "Could not check Hugging Face authorization.",
-        );
-        return;
-      } finally {
-        inferenceCheckPendingRef.current = false;
-      }
-    }
-    sessionStorage.removeItem(CHAT_AUTO_SEND_KEY);
+    const payload = withReaderSelection(nextDraft, readerOwnsSelection, paperSelection);
+    const authorized = authorizeSend(payload, Boolean(user));
+    if (authorized !== true && !(await authorized)) return;
+    stopChatAutoSend();
     if (!sendChat(payload)) {
-      restoreAuthorizationPrompt(
-        payload,
-        "Your prompt was not sent. It is ready to retry.",
-      );
+      restorePrompt(payload, "Your prompt was not sent. It is ready to retry.");
       return;
     }
-    sessionStorage.removeItem(CHAT_DRAFT_KEY);
-    sessionStorage.removeItem(CHAT_MODEL_KEY);
-    sessionStorage.removeItem(CHAT_AUTH_ATTEMPTED_KEY);
     clearQueuedChatLaunch();
-    queuedLaunchRef.current = null;
-    setDraft(emptyDraft());
+    setDraft(emptyChatDraft());
     onPaperSelectionChange?.(undefined);
     if (mode === "paper") onReaderSubmit?.();
-  }, [authorizeInference, mode, onPaperSelectionChange, onReaderSubmit, paperSelection, restoreAuthorizationPrompt, sendChat, user, userBilledInference]);
-
-  useEffect(() => {
-    if (authLoading || !user) return;
-    const savedModel = sessionStorage.getItem(CHAT_MODEL_KEY);
-    if (savedModel) setSelectedModel(savedModel);
-    void getChatModels().then((result) => {
-      setModels(result.items);
-      if (!routeSessionIdRef.current) {
-        const requestedModel = requestedModelRef.current || savedModel;
-        setSelectedModel(
-          requestedModel && result.items.some((model) => model.id === requestedModel)
-            ? requestedModel
-            : result.default_model,
-        );
-      }
-    });
-    const savedDraft = readStoredDraft();
-    const shouldAutoSend = sessionStorage.getItem(CHAT_AUTO_SEND_KEY) === "1";
-    if (savedDraft) {
-      onPaperSelectionChange?.(savedDraft.paperSelection);
-      if (shouldAutoSend) setPendingAutoDraft(savedDraft);
-      else setDraft(savedDraft);
-    }
-  }, [authLoading, onPaperSelectionChange, refreshSessions, user]);
+  }, [authorizeSend, mode, onPaperSelectionChange, onReaderSubmit, paperSelection, readerOwnsSelection, restorePrompt, sendChat, user]);
 
   const selectedTurn = chat.selectedBusy;
   const { load: loadChat, activeConfiguration } = chat;
@@ -383,19 +243,10 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   });
   // Only the owner can open /chat/:id. Anyone else who was handed that URL
   // lands on its public share when the owner created one.
-  const routeNotOwned = !authLoading && (
-    !user || (routeQuery.error instanceof ApiError && routeQuery.error.status === 404)
+  const publicShare = usePublicShareRedirect(
+    mode === "general" ? routeSessionId : undefined,
+    !authLoading && (!user || (routeQuery.error instanceof ApiError && routeQuery.error.status === 404)),
   );
-  const publicShareQuery = useQuery({
-    queryKey: ["chatSessionPublicShare", routeSessionId],
-    queryFn: () => chatApi.getSessionPublicShare(routeSessionId ?? ""),
-    enabled: mode === "general" && Boolean(routeSessionId) && routeNotOwned,
-    retry: false,
-  });
-  const publicSharePath = publicShareQuery.data?.public_path;
-  useEffect(() => {
-    if (publicSharePath) navigate(publicSharePath, { replace: true });
-  }, [navigate, publicSharePath]);
   const detail = routeQuery.data;
   // A newly admitted turn already initialized the visible transcript, even when
   // its first canonical fetch is still pending after streaming finishes.
@@ -411,10 +262,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     if (initializedRoute === selectedId) return;
     if (selectedTurn) {
       setInitializedRoute(selectedId);
-      const configuration = activeConfiguration;
-      if (configuration) {
-        if (configuration.model) setSelectedModel(configuration.model);
-      }
+      if (activeConfiguration?.model) setSelectedModel(activeConfiguration.model);
       return;
     }
     if (!selectedId) {
@@ -431,50 +279,22 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     });
     setSessionError("");
     setSelectedModel(detail.selected_model);
-  }, [routeSessionId, selectedTurn, detail, loadChat, activeConfiguration, routeQuery.isFetching, initializedRoute]);
+  }, [routeSessionId, selectedTurn, detail, loadChat, activeConfiguration, routeQuery.isFetching, initializedRoute, setSelectedModel]);
 
-  useEffect(() => {
-    if (authLoading) return;
-    const prompt = searchParams.get("q")?.trim();
-    if (!prompt) return;
-    autoSendStartedRef.current = false;
-    const requestedModel = searchParams.get("model");
-    if (requestedModel) setSelectedModel(requestedModel);
-    setPendingAutoDraft(emptyDraft(prompt));
-    const next = new URLSearchParams(searchParams);
-    next.delete("q");
-    next.delete("model");
-    setSearchParams(next, { replace: true });
-  }, [authLoading, searchParams, setSearchParams]);
-
-  useEffect(() => {
-    if (
-      authLoading
+  useChatAutoSend({
+    pendingDraft: pendingAutoDraft,
+    setPendingDraft: setPendingAutoDraft,
+    blocked: authLoading
       || chat.busy
-      || !pendingAutoDraft.text
-      || autoSendStartedRef.current
       || (Boolean(user) && availabilityQuery.isFetching)
-      || (routeSessionId && !routeReady)
-    ) return;
-    // Deferring avoids React StrictMode's development-only effect cleanup from
-    // aborting the request before the second effect pass can own it.
-    const timer = window.setTimeout(() => {
-      if (autoSendStartedRef.current) return;
-      autoSendStartedRef.current = true;
-      const nextDraft = pendingAutoDraft;
-      void send(nextDraft).finally(() => setPendingAutoDraft(emptyDraft()));
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [
+      || Boolean(routeSessionId && !routeReady),
     authLoading,
-    availabilityQuery.isFetching,
-    chat.busy,
-    pendingAutoDraft,
-    routeSessionId,
-    routeReady,
+    signedIn: Boolean(user),
     send,
-    user,
-  ]);
+    restoreDraft: setDraft,
+    setSelectedModel,
+    onPaperSelectionChange,
+  });
 
   useEffect(() => {
     const onFocus = () => {
@@ -489,65 +309,31 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     if (window.innerWidth <= 900) setSidebarOpen(false);
     loadChat([], null);
     setInitializedRoute(null);
-    setDraft(emptyDraft());
+    setDraft(emptyChatDraft());
     onPaperSelectionChange?.(undefined);
     if (mode === "paper") onReaderNewChat?.();
     else navigate("/chat");
   };
-  const saveRename = async (id: string, title: string) => {
-    try {
-      const updated = await updateSession(id, { title });
-      manualTitleLockRef.current.add(id);
-      patchSession(id, updated);
-      return true;
-    } catch (error) {
-      setSessionError(error instanceof Error ? error.message : "Rename failed");
-      return false;
-    }
-  };
-  const remove = async (id: string) => {
-    const active = chat.busy && id === chat.activeSessionId;
-    if (!window.confirm(active ? "Stop and delete this chat? This cannot be undone." : "Delete this chat? This cannot be undone.")) return;
-    if (active) chat.stop();
-    try {
-      if (active) {
-        const deadline = Date.now() + 3_000;
-        for (;;) {
-          const detail = await getSession(id);
-          if (!detail.is_busy) break;
-          if (Date.now() >= deadline) throw new Error("Generation is still stopping. The chat was not deleted.");
-          await new Promise((resolve) => window.setTimeout(resolve, 150));
-        }
-      }
-      await removeSession(id); if (id === routeSessionId) newChat(); await refreshSessions();
-    }
-    catch (error) { setSessionError(error instanceof Error ? error.message : "Delete failed"); }
-  };
+  const sessionActions = useChatSessionActions({
+    routeSessionId,
+    selectedModel,
+    setSelectedModel,
+    patchSession,
+    onRenamed: (id) => manualTitleLockRef.current.add(id),
+    refreshSessions,
+    onError: setSessionError,
+    onSelectedDeleted: newChat,
+    isActive: (id) => chat.busy && id === chat.activeSessionId,
+    stopActive: chat.stop,
+  });
   const archive = useChatArchive({
     messages: chat.messages,
     refreshSessions,
     resetChat: chat.reset,
     restoreDraft: setDraft,
   });
-  const changeModel = async (model: string) => {
-    const previousModel = selectedModel;
-    setSelectedModel(model);
-    if (!routeSessionId) return true;
-    try {
-      const updated = await updateSession(routeSessionId, { selected_model: model });
-      patchSession(routeSessionId, { selected_model: updated.selected_model });
-      setSessionError("");
-      return true;
-    }
-    catch (error) {
-      setSelectedModel(previousModel);
-      setSessionError(error instanceof Error ? error.message : "Model change failed");
-      return false;
-    }
-  };
-  const lunaAvailable = models.some((model) => model.id === DEFAULT_CHAT_MODEL);
   const retryWithLuna = async () => {
-    if (await changeModel(DEFAULT_CHAT_MODEL)) chat.retryLatest();
+    if (await sessionActions.changeModel(DEFAULT_CHAT_MODEL)) chat.retryLatest();
   };
 
   const viewportHeight = useChatViewportHeight(mode === "general");
@@ -560,20 +346,14 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   const isEmpty = chat.messages.length === 0;
   const isRouteSessionLoading = Boolean(routeSessionId && (
     authLoading || (user && !routeReady && !routeQuery.isError)
-    || publicShareQuery.isFetching || publicSharePath
+    || publicShare.pending
   ));
   const routeSessionError = !routeReady && !isRouteSessionLoading && routeQuery.error?.message;
-  const openRouterFallbackEnabled = Boolean(
-    openRouterCredentialQuery.data?.fallback_enabled,
-  );
-  const composerDraft = onPaperSelectionChange
-    ? (paperSelection ? { ...draft, paperSelection } : { text: draft.text, paperMentions: draft.paperMentions })
-    : draft;
   const composerProps = {
     onSend: send,
     busy: selectedTurn,
     onStop: chat.stop,
-    draft: composerDraft,
+    draft: withReaderSelection(draft, readerOwnsSelection, paperSelection),
     onDraftChange: (next: ChatDraft) => {
       if (onPaperSelectionChange) {
         setDraft({ text: next.text, paperMentions: next.paperMentions });
@@ -584,13 +364,20 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     },
     disabled: chatPaused || authLoading || (chat.busy && !selectedTurn),
     describedBy: chatPaused ? "chat-paused-description" : undefined,
-    paperMentionsEnabled: Boolean(availabilityQuery.data?.paper_mentions_enabled),
-    paperSelectionEnabled: availabilityQuery.data?.paper_reader_selection_enabled === true,
-    paperArtifactsEnabled: mode === "general" && availabilityQuery.data?.paper_artifacts_enabled === true,
+    paperMentionsEnabled: Boolean(availability?.paper_mentions_enabled),
+    paperSelectionEnabled: availability?.paper_reader_selection_enabled === true,
+    paperArtifactsEnabled: mode === "general" && availability?.paper_artifacts_enabled === true,
+  };
+  const surfaceProps = {
+    composerProps,
+    provider: model.provider,
+    sponsored: model.sponsored,
+    paused: chatPaused,
+    error: chat.sessionError,
   };
 
   return (
-    <GeneralArtifactProvider enabled={mode === "general"} workspaceKey={routeSessionId ?? "new-chat"} onAskAiFix={(prompt) => { void send(emptyDraft(prompt)); }}>
+    <GeneralArtifactProvider enabled={mode === "general"} workspaceKey={routeSessionId ?? "new-chat"} onAskAiFix={(prompt) => { void send(emptyChatDraft(prompt)); }}>
     <div className={`chat-page${mode === "paper" ? " chat-page--reader" : ""}`} style={{ height: viewportHeight }}>
       {mode === "general" && <ChatSessionNavigation
         sessions={visibleSessions}
@@ -604,8 +391,8 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
           if (window.innerWidth <= 900) setSidebarOpen(false);
           navigate(`/chat/${sessionId}`);
         }}
-        onRename={saveRename}
-        onDelete={(sessionId) => void remove(sessionId)}
+        onRename={sessionActions.rename}
+        onDelete={(sessionId) => void sessionActions.remove(sessionId)}
       />}
 
       <GeneralArtifactWorkspace enabled={mode === "general"}>
@@ -617,21 +404,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             : current?.title || detail?.title || (isEmpty ? "" : "New chat")}</span>
           {staging && <span className="chat-staging-badge">Staging</span>}
           {mode === "general" && routeSessionId && sessionPrimaryPaper && (
-            <Link
-              className="chat-reader-action"
-              to={`/pdf/${sessionPrimaryPaper.route_id}`}
-              onClick={(event) => {
-                if (!canNavigateAwayFromArtifact()) {
-                  event.preventDefault();
-                  return;
-                }
-                const readerRoute = sessionPrimaryPaper.route_id;
-                sessionStorage.setItem(`pwc:reader:session:${readerRoute}`, routeSessionId);
-                if (routeViewerPage) {
-                  sessionStorage.setItem(`pwc:reader:page:${readerRoute}`, String(routeViewerPage));
-                }
-              }}
-            >Open reader</Link>
+            <OpenReaderLink routeId={sessionPrimaryPaper.route_id} sessionId={routeSessionId} page={routeViewerPage} />
           )}
           {routeSessionId && routeReady && !isEmpty && (
             <ChatSharing
@@ -642,42 +415,13 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
               onError={setSessionError}
             />
           )}
-          {mode === "paper" && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button type="button" className="icon-btn chat-reader-icon-btn" aria-label="Chat options" title="Chat options">
-                  <MoreVertical aria-hidden="true" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={newChat}>New chat</DropdownMenuItem>
-                <DropdownMenuItem asChild><Link to="/chat">All chats</Link></DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-          {mode === "paper" && onReaderClose && (
-            <button type="button" className="icon-btn chat-reader-icon-btn" onClick={onReaderClose} aria-label="Close chat" title="Close chat">
-              <X aria-hidden="true" />
-            </button>
-          )}
+          {mode === "paper" && <ReaderChatMenu onNewChat={newChat} onClose={onReaderClose} />}
         </div>
 
-        {creditsNotice && (
-          <div className="chat-credits-notice" role="status">
-            <span>{creditsNotice.message}</span>
-            <button
-              type="button"
-              className="chat-credits-notice-close"
-              aria-label="Dismiss credits notice"
-              onClick={() => {
-                dismissOpenAICreditsNotice(creditsNotice.resetsAt);
-                setDismissedCreditsNotice(creditsNotice.resetsAt);
-              }}
-            >
-              ×
-            </button>
-          </div>
-        )}
+        <OpenAICreditsNotice
+          provider={model.provider}
+          enabled={isChatLive() && Boolean(user) && model.provider === "openai"}
+        />
 
         {mode === "general" && latexPaper && <LatexPaperArtifact descriptor={latexPaper} />}
         {isRouteSessionLoading && !pendingAutoDraft.text ? <div className="chat-session-loading" role="status" aria-live="polite">
@@ -688,46 +432,29 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
           <button type="button" onClick={() => {
             void routeQuery.refetch();
           }}>Try again</button>
-        </div> : isEmpty && !pendingAutoDraft.text ? <div className="chat-empty"><div className="chat-empty-inner">
-          <div className="chat-empty-eyebrow">{mode === "paper" ? "Paper chat" : "Research chat"}</div>
-          <h1 className="chat-empty-title">{mode === "paper" ? "Ask about this paper" : <>Ask <em>Papers With Code</em></>}</h1>
-          <p className="chat-empty-sub">{mode === "paper" ? "Questions are grounded in the open paper. Add up to three other papers with @." : "Answers are grounded in a live hybrid search over papers, tasks, and benchmarks — with citations you can follow."}</p>
-          {staging && <p className="chat-staging-access-note">
-            This is a limited staging preview. Only approved Hugging Face users can start chats.
-          </p>}
+        </div> : isEmpty && !pendingAutoDraft.text ? <ChatEmptyState mode={mode} staging={staging}>
           <ChatComposerSurface
             variant="empty"
-            composerProps={composerProps}
-            provider={selectedProvider}
-            sponsored={selectedSponsored}
-            paused={chatPaused}
-            error={chat.sessionError}
-            suggestions={mode === "paper" ? READER_PROMPTS : SUGGESTED_CHAT_PROMPTS}
+            {...surfaceProps}
+            suggestions={mode === "paper" ? READER_CHAT_PROMPTS : SUGGESTED_CHAT_PROMPTS}
           />
-        </div></div> : <>
+        </ChatEmptyState> : <>
           <ChatConversation
             messages={chat.messages}
             papers={chat.papers}
             busy={selectedTurn}
             queuedDraft={pendingAutoDraft.text ? pendingAutoDraft : undefined}
-            paperMentionsEnabled={Boolean(availabilityQuery.data?.paper_mentions_enabled)}
+            paperMentionsEnabled={Boolean(availability?.paper_mentions_enabled)}
             archivePending={archive.pending}
-            openRouterFallbackEnabled={openRouterFallbackEnabled}
+            openRouterFallbackEnabled={Boolean(openRouterCredentialQuery.data?.fallback_enabled)}
             onToggleBlock={chat.toggleBlock}
             onEditAndResend={chat.editAndResend}
             onRetryFromProgress={chat.retryFromProgress}
-            onRetryWithLuna={lunaAvailable ? () => void retryWithLuna() : undefined}
+            onRetryWithLuna={model.lunaAvailable ? () => void retryWithLuna() : undefined}
             onArchiveOld={() => void archive.archiveOld()}
             onArchiveOldest={() => void archive.archiveOldest()}
           />
-          <ChatComposerSurface
-            variant="followup"
-            composerProps={composerProps}
-            provider={selectedProvider}
-            sponsored={selectedSponsored}
-            paused={chatPaused}
-            error={chat.sessionError}
-          />
+          <ChatComposerSurface variant="followup" {...surfaceProps} />
         </>}
       </section>
       </GeneralArtifactWorkspace>
@@ -737,16 +464,14 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
           onCancel={chat.cancelCapacity}
           onRetry={() => {
             if (chat.retryCapacity()) {
-              setDraft(emptyDraft());
+              setDraft(emptyChatDraft());
               onPaperSelectionChange?.(undefined);
             }
           }}
         />
       )}
       {chat.disabledRequest && <ChatDisabledDialog onClose={() => {
-        const restored = chat.disabledRequest?.draft ?? draft;
-        setDraft(restored);
-        onPaperSelectionChange?.(restored.paperSelection);
+        showDraft(chat.disabledRequest?.draft ?? draft);
         chat.dismissDisabled();
         void availabilityQuery.refetch();
       }} />}

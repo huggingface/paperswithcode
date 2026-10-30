@@ -1,31 +1,16 @@
 /* eslint-disable react-refresh/only-export-components */
 import React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { Download, ExternalLink, FileCode2, X } from "lucide-react";
 
-import { apiUrl } from "@/lib/apiUrl";
+import { chatApi } from "@/lib/api/chat";
+import { chatArtifactUrls } from "@/lib/chatArtifactUrls";
 import type { ArtifactBlock } from "@/lib/chat";
+import { chatArtifactKeys } from "@/lib/chatSessionQueries";
 import { LatexPaperPanel } from "./LatexPaperPanel";
 import { useArtifactPanel } from "./useArtifactPanel";
 
 const POSTERLY_SOURCE = "https://github.com/Chenruishuo/posterly/tree/b9f42e5578a49a27525a68f85376bb3bb25af86f";
-
-interface Manifest {
-  entrypoint: string;
-  gate_report: string;
-  downloads: Array<{ path: string; label: string }>;
-  source_files?: string[];
-  canvas: { width: number; height: number; unit: string; orientation: string };
-  direction: string;
-  gate_summary: string[];
-}
-
-interface VersionSummary {
-  version_id: string;
-  version: number;
-  gate_status: ArtifactBlock["gate_status"];
-  total_bytes: number;
-}
 
 function publicShareId(): string | null {
   if (typeof window === "undefined") return null;
@@ -37,30 +22,27 @@ export function artifactUrls(block: ArtifactBlock) {
   if (block.scope === "public") {
     const share = publicShareId();
     if (!share || !block.public_capability) return null;
-    const root = `/api/v1/chat/shares/${encodeURIComponent(share)}/artifacts/${encodeURIComponent(block.public_capability)}`;
+    const root = chatArtifactUrls.sharedRoot(share, block.public_capability);
     return {
-      preview: apiUrl(`${root}/preview`),
-      png: apiUrl(`${root}/download/png`),
-      pdf: apiUrl(`${root}/download/pdf`),
-      manifest: null,
-      source: null,
-      gate: null,
-      download: null,
+      preview: `${root}/preview`,
+      png: `${root}/download/png`,
+      pdf: `${root}/download/pdf`,
+      owner: null,
     };
   }
-  if (!block.artifact_id || !block.version_id) return null;
-  const root = `/api/v1/chat/artifacts/${encodeURIComponent(block.artifact_id)}/versions/${encodeURIComponent(block.version_id)}`;
-  const fileUrl = (kind: "source" | "download", path: string) => apiUrl(
-    `${root}/${kind}/${path.split("/").map(encodeURIComponent).join("/")}`,
-  );
+  const { artifact_id: artifactId, version_id: versionId } = block;
+  if (!artifactId || !versionId) return null;
+  const fileUrl = (kind: "source" | "download", path: string) => chatArtifactUrls.file(artifactId, versionId, kind, path);
   return {
-    preview: apiUrl(`${root}/preview`),
+    preview: chatArtifactUrls.preview(artifactId, versionId),
     png: fileUrl("download", "poster.png"),
     pdf: null,
-    manifest: apiUrl(`${root}/manifest`),
-    source: (path: string) => fileUrl("source", path),
-    gate: (path: string) => fileUrl("source", path),
-    download: (path: string) => fileUrl("download", path),
+    owner: {
+      artifactId,
+      versionId,
+      source: (path: string) => fileUrl("source", path),
+      download: (path: string) => fileUrl("download", path),
+    },
   };
 }
 
@@ -98,17 +80,10 @@ const PosterArtifactPanel: React.FC<{ forceDialog?: boolean; readerFallback?: bo
   const panelRef = React.useRef<HTMLElement>(null);
   const pushedHistoryRef = React.useRef(false);
 
+  const ownedArtifactId = state.open && block?.scope === "owner" ? block.artifact_id : undefined;
   const versionsQuery = useQuery({
-    queryKey: ["chat-artifact-versions", block?.artifact_id],
-    queryFn: async () => {
-      const response = await fetch(apiUrl(`/api/v1/chat/artifacts/${encodeURIComponent(block!.artifact_id!)}`), {
-        credentials: "include",
-        cache: "no-store",
-      });
-      if (!response.ok) throw new Error("Could not load poster versions");
-      return (await response.json() as { versions: VersionSummary[] }).versions;
-    },
-    enabled: state.open && block?.scope === "owner" && Boolean(block.artifact_id),
+    queryKey: chatArtifactKeys.posterVersions(ownedArtifactId),
+    queryFn: ownedArtifactId ? () => chatApi.getPosterVersions(ownedArtifactId) : skipToken,
     staleTime: Number.POSITIVE_INFINITY,
   });
   const selectedVersion = versionsQuery.data?.find(
@@ -122,27 +97,19 @@ const PosterArtifactPanel: React.FC<{ forceDialog?: boolean; readerFallback?: bo
     total_bytes: selectedVersion.total_bytes,
   } : block;
   const links = effective ? artifactUrls(effective) : null;
+  const owned = state.open ? links?.owner ?? null : null;
   const manifestQuery = useQuery({
-    queryKey: ["chat-artifact-manifest", effective?.version_id],
-    queryFn: async () => {
-      const response = await fetch(links!.manifest!, { credentials: "include", cache: "no-store" });
-      if (!response.ok) throw new Error("Could not load poster details");
-      return response.json() as Promise<Manifest>;
-    },
-    enabled: state.open && effective?.scope === "owner" && Boolean(links?.manifest),
+    queryKey: chatArtifactKeys.manifest(owned?.artifactId, owned?.versionId),
+    queryFn: owned ? () => chatApi.getPosterManifest(owned.artifactId, owned.versionId) : skipToken,
     staleTime: Number.POSITIVE_INFINITY,
   });
   const manifest = manifestQuery.data;
   const sourcePath = state.sourceFile ?? manifest?.entrypoint ?? null;
   const sourceQuery = useQuery({
-    queryKey: ["chat-artifact-source", effective?.version_id, sourcePath],
-    queryFn: async () => {
-      const response = await fetch(links!.source!(sourcePath!), { credentials: "include", cache: "no-store" });
-      if (!response.ok) throw new Error("Source could not be loaded");
-      return response.text();
-    },
-    enabled: state.open && state.tab === "source" && effective?.scope === "owner"
-      && Boolean(sourcePath && links?.source),
+    queryKey: chatArtifactKeys.source(owned?.artifactId, owned?.versionId, sourcePath),
+    queryFn: owned && state.tab === "source" && sourcePath
+      ? () => chatApi.getArtifactSource(owned.artifactId, owned.versionId, sourcePath)
+      : skipToken,
     staleTime: Number.POSITIVE_INFINITY,
   });
 
@@ -201,8 +168,8 @@ const PosterArtifactPanel: React.FC<{ forceDialog?: boolean; readerFallback?: bo
   const pdfPath = manifest?.downloads[0]?.path;
   const pdfUrl = effective.scope === "public"
     ? links.pdf
-    : pdfPath && links.download
-      ? links.download(pdfPath)
+    : pdfPath && links.owner
+      ? links.owner.download(pdfPath)
       : null;
 
   return <section
@@ -236,8 +203,8 @@ const PosterArtifactPanel: React.FC<{ forceDialog?: boolean; readerFallback?: bo
       {state.tab === "preview"
         ? <img src={links.preview} alt={`Full preview of ${effective.title}`} />
         : <div className="chat-artifact-source-workspace">
-            {(manifest?.source_files?.length ?? 0) > 1 && <nav aria-label="Poster source files">
-              {manifest!.source_files!.map((path) => <button type="button" key={path} aria-pressed={sourcePath === path} onClick={() => panel.setSourceFile(path)}>{path}</button>)}
+            {manifest?.source_files && manifest.source_files.length > 1 && <nav aria-label="Poster source files">
+              {manifest.source_files.map((path) => <button type="button" key={path} aria-pressed={sourcePath === path} onClick={() => panel.setSourceFile(path)}>{path}</button>)}
             </nav>}
             <pre><code>{sourceQuery.isError ? "Source could not be loaded." : sourceQuery.data ?? "Loading source…"}</code></pre>
           </div>}
@@ -251,8 +218,8 @@ const PosterArtifactPanel: React.FC<{ forceDialog?: boolean; readerFallback?: bo
       <div className="chat-artifact-actions">
         <a href={links.png} download><Download /> PNG</a>
         {effective.gate_status !== "failed" && pdfUrl && <a href={pdfUrl} download><Download /> PDF</a>}
-        {effective.scope === "owner" && manifest && links.source && <a href={links.source(manifest.entrypoint)} download><FileCode2 /> HTML</a>}
-        {effective.scope === "owner" && manifest && links.gate && <a href={links.gate(manifest.gate_report)} download>Gate report</a>}
+        {effective.scope === "owner" && manifest && links.owner && <a href={links.owner.source(manifest.entrypoint)} download><FileCode2 /> HTML</a>}
+        {effective.scope === "owner" && manifest && links.owner && <a href={links.owner.source(manifest.gate_report)} download>Gate report</a>}
         <a href={POSTERLY_SOURCE} target="_blank" rel="noreferrer"><ExternalLink /> Posterly source · AGPL-3.0</a>
       </div>
     </footer>
@@ -261,8 +228,10 @@ const PosterArtifactPanel: React.FC<{ forceDialog?: boolean; readerFallback?: bo
 
 export const ArtifactPanel: React.FC<{ forceDialog?: boolean; readerFallback?: boolean }> = (props) => {
   const { state } = useArtifactPanel();
-  if (state.selected?.artifact_kind === "latex_paper") {
-    return <LatexPaperPanel block={state.selected} {...props} />;
+  const selected = state.selected;
+  // Paper artifacts are always created from a descriptor, so they carry an ID.
+  if (selected?.artifact_kind === "latex_paper" && selected.artifact_id) {
+    return <LatexPaperPanel artifactId={selected.artifact_id} title={selected.title} {...props} />;
   }
   return <PosterArtifactPanel {...props} />;
 };

@@ -21,8 +21,7 @@ vi.mock("@/lib/chat", async (original) => ({
 }));
 vi.mock("@/lib/chatSessions", async (original) => ({
   ...await original<typeof import("@/lib/chatSessions")>(),
-  getSession: mocks.getSession, listSessions: mocks.listSessions,
-  getChatModels: async () => ({ items: [{ id: "gpt-5.6-luna@openai", label: "Luna", provider: "openai" }], default_model: "gpt-5.6-luna@openai" }),
+  listSessions: mocks.listSessions,
 }));
 vi.mock("@/components/chat/ChatComposerSurface", () => ({
   ChatComposerSurface: ({ composerProps: props }: ComponentProps<typeof ChatComposerSurface>) => <>
@@ -88,6 +87,8 @@ beforeEach(() => {
   mocks.authLoading = false;
   mocks.frames = [];
   mocks.getSession.mockImplementation(async (id: string) => detail(id));
+  vi.spyOn(chatApi, "getSession").mockImplementation((id) => mocks.getSession(id));
+  vi.spyOn(chatApi, "getModels").mockResolvedValue({ items: [{ id: "gpt-5.6-luna@openai", label: "Luna", provider: "openai" }], default_model: "gpt-5.6-luna@openai" });
   mocks.listSessions.mockResolvedValue([detail("a"), detail("b")]);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });

@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { useMutation } from "@tanstack/react-query";
 
 import { useToast } from "@/components/ui/use-toast";
-import type { ChatDraft, ChatMessage } from "@/lib/chat";
-import { archiveOldChats, archiveOldestChats } from "@/lib/chatSessions";
+import { chatApi } from "@/lib/api/chat";
+import { draftFromMessage, latestUserMessage, type ChatDraft, type ChatMessage } from "@/lib/chat";
+
+type ArchiveScope = "old" | "oldest";
 
 interface UseChatArchiveOptions {
   messages: ChatMessage[];
@@ -11,6 +13,11 @@ interface UseChatArchiveOptions {
   restoreDraft: (draft: ChatDraft) => void;
 }
 
+const FAILURE_TITLES: Record<ArchiveScope, string> = {
+  old: "Could not archive old chats",
+  oldest: "Could not archive chats",
+};
+
 export function useChatArchive({
   messages,
   refreshSessions,
@@ -18,72 +25,49 @@ export function useChatArchive({
   restoreDraft,
 }: UseChatArchiveOptions) {
   const { toast } = useToast();
-  const [pending, setPending] = useState<"old" | "oldest" | null>(null);
-
-  const restoreQuestion = () => {
-    const failedMessage = [...messages].reverse().find(
-      (message) => message.role === "user",
-    );
-    resetChat();
-    restoreDraft({
-      text: failedMessage?.text ?? "",
-      paperMentions: failedMessage?.paperMentions ?? [],
-      ...(failedMessage?.paperSelection
-        ? { paperSelection: failedMessage.paperSelection }
-        : {}),
-    });
-  };
-
-  const archiveOld = async () => {
-    if (pending !== null) return;
-    setPending("old");
-    try {
-      const result = await archiveOldChats();
+  const mutation = useMutation({
+    mutationFn: async (scope: ArchiveScope) => {
+      const result = scope === "old"
+        ? await chatApi.archiveOldChats()
+        : await chatApi.archiveOldestChats();
       await refreshSessions();
-      if (result.archived_count === 0) {
+      return result;
+    },
+    onSuccess: ({ archived_count: count }, scope) => {
+      if (scope === "old" && count === 0) {
         toast({
           title: "No chats were archived",
           description: "There are no inactive chats older than 30 days.",
         });
         return;
       }
-      restoreQuestion();
+      // The quota error belongs to the latest question; offer it again.
+      const failedMessage = latestUserMessage(messages);
+      resetChat();
+      restoreDraft(draftFromMessage(failedMessage));
       toast({
-        title: `${result.archived_count} ${result.archived_count === 1 ? "chat" : "chats"} archived`,
+        title: `${count} ${count === 1 ? "chat" : "chats"} archived`,
         description: "Your question is ready to send again.",
       });
-    } catch (error) {
+    },
+    onError: (error, scope) => {
       toast({
         variant: "destructive",
-        title: "Could not archive old chats",
+        title: FAILURE_TITLES[scope],
         description: error instanceof Error ? error.message : "Try again.",
       });
-    } finally {
-      setPending(null);
-    }
-  };
+    },
+  });
+  const pending: ArchiveScope | null = mutation.isPending ? mutation.variables ?? null : null;
 
-  const archiveOldest = async () => {
+  const archive = async (scope: ArchiveScope) => {
     if (pending !== null) return;
-    setPending("oldest");
-    try {
-      const result = await archiveOldestChats();
-      await refreshSessions();
-      restoreQuestion();
-      toast({
-        title: `${result.archived_count} ${result.archived_count === 1 ? "chat" : "chats"} archived`,
-        description: "Your question is ready to send again.",
-      });
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Could not archive chats",
-        description: error instanceof Error ? error.message : "Try again.",
-      });
-    } finally {
-      setPending(null);
-    }
+    await mutation.mutateAsync(scope).catch(() => undefined);
   };
 
-  return { pending, archiveOld, archiveOldest };
+  return {
+    pending,
+    archiveOld: () => archive("old"),
+    archiveOldest: () => archive("oldest"),
+  };
 }

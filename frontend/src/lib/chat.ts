@@ -26,200 +26,26 @@ import { chatApi } from "@/lib/api/chat";
 import { notifyStaleAuth } from "@/lib/apiAuth";
 import { ApiError } from "@/lib/apiTransport";
 import { mockChatStream } from "@/lib/chatMock";
+import type {
+  ChatBlock,
+  ChatBrowserLatencyUpdate,
+  ChatCitation,
+  ChatEvent,
+  ChatPaperHit,
+  ChatStreamRequest,
+  PaperMentionDraft,
+  ReasoningEffort,
+} from "@/lib/api/chat.types";
 
-export type ReasoningEffort = "low" | "medium" | "high" | "max";
+// Wire types live with the API client; existing imports keep using this module.
+export type * from "@/lib/api/chat.types";
 
 /** Every chat runs at this effort; the picker is no longer user-facing. */
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort = "medium";
 
-/** Structured metadata for one search hit.
- * Keys are always present; unavailable values are null / empty lists. */
-export interface ChatPaperMetadata {
-  arxiv_id: string | null;
-  source: "arxiv" | "external";
-  source_url: string | null;
-  /** Backend-hosted or paper-supplied preview image. */
-  thumbnail_url: string | null;
-  authors: { name: string }[];
-  /** ISO date, e.g. "2025-02-18". */
-  published: string | null;
-  /** Display name, e.g. "CVPR 2024". */
-  conference: string | null;
-  citation_count: number | null;
-  tasks: { name: string; slug: string }[];
-  methods: { name: string; slug: string }[];
-  repositories: { url: string; stars: number | null }[];
-  project_pages: { url: string }[];
-}
-
-/** One paper returned by the assistant's `search_papers` tool. */
-export interface ChatPaperHit {
-  /** Citation/route key: arXiv ID or internal numeric ID (`/paper/<route_id>`). */
-  route_id: string;
-  title: string;
-  /** Bounded abstract or external-resource description (≤4,000 chars). */
-  content: string;
-  content_truncated: boolean;
-  metadata: ChatPaperMetadata;
-}
-
-export interface ChatCitation {
-  kind?: "catalog_paper" | "external_source" | "paper" | "web";
-  route_id: string | null;
-  url?: string | null;
-  source_type?: "paper" | "article" | null;
-  provider?: "paperswithcode" | "semantic_scholar" | "web";
-  title: string;
-  excerpt?: string | null;
-  source_url: string | null;
-  thumbnail_url?: string | null;
-  favicon_url?: string | null;
-  arxiv_id?: string | null;
-  semantic_scholar_id?: string | null;
-  authors?: string[];
-  published?: string | null;
-  conference?: string | null;
-  citation_count?: number | null;
-}
-
-export type ChatEvent =
-  | {
-      type: "stream_start";
-      request_id: string;
-      session_id: string | null;
-      provider_execution?: boolean;
-    }
-  | { type: "workspace_ready" }
-  | { type: "compaction_status"; state: "started" | "finished" }
-  | {
-      type: "lifecycle";
-      phase: "preparing_workspace" | "starting_agent" | "connecting_model";
-    }
-  | { type: "reasoning_start" }
-  | { type: "reasoning_delta"; text: string }
-  | { type: "reasoning_end" }
-  | { type: "tool_call"; id: string; name: string; args: Record<string, unknown> }
-  | {
-      type: "tool_call_start";
-      id: string;
-      name: string;
-      content_index: number;
-      redacted?: boolean;
-    }
-  | {
-      type: "tool_call_arguments_delta";
-      id: string;
-      name: string;
-      delta: string;
-      partial_args: Record<string, unknown>;
-      snapshot?: boolean;
-      redacted?: boolean;
-    }
-  | {
-      type: "tool_call_arguments_done";
-      id: string;
-      name: string;
-      args: Record<string, unknown>;
-      redacted?: boolean;
-    }
-  | {
-      type: "app_start";
-      id: string;
-      instance_id: string;
-      provider: "excalidraw";
-      server: "excalidraw";
-      tool: "create_view";
-      resource_uri: "ui://excalidraw/mcp-app.html";
-      input: { elements: string };
-    }
-  | {
-      type: "app_result";
-      id: string;
-      status: "ready" | "error";
-      took_ms: number;
-      result: McpAppResult;
-    }
-  | {
-      type: "tool_result";
-      id: string;
-      took_ms: number;
-      status?: "success" | "error" | "denied";
-      content?: { type: "text"; text: string; truncated: boolean }[];
-      metadata?: { exit_code: number | null; output_truncated: boolean };
-      /** Legacy local_mcp result shape. */
-      hits?: number;
-      results?: ChatPaperHit[];
-    }
-  | {
-      type: "artifact_start";
-      publication_id: string;
-      identifier: string;
-      kind: "posterly";
-      title: string;
-    }
-  | {
-      type: "artifact_ready";
-      publication_id: string;
-      artifact_id: string;
-      version_id: string;
-      identifier: string;
-      version: number;
-      kind: "posterly";
-      title: string;
-      preview_mime: "image/png";
-      source_language: "html";
-      gate_status: "passed" | "warnings" | "failed";
-      total_bytes: number;
-    }
-  | { type: "artifact_error"; publication_id: string; code: string; message: string }
-  | PaperArtifactEvent
-  | { type: "sandbox_start"; session_id: string }
-  | { type: "sandbox_ready"; session_id: string; cold_start_ms: number }
-  | { type: "answer_delta"; text: string }
-  | { type: "done"; followups?: string[]; finish_reason?: string; citations?: ChatCitation[] }
-  | { type: "error"; message: string; code?: string }
-  | { type: "session_title_start" }
-  | { type: "session_title_delta"; text: string }
-  | { type: "session_title_done"; title: string };
-
-export interface ChatStreamRequest {
-  message: string;
-  session_id: string | null;
-  client_message_id: string;
-  initial_model?: string;
-  replace_message_id?: string;
-  retry_message_id?: string;
-  prior_revision?: number;
-  paper_mentions?: PaperMentionWire[];
-  web_search_enabled: boolean;
-  reasoning_effort?: ReasoningEffort;
-  primary_paper_route_id?: string;
-  viewer_context?: { page: number };
-  paper_selection?: PaperSelectionWire;
-}
-
-export interface PaperMentionDraft {
-  key: string;
-  route_id: string;
-  title: string;
-  source: "arxiv" | "external";
-  start: number;
-  end: number;
-  unavailable?: boolean;
-}
-
-type PaperMentionWire = Pick<PaperMentionDraft, "route_id" | "title" | "start" | "end">;
-
 export interface PaperSelectionDraft {
   routeId: string;
   paperVersion: string;
-  page: number;
-  text: string;
-}
-
-export interface PaperSelectionWire {
-  route_id: string;
-  paper_version: string;
   page: number;
   text: string;
 }
@@ -231,96 +57,6 @@ export interface ChatDraft {
 }
 
 /* ---------- UI message model (also persisted for session history) ---------- */
-
-export interface ReasoningBlock {
-  kind: "reasoning";
-  text: string;
-  /** True while reasoning tokens are still streaming in. */
-  active: boolean;
-  open: boolean;
-  citations?: ChatCitation[];
-}
-
-export interface ToolBlock {
-  kind: "tool";
-  schema_version?: 1 | 2;
-  id: string;
-  name: string;
-  args: Record<string, unknown>;
-  argumentText?: string;
-  argumentState?: "streaming" | "done";
-  arguments_redacted?: boolean;
-  status: "running" | "done" | "success" | "error" | "denied";
-  content?: { type: "text"; text: string; truncated: boolean }[];
-  metadata?: { exit_code: number | null; output_truncated: boolean };
-  /** Legacy local_mcp projection fields. */
-  hits?: number;
-  took_ms?: number;
-  results?: ChatPaperHit[];
-  open: boolean;
-}
-
-interface McpAppResult {
-  content: { type: "text"; text: string; truncated: boolean }[];
-  structuredContent: { checkpointId?: string };
-  isError: boolean;
-}
-
-export interface AppBlock {
-  kind: "app";
-  schema_version: 1;
-  instance_id: string;
-  provider: "excalidraw";
-  server: "excalidraw";
-  tool: "create_view";
-  resource_uri: "ui://excalidraw/mcp-app.html";
-  resource_version?: string | null;
-  status: "loading" | "ready" | "error" | "unavailable" | "incompatible";
-  input: { elements: string };
-  result: McpAppResult;
-  csp: Record<string, string[]>;
-  permissions: { clipboardWrite?: boolean };
-  height: number;
-  public_fork?: boolean;
-}
-
-export interface AnswerBlock {
-  kind: "answer";
-  text: string;
-  done: boolean;
-  citations?: ChatCitation[];
-}
-
-export interface ArtifactBlock {
-  kind: "artifact";
-  schema_version: 1;
-  scope: "owner" | "public";
-  publication_id?: string;
-  artifact_id?: string;
-  version_id?: string;
-  public_capability?: string;
-  identifier: string;
-  version?: number;
-  artifact_kind: "posterly" | "latex_paper";
-  title: string;
-  status: "generating" | "ready" | "error";
-  phase?: "preparing_paper" | "designing_poster" | "checking_poster" | "rendering_poster" | "publishing_poster";
-  preview_mime?: "image/png" | "application/pdf";
-  source_language?: "html" | "latex";
-  gate_status?: "passed" | "warnings" | "failed";
-  total_bytes?: number;
-  error_code?: string;
-  error_message?: string;
-}
-
-interface PaperArtifactEvent {
-  type: "paper_artifact";
-  operation: "create" | "begin-edit" | "draft" | "repair";
-  activated: boolean;
-  descriptor: import("./chatSessions").LatexPaperArtifactDescriptor;
-}
-
-export type ChatBlock = ReasoningBlock | ToolBlock | AppBlock | ArtifactBlock | AnswerBlock;
 
 export interface ChatMessage {
   id: string;
@@ -341,6 +77,36 @@ export interface ChatMessage {
   status?: string;
   paperMentions?: PaperMentionDraft[];
   paperSelection?: PaperSelectionDraft;
+}
+
+/** The newest user prompt in a transcript. */
+export function latestUserMessage(messages: readonly ChatMessage[]): ChatMessage | undefined {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (messages[index].role === "user") return messages[index];
+  }
+  return undefined;
+}
+
+/** The composer draft that reproduces a sent prompt. */
+export function draftFromMessage(message: ChatMessage | undefined): ChatDraft {
+  return {
+    text: message?.text ?? "",
+    paperMentions: message?.paperMentions ?? [],
+    ...(message?.paperSelection ? { paperSelection: message.paperSelection } : {}),
+  };
+}
+
+/** Every paper returned by search tools in a transcript, keyed by route ID. */
+export function collectChatPapers(messages: readonly ChatMessage[]): Record<string, ChatPaperHit> {
+  const papers: Record<string, ChatPaperHit> = {};
+  for (const message of messages) {
+    for (const block of message.blocks ?? []) {
+      if (block.kind === "tool") {
+        for (const result of block.results ?? []) papers[result.route_id] = result;
+      }
+    }
+  }
+  return papers;
 }
 
 export const isChatLive = (): boolean => {
@@ -386,20 +152,6 @@ export class ChatTransportError extends Error {
     super(message);
     this.name = "ChatTransportError";
   }
-}
-
-export interface ChatBrowserLatencyUpdate {
-  submission_to_stream_start_ms?: number;
-  submission_to_first_visible_delta_ms?: number;
-  submission_to_first_reasoning_delta_ms?: number;
-  submission_to_first_tool_call_ms?: number;
-  submission_to_first_answer_delta_ms?: number;
-  terminal_classification?:
-    | "complete"
-    | "stopped"
-    | "error"
-    | "network_error"
-    | "aborted";
 }
 
 /**

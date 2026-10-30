@@ -8,6 +8,7 @@ import {
   ChatStreamError,
   ChatTransportError,
 } from "@/lib/chat";
+import { chatApi } from "@/lib/api/chat";
 import type { ChatSessionDetail } from "@/lib/chatSessions";
 import { useChat } from "@/hooks/useChat";
 
@@ -28,10 +29,6 @@ vi.mock("@/lib/chat", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/chatSessions", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/chatSessions")>();
-  return { ...actual, getSession: getSessionMock };
-});
 
 const sessionDetail = (
   id: string,
@@ -138,6 +135,7 @@ beforeEach(() => {
   streamChatMock.mockReset();
   resumeChatMock.mockReset();
   getSessionMock.mockReset();
+  vi.spyOn(chatApi, "getSession").mockImplementation((id) => getSessionMock(id));
   reportChatLatencyMock.mockReset();
 });
 

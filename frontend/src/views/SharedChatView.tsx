@@ -8,41 +8,22 @@ import { AssistantMessage, UserMessage } from "@/components/chat/ChatMessage";
 import { Spinner } from "@/components/chat/icons";
 import { ArtifactPanelProvider } from "@/components/chat/useArtifactPanel";
 import { isStagingEnvironment } from "@/lib/apiUrl";
-import type { ChatMessage, ChatPaperHit } from "@/lib/chat";
+import { chatApi } from "@/lib/api/chat";
+import { ApiError } from "@/lib/apiTransport";
+import { collectChatPapers, type ChatMessage } from "@/lib/chat";
 import { queueChatLaunch } from "@/lib/chatLaunch";
-import {
-  ChatRequestError,
-  getSharedChat,
-  publicShareToUiMessages,
-  type ChatShareDetail,
-} from "@/lib/chatSessions";
+import { toggleChatBlock } from "@/lib/chatLifecycle";
+import { publicShareToUiMessages, type ChatShareDetail } from "@/lib/chatSessions";
+
+const isNotFound = (error: unknown) => error instanceof ApiError && error.status === 404;
 
 const SharedTranscript: React.FC<{ detail: ChatShareDetail }> = ({ detail }) => {
   const [messages, setMessages] = useState<ChatMessage[]>(
     () => publicShareToUiMessages(detail),
   );
-  const papers = useMemo(() => {
-    const result: Record<string, ChatPaperHit> = {};
-    for (const message of messages) {
-      for (const block of message.blocks ?? []) {
-        if (block.kind === "tool") {
-          for (const paper of block.results ?? []) result[paper.route_id] = paper;
-        }
-      }
-    }
-    return result;
-  }, [messages]);
+  const papers = useMemo(() => collectChatPapers(messages), [messages]);
   const toggleBlock = (messageId: string, blockIndex: number) => {
-    setMessages((previous) => previous.map((message) => {
-      if (message.id !== messageId) return message;
-      return {
-        ...message,
-        blocks: message.blocks?.map((block, index) => index === blockIndex
-          && (block.kind === "reasoning" || block.kind === "tool")
-          ? { ...block, open: !block.open }
-          : block),
-      };
-    }));
+    setMessages((previous) => toggleChatBlock(previous, messageId, blockIndex));
   };
 
   return (
@@ -61,8 +42,8 @@ const SharedChatView: React.FC = () => {
   const [headerHeight, setHeaderHeight] = useState(60);
   const query = useQuery({
     queryKey: ["shared-chat", shareId],
-    queryFn: () => getSharedChat(shareId),
-    retry: (count, error) => !(error instanceof ChatRequestError && error.status === 404) && count < 1,
+    queryFn: () => chatApi.getSharedChat(shareId),
+    retry: (count, error) => !isNotFound(error) && count < 1,
   });
 
   useEffect(() => {
@@ -97,7 +78,7 @@ const SharedChatView: React.FC = () => {
     queueChatLaunch(prompt, undefined, { autoSend: false });
     navigate("/chat");
   };
-  const missing = query.error instanceof ChatRequestError && query.error.status === 404;
+  const missing = isNotFound(query.error);
 
   if (query.isLoading) {
     return <div className="shared-chat-state" role="status"><Spinner /> Loading shared conversation…</div>;

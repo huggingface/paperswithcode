@@ -6,9 +6,11 @@ import { CompactionStatus } from "./CompactionStatus";
  */
 
 import React from "react";
-import { Check, Copy, FileText, Pencil, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Check, Copy, FileText, Pencil } from "lucide-react";
 
+import { AssistantError, type HfBillingGuidance } from "@/components/chat/AssistantError";
 import { ChatMarkdown, PaperCitation } from "@/components/chat/ChatMarkdown";
+import { FeedbackControls } from "@/components/chat/FeedbackControls";
 import { McpAppFrame } from "@/components/chat/McpAppFrame";
 import { PosterArtifact } from "@/components/chat/PosterArtifact";
 import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
@@ -18,7 +20,6 @@ import { CheckIcon, Chevron, SearchIcon, Spinner } from "@/components/chat/icons
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
 import { authorsLine, excerpt, venueLine } from "@/components/chat/paperDisplay";
-import { chatApi } from "@/lib/api/chat";
 import type {
   AnswerBlock,
   AppBlock,
@@ -32,15 +33,6 @@ import type {
   ToolBlock,
 } from "@/lib/chat";
 
-const HF_PRO_URL = "https://huggingface.co/pro";
-const HF_PRICING_URL = "https://huggingface.co/docs/inference-providers/pricing";
-const PRODUCTION_CHAT_URL = "https://paperswithcode.co/chat";
-
-export interface HfBillingGuidance {
-  account_type: "Free" | "PRO" | "Organization" | null;
-  bill_to: string | null;
-  usage_url: string;
-}
 
 const Caret: React.FC = () => <span className="chat-caret" />;
 
@@ -346,37 +338,64 @@ const useEditorTextarea = (text: string) => {
   return { textareaRef, resize };
 };
 
-const PlainUserEditor: React.FC<UserEditorProps> = ({ id, text, paperSelection, editNotice, onCancel, onResend, onResendDraft }) => {
-  const [value, setValue] = React.useState(text);
-  const [selection, setSelection] = React.useState(paperSelection);
+/** Escape cancels; Enter sends unless composing or adding a newline. */
+const editorKeyDown = (
+  event: React.KeyboardEvent<HTMLTextAreaElement>,
+  onCancel: (() => void) | undefined,
+  resend: () => void,
+) => {
+  if (event.key === "Escape") { event.preventDefault(); onCancel?.(); }
+  else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); resend(); }
+};
+
+const EditorActions: React.FC<{
+  editNotice?: string;
+  canSend: boolean;
+  onCancel?: () => void;
+  onSend: () => void;
+}> = ({ editNotice, canSend, onCancel, onSend }) => <>
+  {editNotice && <div className="chat-inline-editor-notice">{editNotice}</div>}
+  <div className="chat-inline-editor-actions">
+    <button type="button" onClick={onCancel}>Cancel</button>
+    <button type="button" className="chat-inline-editor-send" disabled={!canSend} onClick={onSend}>Send</button>
+  </div>
+</>;
+
+/** Submits an edited draft once; a refused draft can be sent again. */
+const useEditorSubmit = (
+  valid: boolean,
+  draft: () => ChatDraft,
+  { onResend, onResendDraft }: Pick<UserEditorProps, "onResend" | "onResendDraft">,
+) => {
   const [submitting, setSubmitting] = React.useState(false);
-  const { textareaRef, resize } = useEditorTextarea(text);
-  React.useLayoutEffect(resize, [resize, value]);
-  const valid = Boolean(value.trim()) && value.length <= 8_000;
   const resend = () => {
     if (!valid || submitting) return;
     setSubmitting(true);
-    const accepted = onResendDraft?.({
-      text: value,
-      paperMentions: [],
-      ...(selection ? { paperSelection: selection } : {}),
-    }) ?? onResend?.(value) ?? false;
+    const next = draft();
+    const accepted = onResendDraft?.(next) ?? onResend?.(next.text) ?? false;
     if (!accepted) setSubmitting(false);
   };
+  return { resend, canSend: valid && !submitting };
+};
+
+/** The editor without paper mentions, which needs no search client. */
+const PlainUserEditor: React.FC<UserEditorProps> = ({ id, text, paperSelection, editNotice, onCancel, onResend, onResendDraft }) => {
+  const [value, setValue] = React.useState(text);
+  const [selection, setSelection] = React.useState(paperSelection);
+  const { textareaRef, resize } = useEditorTextarea(text);
+  React.useLayoutEffect(resize, [resize, value]);
+  const { resend, canSend } = useEditorSubmit(
+    Boolean(value.trim()) && value.length <= 8_000,
+    () => ({ text: value, paperMentions: [], ...(selection ? { paperSelection: selection } : {}) }),
+    { onResend, onResendDraft },
+  );
   return <div className="chat-msg chat-msg-user chat-msg-user-editing" data-message-id={id}>
     <div className="chat-inline-editor">
       {selection && <PaperSelectionCard selection={selection} editable onRemove={() => setSelection(undefined)} />}
       <textarea ref={textareaRef} className="chat-inline-editor-textarea" aria-label="Edit message" value={value} maxLength={8_000}
         onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") { event.preventDefault(); onCancel?.(); }
-          else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); resend(); }
-        }} />
-      {editNotice && <div className="chat-inline-editor-notice">{editNotice}</div>}
-      <div className="chat-inline-editor-actions">
-        <button type="button" onClick={onCancel}>Cancel</button>
-        <button type="button" className="chat-inline-editor-send" disabled={!valid || submitting} onClick={resend}>Send</button>
-      </div>
+        onKeyDown={(event) => editorKeyDown(event, onCancel, resend)} />
+      <EditorActions editNotice={editNotice} canSend={canSend} onCancel={onCancel} onSend={resend} />
     </div>
   </div>;
 };
@@ -389,18 +408,15 @@ const MentionUserEditor: React.FC<UserEditorProps & { paperMentions: PaperMentio
     paperMentions,
     ...(paperSelection ? { paperSelection } : {}),
   });
-  const [submitting, setSubmitting] = React.useState(false);
   const [scrollTop, setScrollTop] = React.useState(0);
   const { textareaRef, resize } = useEditorTextarea(text);
   const editor = usePaperMentions({ draft: value, onChange: setValue, enabled, textareaRef });
   React.useLayoutEffect(resize, [resize, value.text]);
-  const valid = Boolean(value.text.trim()) && value.text.length <= 8_000 && (enabled || value.paperMentions.length === 0);
-  const resend = () => {
-    if (!valid || submitting) return;
-    setSubmitting(true);
-    const accepted = onResendDraft?.(value) ?? onResend?.(value.text) ?? false;
-    if (!accepted) setSubmitting(false);
-  };
+  const { resend, canSend } = useEditorSubmit(
+    Boolean(value.text.trim()) && value.text.length <= 8_000 && (enabled || value.paperMentions.length === 0),
+    () => value,
+    { onResend, onResendDraft },
+  );
   return <div className="chat-msg chat-msg-user chat-msg-user-editing" data-message-id={id}>
     <div className="chat-inline-editor">
       {value.paperSelection && (
@@ -421,17 +437,12 @@ const MentionUserEditor: React.FC<UserEditorProps & { paperMentions: PaperMentio
           onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
           onKeyDown={(event) => {
             if (editor.keyDown(event)) return;
-            if (event.key === "Escape") { event.preventDefault(); onCancel?.(); }
-            else if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); resend(); }
+            editorKeyDown(event, onCancel, resend);
           }} />
         <PaperMentionPicker open={editor.open} query={editor.query} results={editor.results} activeIndex={editor.activeIndex} loading={editor.loading} error={editor.error} onSelect={editor.select} id={editor.pickerId} optionIdPrefix={editor.optionIdPrefix} />
       </div>
       {!enabled && value.paperMentions.length > 0 && <div className="chat-inline-editor-notice" role="status">Paper mentions are currently disabled. Remove them before sending.</div>}
-      {editNotice && <div className="chat-inline-editor-notice">{editNotice}</div>}
-      <div className="chat-inline-editor-actions">
-        <button type="button" onClick={onCancel}>Cancel</button>
-        <button type="button" className="chat-inline-editor-send" disabled={!valid || submitting} onClick={resend}>Send</button>
-      </div>
+      <EditorActions editNotice={editNotice} canSend={canSend} onCancel={onCancel} onSend={resend} />
     </div>
   </div>;
 };
@@ -524,6 +535,26 @@ export const UserMessage: React.FC<{
   );
 };
 
+const citationMaps = (snapshot: ChatCitation[]) => ({
+  citations: Object.fromEntries(
+    snapshot
+      .filter((citation) => (
+        citation.kind === "catalog_paper"
+        || citation.kind === "paper"
+        || (!citation.kind && citation.route_id)
+      ) && citation.route_id)
+      .map((citation) => [citation.route_id as string, citation]),
+  ),
+  webCitations: Object.fromEntries(
+    snapshot
+      .filter((citation) => (
+        citation.kind === "external_source"
+        || citation.kind === "web"
+      ) && citation.url)
+      .map((citation) => [citation.url as string, citation]),
+  ),
+});
+
 export const AssistantMessage: React.FC<{
   msg: ChatMessageType;
   papers: Record<string, ChatPaperHit>;
@@ -537,64 +568,20 @@ export const AssistantMessage: React.FC<{
   openRouterFallbackEnabled?: boolean;
   feedbackEnabled?: boolean;
 }> = ({ msg, papers, onToggleBlock, onRetryCompaction, onRetryWithLuna, onArchiveOldChats, onArchiveOldestChats, archivePending = null, hfBilling = null, openRouterFallbackEnabled = false, feedbackEnabled = false }) => {
-  const [feedback, setFeedback] = React.useState<boolean | null>(null);
-  const [feedbackPending, setFeedbackPending] = React.useState(false);
-  const [feedbackError, setFeedbackError] = React.useState(false);
-  const [feedbackComposerOpen, setFeedbackComposerOpen] = React.useState(false);
-  const [feedbackComment, setFeedbackComment] = React.useState("");
-  const feedbackTextareaRef = React.useRef<HTMLTextAreaElement>(null);
-  const feedbackPanelId = `chat-feedback-panel-${msg.id}`;
   const canRate = feedbackEnabled
     && !msg.streaming
     && !msg.error
     && Boolean(msg.blocks?.some((block) => block.kind === "answer" && block.text.trim()));
-
-  React.useEffect(() => {
-    if (feedbackComposerOpen) feedbackTextareaRef.current?.focus();
-  }, [feedbackComposerOpen]);
-
-  const submitFeedback = async (value: boolean, comment?: string) => {
-    if (feedbackPending) return;
-    setFeedbackPending(true);
-    setFeedbackError(false);
-    try {
-      if (comment === undefined) await chatApi.reportFeedback(msg.id, value);
-      else await chatApi.reportFeedback(msg.id, value, comment);
-      setFeedback(value);
-      setFeedbackComposerOpen(false);
-      setFeedbackComment("");
-    } catch {
-      setFeedbackError(true);
-    } finally {
-      setFeedbackPending(false);
-    }
-  };
 
   return (
   <div className="chat-msg chat-msg-assistant">
     <div className="chat-msg-blocks">
       {msg.blocks?.map((b, i) => {
         const key = `${msg.id}-${i}`;
-        const citationSnapshot =
+        const { citations, webCitations } = citationMaps(
           "citations" in b && b.citations !== undefined
             ? b.citations
-            : msg.citations ?? [];
-        const citations = Object.fromEntries(
-          citationSnapshot
-            .filter((citation) => (
-              citation.kind === "catalog_paper"
-              || citation.kind === "paper"
-              || (!citation.kind && citation.route_id)
-            ) && citation.route_id)
-            .map((citation) => [citation.route_id as string, citation]),
-        );
-        const webCitations = Object.fromEntries(
-          citationSnapshot
-            .filter((citation) => (
-              citation.kind === "external_source"
-              || citation.kind === "web"
-            ) && citation.url)
-            .map((citation) => [citation.url as string, citation]),
+            : msg.citations ?? [],
         );
         if (b.kind === "reasoning") {
           return (
@@ -634,69 +621,16 @@ export const AssistantMessage: React.FC<{
           </span>
         </div>
       )}
-      {msg.error && <div className="chat-error">
-        {msg.blocks?.some((block) => block.kind === "answer" && block.text.trim()) && <strong>Incomplete—response interrupted. </strong>}
-        {["context_too_large", "provider_error", "persistence_error"].includes(msg.errorCode ?? "") && onRetryCompaction && <button type="button" onClick={onRetryCompaction}>Retry</button>}
-        <span>{msg.errorCode === "chat_disabled_interrupted"
-          ? "Chat was disabled while this response was running. The partial response is saved. Please try again later."
-          : msg.errorCode === "chat_session_quota_exceeded"
-          ? msg.error
-          : `The assistant hit an error: ${msg.error}`}</span>
-        {["hf_inference_billing_required", "hf_inference_credential_expired"].includes(msg.errorCode ?? "") && (
-          <a href="/settings">
-            Re-sign in with Hugging Face
-          </a>
-        )}
-        {msg.errorCode === "hf_inference_billing_exhausted" && <>
-          {onRetryWithLuna && <button type="button" onClick={onRetryWithLuna}>Retry with GPT-6 Luna</button>}
-          {hfBilling?.account_type === "Free" && !hfBilling.bill_to
-            ? <a href={HF_PRO_URL} target="_blank" rel="noreferrer">
-                Upgrade to Hugging Face PRO — $9/month for 20× more included credits
-              </a>
-            : <a href={hfBilling?.usage_url ?? "/settings"} target={hfBilling ? "_blank" : undefined} rel={hfBilling ? "noreferrer" : undefined}>
-                Review Hugging Face usage and billing
-              </a>}
-          <a href={HF_PRICING_URL} target="_blank" rel="noreferrer">
-            Inference Providers pricing and billing details
-          </a>
-        </>}
-        {msg.errorCode === "hf_sponsored_unavailable" && onRetryWithLuna && (
-          <button type="button" onClick={onRetryWithLuna}>Retry with GPT-6 Luna</button>
-        )}
-        {msg.errorCode === "openrouter_monthly_budget_exhausted" && <>
-          {openRouterFallbackEnabled
-            ? <span>This response started on the shared allowance. Your connected OpenRouter key will be used when you explicitly retry.</span>
-            : <a href="/settings#openrouter-byok">Connect your own OpenRouter key</a>}
-          <span>Or select a Hugging Face-backed model and explicitly retry.</span>
-        </>}
-        {msg.errorCode === "openrouter_staging_funding_disabled" && (
-          <a href={PRODUCTION_CHAT_URL}>Continue on paperswithcode.co</a>
-        )}
-        {msg.errorCode === "openrouter_unavailable" && <>
-          <a href="/settings#openrouter-byok">Bring your own key in Settings</a>
-          <a href="https://github.com/huggingface/paperswithcode-feedback" target="_blank" rel="noreferrer">File an issue</a>
-        </>}
-        {msg.errorCode === "openrouter_byok_billing_error" && (
-          <a href="https://openrouter.ai/settings/credits" target="_blank" rel="noreferrer">Review OpenRouter billing</a>
-        )}
-        {["openrouter_byok_credential_invalid", "openrouter_byok_rate_limit"].includes(msg.errorCode ?? "") && (
-          <a href="/settings#openrouter-byok">Review OpenRouter settings</a>
-        )}
-        {msg.errorCode === "chat_session_quota_exceeded" && (onArchiveOldChats || onArchiveOldestChats) && (
-          <span className="chat-error-actions">
-            {onArchiveOldChats && (
-              <button type="button" disabled={archivePending !== null} onClick={onArchiveOldChats}>
-                {archivePending === "old" ? "Archiving…" : "Archive chats older than 30 days"}
-              </button>
-            )}
-            {onArchiveOldestChats && (
-              <button type="button" disabled={archivePending !== null} onClick={onArchiveOldestChats}>
-                {archivePending === "oldest" ? "Archiving…" : "Archive oldest 50 chats"}
-              </button>
-            )}
-          </span>
-        )}
-      </div>}
+      {msg.error && <AssistantError
+        msg={{ ...msg, error: msg.error }}
+        onRetryCompaction={onRetryCompaction}
+        onRetryWithLuna={onRetryWithLuna}
+        onArchiveOldChats={onArchiveOldChats}
+        onArchiveOldestChats={onArchiveOldestChats}
+        archivePending={archivePending}
+        hfBilling={hfBilling}
+        openRouterFallbackEnabled={openRouterFallbackEnabled}
+      />}
       {!msg.streaming && msg.finishReason && !["success", "scope_blocked"].includes(msg.finishReason) && (
         <div className="chat-finish-note">
           {["tool_limit", "max_turns"].includes(msg.finishReason)
@@ -704,84 +638,7 @@ export const AssistantMessage: React.FC<{
             : `The assistant stopped early (${msg.finishReason.replace(/_/g, " ")}).`}
         </div>
       )}
-      {canRate && (
-        <div className="chat-feedback" aria-label="Rate this response">
-          <span className="chat-feedback-label">
-            {feedback === null ? "Was this helpful?" : "Thanks for your feedback"}
-          </span>
-          <button
-            type="button"
-            className={`chat-feedback-action${feedback === true ? " chat-feedback-action-selected" : ""}`}
-            aria-label="Helpful response"
-            aria-pressed={feedback === true}
-            disabled={feedbackPending}
-            onClick={() => {
-              setFeedbackComposerOpen(false);
-              void submitFeedback(true);
-            }}
-          >
-            <ThumbsUp aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className={`chat-feedback-action${feedback === false ? " chat-feedback-action-selected" : ""}`}
-            aria-label="Unhelpful response"
-            aria-pressed={feedback === false}
-            aria-expanded={feedbackComposerOpen}
-            aria-controls={feedbackPanelId}
-            disabled={feedbackPending}
-            onClick={() => {
-              setFeedbackError(false);
-              setFeedbackComposerOpen(true);
-            }}
-          >
-            <ThumbsDown aria-hidden="true" />
-          </button>
-          {feedbackError && <span className="chat-feedback-error" role="status">Couldn’t send feedback.</span>}
-        </div>
-      )}
-      {canRate && feedbackComposerOpen && (
-        <div className="chat-feedback-panel" id={feedbackPanelId} role="group" aria-labelledby={`${feedbackPanelId}-title`}>
-          <div className="chat-feedback-panel-title" id={`${feedbackPanelId}-title`}>Additional feedback</div>
-          <label className="chat-feedback-panel-label" htmlFor={`${feedbackPanelId}-comment`}>
-            Tell us what went wrong (optional)
-          </label>
-          <textarea
-            ref={feedbackTextareaRef}
-            id={`${feedbackPanelId}-comment`}
-            className="chat-feedback-comment"
-            value={feedbackComment}
-            maxLength={500}
-            rows={4}
-            disabled={feedbackPending}
-            onChange={(event) => setFeedbackComment(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setFeedbackComposerOpen(false);
-              }
-            }}
-          />
-          <div className="chat-feedback-panel-actions">
-            <button
-              type="button"
-              className="chat-feedback-skip"
-              disabled={feedbackPending}
-              onClick={() => void submitFeedback(false)}
-            >
-              Skip
-            </button>
-            <button
-              type="button"
-              className="chat-feedback-submit"
-              disabled={feedbackPending}
-              onClick={() => void submitFeedback(false, feedbackComment.trim() || undefined)}
-            >
-              {feedbackPending ? "Submitting…" : "Submit"}
-            </button>
-          </div>
-        </div>
-      )}
+      {canRate && <FeedbackControls messageId={msg.id} />}
     </div>
   </div>
   );

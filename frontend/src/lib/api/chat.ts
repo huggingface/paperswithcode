@@ -1,34 +1,37 @@
 import type {
   ChatAutocompleteVocabulary,
   ChatAvailability,
-  ChatSandboxSpendStatus,
-  ChatWebSearchBudgetStatus,
-  OpenRouterCredentialStatus,
-  OpenAIUsageStatus,
-  OpenRouterUsageStatus,
-} from "./chat.types";
-export type * from "./chat.types";
-import type { ChatBrowserLatencyUpdate, ReasoningEffort } from "../chat";
-import type {
+  ChatBrowserLatencyUpdate,
   ChatModelChoice,
+  ChatSandboxSpendStatus,
   ChatSession,
   ChatSessionDetail,
   ChatShareDetail,
   ChatShareSummary,
-} from "../chatSessions";
-import type { ApiRequest } from "../apiTransport";
+  ChatStreamRequest,
+  ChatWebSearchBudgetStatus,
+  InferenceBillingStatus,
+  LatexPaperArtifactDescriptor,
+  LatexPaperHistoryPage,
+  LatexPaperManifest,
+  OpenAIUsageStatus,
+  OpenRouterCredentialStatus,
+  OpenRouterUsageStatus,
+  PosterManifest,
+  PosterVersionSummary,
+  ReasoningEffort,
+} from "./chat.types";
+import { withStaleAuthNotification } from "../apiAuth";
+import { ApiError, type ApiRequest } from "../apiTransport";
+import { apiUrl } from "../apiUrl";
 import { apiFetch, apiRequest } from "./request";
+import {
+  chatArtifactFilePath as filePath,
+  chatArtifactPath as artifactPath,
+  chatArtifactVersionPath as versionPath,
+} from "../chatArtifactUrls";
 
-export interface InferenceBillingStatus {
-  connected: boolean;
-  account_type: string | null;
-  monthly_credits_usd: number | null;
-  pay_as_you_go: boolean;
-  usage_url: string;
-  token_url: string;
-  bill_to: string | null;
-  organizations: Array<{ name: string; display_name: string }>;
-}
+export type * from "./chat.types";
 
 export class ChatApi {
   constructor(private readonly request: ApiRequest) {}
@@ -187,7 +190,94 @@ export class ChatApi {
     });
   }
 
-  stream(body: unknown, signal?: AbortSignal): Promise<Response> {
+  /* ---------- Private chat artifacts ---------- */
+
+  getPosterVersions(artifactId: string): Promise<PosterVersionSummary[]> {
+    return this.request<{ versions: PosterVersionSummary[] }>(artifactPath(artifactId), { cache: "no-store" })
+      .then((artifact) => artifact.versions);
+  }
+
+  getPosterManifest(artifactId: string, versionId: string): Promise<PosterManifest> {
+    return this.request(`${versionPath(artifactId, versionId)}/manifest`, { cache: "no-store" });
+  }
+
+  getLatexPaper(artifactId: string): Promise<LatexPaperArtifactDescriptor> {
+    return this.request(artifactPath(artifactId), { cache: "no-store" });
+  }
+
+  getLatexPaperHistory(artifactId: string, cursor: string | null): Promise<LatexPaperHistoryPage> {
+    const query = new URLSearchParams({ limit: "20" });
+    if (cursor) query.set("cursor", cursor);
+    return this.request(`${artifactPath(artifactId)}/versions?${query}`, { cache: "no-store" });
+  }
+
+  getLatexPaperManifest(artifactId: string, versionId: string): Promise<LatexPaperManifest> {
+    return this.request(`${versionPath(artifactId, versionId)}/manifest`, { cache: "no-store" });
+  }
+
+  /** One source file as text. */
+  getArtifactSource(artifactId: string, versionId: string, path: string): Promise<string> {
+    return withStaleAuthNotification(async () => {
+      const response = await apiFetch(`${versionPath(artifactId, versionId)}/source/${filePath(path)}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new ApiError(response, await response.text());
+      return response.text();
+    });
+  }
+
+  saveLatexPaper(
+    artifactId: string,
+    expectedParentVersionId: string,
+    files: Record<string, string>,
+  ): Promise<LatexPaperArtifactDescriptor> {
+    return this.request(`${artifactPath(artifactId)}/save-compile`, {
+      method: "POST",
+      body: JSON.stringify({
+        expected_parent_version_id: expectedParentVersionId,
+        files: Object.entries(files).map(([path, content]) => ({ path, content })),
+      }),
+    });
+  }
+
+  restoreLatexPaperVersion(
+    artifactId: string,
+    sourceVersionId: string,
+    expectedParentVersionId: string,
+  ): Promise<LatexPaperArtifactDescriptor> {
+    return this.request(`${artifactPath(artifactId)}/versions/restore`, {
+      method: "POST",
+      body: JSON.stringify({ source_version_id: sourceVersionId, expected_parent_version_id: expectedParentVersionId }),
+    });
+  }
+
+  uploadLatexPaperFigure(
+    artifactId: string,
+    expectedParentVersionId: string,
+    figure: File,
+  ): Promise<LatexPaperArtifactDescriptor> {
+    const form = new FormData();
+    form.set("expected_parent_version_id", expectedParentVersionId);
+    form.set("path", `figures/${figure.name}`);
+    form.set("figure", figure);
+    return withStaleAuthNotification(async () => {
+      // The shared transport sets a JSON Content-Type on every request, which
+      // would drop the multipart boundary; the browser must set it for FormData.
+      const response = await fetch(apiUrl(`/api/v1${artifactPath(artifactId)}/figures`), {
+        method: "POST",
+        credentials: "include",
+        body: form,
+      });
+      if (!response.ok) throw new ApiError(response, await response.text());
+      return response.json() as Promise<LatexPaperArtifactDescriptor>;
+    });
+  }
+
+  refreshLatexPaperCompile(artifactId: string): Promise<LatexPaperArtifactDescriptor> {
+    return this.request(`${artifactPath(artifactId)}/refresh-compile`, { method: "POST" });
+  }
+
+  stream(body: ChatStreamRequest, signal?: AbortSignal): Promise<Response> {
     return apiFetch("/chat/stream", {
       method: "POST",
       headers: { Accept: "text/event-stream" },

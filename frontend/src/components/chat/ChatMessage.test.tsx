@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -263,6 +263,12 @@ describe("UserMessage", () => {
   });
 });
 
+const QueryWrapper = ({ children }: { children: ReactNode }) => (
+  <QueryClientProvider client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}>
+    {children}
+  </QueryClientProvider>
+);
+
 describe("AssistantMessage", () => {
   const renderAssistant = (
     msg: ChatMessageType,
@@ -346,6 +352,7 @@ describe("AssistantMessage", () => {
         onToggleBlock={() => undefined}
         feedbackEnabled
       />,
+      { wrapper: QueryWrapper },
     );
 
     await user.click(screen.getByRole("button", { name: "Helpful response" }));
@@ -369,6 +376,7 @@ describe("AssistantMessage", () => {
         onToggleBlock={() => undefined}
         feedbackEnabled
       />,
+      { wrapper: QueryWrapper },
     );
 
     await user.click(screen.getByRole("button", { name: "Unhelpful response" }));
@@ -402,6 +410,7 @@ describe("AssistantMessage", () => {
         onToggleBlock={() => undefined}
         feedbackEnabled
       />,
+      { wrapper: QueryWrapper },
     );
 
     await user.click(screen.getByRole("button", { name: "Unhelpful response" }));
