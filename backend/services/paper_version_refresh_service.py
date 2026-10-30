@@ -181,6 +181,8 @@ class PaperVersionRefreshService:
             target.is_latest_version = True
             self.db.add(target)
             if hf_paper is not None:
+                # The sync queries the new links and latest version.
+                self.db.flush()
                 AuthorHfProfileSyncService(self.db).sync_paper(hf_paper)
             self.db.commit()
             self.db.refresh(target)

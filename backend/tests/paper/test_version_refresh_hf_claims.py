@@ -56,7 +56,8 @@ def _session(tmp_path, author_name: str):
         Metric,
     )
     Base.metadata.create_all(bind=engine, tables=[m.__table__ for m in models])
-    db = sessionmaker(bind=engine)()
+    # Like production sessions, which never autoflush.
+    db = sessionmaker(bind=engine, autoflush=False)()
     db.add_all(
         [
             Paper(
