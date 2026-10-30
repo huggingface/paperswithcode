@@ -470,6 +470,14 @@ describe("CronDashboard refresh controls", () => {
     await waitFor(() => expect(spend).toHaveBeenCalledTimes(2));
     expect(cronStatus).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(refreshButton).toBeEnabled());
+
+    // A forced refresh is not absorbed by an auto refresh already in flight.
+    cronStatus.mockImplementationOnce(() => new Promise(() => {}));
+    void queryClient.refetchQueries({ queryKey: ["admin", "cronStatus"] });
+    await waitFor(() => expect(cronStatus).toHaveBeenCalledTimes(3));
+    fireEvent.click(refreshButton);
+    await waitFor(() => expect(cronStatus).toHaveBeenCalledTimes(4));
+    expect(cronStatus).toHaveBeenLastCalledWith(true);
     queryClient.clear();
   });
 });

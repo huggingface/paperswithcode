@@ -153,7 +153,9 @@ export function CodexPaperJobDialog({
   const job = jobId ? jobQuery.data : undefined;
   const waiting = job?.status === "awaiting_markdown";
   const active = job ? ACTIVE_STATUSES.has(job.status) : false;
-  const error = (start.error ?? cancel.error ?? jobQuery.error)?.message;
+  // A job written by start/cancel supersedes an earlier failed poll.
+  const pollError = jobQuery.errorUpdatedAt > jobQuery.dataUpdatedAt ? jobQuery.error : null;
+  const error = (start.error ?? cancel.error ?? pollError)?.message;
 
   useEffect(() => {
     if (job?.status !== "completed" || completedJobId.current === job.id) return;

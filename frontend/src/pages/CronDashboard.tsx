@@ -159,11 +159,13 @@ const CronDashboard = () => {
   // Force a fresh CRON snapshot and refetch every other admin panel on screen.
   const refresh = useMutation({
     mutationFn: () => Promise.all([
-      queryClient.fetchQuery({
-        queryKey: CRON_STATUS_KEY,
-        queryFn: () => operationsApi.getCronStatus(true),
-        retry: false,
-      }),
+      // Cancel an in-flight auto refresh so it cannot absorb the forced fetch.
+      queryClient.cancelQueries({ queryKey: CRON_STATUS_KEY }).then(() =>
+        queryClient.fetchQuery({
+          queryKey: CRON_STATUS_KEY,
+          queryFn: () => operationsApi.getCronStatus(true),
+          retry: false,
+        })),
       queryClient.refetchQueries({
         queryKey: ["admin"],
         type: "active",
