@@ -282,6 +282,27 @@
   font-size: 13px;
 }
 .topic-dialog-chip svg { width: 13px; height: 13px; }
+.topic-dialog-chip-image {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: -2px 1px -2px 0;
+  box-sizing: border-box;
+  border: 1px solid var(--hairline);
+  background: #fff;
+}
+.topic-dialog-chip-image.is-author { border-radius: 50%; object-fit: cover; }
+.topic-dialog-chip-image.is-organization { border-radius: 5px; padding: 2px; object-fit: contain; }
+.topic-dialog-chip-image.is-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-soft);
+  background: var(--hairline);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
 .topic-dialog-chip[aria-pressed="false"]:hover:not(:disabled) { border-color: var(--accent-text); color: var(--accent-text); }
 .topic-dialog-chip[aria-pressed="true"] { border-color: var(--accent-text); color: #fff; background: var(--accent-text); }
 .topic-dialog-chip[aria-pressed="true"]:hover:not(:disabled) { opacity: 0.85; }

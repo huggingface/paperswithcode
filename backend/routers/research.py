@@ -3,7 +3,7 @@
 from datetime import date, datetime, timezone
 import binascii
 import json
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from backend.database.connection import get_database_session
 from backend.models.database.research import ResearchSubscription
 from backend.models.research import (
     FollowKind,
+    FollowSuggestions,
     FollowView,
     ResearchFeedEntry,
     SubscriptionUpdate,
@@ -30,6 +31,12 @@ from backend.services.research_delivery_service import (
 from backend.utils.auth import require_user
 
 router = APIRouter(tags=["research"])
+
+
+@router.get("/research/follow-suggestions", response_model=FollowSuggestions)
+def follow_suggestions(response: Response, db: Session = Depends(get_database_session)):
+    response.headers["Cache-Control"] = "public, max-age=300"
+    return service.suggestions(db)
 
 
 @router.get("/me/follows", response_model=list[FollowView])

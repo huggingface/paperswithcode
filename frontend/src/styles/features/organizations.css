@@ -214,6 +214,22 @@
     height: 64px;
   }
 }
+.author-photo {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  max-width: 120px;
+  margin: 0;
+}
+.author-photo figcaption {
+  color: var(--ink-soft);
+  font-size: 10px;
+  line-height: 1.3;
+  text-align: center;
+}
+.author-photo figcaption a { color: inherit; }
 .author-hero .feed-subtitle a {
   color: var(--accent-text);
   text-decoration: none;

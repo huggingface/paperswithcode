@@ -8,6 +8,18 @@ export interface ResearchFollow {
   name: string;
   url: string;
   created_at: string;
+  /** An author's face or an organization's logo. */
+  image_url?: string | null;
+}
+export interface FollowSuggestion {
+  entity_id: number;
+  name: string;
+  url: string;
+  image_url: string | null;
+}
+export interface FollowSuggestions {
+  authors: FollowSuggestion[];
+  organizations: FollowSuggestion[];
 }
 export interface ResearchTopicSuggestion {
   kind: FollowKind;
@@ -50,6 +62,7 @@ export interface FollowingFilters {
 }
 export const researchApi = {
   follows: () => apiRequest<ResearchFollow[]>('/me/follows'),
+  followSuggestions: () => apiRequest<FollowSuggestions>('/research/follow-suggestions'),
   setFollow: (kind: FollowKind, id: string | number, enabled: boolean) =>
     apiRequest<void>(`/me/follows/${kind}/${id}`, { method: enabled ? 'PUT' : 'DELETE' }),
   following: (offset = 0, filters: FollowingFilters = {}) => {

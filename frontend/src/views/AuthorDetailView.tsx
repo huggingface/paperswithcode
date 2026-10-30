@@ -91,7 +91,25 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
       <header className="author-hero">
         <div className="organizations-eyebrow">AUTHOR</div>
         <div className="author-hero-title">
-          {author.data?.hf_username && (
+          {author.data?.photo ? (
+            <figure className="author-photo">
+              <img className="author-avatar-base author-avatar" src={author.data.photo.url} alt="" />
+              <figcaption>
+                Photo:{" "}
+                <a href={author.data.photo.source_url} target="_blank" rel="noopener noreferrer">
+                  {author.data.photo.credit}
+                </a>
+                {", "}
+                {author.data.photo.license_url ? (
+                  <a href={author.data.photo.license_url} target="_blank" rel="noopener noreferrer">
+                    {author.data.photo.license}
+                  </a>
+                ) : (
+                  author.data.photo.license
+                )}
+              </figcaption>
+            </figure>
+          ) : author.data?.hf_username && (
             <AuthorAvatar
               className="author-avatar"
               url={author.data.hf_avatar_url}

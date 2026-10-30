@@ -15,15 +15,18 @@ from backend.models.database import (
     Author as DBAuthor,
     AuthorAlias,
     AuthorGoogleScholarProfile,
+    AuthorPhoto,
     Organization,
     Paper as DBPaper,
     PaperAuthor,
 )
 from backend.models.papers import (
     Author,
+    AuthorPhotoInfo,
     Authors,
     Papers,
 )
+from backend.utils.author_photos import author_photo_path
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
 
 
@@ -204,6 +207,13 @@ class AuthorService:
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve authors: {str(e)}")
 
+    def get_photo(self, author_id: int, sha256: str) -> AuthorPhoto:
+        """Return the stored photo when the URL names its current version."""
+        photo = self.db.get(AuthorPhoto, author_id)
+        if photo is None or photo.sha256 != sha256:
+            raise PaperNotFoundError("Photo not available")
+        return photo
+
     def get_author_by_id(self, author_id: str) -> Author:
         """
         Get a specific author by ID.
@@ -240,6 +250,8 @@ class AuthorService:
                 .scalar()
             )
 
+            photo = self.db.get(AuthorPhoto, db_author.id)
+
             author_dict = {
                 "id": str(db_author.id),
                 "full_name": db_author.name,
@@ -249,6 +261,14 @@ class AuthorService:
                 "hf_status": db_author.hf_status,
                 "hf_is_pro": db_author.hf_is_pro or False,
                 "google_scholar_id": scholar_id,
+                "photo": photo
+                and AuthorPhotoInfo(
+                    url=author_photo_path(photo),
+                    credit=photo.credit,
+                    license=photo.license,
+                    license_url=photo.license_url,
+                    source_url=photo.source_url,
+                ),
                 "paper_count": paper_count or 0,
                 "organization_slug": organization_slug_for_author_name(
                     self.db, db_author.name

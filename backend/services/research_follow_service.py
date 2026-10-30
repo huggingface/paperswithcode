@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     Author,
+    AuthorPhoto,
     Dataset,
     Method,
     Organization,
@@ -23,9 +24,17 @@ from backend.models.database.research import (
     ResearchSubscription,
     ResearchSuppression,
 )
-from backend.models.research import FollowView, ResearchEntry, ResearchFeedEntry
+from backend.models.research import (
+    FollowSuggestion,
+    FollowSuggestions,
+    FollowView,
+    ResearchEntry,
+    ResearchFeedEntry,
+)
 from backend.models.database.research import ResearchTopic
+from backend.services.organization_service import OrganizationService
 from backend.services.research_topic_service import THRESHOLD as TOPIC_THRESHOLD
+from backend.utils.author_photos import author_image_url
 
 ENTITIES = {
     "task": (Task, "tasks"),
@@ -35,6 +44,65 @@ ENTITIES = {
     "organization": (Organization, "orgs"),
 }
 
+# Well-known researchers; author popularity has no data signal, since citation
+# ranks favour coauthors of a few huge papers.
+POPULAR_AUTHOR_IDS = (266, 4049, 13379, 25, 264)
+# Enough organizations to still fill five chips after hiding followed ones.
+POPULAR_ORGANIZATION_LIMIT = 10
+
+
+def _image_urls(db: Session, kind: str, entities: list) -> dict[int, str | None]:
+    """Faces for authors and logos for organizations; other kinds have none."""
+    if kind == "author":
+        ids = [author.id for author in entities]
+        photos = {
+            photo.author_id: photo
+            for photo in db.scalars(
+                select(AuthorPhoto).where(AuthorPhoto.author_id.in_(ids))
+            )
+        }
+        return {a.id: author_image_url(a, photos.get(a.id)) for a in entities}
+    if kind == "organization":
+        return {org.id: OrganizationService.logo_url(org) for org in entities}
+    return {}
+
+
+def _entity_url(kind: str, entity) -> str:
+    return f"/{ENTITIES[kind][1]}/{getattr(entity, 'slug', None) or entity.id}"
+
+
+def suggestions(db: Session) -> FollowSuggestions:
+    authors = {
+        a.id: a
+        for a in db.scalars(select(Author).where(Author.id.in_(POPULAR_AUTHOR_IDS)))
+    }
+    ordered_authors = [authors[i] for i in POPULAR_AUTHOR_IDS if i in authors]
+    # The directory's curated order puts the best-known labs first.
+    organizations = db.scalars(
+        select(Organization)
+        .where(Organization.display_order.is_not(None))
+        .order_by(Organization.display_order, Organization.id)
+        .limit(POPULAR_ORGANIZATION_LIMIT)
+    ).all()
+    groups = {}
+    for kind, entities in (
+        ("author", ordered_authors),
+        ("organization", organizations),
+    ):
+        images = _image_urls(db, kind, entities)
+        groups[kind] = [
+            FollowSuggestion(
+                entity_id=entity.id,
+                name=entity.name,
+                url=_entity_url(kind, entity),
+                image_url=images.get(entity.id),
+            )
+            for entity in entities
+        ]
+    return FollowSuggestions(
+        authors=groups["author"], organizations=groups["organization"]
+    )
+
 
 def follows(db: Session, subject: str) -> list[FollowView]:
     rows = db.scalars(
@@ -43,7 +111,7 @@ def follows(db: Session, subject: str) -> list[FollowView]:
         .order_by(ResearchFollow.kind, ResearchFollow.entity_id)
     ).all()
     result = []
-    for kind, (model, route) in ENTITIES.items():
+    for kind, (model, _route) in ENTITIES.items():
         group = [row for row in rows if row.kind == kind]
         entities = (
             {
@@ -55,17 +123,18 @@ def follows(db: Session, subject: str) -> list[FollowView]:
             if group
             else {}
         )
+        images = _image_urls(db, kind, list(entities.values()))
         for row in group:
             entity = entities.get(row.entity_id)
             if entity:
-                slug = getattr(entity, "slug", None) or entity.id
                 result.append(
                     FollowView(
                         kind=kind,
                         entity_id=row.entity_id,
                         name=entity.name,
-                        url=f"/{route}/{slug}",
+                        url=_entity_url(kind, entity),
                         created_at=row.created_at,
+                        image_url=images.get(entity.id),
                     )
                 )
     return result

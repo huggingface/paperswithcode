@@ -18,6 +18,7 @@ from backend.models.database import (
     Base,
     Author as DBAuthor,
     AuthorGoogleScholarProfile,
+    AuthorPhoto,
     Organization,
     Paper as DBPaper,
     PaperAuthor,
@@ -224,6 +225,94 @@ def test_author_detail_includes_verified_google_scholar_id(client, sample_author
 
     assert client.get("/api/v1/authors/2").json()["google_scholar_id"] == "VoxU11IAAAAJ"
     assert client.get("/api/v1/authors/1").json()["google_scholar_id"] is None
+
+
+def test_author_photo_is_served_with_its_credit(client, sample_authors):
+    db = TestingSessionLocal()
+    db.add(
+        AuthorPhoto(
+            author_id=2,
+            image_data=b"jpeg-bytes",
+            mime_type="image/jpeg",
+            sha256="abc123",
+            source_url="https://commons.wikimedia.org/wiki/File:Jane.jpg",
+            credit="A Photographer",
+            license="CC BY 4.0",
+            license_url="https://creativecommons.org/licenses/by/4.0",
+        )
+    )
+    db.commit()
+    db.close()
+
+    photo = client.get("/api/v1/authors/2").json()["photo"]
+    assert photo["url"] == "/api/v1/authors/2/photo/abc123.jpg"
+    assert (photo["credit"], photo["license"]) == ("A Photographer", "CC BY 4.0")
+    assert client.get("/api/v1/authors/1").json()["photo"] is None
+
+    response = client.get(photo["url"])
+    assert response.content == b"jpeg-bytes"
+    assert response.headers["content-type"] == "image/jpeg"
+    assert "immutable" in response.headers["cache-control"]
+    # A stale digest or another format is not this photo.
+    assert client.get("/api/v1/authors/2/photo/old.jpg").status_code == 404
+    assert client.get("/api/v1/authors/2/photo/abc123.png").status_code == 404
+    assert client.get("/api/v1/authors/1/photo/abc123.jpg").status_code == 404
+
+
+def test_follow_suggestions_carry_faces_and_logos(client):
+    db = TestingSessionLocal()
+    db.add_all(
+        [
+            DBAuthor(id=266, name="Yann LeCun"),
+            # A default HF avatar is no face.
+            DBAuthor(
+                id=25,
+                name="Yoshua Bengio",
+                hf_username="bengio",
+                hf_avatar_url="https://huggingface.co/avatars/default.svg",
+            ),
+            DBAuthor(
+                id=264,
+                name="Kaiming He",
+                hf_username="kaiming",
+                hf_avatar_url="https://cdn-avatars.huggingface.co/kaiming.png",
+            ),
+            AuthorPhoto(
+                author_id=266,
+                image_data=b"x",
+                mime_type="image/jpeg",
+                sha256="d1",
+                source_url="https://commons.wikimedia.org/wiki/File:LeCun.jpg",
+                credit="Someone",
+                license="CC BY-SA 2.0",
+            ),
+            Organization(id=1, name="Microsoft", slug="microsoft", display_order=1),
+            Organization(
+                id=3,
+                name="NVIDIA",
+                slug="nvidia",
+                display_order=3,
+                logo_mime_type="image/png",
+                logo_sha256="e2",
+            ),
+            Organization(id=8, name="Unranked Lab", slug="unranked"),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    response = client.get("/api/v1/research/follow-suggestions")
+    body = response.json()
+    assert [(a["entity_id"], a["image_url"]) for a in body["authors"]] == [
+        (266, "/api/v1/authors/266/photo/d1.jpg"),
+        (25, None),
+        (264, "https://cdn-avatars.huggingface.co/kaiming.png"),
+    ]
+    assert [(o["name"], o["url"], o["image_url"]) for o in body["organizations"]] == [
+        ("Microsoft", "/orgs/microsoft", None),
+        ("NVIDIA", "/orgs/nvidia", "/api/v1/organizations/nvidia/logo/e2.png"),
+    ]
+    assert response.headers["cache-control"] == "public, max-age=300"
 
 
 def test_hf_author_lists_unclaimed_papers(client, sample_authors):

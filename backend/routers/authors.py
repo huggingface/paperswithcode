@@ -6,7 +6,7 @@ original PapersWithCode API specification with enhancements.
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, Response
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
@@ -17,6 +17,7 @@ from backend.models.papers import (
 )
 from backend.services.author_service import AuthorService
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
+from backend.utils.organization_logos import organization_logo_extension
 
 router = APIRouter()
 
@@ -139,6 +140,33 @@ def get_author(
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.get(
+    "/authors/{author_id}/photo/{sha256}.{extension}",
+    summary="Serve a self-hosted author photo",
+)
+def get_author_photo(
+    author_id: int,
+    sha256: str,
+    extension: str,
+    db: Session = Depends(get_database_session),
+):
+    try:
+        photo = AuthorService(db).get_photo(author_id, sha256)
+    except PaperNotFoundError:
+        raise HTTPException(status_code=404, detail="Photo not available")
+    if organization_logo_extension(photo.mime_type) != extension:
+        raise HTTPException(status_code=404, detail="Photo format not available")
+    # The URL names the photo's digest, so its bytes never change.
+    return Response(
+        content=photo.image_data,
+        media_type=photo.mime_type,
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "CDN-Cache-Control": "public, max-age=31536000, immutable",
+        },
+    )
 
 
 @router.get(

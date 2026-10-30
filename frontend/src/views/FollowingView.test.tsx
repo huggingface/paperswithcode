@@ -29,7 +29,11 @@ beforeEach(() => {
   vi.stubEnv('VITE_CHAT_ENABLED', '0');
   vi.spyOn(catalogApi, 'topTasks').mockResolvedValue([]);
   vi.spyOn(catalogApi, 'trendingTasks').mockResolvedValue({ results: [], recent_days: 7, baseline_days: 30 });
-  vi.spyOn(catalogApi, 'organizationIndex').mockResolvedValue({ count: 0, results: [] } as never);
+  vi.spyOn(researchApi, 'followSuggestions').mockResolvedValue({ authors: [
+    { entity_id: 266, name: 'Yann LeCun', url: '/authors/266', image_url: '/api/v1/authors/266/photo/abc.jpg' },
+    { entity_id: 25, name: 'Yoshua Bengio', url: '/authors/25', image_url: null },
+    { entity_id: 264, name: 'Kaiming He', url: '/authors/264', image_url: null },
+  ], organizations: [] });
   vi.spyOn(catalogApi, 'trendingMethods').mockResolvedValue({ results: [], recent_days: 7, baseline_days: 30 } as never);
   vi.spyOn(papersApi, 'list').mockResolvedValue({ count: 0, results: [], next_page: null, previous_page: null });
   vi.spyOn(researchApi, 'follows').mockResolvedValue([
@@ -185,11 +189,12 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   vi.mocked(catalogApi.trendingMethods).mockResolvedValue({ results: [
     { id: '9', name: 'LoRA', slug: 'lora' },
   ], recent_days: 7, baseline_days: 30 } as never);
-  vi.mocked(catalogApi.organizationIndex).mockResolvedValue({ count: 3, results: [
-    { id: '1', name: 'Microsoft', slug: 'microsoft', display_order: 1 },
-    { id: '3', name: 'NVIDIA', slug: 'nvidia', display_order: 3 },
-    { id: '8', name: 'Unranked Lab', slug: 'unranked', display_order: null },
-  ] } as never);
+  vi.mocked(researchApi.followSuggestions).mockResolvedValue({ authors: [
+    { entity_id: 266, name: 'Yann LeCun', url: '/authors/266', image_url: '/api/v1/authors/266/photo/abc.jpg' },
+  ], organizations: [
+    { entity_id: 1, name: 'Microsoft', url: '/orgs/microsoft', image_url: null },
+    { entity_id: 3, name: 'NVIDIA', url: '/orgs/nvidia', image_url: '/api/v1/organizations/nvidia/logo/abc.png' },
+  ] });
   vi.spyOn(researchApi, 'setTopic').mockResolvedValue({ ...topic, status: 'pending' });
   vi.spyOn(researchApi, 'setFollow').mockResolvedValue(undefined);
   renderFeed();
@@ -202,8 +207,9 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   expect(task).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(await screen.findByRole('button', { name: 'LoRA' }));
   fireEvent.click(screen.getByRole('button', { name: 'Yann LeCun' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'NVIDIA' }));
-  expect(screen.queryByRole('button', { name: 'Unranked Lab' })).not.toBeInTheDocument();
+  const nvidia = await screen.findByRole('button', { name: 'NVIDIA' });
+  expect(nvidia.querySelector('img')).toHaveAttribute('src', '/api/v1/organizations/nvidia/logo/abc.png');
+  fireEvent.click(nvidia);
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
   fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
   await waitFor(() => expect(researchApi.setTopic).toHaveBeenCalledWith('real-time video generation'));
@@ -221,7 +227,10 @@ it('shows the top five per group with links to browse the rest', async () => {
   renderFeed();
   expect(await screen.findByRole('button', { name: 'Task 5' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Task 6' })).not.toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Kaiming He' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Yann LeCun' }).querySelector('img'))
+    .toHaveAttribute('src', '/api/v1/authors/266/photo/abc.jpg');
+  // Authors without a photo show their initials.
+  expect(screen.getByRole('button', { name: 'Kaiming He' })).toHaveTextContent('KH');
   expect(screen.queryByRole('button', { name: 'Fei-Fei Li' })).not.toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Browse tasks' })).toHaveAttribute('href', '/tasks');
 });

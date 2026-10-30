@@ -575,6 +575,16 @@ class AuthorLink(BaseModel):
     )
 
 
+class AuthorPhotoInfo(BaseModel):
+    """A self-hosted author portrait and the credit its license requires."""
+
+    url: str = Field(..., description="Versioned photo URL")
+    credit: str = Field(..., description="Photographer or rights holder")
+    license: str = Field(..., description="License name, e.g. CC BY 4.0")
+    license_url: Optional[str] = Field(None, description="License deed URL")
+    source_url: str = Field(..., description="Page the photo was taken from")
+
+
 class Author(BaseModel):
     """
     Author object matching the original PapersWithCode API specification.
@@ -601,6 +611,13 @@ class Author(BaseModel):
         description=(
             "Google Scholar user ID, set only when the profile lists the author's "
             "papers (author detail only)"
+        ),
+    )
+    photo: Optional[AuthorPhotoInfo] = Field(
+        None,
+        description=(
+            "Freely licensed portrait for authors without an HF avatar "
+            "(author detail only)"
         ),
     )
 

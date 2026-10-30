@@ -117,6 +117,40 @@ describe("AuthorDetailView", () => {
     );
   });
 
+  it("shows a stored photo with the credit its license requires", async () => {
+    vi.spyOn(papersApi, "getAuthor").mockResolvedValue({
+      id: "25",
+      full_name: "Yoshua Bengio",
+      photo: {
+        url: "/api/v1/authors/25/photo/abc.jpg",
+        credit: "Maryse Boyce",
+        license: "CC BY 4.0",
+        license_url: "https://creativecommons.org/licenses/by/4.0",
+        source_url: "https://commons.wikimedia.org/wiki/File:Yoshua_Bengio_2019_cropped.jpg",
+      },
+      paper_count: 1,
+    });
+    vi.spyOn(papersApi, "list").mockResolvedValue({
+      count: 1,
+      next_page: null,
+      previous_page: null,
+      results: [paper],
+    });
+
+    const { container } = renderAuthor();
+
+    expect(await screen.findByRole("heading", { name: "Yoshua Bengio" })).toBeInTheDocument();
+    expect(container.querySelector(".author-avatar")).toHaveAttribute("src", "/api/v1/authors/25/photo/abc.jpg");
+    expect(screen.getByRole("link", { name: "Maryse Boyce" })).toHaveAttribute(
+      "href",
+      "https://commons.wikimedia.org/wiki/File:Yoshua_Bengio_2019_cropped.jpg",
+    );
+    expect(screen.getByRole("link", { name: "CC BY 4.0" })).toHaveAttribute(
+      "href",
+      "https://creativecommons.org/licenses/by/4.0",
+    );
+  });
+
   it("sends an organization listed as an author to its organization page", async () => {
     vi.spyOn(papersApi, "getAuthor").mockResolvedValue({
       id: "7",

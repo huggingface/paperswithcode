@@ -15,6 +15,7 @@ from sqlalchemy import (
     Index,
     Integer,
     JSON,
+    LargeBinary,
     Numeric,
     String,
     Text,
@@ -326,6 +327,29 @@ class AuthorGoogleScholarProfile(Base):
         ARRAY(BigInteger).with_variant(JSON(), "sqlite"), nullable=False
     )
     verified_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class AuthorPhoto(Base):
+    """A freely licensed portrait for an author without an uploaded HF avatar."""
+
+    __tablename__ = "author_photos"
+
+    author_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("authors.id", ondelete="CASCADE"), primary_key=True
+    )
+    image_data: Mapped[bytes] = mapped_column(
+        LargeBinary, nullable=False, deferred=True
+    )
+    mime_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Licenses like CC BY require crediting the photographer next to the photo.
+    source_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    credit: Mapped[str] = mapped_column(String(500), nullable=False)
+    license: Mapped[str] = mapped_column(String(100), nullable=False)
+    license_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 

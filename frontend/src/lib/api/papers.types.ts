@@ -225,8 +225,18 @@ export interface Author {
   hf_avatar_url?: string | null;
   /** Set only when the Scholar profile was verified against the author's papers. */
   google_scholar_id?: string | null;
+  /** Freely licensed portrait, shown with its credit, for authors without an HF avatar. */
+  photo?: AuthorPhoto | null;
   organization_slug?: string | null;
   paper_count: number;
+}
+
+export interface AuthorPhoto {
+  url: string;
+  credit: string;
+  license: string;
+  license_url: string | null;
+  source_url: string;
 }
 
 interface AuthorLink {

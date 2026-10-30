@@ -15,6 +15,22 @@ class FollowView(BaseModel):
     name: str
     url: str
     created_at: datetime
+    # An author's face or an organization's logo, for follow chips.
+    image_url: str | None = None
+
+
+class FollowSuggestion(BaseModel):
+    entity_id: int
+    name: str
+    url: str
+    image_url: str | None = None
+
+
+class FollowSuggestions(BaseModel):
+    """Popular authors and organizations offered when building a research feed."""
+
+    authors: list[FollowSuggestion]
+    organizations: list[FollowSuggestion]
 
 
 class TopicUpdate(BaseModel):
