@@ -1724,8 +1724,11 @@ class CodexPaperJobService:
         if completion_error is None and not accepted_apply:
             completion_error = "Remote job completed without an accepted apply."
         thumbnail_status = getattr(row, "thumbnail_status", None)
+        # Scheduled runners are told not to wait for the thumbnail the VPS
+        # queued at enqueue time, so its state says nothing about the stage.
         thumbnail_blocks_completion = (
             getattr(row, "kind", None) != "resolve-model-paper"
+            and getattr(row, "trigger", "admin") not in SCHEDULED_TRIGGERS
         )
         if (
             completion_error is None
