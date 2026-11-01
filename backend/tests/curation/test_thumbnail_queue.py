@@ -371,6 +371,25 @@ def test_resolution_completion_does_not_wait_for_thumbnail_worker(monkeypatch):
     assert row.thumbnail_status == "queued"
 
 
+def test_scheduled_completion_does_not_wait_for_queued_thumbnail(monkeypatch):
+    service = CodexPaperJobService()
+    monkeypatch.setattr(service, "dispatch_next", lambda *_args: None)
+    monkeypatch.setattr(service, "_evaluate_scheduled_health", lambda *_args: None)
+    for thumbnail_status in ("queued", "processing", "failed"):
+        row = _queue_row(trigger="hf-daily-cron", thumbnail_status=thumbnail_status)
+
+        result = service.complete(
+            _Database(row=row),
+            row,
+            report="done",
+            error=None,
+            settings=get_settings(),
+        )
+
+        assert result.status == "completed"
+        assert row.thumbnail_status == thumbnail_status
+
+
 def test_legitimate_no_changes_submission_can_complete(monkeypatch):
     service = CodexPaperJobService()
     monkeypatch.setattr(service, "dispatch_next", lambda *_args: None)
