@@ -141,10 +141,10 @@ def test_parse_and_fetch_default_public_leaderboard_contract():
             assert url == SPACE_APP_URL
             assert verbose is False
 
-        def predict(self, version, search, languages, datasets, clone, *, api_name):
+        def predict(self, *, version, search, langs, datasets, clone, api_name):
             assert version == "latest"
             assert search == ""
-            assert languages == [DEFAULT_LANGUAGE]
+            assert langs == [DEFAULT_LANGUAGE]
             assert datasets == DEFAULT_DATASETS
             assert clone is False
             assert api_name == "/partial"
@@ -218,7 +218,7 @@ def test_fetches_english_and_every_available_language_view():
             assert verbose is False
             self.calls = 0
 
-        def predict(self, version, search, languages, datasets, clone, *, api_name):
+        def predict(self, *, version, search, langs, datasets, clone, api_name):
             assert (version, search, datasets, clone, api_name) == (
                 "latest",
                 "",
@@ -228,9 +228,9 @@ def test_fetches_english_and_every_available_language_view():
             )
             self.calls += 1
             if self.calls == 1:
-                assert languages == [DEFAULT_LANGUAGE]
+                assert langs == [DEFAULT_LANGUAGE]
                 return _response(_payload(), language_choices=choices)
-            assert languages == all_languages
+            assert langs == all_languages
             return _response(
                 multilingual_payload,
                 language=all_languages,
@@ -264,10 +264,13 @@ def test_parser_rejects_truncated_or_noncontiguous_data():
 
 def test_parser_accepts_complete_ranked_subset_from_multilingual_view():
     payload = _payload()
-    for row in payload["data"][5:]:
+    for row in payload["data"][5:8]:
         row[0] = None
         row[2] = None
         row[3] = None
+    # Partial-coverage rows keep their averages but have no rank.
+    for row in payload["data"][8:]:
+        row[0] = None
 
     entries = parse_open_tts_leaderboard(payload, min_ranked_entries=5)
 
