@@ -246,12 +246,9 @@ def parse_open_tts_leaderboard(
     for row in rows:
         if not isinstance(row, list) or len(row) != len(headers):
             raise ValueError("Open TTS response contains a malformed row")
-        aggregate_values = (
-            row[indexes["Rank"]],
-            row[indexes["Average WER ⬇️"]],
-            row[indexes["Average RTFx ⬆️"]],
-        )
-        if aggregate_values == (None, None, None):
+        # Upstream leaves Rank empty for models without full coverage of the
+        # selected languages/datasets; their averages are not comparable.
+        if row[indexes["Rank"]] is None:
             continue
         model_cell = str(row[indexes["Model"]])
         link = _MODEL_LINK_RE.fullmatch(model_cell.strip())
@@ -306,11 +303,11 @@ def fetch_open_tts_leaderboard(
     """Fetch English scores across Seed-TTS and CV3-Eval without cloning."""
     client = client_factory(SPACE_APP_URL, verbose=False)
     payload = client.predict(
-        "latest",
-        "",
-        [DEFAULT_LANGUAGE],
-        DEFAULT_DATASETS,
-        False,
+        version="latest",
+        search="",
+        langs=[DEFAULT_LANGUAGE],
+        datasets=DEFAULT_DATASETS,
+        clone=False,
         api_name="/partial",
     )
     return parse_open_tts_leaderboard(_default_table_value(payload))
@@ -322,21 +319,21 @@ def fetch_open_tts_leaderboards(
     """Fetch the English and all-available-language comparable views."""
     client = client_factory(SPACE_APP_URL, verbose=False)
     english_payload = client.predict(
-        "latest",
-        "",
-        [DEFAULT_LANGUAGE],
-        DEFAULT_DATASETS,
-        False,
+        version="latest",
+        search="",
+        langs=[DEFAULT_LANGUAGE],
+        datasets=DEFAULT_DATASETS,
+        clone=False,
         api_name="/partial",
     )
     languages = _available_languages(english_payload)
     english = parse_open_tts_leaderboard(_default_table_value(english_payload))
     all_language_payload = client.predict(
-        "latest",
-        "",
-        languages,
-        DEFAULT_DATASETS,
-        False,
+        version="latest",
+        search="",
+        langs=languages,
+        datasets=DEFAULT_DATASETS,
+        clone=False,
         api_name="/partial",
     )
     all_languages = parse_open_tts_leaderboard(
