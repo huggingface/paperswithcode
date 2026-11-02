@@ -24,6 +24,7 @@ from backend.services.three_d_arena_sync_service import (
     ARENA_SOURCE_URL,
     MANAGED_METHODOLOGY_PREFIX,
     METRIC_NAME,
+    MODEL_PAPER_ARXIV_IDS,
     ArenaEntry,
     ThreeDArenaSyncService,
     fetch_arena_leaderboard,
@@ -366,3 +367,8 @@ def test_sync_deletes_duplicate_leftover_when_canonical_row_exists():
     assert rows[0].metrics == {METRIC_NAME: 1267}
     assert rows[0].external_source_url == ARENA_SOURCE_URL
     assert rows[0].methodology.startswith(MANAGED_METHODOLOGY_PREFIX)
+
+
+def test_unilat3d_variants_resolve_to_the_unilat3d_paper():
+    assert MODEL_PAPER_ARXIV_IDS["UniLat3D-3DGS"] == "2509.25079"
+    assert MODEL_PAPER_ARXIV_IDS["UniLat3D-Mesh"] == "2509.25079"

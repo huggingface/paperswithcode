@@ -72,6 +72,18 @@ class ModelIdentity:
 
 
 _COSMOS_3 = "2606.02800"
+_COSMOS_3_SUPER = ModelIdentity(
+    "Cosmos3-Super",
+    arxiv_id=_COSMOS_3,
+    is_open=True,
+    hf_model_url="https://huggingface.co/nvidia/Cosmos3-Super",
+)
+_COSMOS_3_NANO = ModelIdentity(
+    "Cosmos3-Nano",
+    arxiv_id=_COSMOS_3,
+    is_open=True,
+    hf_model_url="https://huggingface.co/nvidia/Cosmos3-Nano",
+)
 _MAGI_1 = ModelIdentity("MAGI-1 24B", arxiv_id="2505.13211", is_open=True)
 _GEOPHYS = ModelIdentity(
     "MAGI-1 24B + GeoPhys (BoN)", arxiv_id="2606.20707", is_open=True
@@ -102,24 +114,15 @@ MODEL_IDENTITIES: dict[tuple[str, str], ModelIdentity] = {
     ("Magi-1 24B + GeoPhys (BoN) (op)", "i2v"): _GEOPHYS,
     ("Magi-1 24B (op)", "v2v"): _MAGI_1,
     ("Magi-1 24B (op)", "i2v"): _MAGI_1,
-    ("Cosmos3-Super", "v2v"): ModelIdentity(
-        "Cosmos3-Super",
-        arxiv_id=_COSMOS_3,
-        is_open=True,
-        hf_model_url="https://huggingface.co/nvidia/Cosmos3-Super",
-    ),
-    ("Cosmos3-Nano", "v2v"): ModelIdentity(
-        "Cosmos3-Nano",
-        arxiv_id=_COSMOS_3,
-        is_open=True,
-        hf_model_url="https://huggingface.co/nvidia/Cosmos3-Nano",
-    ),
-    ("Cosmos3-Nano", "i2v"): ModelIdentity(
-        "Cosmos3-Nano",
-        arxiv_id=_COSMOS_3,
-        is_open=True,
-        hf_model_url="https://huggingface.co/nvidia/Cosmos3-Nano",
-    ),
+    # NVIDIA's single-generation runs with GPT-6 Astra upsampled prompts; like
+    # the FLUX 3 prompt rows, the prompts change but the model is Cosmos 3.
+    ("Cosmos3-Super + Prompt Upsampling", "v2v"): _COSMOS_3_SUPER,
+    ("Cosmos3-Super + Prompt Upsampling", "i2v"): _COSMOS_3_SUPER,
+    ("Cosmos3-Nano + Prompt Upsampling", "v2v"): _COSMOS_3_NANO,
+    ("Cosmos3-Nano + Prompt Upsampling", "i2v"): _COSMOS_3_NANO,
+    ("Cosmos3-Super", "v2v"): _COSMOS_3_SUPER,
+    ("Cosmos3-Nano", "v2v"): _COSMOS_3_NANO,
+    ("Cosmos3-Nano", "i2v"): _COSMOS_3_NANO,
     ("Cosmos3-Super-Image2Video", "i2v"): ModelIdentity(
         "Cosmos3-Super-Image2Video",
         arxiv_id=_COSMOS_3,

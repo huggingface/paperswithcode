@@ -24,6 +24,7 @@ from backend.services.coarena_sync_service import (
     COARENA_SOURCE_URL,
     MANAGED_METHODOLOGY_PREFIX,
     METRIC_NAME,
+    MODEL_PAPER_IDENTITIES,
     CoArenaEntry,
     CoArenaSyncService,
     fetch_coarena_leaderboard,
@@ -289,3 +290,14 @@ def test_company_still_rejects_malformed_non_null_values(company):
     rows[0]["company"] = company
     with pytest.raises(ValueError, match="invalid company"):
         parse_coarena_leaderboard({"entries": rows})
+
+
+@pytest.mark.parametrize(
+    ("model_id", "source_url"),
+    [
+        ("gpt-6-1-terra", "https://openai.com/index/introducing-gpt-6-1-terra"),
+        ("kimi-k3-1-pro", "https://www.kimi.com/blog/kimi-k3-1-pro"),
+    ],
+)
+def test_reviewed_models_resolve_to_release_pages(model_id, source_url):
+    assert MODEL_PAPER_IDENTITIES[model_id].source_url == source_url

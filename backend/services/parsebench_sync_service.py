@@ -215,6 +215,12 @@ _LIGHTONOCR_3 = external(
     is_open=True,
 )
 
+_GPT_6_1_TERRA = external(
+    "https://openai.com/index/introducing-gpt-6-1-terra",
+    "Introducing GPT-6.1 Terra",
+    "2026-10-26",
+)
+
 _GPT_6_SOL_LUNA = external(
     "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
     "Introducing GPT-6 Sol and Luna",
@@ -232,6 +238,22 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "WeVisDoc-2B": arxiv("2609.20423"),
     "WeVisDoc-4B": arxiv("2609.20423"),
     "OpenAI GPT-6.1 Sol (Reasoning Low)": _GPT_6_1_SOL,
+    "OpenAI GPT-6.1 Terra (Reasoning Medium)": _GPT_6_1_TERRA,
+    "OpenAI GPT-6.1 Terra (Reasoning Low)": _GPT_6_1_TERRA,
+    "OvisOCR3": arxiv("2610.33066"),
+    "Unlimited-OCR-2": arxiv("2610.39308"),
+    "Nemotron-3.5-Parse": external(
+        "https://huggingface.co/nvidia/Nemotron-3.5-Parse",
+        "Nemotron 3.5 Parse",
+        "2026-10-17",
+        is_open=True,
+    ),
+    "MiniCPM-OCR 1.0": external(
+        "https://huggingface.co/openbmb/MiniCPM-OCR-1.0",
+        "MiniCPM-OCR 1.0",
+        "2026-10-21",
+        is_open=True,
+    ),
     "Google Gemini 3.7 Flash (Thinking High)": _GEMINI_3_7_FLASH,
     "Google Gemini 3.7 Flash (Thinking Medium)": _GEMINI_3_7_FLASH,
     "Google Gemini 3.7 Flash (Thinking Low)": _GEMINI_3_7_FLASH,
@@ -498,6 +520,8 @@ EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
         "OpenDataLoader",
         "pdf-inspector",
         "MarkItDown",
+        # API snapshot document-parse-260930; Upstage publishes only a changelog.
+        "Upstage Document Parse 2 (Enhanced)",
     }
 )
 

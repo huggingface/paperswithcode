@@ -223,6 +223,9 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Qwen 3.8 Max": ModelIdentity(
         "Qwen3.8-Max", source_url="https://qwen.ai/blog?id=qwen3.8"
     ),
+    "Qwen 3.8 Max 0902": ModelIdentity(
+        "Qwen3.8-Max", source_url="https://qwen.ai/blog?id=qwen3.8"
+    ),
     "DeepSeek V4 Pro 0813": ModelIdentity(
         "DeepSeek-V4-Pro-0813",
         arxiv_id="2606.19348",

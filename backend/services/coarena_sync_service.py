@@ -71,6 +71,12 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "gpt-6-1-sol": PaperIdentity(
         source_url="https://openai.com/index/introducing-gpt-6-1-sol/", is_open=False
     ),
+    "gpt-6-1-terra": PaperIdentity(
+        source_url="https://openai.com/index/introducing-gpt-6-1-terra", is_open=False
+    ),
+    "kimi-k3-1-pro": PaperIdentity(
+        source_url="https://www.kimi.com/blog/kimi-k3-1-pro", is_open=True
+    ),
     "opus-5-5": PaperIdentity(
         source_url="https://www.anthropic.com/claude-opus-5-5", is_open=False
     ),

@@ -110,6 +110,9 @@ SELECTOR_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "group:anthropic-claude-haiku-5-5": _source(
         "https://www.anthropic.com/claude-haiku-5-5"
     ),
+    "group:anthropic-claude-sonnet-5-5": _source(
+        "https://www.anthropic.com/claude-sonnet-5-5"
+    ),
     "group:anthropic-claude-fable-5-1": _source(
         "https://www.anthropic.com/claude-fable-and-mythos-5-1"
     ),
@@ -131,6 +134,9 @@ SELECTOR_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     ),
     "group:deepseek-v4-1-flash": _arxiv(
         "2609.19969", hf="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash"
+    ),
+    "group:deepseek-v4-1-flash-1017": _arxiv(
+        "2609.19969", hf="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017"
     ),
     "group:zai-glm-5-3-flash": _source(
         "https://z.ai/blog/glm-5.3-flash",
@@ -197,6 +203,14 @@ SELECTOR_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     ),
     "group:deepseek-v4-flash-0731": _arxiv(
         "2606.19348", hf="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731"
+    ),
+    "group:deepseek-v4-pro-0813": _arxiv(
+        "2606.19348", hf="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro-0813"
+    ),
+    "group:alibaba-qwen3-8-27b": _source(
+        "https://huggingface.co/Qwen/Qwen3.8-27B",
+        is_open=True,
+        hf="https://huggingface.co/Qwen/Qwen3.8-27B",
     ),
     "group:xai-grok-4-6": _source("https://x.ai/news/grok-4-6"),
     "group:xai-grok-4-5": _source("https://x.ai/news/grok-4-5"),

@@ -243,6 +243,17 @@ def test_v3_parser_accepts_leaderboard_growth_past_one_hundred_rows():
             "source:https://openai.com/index/introducing-gpt-6-sol-and-luna/",
         ),
         ("deepseek-v4-1-flash", "arxiv:2609.19969"),
+        ("deepseek-v4-1-flash-1017", "arxiv:2609.19969"),
+        ("deepseek-v4-pro-0813", "arxiv:2606.19348"),
+        (
+            "anthropic-claude-sonnet-5-5",
+            "source:https://www.anthropic.com/claude-sonnet-5-5",
+        ),
+        (
+            "alibaba-qwen3-8-27b",
+            "source:https://huggingface.co/Qwen/Qwen3.8-27B",
+        ),
+        ("anthropic-claude-sonnet-5-5-provider-adapter", None),
         ("zai-glm-5-3-flash", "source:https://z.ai/blog/glm-5.3-flash"),
         # Provider-adapter variants stay unmapped until they are reviewed.
         ("openai-gpt-6-astra-provider-adapter", None),

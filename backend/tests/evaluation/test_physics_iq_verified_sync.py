@@ -494,3 +494,11 @@ def test_unconfigured_leaderboard_is_refused():
     session.commit()
     with pytest.raises(RuntimeError, match="not linked"):
         PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(README))
+
+
+@pytest.mark.parametrize("track", ["v2v", "i2v"])
+@pytest.mark.parametrize("model", ["Cosmos3-Super", "Cosmos3-Nano"])
+def test_prompt_upsampling_runs_resolve_to_the_cosmos_3_model(model, track):
+    identity = MODEL_IDENTITIES[(f"{model} + Prompt Upsampling", track)]
+    assert identity.model_name == model
+    assert identity.paper_key == "2606.02800"

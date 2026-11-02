@@ -643,6 +643,13 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             metric="Success Rate",
             identities=IDENTITIES["cybergym"],
             min_selected=20,
+            excluded={
+                "XekRung-1.5-27B-Preview (finetuned from Qwen3.8-27B)": "unreleased preview checkpoint, still being trained",
+                "Basin (basin1-0912-pre-dpo)": "pre-DPO training checkpoint",
+                # The April preview; its 0813 successor is reviewed.
+                "DeepSeek-V4-Pro Preview": "superseded preview checkpoint",
+                "OpenHands-LM-32B": "v0.1 research preview",
+            },
             protocol="All 1,507 Level 1 tasks (vulnerability description plus unpatched codebase), one trial; success requires a PoC that reproduces the target vulnerability. Model-focused runs without the cleaned vulnerable image or test-time memory.",
         ),
         _fetching(CYBERGYM_DATA_URL, parse_cybergym),

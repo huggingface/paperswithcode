@@ -73,6 +73,17 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             source_url="https://www.minimax.io/blog/minimax-m31f",
             is_open=True,
         ),
+        # The open-weight checkpoint, three weeks of RL past the API preview.
+        "Mistral Large 4 OSS": ModelIdentity(
+            "Mistral Large 4",
+            source_url="https://mistral.ai/news/mistral-large-4/",
+            is_open=True,
+            hf_model_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B",
+        ),
+        "Mercury 3": ModelIdentity(
+            "Mercury 3",
+            source_url="https://www.inceptionlabs.ai/blog/introducing-mercury-3",
+        ),
         "Hy4 Preview": ModelIdentity(
             "Hy4 Preview",
             source_url="https://github.com/Tencent-Hunyuan/Hy4-preview/blob/1296fab2674cb5a645ccfe53e9a8dc225dbe69f2/README.md",
@@ -815,6 +826,31 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
         "SWE-Gym-32B": ModelIdentity(
             "SWE-Gym-32B", arxiv_id="2412.21139", is_open=True
+        ),
+        "Feyospace-v1.1 (finetuned from Qwen3.8-27B)": ModelIdentity(
+            "Feyospace-v1.1",
+            source_url="https://huggingface.co/feyospace/feyospace-v1.1-small",
+            is_open=True,
+            hf_model_url="https://huggingface.co/feyospace/feyospace-v1.1-small",
+        ),
+        "GPT-5.5-Cyber": ModelIdentity(
+            "GPT-5.5-Cyber",
+            source_url="https://openai.com/index/daybreak-securing-the-world/",
+        ),
+        # Released only to Project Glasswing partners; a model of its own,
+        # not a preview checkpoint of Claude Mythos 5.
+        "Claude Mythos Preview": ModelIdentity(
+            "Claude Mythos Preview",
+            source_url="https://www.anthropic.com/claude-mythos-preview-system-card",
+        ),
+        "GLM-4.7": ModelIdentity(
+            "GLM-4.7",
+            source_url="https://z.ai/blog/glm-4.7",
+            is_open=True,
+            hf_model_url="https://huggingface.co/zai-org/GLM-4.7",
+        ),
+        "GPT-4.1": ModelIdentity(
+            "GPT-4.1", source_url="https://openai.com/index/gpt-4-1/"
         ),
     },
     "patcheval-verified": {
