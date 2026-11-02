@@ -796,9 +796,9 @@ def test_codex_completion_locks_and_rereads_its_pi_pair():
 
 
 def test_production_pi_image_pins_the_current_runner_pair():
-    from deploy.configure_host_env import production_codex_image_values
+    from deploy.configure_host_env import production_pi_shadow_values
 
-    values = production_codex_image_values()
+    values = production_pi_shadow_values()
     runner_digest = hashlib.sha256(
         Path("jobs/run_paper_curation.py").read_bytes()
         + Path("jobs/run_pi_curation.py").read_bytes()

@@ -710,10 +710,11 @@ Inference Providers" (the agent can read it), billed to
 routing when that provider fails before a proposal. The **Build Pi curator
 image** workflow publishes `jobs/Dockerfile.pi-curator` to the same container
 repository as `pi-runner-<hash>` and prints the digest to pin.
-`production_codex_image_values()` in `deploy/configure_host_env.py` carries the
-Pi image pin, sample rate, pool size, and billing org, so the
-`--production-codex-image-only` update below installs Codex and Pi pins
-together. It never writes the token, which is stored on its own. Apply
+`production_pi_shadow_values()` in `deploy/configure_host_env.py` carries the
+Pi image pin, sample rate, pool size, and billing org for scheduled production
+only (staging stays at rate 0). The `--production-codex-image-only` update
+below installs Codex and Pi pins together. It never writes the token, which is
+stored on its own. Apply
 `backend/database/migrations/add_curation_pi_shadow_runner.sql` before
 deploying a release that maps the new columns.
 
