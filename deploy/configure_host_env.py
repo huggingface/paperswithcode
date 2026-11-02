@@ -1638,6 +1638,15 @@ def production_codex_image_values() -> dict[str, str]:
             "@sha256:3c4c6b16737946f69a0390f3c014ffea5a46be8b7e63633e804c21d3e0046496"
         ),
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",
+        # Shadow-only Pi runs on a stable 20% of daily papers. Their
+        # inference-only PWC_CURATION_PI_HF_TOKEN is stored separately and kept.
+        "PWC_CURATION_PI_JOBS_IMAGE": (
+            f"{OPERATOR.curator_image_repository}:pi-runner-1d2d6f1fda61"
+            "@sha256:383882d977ba6c17fd0d6d18cf5c1f031bdf36b2c55f519130cd41fffaae08d0"
+        ),
+        "PWC_CURATION_PI_SHADOW_SAMPLE_RATE": "0.2",
+        "PWC_CURATION_PI_SHADOW_MAX_ACTIVE": "2",
+        "PWC_CURATION_PI_BILL_TO": "huggingface",
     }
 
 
@@ -2113,7 +2122,7 @@ def main() -> int:
         ]
         for path, lines, group in updates:
             write_env(path, lines, group)
-        print("updated production and CRON Codex image pin")
+        print("updated production and CRON Codex and Pi image pins")
         return 0
     if args.modal_profile and not args.production_chat_seal_only:
         parser.error("--modal-profile requires --production-chat-seal-only")

@@ -84,6 +84,12 @@ def test_production_codex_credentials_are_mapped_without_enabling_base_flags():
         "PWC_CODEX_JOBS_TOKEN": "hf-secret",
         "PWC_CODEX_JOBS_IMAGE": CURATOR_IMAGE,
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",
+        "PWC_CURATION_PI_JOBS_IMAGE": configure_host_env.production_codex_image_values()[
+            "PWC_CURATION_PI_JOBS_IMAGE"
+        ],
+        "PWC_CURATION_PI_SHADOW_SAMPLE_RATE": "0.2",
+        "PWC_CURATION_PI_SHADOW_MAX_ACTIVE": "2",
+        "PWC_CURATION_PI_BILL_TO": "huggingface",
         "PWC_CODEX_JOBS_CLI_VERSION": "0.75.0",
         "PWC_CODEX_JOBS_MODEL": "gpt-6-luna",
         "PWC_CODEX_JOBS_REASONING_EFFORT": "medium",
@@ -224,6 +230,9 @@ def test_production_codex_image_only_updates_no_other_values(
         assert (
             configure_host_env.decoded_value(lines["PWC_CODEX_JOBS_IMAGE_REVISION"])
             == ""
+        )
+        assert "pi-runner-" in configure_host_env.decoded_value(
+            lines["PWC_CURATION_PI_JOBS_IMAGE"]
         )
 
 
