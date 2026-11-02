@@ -415,7 +415,7 @@ it('shows the feed for an account that follows only a topic', async () => {
   expect(await screen.findByText('A paper')).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Build your personal research feed' })).not.toBeInTheDocument();
 });
-it('lists papers shared on X under the trending (X) tab, over the homepage week window', async () => {
+it('lists papers shared on X under the trending (X) tab, over a month window by default', async () => {
   const xTrending = vi.spyOn(papersApi, 'xTrending').mockResolvedValue({ count: 1, results: [paper], next_page: null, previous_page: null } as never);
   renderFeed('/');
   fireEvent.click(await screen.findByRole('button', { name: 'trending (X)' }));
@@ -426,5 +426,6 @@ it('lists papers shared on X under the trending (X) tab, over the homepage week 
   expect(xTrending).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 30, include_resources: true }));
   const { start_date, end_date } = xTrending.mock.calls[0][0]!;
   expect(start_date && end_date && start_date < end_date).toBeTruthy();
+  expect((Date.parse(end_date!) - Date.parse(start_date!)) / 86_400_000).toBeGreaterThan(7);
   expect(researchApi.following).not.toHaveBeenCalled();
 });
