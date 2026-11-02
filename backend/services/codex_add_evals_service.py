@@ -1290,9 +1290,16 @@ class CodexPaperJobService:
 
     @staticmethod
     def _record_pair_diff(db: Session, row: PaperCurationJob) -> None:
-        """Store the comparison on the Pi job once both jobs of a pair are done."""
+        """Store the comparison on the Pi job once both jobs of a pair are done.
+
+        Both completions of a pair serialize on the Pi row: a Pi completion
+        holds it (flushed, so a concurrent Codex completion waits), and a Codex
+        completion locks and re-reads it. Whichever commits second sees both
+        jobs terminal, so concurrent completions cannot both skip the diff.
+        """
         if getattr(row, "runner", "codex") == "pi":
             pi_row = row
+            db.flush()
             codex_row = db.get(PaperCurationJob, row.paired_job_id)
         elif (
             getattr(row, "trigger", "admin") != "hf-daily-cron"
@@ -1309,6 +1316,8 @@ class CodexPaperJobService:
                 )
                 .first()
             )
+            if pi_row is not None:
+                db.refresh(pi_row, with_for_update=True)
         if (
             pi_row is None
             or codex_row is None

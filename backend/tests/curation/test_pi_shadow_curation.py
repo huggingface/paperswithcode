@@ -537,6 +537,9 @@ def test_pair_diff_is_stored_on_the_pi_job_once_both_are_terminal():
     )
 
     class Database:
+        def flush(self):
+            pass
+
         def get(self, _model, key):
             assert key == codex.id
             return codex
@@ -748,3 +751,38 @@ def test_admin_retry_refuses_pi_shadow_jobs():
         response = client.post(f"/api/v1/admin/codex-curation/jobs/{row.id}/retry")
 
     assert response.status_code == 409
+
+
+def test_codex_completion_locks_and_rereads_its_pi_pair():
+    codex = _codex_row(status="completed", proposal={"enrich": {"task_ids": [1]}})
+    for field in ("error", "duration_ms", "input_tokens", "output_tokens", "model"):
+        setattr(codex, field, None)
+    pi = _job(
+        runner="pi",
+        status="running",
+        paired_job_id=codex.id,
+        pair_diff=None,
+        context_snapshot={"paper": {}},
+    )
+    refreshed = []
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return pi
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+        def refresh(self, row, *, with_for_update):
+            # A concurrent Pi completion committed while this one waited.
+            refreshed.append(with_for_update)
+            row.status = "completed"
+
+    CodexPaperJobService._record_pair_diff(Database(), codex)
+
+    assert refreshed == [True]
+    assert pi.pair_diff["enrich"]["task_ids"]["codex_only"] == [1]
