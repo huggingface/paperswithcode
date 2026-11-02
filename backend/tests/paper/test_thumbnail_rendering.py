@@ -289,6 +289,31 @@ def test_approved_external_pdf_host_can_be_rendered(monkeypatch, host: str):
     assert result == b"%PDF-example"
 
 
+def test_huggingface_pdf_follows_cdn_redirect(monkeypatch):
+    service = _external_pdf_service()
+    cdn_url = "https://us.aws.cdn.hf.co/xet-bridge-us/abc?Signature=x"
+    hops = []
+
+    async def fetch_one_hop(url, **kwargs):
+        hops.append(url)
+        if url == cdn_url:
+            return 200, "application/pdf", b"%PDF-example", None
+        return 302, "text/plain", b"", cdn_url
+
+    monkeypatch.setattr(
+        "backend.services.safe_outbound_http_service._fetch_one_hop", fetch_one_hop
+    )
+
+    result = asyncio.run(
+        service._download_external_pdf(
+            "https://huggingface.co/spaces/lab/publications/resolve/main/report.pdf"
+        )
+    )
+
+    assert result == b"%PDF-example"
+    assert hops[-1] == cdn_url
+
+
 @pytest.mark.parametrize(
     ("content_type", "body", "expected"),
     [
