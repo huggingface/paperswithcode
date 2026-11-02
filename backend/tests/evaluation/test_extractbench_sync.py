@@ -355,3 +355,25 @@ def test_discovery_reuses_existing_and_indexes_missing_external_papers(monkeypat
     assert result.papers["https://example.com/model-0"] == 1000
     assert result.papers["https://example.com/new"]
     assert result.indexed_papers == ["https://example.com/new"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "key"),
+    [
+        (
+            "Codex (GPT-6.1 Sol Evidence)",
+            "https://openai.com/index/introducing-gpt-6-1-sol/",
+        ),
+        (
+            "Codex (GPT-6.1 Terra Evidence)",
+            "https://openai.com/index/introducing-gpt-6-1-terra",
+        ),
+    ],
+)
+def test_codex_rows_resolve_to_the_gpt_6_1_releases(provider, key):
+    assert MODEL_PAPER_IDENTITIES[provider].key == key
+
+
+def test_third_party_harness_is_a_reviewed_exclusion():
+    assert "KYNEX (GPT-5.4)" in EXCLUDED_PROVIDERS
+    assert "KYNEX (GPT-5.4)" not in MODEL_PAPER_IDENTITIES

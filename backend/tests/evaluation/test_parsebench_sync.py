@@ -339,3 +339,29 @@ def test_discovery_reuses_existing_and_indexes_missing_external_papers(monkeypat
     assert result.papers["https://example.com/model-0"] == 1000
     assert result.papers["https://example.com/new"]
     assert result.indexed_papers == ["https://example.com/new"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "key"),
+    [
+        (
+            "OpenAI GPT-6.1 Terra (Reasoning Medium)",
+            "https://openai.com/index/introducing-gpt-6-1-terra",
+        ),
+        (
+            "OpenAI GPT-6.1 Terra (Reasoning Low)",
+            "https://openai.com/index/introducing-gpt-6-1-terra",
+        ),
+        ("OvisOCR3", "2610.33066"),
+        ("Unlimited-OCR-2", "2610.39308"),
+        ("Nemotron-3.5-Parse", "https://huggingface.co/nvidia/Nemotron-3.5-Parse"),
+        ("MiniCPM-OCR 1.0", "https://huggingface.co/openbmb/MiniCPM-OCR-1.0"),
+    ],
+)
+def test_new_upstream_providers_resolve_to_their_release(provider, key):
+    assert MODEL_PAPER_IDENTITIES[provider].key == key
+    assert provider not in EXCLUDED_PROVIDERS
+
+
+def test_upstage_api_snapshot_is_a_reviewed_exclusion():
+    assert "Upstage Document Parse 2 (Enhanced)" in EXCLUDED_PROVIDERS

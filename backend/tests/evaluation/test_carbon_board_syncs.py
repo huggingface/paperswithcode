@@ -490,3 +490,43 @@ def test_riemann_fetch_sends_the_surge_browser_user_agent():
     client = httpx.Client(transport=httpx.MockTransport(handler))
     assert len(boards.BOARD_SYNCS["sync_riemann_bench"].fetch(client)) == 44
     assert seen["agent"].startswith("Mozilla/5.0 (X11; Linux x86_64)")
+
+
+@pytest.mark.parametrize(
+    ("name", "model_name"),
+    [
+        ("Feyospace-v1.1 (finetuned from Qwen3.8-27B)", "Feyospace-v1.1"),
+        ("GPT-5.5-Cyber", "GPT-5.5-Cyber"),
+        ("Claude Mythos Preview", "Claude Mythos Preview"),
+        ("GLM-4.7", "GLM-4.7"),
+        ("GPT-4.1", "GPT-4.1"),
+    ],
+)
+def test_cybergym_reviews_released_models(name, model_name):
+    board = boards.BOARD_SYNCS["sync_cybergym"].board
+    assert board.identities[name].model_name == model_name
+    assert name not in board.excluded
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "XekRung-1.5-27B-Preview (finetuned from Qwen3.8-27B)",
+        "Basin (basin1-0912-pre-dpo)",
+        "DeepSeek-V4-Pro Preview",
+        "OpenHands-LM-32B",
+    ],
+)
+def test_cybergym_excludes_preview_and_training_checkpoints(name):
+    board = boards.BOARD_SYNCS["sync_cybergym"].board
+    assert board.excluded[name]
+    assert name not in board.identities
+
+
+def test_vals_index_maps_the_open_mistral_large_4_release():
+    identity = IDENTITIES["vals-index-v2-2"]["Mistral Large 4 OSS"]
+    assert identity.is_open
+    assert identity.source_url == "https://mistral.ai/news/mistral-large-4/"
+    assert IDENTITIES["vals-index-v2-2"]["Mercury 3"].source_url == (
+        "https://www.inceptionlabs.ai/blog/introducing-mercury-3"
+    )

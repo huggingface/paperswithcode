@@ -122,6 +122,16 @@ _GPT_6_SOL_LUNA = external(
     "Introducing GPT-6 Sol and Luna",
     "2026-09-22",
 )
+_GPT_6_1_SOL = external(
+    "https://openai.com/index/introducing-gpt-6-1-sol/",
+    "Introducing GPT-6.1 Sol",
+    "2026-09-29",
+)
+_GPT_6_1_TERRA = external(
+    "https://openai.com/index/introducing-gpt-6-1-terra",
+    "Introducing GPT-6.1 Terra",
+    "2026-10-26",
+)
 _GPT_5_6 = external(
     "https://openai.com/index/gpt-5-6/",
     "GPT-5.6: Frontier intelligence that scales with your ambition",
@@ -153,6 +163,8 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "Claude Code (Opus 5.5 Evidence)": _OPUS_5_5,
     "Claude Code (Opus 4.8 Evidence)": _OPUS_4_8,
     "Claude Code (Opus 4.8)": _OPUS_4_8,
+    "Codex (GPT-6.1 Sol Evidence)": _GPT_6_1_SOL,
+    "Codex (GPT-6.1 Terra Evidence)": _GPT_6_1_TERRA,
     "Codex (GPT-6 Sol Evidence)": _GPT_6_SOL_LUNA,
     "Codex (GPT-6 Luna Evidence)": _GPT_6_SOL_LUNA,
     "Codex (GPT-5.6 Sol Evidence)": _GPT_5_6,
@@ -268,6 +280,8 @@ EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
         "Extend Extract",
         "Extend (Max Context)",
         "Datalab (Accurate + Balanced)",
+        # A third-party extraction harness around GPT-5.4, not a model release.
+        "KYNEX (GPT-5.4)",
     }
 )
 

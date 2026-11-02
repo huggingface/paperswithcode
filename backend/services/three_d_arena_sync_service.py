@@ -55,6 +55,8 @@ MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
     "TripoSR": "2403.02151",
     "LGM": "2402.05054",
     "3DTopia-XL": "2409.12957",
+    "UniLat3D-3DGS": "2509.25079",
+    "UniLat3D-Mesh": "2509.25079",
 }
 
 

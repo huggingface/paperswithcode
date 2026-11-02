@@ -23,6 +23,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services import vals_finance_agent_sync_service as service
+from backend.services.carbon_board_identities import IDENTITIES
 from backend.services.vals_finance_agent_sync_service import (
     MANAGED_METHODOLOGY_PREFIX,
     METRIC_NAME,
@@ -361,3 +362,12 @@ def test_unconfigured_leaderboard_is_refused():
     session.commit()
     with pytest.raises(RuntimeError, match="not linked"):
         ValsFinanceAgentSyncService(session).sync(parse_vals_finance_agent(HTML))
+
+
+def test_dated_qwen_max_checkpoint_reuses_the_vals_index_mapping():
+    finance = MODEL_IDENTITIES["Qwen 3.8 Max 0902"]
+    index = IDENTITIES["vals-index-v2-2"]["Qwen 3.8 Max 0902"]
+    assert (finance.model_name, finance.paper_key) == (
+        index.model_name,
+        index.paper_key,
+    )
