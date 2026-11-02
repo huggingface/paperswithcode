@@ -328,8 +328,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const auth = useOptionalAuth();
   const user = auth?.user;
   const [searchParams, setSearchParams] = useSearchParams();
-  // Following defaults to its 30-day match window; the other tabs default to a week.
-  const dateRange = readHomepagePaperDateRange(searchParams, undefined, following ? "month" : "week");
+  // Following defaults to its 30-day match window and trending on X to a month;
+  // the trending tab defaults to a week.
+  const dateRange = readHomepagePaperDateRange(searchParams, undefined, mode === "trending" ? "week" : "month");
 
   // The home feed only offers trending, following and trending on X; newest
   // and most cited stay on the other paper feeds.
