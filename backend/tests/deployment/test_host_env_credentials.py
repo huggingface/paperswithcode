@@ -84,6 +84,12 @@ def test_production_codex_credentials_are_mapped_without_enabling_base_flags():
         "PWC_CODEX_JOBS_TOKEN": "hf-secret",
         "PWC_CODEX_JOBS_IMAGE": CURATOR_IMAGE,
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",
+        "PWC_CURATION_PI_JOBS_IMAGE": configure_host_env.production_pi_shadow_values()[
+            "PWC_CURATION_PI_JOBS_IMAGE"
+        ],
+        "PWC_CURATION_PI_SHADOW_SAMPLE_RATE": "0.2",
+        "PWC_CURATION_PI_SHADOW_MAX_ACTIVE": "2",
+        "PWC_CURATION_PI_BILL_TO": "huggingface",
         "PWC_CODEX_JOBS_CLI_VERSION": "0.75.0",
         "PWC_CODEX_JOBS_MODEL": "gpt-6-luna",
         "PWC_CODEX_JOBS_REASONING_EFFORT": "medium",
@@ -95,6 +101,18 @@ def test_production_codex_credentials_are_mapped_without_enabling_base_flags():
         "PWC_CODEX_CURATION_TRACE_HF_BUCKET_ID": "nielsr/curate-papers-traces",
         "PWC_CODEX_CURATION_POLICY_VERSION": "hf-daily-v1",
     }
+
+
+def test_unscheduled_codex_values_leave_pi_shadow_off():
+    values = configure_host_env.production_codex_values(
+        {
+            "OPENAI_API_KEY": "OPENAI_API_KEY=openai-secret",
+            "PWC_HF_TOKEN": "PWC_HF_TOKEN=hf-secret",
+        },
+        "nielsr",
+        scheduled=False,
+    )
+    assert not any(key.startswith("PWC_CURATION_PI_") for key in values)
 
 
 def test_production_codex_only_updates_app_and_cron_environments(
@@ -224,6 +242,9 @@ def test_production_codex_image_only_updates_no_other_values(
         assert (
             configure_host_env.decoded_value(lines["PWC_CODEX_JOBS_IMAGE_REVISION"])
             == ""
+        )
+        assert "pi-runner-" in configure_host_env.decoded_value(
+            lines["PWC_CURATION_PI_JOBS_IMAGE"]
         )
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import re
 import sys
 import uuid
 from datetime import date
@@ -792,3 +793,20 @@ def test_codex_completion_locks_and_rereads_its_pi_pair():
 
     assert refreshed == [True]
     assert pi.pair_diff["enrich"]["task_ids"]["codex_only"] == [1]
+
+
+def test_production_pi_image_pins_the_current_runner_pair():
+    from deploy.configure_host_env import production_pi_shadow_values
+
+    values = production_pi_shadow_values()
+    runner_digest = hashlib.sha256(
+        Path("jobs/run_paper_curation.py").read_bytes()
+        + Path("jobs/run_pi_curation.py").read_bytes()
+    ).hexdigest()
+
+    assert re.fullmatch(
+        rf".+:pi-runner-{runner_digest[:12]}@sha256:[0-9a-f]{{64}}",
+        values["PWC_CURATION_PI_JOBS_IMAGE"],
+    )
+    assert float(values["PWC_CURATION_PI_SHADOW_SAMPLE_RATE"]) == 0.2
+    assert "PWC_CURATION_PI_HF_TOKEN" not in values
