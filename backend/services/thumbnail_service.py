@@ -53,6 +53,12 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "ecmlpkdd-storage.s3.eu-central-1.amazonaws.com",
         "github.com",
         "huggingface.co",
+        # huggingface.co/.../resolve/... redirects LFS and Xet files to these CDNs.
+        "cas-bridge.xethub.hf.co",
+        "cdn-lfs.hf.co",
+        "cdn-lfs-eu-1.hf.co",
+        "cdn-lfs-us-1.hf.co",
+        "us.aws.cdn.hf.co",
         "ieeexplore.ieee.org",
         # github.com/<owner>/<repo>/raw/... redirects Git LFS files here.
         "media.githubusercontent.com",
