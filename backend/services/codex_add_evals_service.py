@@ -20,6 +20,7 @@ from pathlib import Path
 from statistics import median
 from typing import Literal
 
+from fastapi.encoders import jsonable_encoder
 from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError
 from pydantic import BaseModel, Field
@@ -40,6 +41,7 @@ from backend.models.database import (
     PaperCurationWorkflow,
     TrendingModelCandidate,
 )
+from backend.services.curation_pair_diff import curation_pair_diff
 from backend.services.curation_priority_service import is_priority_paper
 from backend.services.curation_thumbnail_queue_service import (
     queue_missing_paper_thumbnail,
@@ -111,6 +113,11 @@ ADMIN_MARKDOWN_KINDS = frozenset({"add-evals", "enrich-paper"})
 # Job in the namespace, so read paths share one call per process per interval.
 READ_RECONCILE_INTERVAL_SECONDS = 30.0
 CURATOR_COMMAND = "exec python3 /runner/run_paper_curation.py"
+PI_CURATOR_COMMAND = "exec python3 /runner/run_pi_curation.py"
+# Pi shadow jobs mirror a sampled daily stage on the Pi harness. Their own
+# trigger keeps them out of every scheduled lane, breaker, and token guardrail.
+PI_SHADOW_TRIGGER = "pi-shadow"
+PI_SHADOW_KINDS = frozenset({"enrich-paper", "add-evals"})
 CURATION_DISPATCH_LOCK_ID = 0x50574344
 CURATOR_BOOTSTRAP_PATHS = (
     ".agents/skills/add-evals/SKILL.md",
@@ -191,6 +198,9 @@ class CodexPaperJob(BaseModel):
     output_tokens: int | None = None
     duration_ms: int | None = None
     audit_status: str = "unreviewed"
+    runner: str = "codex"
+    paired_job_id: uuid.UUID | None = None
+    pair_diff: dict | None = None
 
 
 class CodexPaperJobCounts(BaseModel):
@@ -386,6 +396,21 @@ def _release_git_revision(root: Path) -> str | None:
     return revision if isinstance(revision, str) and len(revision) == 40 else None
 
 
+def _runner_fields(settings: Settings, runner: str) -> dict[str, str]:
+    """Model, effort, and harness version recorded on a job of each runner."""
+    if runner == "pi":
+        return {
+            "model": settings.curation_pi_model,
+            "reasoning_effort": settings.curation_pi_thinking,
+            "codex_cli_version": f"pi@{settings.curation_pi_cli_version}",
+        }
+    return {
+        "model": settings.codex_jobs_model,
+        "reasoning_effort": settings.codex_jobs_reasoning_effort,
+        "codex_cli_version": settings.codex_jobs_cli_version,
+    }
+
+
 def _git_revision() -> str:
     configured_revision = os.getenv("PWC_CODEX_JOBS_GIT_SHA", "").strip()
     if configured_revision:
@@ -467,6 +492,9 @@ class CodexPaperJobService:
             output_tokens=getattr(row, "output_tokens", None),
             duration_ms=getattr(row, "duration_ms", None),
             audit_status=getattr(row, "audit_status", "unreviewed"),
+            runner=getattr(row, "runner", "codex"),
+            paired_job_id=getattr(row, "paired_job_id", None),
+            pair_diff=getattr(row, "pair_diff", None),
         )
 
     # Compatibility name for callers and tests that predate the public serializer.
@@ -760,7 +788,10 @@ class CodexPaperJobService:
         while True:
             active = (
                 db.query(PaperCurationJob)
-                .filter(PaperCurationJob.status.in_(ACTIVE_STATUSES))
+                .filter(
+                    PaperCurationJob.status.in_(ACTIVE_STATUSES),
+                    PaperCurationJob.runner == "codex",
+                )
                 .all()
             )
             if len(active) >= settings.codex_jobs_max_active:
@@ -852,7 +883,10 @@ class CodexPaperJobService:
             raise RuntimeError("Canary dispatch is blocked by the token guardrail")
         active = (
             db.query(PaperCurationJob)
-            .filter(PaperCurationJob.status.in_(ACTIVE_STATUSES))
+            .filter(
+                PaperCurationJob.status.in_(ACTIVE_STATUSES),
+                PaperCurationJob.runner == "codex",
+            )
             .all()
         )
         if len(active) >= settings.codex_jobs_max_active:
@@ -1107,10 +1141,15 @@ class CodexPaperJobService:
                     error,
                 )
                 return
+        pi = getattr(row, "runner", "codex") == "pi"
         if (
             not settings.codex_jobs_namespace
             or not settings.codex_jobs_token
-            or not settings.codex_jobs_openai_api_key
+            or not (
+                settings.curation_pi_hf_token
+                if pi
+                else settings.codex_jobs_openai_api_key
+            )
         ):
             row.status = "failed"
             row.error = "Hugging Face Jobs namespace or credentials are not configured."
@@ -1165,6 +1204,131 @@ class CodexPaperJobService:
             self._fail_release_signal(db, row)
             self._advance_workflow(db, row, settings)
             db.commit()
+        if not pi and row.status == "running":
+            self._pair_pi_shadow(db, settings, row)
+
+    @staticmethod
+    def _pi_shadow_sampled(settings: Settings, row: PaperCurationJob) -> bool:
+        """Pick a stable share of papers, so both of a paper's stages pair."""
+        if (
+            settings.curation_pi_shadow_sample_rate <= 0
+            or not settings.curation_pi_jobs_image
+            or not settings.curation_pi_hf_token
+            or row.trigger != "hf-daily-cron"
+            or row.kind not in PI_SHADOW_KINDS
+            or row.paper_id is None
+            or row.retry_of_id is not None
+        ):
+            return False
+        digest = hashlib.sha256(f"pi-shadow:{row.paper_id}".encode()).digest()
+        return (
+            int.from_bytes(digest[:4], "big") / 2**32
+            < settings.curation_pi_shadow_sample_rate
+        )
+
+    def _pair_pi_shadow(
+        self, db: Session, settings: Settings, codex_row: PaperCurationJob
+    ) -> None:
+        """Start a shadow Pi job on the same stage and starting context, if room.
+
+        Pairing is best effort: a full Pi pool skips the pair instead of
+        queueing it, and no Pi failure may hold back the Codex job.
+        """
+        if not self._pi_shadow_sampled(settings, codex_row):
+            return
+        active = (
+            db.query(func.count(PaperCurationJob.id))
+            .filter(
+                PaperCurationJob.runner == "pi",
+                PaperCurationJob.status.in_(ACTIVE_STATUSES),
+            )
+            .scalar()
+        )
+        if active >= settings.curation_pi_shadow_max_active:
+            logger.info("Pi shadow pool full; skipped pairing job %s", codex_row.id)
+            return
+        from backend.services.codex_curation_callback_service import (  # noqa: PLC0415
+            CodexCurationCallbackService,
+        )
+
+        # Context building reads the catalog and the Markdown bucket; none of
+        # that may fail the already launched Codex job or the dispatch loop.
+        try:
+            context = CodexCurationCallbackService(db, job_service=self).context(
+                codex_row, settings
+            )
+            context.pop("job", None)
+            context.pop("retry_feedback", None)
+            row = PaperCurationJob(
+                id=uuid.uuid4(),
+                kind=codex_row.kind,
+                paper_id=codex_row.paper_id,
+                paper_route=codex_row.paper_route,
+                paper_title=codex_row.paper_title,
+                requested_by=PI_SHADOW_TRIGGER,
+                status="queued",
+                trigger=PI_SHADOW_TRIGGER,
+                cohort_date=codex_row.cohort_date,
+                policy_version=codex_row.policy_version,
+                priority=codex_row.priority,
+                repository_sha=codex_row.repository_sha,
+                skill_sha256=codex_row.skill_sha256,
+                bootstrap_bundle_sha256=codex_row.bootstrap_bundle_sha256,
+                validator_version=codex_row.validator_version,
+                runner="pi",
+                paired_job_id=codex_row.id,
+                context_snapshot=jsonable_encoder(context),
+                **_runner_fields(settings, "pi"),
+            )
+            db.add(row)
+            db.commit()
+        except Exception:
+            db.rollback()
+            logger.exception("Pi shadow pairing failed for job %s", codex_row.id)
+            return
+        self._dispatch_row(db, settings, row)
+
+    @staticmethod
+    def _record_pair_diff(db: Session, row: PaperCurationJob) -> None:
+        """Store the comparison on the Pi job once both jobs of a pair are done.
+
+        Both completions of a pair serialize on the Pi row: a Pi completion
+        holds it (flushed, so a concurrent Codex completion waits), and a Codex
+        completion locks and re-reads it. Whichever commits second sees both
+        jobs terminal, so concurrent completions cannot both skip the diff.
+        Sessions do not autoflush, so pending terminal states (a reconcile
+        batch may end both halves) are flushed before the locked re-read.
+        """
+        pi = getattr(row, "runner", "codex") == "pi"
+        if not pi and (
+            getattr(row, "trigger", "admin") != "hf-daily-cron"
+            or row.kind not in PI_SHADOW_KINDS
+        ):
+            return
+        db.flush()
+        if pi:
+            pi_row = row
+            codex_row = db.get(PaperCurationJob, row.paired_job_id)
+        else:
+            codex_row = row
+            pi_row = (
+                db.query(PaperCurationJob)
+                .filter(
+                    PaperCurationJob.paired_job_id == row.id,
+                    PaperCurationJob.runner == "pi",
+                )
+                .first()
+            )
+            if pi_row is not None:
+                db.refresh(pi_row, with_for_update=True)
+        if (
+            pi_row is None
+            or codex_row is None
+            or pi_row.status not in TERMINAL_STATUSES
+            or codex_row.status not in TERMINAL_STATUSES
+        ):
+            return
+        pi_row.pair_diff = curation_pair_diff(codex_row, pi_row)
 
     @staticmethod
     def _bind_active_release(
@@ -1180,9 +1344,10 @@ class CodexPaperJobService:
         row.repository_sha = revision
         row.skill_sha256 = _curator_skill_digest(row.kind)
         row.bootstrap_bundle_sha256 = _store_bootstrap_bundle(db, revision)
-        row.model = settings.codex_jobs_model
-        row.reasoning_effort = settings.codex_jobs_reasoning_effort
-        row.codex_cli_version = settings.codex_jobs_cli_version
+        for field, value in _runner_fields(
+            settings, getattr(row, "runner", "codex")
+        ).items():
+            setattr(row, field, value)
         row.validator_version = "scheduled-policy-v1"
         logger.info(
             "rebound queued curation job %s from release %s to %s",
@@ -1194,6 +1359,12 @@ class CodexPaperJobService:
     def _verified_job_image(
         self, db: Session, settings: Settings, row: PaperCurationJob
     ) -> str:
+        if getattr(row, "runner", "codex") == "pi":
+            if not settings.curation_pi_jobs_image:
+                raise RuntimeError(
+                    "Pi curator image is not configured (PWC_CURATION_PI_JOBS_IMAGE)"
+                )
+            return settings.curation_pi_jobs_image
         if not settings.codex_jobs_image:
             raise RuntimeError("Curator image is not configured (PWC_CODEX_JOBS_IMAGE)")
         image = settings.codex_jobs_image.replace(
@@ -1238,33 +1409,42 @@ class CodexPaperJobService:
         callback_token: str,
         image: str,
     ):
+        runner = getattr(row, "runner", "codex")
+        defaults = _runner_fields(settings, runner)
+        command = PI_CURATOR_COMMAND if runner == "pi" else CURATOR_COMMAND
+        env = {
+            "PWC_CURATION_API_URL": settings.codex_jobs_api_url.rstrip("/"),
+            "PWC_CURATION_JOB_ID": str(row.id),
+            "PWC_CURATION_KIND": row.kind,
+            "PWC_GIT_SHA": row.repository_sha or _git_revision(),
+            "PWC_CURATION_TRIGGER": row.trigger,
+            "PWC_CURATION_MODEL": row.model or defaults["model"],
+            "PWC_CURATION_REASONING_EFFORT": row.reasoning_effort
+            or defaults["reasoning_effort"],
+            "PWC_CODEX_CLI_VERSION": row.codex_cli_version
+            or defaults["codex_cli_version"],
+        }
+        secrets_env = {
+            "PWC_CURATION_JOB_TOKEN": callback_token,
+            "PWC_PAPER_MARKDOWN_HF_TOKEN": settings.hf_token,
+        }
+        if runner == "pi":
+            env["PWC_CURATION_PI_PROVIDER"] = settings.curation_pi_provider
+            env["PWC_CURATION_PI_BILL_TO"] = settings.curation_pi_bill_to
+            secrets_env["HF_TOKEN"] = settings.curation_pi_hf_token
+        else:
+            secrets_env["OPENAI_API_KEY"] = settings.codex_jobs_openai_api_key
+
         def launch():
             return self._api(settings).run_job(
                 image=image,
                 command=[
                     "bash",
                     "-lc",
-                    f"sleep 2; {CURATOR_COMMAND}"
-                    if row.retry_of_id is not None
-                    else CURATOR_COMMAND,
+                    f"sleep 2; {command}" if row.retry_of_id is not None else command,
                 ],
-                env={
-                    "PWC_CURATION_API_URL": settings.codex_jobs_api_url.rstrip("/"),
-                    "PWC_CURATION_JOB_ID": str(row.id),
-                    "PWC_CURATION_KIND": row.kind,
-                    "PWC_GIT_SHA": row.repository_sha or _git_revision(),
-                    "PWC_CURATION_TRIGGER": row.trigger,
-                    "PWC_CURATION_MODEL": row.model or settings.codex_jobs_model,
-                    "PWC_CURATION_REASONING_EFFORT": row.reasoning_effort
-                    or settings.codex_jobs_reasoning_effort,
-                    "PWC_CODEX_CLI_VERSION": row.codex_cli_version
-                    or settings.codex_jobs_cli_version,
-                },
-                secrets={
-                    "PWC_CURATION_JOB_TOKEN": callback_token,
-                    "OPENAI_API_KEY": settings.codex_jobs_openai_api_key,
-                    "PWC_PAPER_MARKDOWN_HF_TOKEN": settings.hf_token,
-                },
+                env=env,
+                secrets=secrets_env,
                 flavor="cpu-basic",
                 timeout=f"{2100 if row.kind == 'add-evals' else 1500}s",
                 labels={
@@ -1282,6 +1462,7 @@ class CodexPaperJobService:
                         else ""
                     ),
                     "kind": row.kind,
+                    "runner": runner,
                 },
                 namespace=settings.codex_jobs_namespace,
             )
@@ -1644,6 +1825,7 @@ class CodexPaperJobService:
         if changed_rows:
             for row in changed_rows:
                 self._advance_workflow(db, row, settings)
+                self._record_pair_diff(db, row)
             db.commit()
             self.dispatch_next(db, settings)
 
@@ -1783,6 +1965,7 @@ class CodexPaperJobService:
             self._fail_release_signal(db, row)
         self._advance_workflow(db, row, settings)
         db.flush()
+        self._record_pair_diff(db, row)
         self._evaluate_scheduled_health(db, row)
         # Queued jobs are the durable dispatch backlog. A dispatch failure after
         # this commit cannot strand a terminal job without its successor.

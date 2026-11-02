@@ -682,6 +682,37 @@ checks the Codex version, PyPDF2 version, full runner SHA-256, exact model, and
 scoped callback-token inheritance. The image is public, so Jobs pull it without
 registry credentials.
 
+### Pi shadow curation
+
+A stable sample of daily papers (`PWC_CURATION_PI_SHADOW_SAMPLE_RATE`, a share
+of paper ids; `0` turns pairing off) also runs each `enrich-paper` and
+`add-evals` stage on the Pi harness with `deepseek-ai/DeepSeek-V4.1-Flash-1017`
+through HF Inference Providers. Right after a sampled Codex stage launches, the
+dispatcher freezes that stage's paper context on a `runner = 'pi'` job
+(`trigger = 'pi-shadow'`, `paired_job_id` → the Codex job) and launches it at
+once. A Pi job is always shadow-only: its proposal is validated against that
+snapshot and stored, never applied. When both jobs are terminal, the Pi row's
+`pair_diff` records tag, link, and evaluation agreement plus status, time, and
+tokens.
+
+Pi jobs use their own pool (`PWC_CURATION_PI_SHADOW_MAX_ACTIVE`, default 2).
+A full pool skips the pair rather than queueing it, so Codex never waits on Pi.
+Pi jobs count toward no Codex slot, health breaker, trace breaker, or token
+guardrail; their weekly outcomes appear under `pi_shadow` in
+`enqueue_hf_daily_paper_curation --status`. Filter the admin curation queue by
+trigger `pi-shadow` to read them.
+
+Pairing also requires a digest-pinned `PWC_CURATION_PI_JOBS_IMAGE` and
+`PWC_CURATION_PI_HF_TOKEN`, a fine-grained token limited to "Make calls to
+Inference Providers" (the agent can read it), billed to
+`PWC_CURATION_PI_BILL_TO` through `X-HF-Bill-To`. The runner prefers the
+`PWC_CURATION_PI_PROVIDER` route (`novita`) and retries once on automatic
+routing when that provider fails before a proposal. The **Build Pi curator
+image** workflow publishes `jobs/Dockerfile.pi-curator` to the same container
+repository as `pi-runner-<hash>` and prints the digest to pin. Apply
+`backend/database/migrations/add_curation_pi_shadow_runner.sql` before
+deploying a release that maps the new columns.
+
 The private application repository credential is never sent to a remote job.
 After authenticating with its paper-scoped callback token, the runner downloads
 only the three curation skills, scoped API helper, proposal schema, and URL

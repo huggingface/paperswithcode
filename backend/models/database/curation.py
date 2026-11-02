@@ -250,6 +250,18 @@ class PaperCurationJob(Base):
     retry_of_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("paper_curation_jobs.id"), nullable=True
     )
+    # "pi" jobs are shadow-only comparison runs paired with a Codex job; they
+    # never apply mutations and stay outside every scheduled lane and breaker.
+    runner: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="codex", server_default="codex"
+    )
+    paired_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("paper_curation_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    context_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    pair_diff: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     audit_status: Mapped[str] = mapped_column(
         String(24), nullable=False, default="unreviewed", server_default="unreviewed"
     )

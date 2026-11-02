@@ -13,7 +13,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from backend.config import Settings, get_settings
-from backend.models.curation import ApplyMutationRequest
+from backend.models.curation import ApplyMutationRequest, CurationLink
 from backend.models.database import (
     BenchmarkCurationCandidate,
     Dataset,
@@ -335,6 +335,16 @@ class CodexCurationCallbackService:
         }
 
     def context(self, row, settings: Settings) -> dict[str, Any]:
+        snapshot = getattr(row, "context_snapshot", None)
+        if snapshot is not None:
+            # A Pi shadow job sees the paper as its Codex pair first saw it.
+            return {
+                **snapshot,
+                "job": self.job_service.serialize(row, settings).model_dump(
+                    mode="json"
+                ),
+                "retry_feedback": self._retry_feedback(row),
+            }
         if getattr(row, "kind", None) in BENCHMARK_GAP_KINDS:
             review = BenchmarkGapReviewService(self.db, settings, self.job_service)
             try:
@@ -1581,8 +1591,67 @@ class CodexCurationCallbackService:
             return None
         return proposal.model_dump(mode="json")
 
-    def _validate_scheduled_policy(
+    def shadow_validation_body(
         self, row, body: ApplyMutationRequest
+    ) -> ApplyMutationRequest:
+        """Rebase a Pi shadow enrichment onto links added after its snapshot.
+
+        The paired Codex job may apply while Pi still runs. Scheduled
+        enrichment must preserve every current link, so without this a Pi
+        proposal built from the frozen snapshot would fail only because Codex
+        was faster. The stored proposal stays Pi's own.
+        """
+        snapshot = (getattr(row, "context_snapshot", None) or {}).get("paper")
+        if snapshot is None or body.enrich is None:
+            return body
+        enrich = body.enrich.model_copy(deep=True)
+        if enrich.task_ids is not None:
+            seen = {item["id"] for item in snapshot.get("tasks") or []}
+            live = {
+                item.task_id
+                for item in self.db.query(PaperTask).filter(
+                    PaperTask.paper_id == row.paper_id
+                )
+            }
+            enrich.task_ids = sorted(set(enrich.task_ids) | (live - seen))
+        if enrich.method_ids is not None:
+            seen = {item["id"] for item in snapshot.get("methods") or []}
+            live = {
+                item.method_id
+                for item in self.db.query(PaperMethod).filter(
+                    PaperMethod.paper_id == row.paper_id
+                )
+            }
+            enrich.method_ids = sorted(set(enrich.method_ids) | (live - seen))
+        paper = self.db.get(Paper, row.paper_id)
+        if enrich.repositories is not None:
+            seen = {item["url"] for item in snapshot.get("repositories") or []}
+            proposed = {link.url for link in enrich.repositories}
+            enrich.repositories += [
+                CurationLink(url=repository.url, is_official=is_official)
+                for repository, is_official in self.db.query(
+                    Repository, PaperRepository.is_official
+                )
+                .join(PaperRepository, PaperRepository.repository_id == Repository.id)
+                .filter(PaperRepository.paper_id == row.paper_id)
+                if repository.url not in seen | proposed
+            ]
+        if enrich.project_pages is not None and paper is not None:
+            seen = {item["url"] for item in snapshot.get("project_pages") or []}
+            proposed = {link.url for link in enrich.project_pages}
+            enrich.project_pages += [
+                CurationLink(url=page.url, is_official=page.is_official)
+                for page in paper.project_pages
+                if page.url not in seen | proposed
+            ]
+        return body.model_copy(update={"enrich": enrich})
+
+    def _validate_scheduled_policy(
+        self,
+        row,
+        body: ApplyMutationRequest,
+        *,
+        preapply_body: ApplyMutationRequest | None = None,
     ) -> dict[str, Any]:
         if getattr(row, "trigger", "admin") == "admin":
             return {"policy": "admin"}
@@ -1593,7 +1662,9 @@ class CodexCurationCallbackService:
             )
         # The pre-apply trace is the reviewable record of what a scheduled job
         # intends to change, so the apply must be exactly that proposal.
-        if self._preapply_proposal(row) != body.model_dump(mode="json"):
+        if self._preapply_proposal(row) != (preapply_body or body).model_dump(
+            mode="json"
+        ):
             raise CodexCurationMutationClosedError(
                 "Scheduled mutation does not match its pre-apply proposal"
             )
