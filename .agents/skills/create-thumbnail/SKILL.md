@@ -43,7 +43,7 @@ The audit distinguishes:
 - `missing_url`: the public paper API has no thumbnail URL.
 - `broken`: the URL does not return an image successfully.
 - `review_default_external`: an external paper uses the default `external_<id>.jpg` filename. Visually inspect it because it may be a useful PDF render or a generic browser capture.
-- `healthy`: reachable image; still inspect when the user reports poor content.
+- `healthy`: reachable image; still inspect when the user reports poor content. A healthy custom or source-art image on an arXiv or PDF-backed paper still needs replacing with the first page (see section 2).
 
 Do not infer visual quality from HTTP status alone. Download candidates and use `view_image` or a montage.
 
@@ -57,17 +57,26 @@ When the paper has an arXiv ID or `source = 'arxiv'`, use a screenshot/render of
 
 Verify that the PDF version matches the title displayed in the catalog. Older arXiv versions can have a different title; use the latest matching version and persist its explicit thumbnail URL when necessary.
 
-### Non-arXiv papers: choose authoritative artwork
+### Non-arXiv papers with a direct PDF: always render the first page
 
-Only for papers without an arXiv ID, use this priority order:
+When a non-arXiv paper has an official direct PDF, use its first page, exactly like an arXiv paper. A direct PDF is any official URL that downloads a real PDF (`%PDF` bytes): `conference_url_pdf`, a `source_url` that is itself a PDF (including GitHub `blob/.../*.pdf` and Hugging Face `blob/.../*.pdf` files), or a PDF linked from the canonical source page. Do not substitute a hero, README image, logo, model-card image, or title card, even when one is more visually distinctive.
+
+If the stored PDF URL now returns 404 because upstream moved the file (for example a deleted GitHub branch), find the PDF's current official location, update the paper's source URL with `pwc paper update <id> source-url <url>`, and render from it. The archived copy at `https://paperswithcode.co/paper-assets/external/<id>/paper.pdf` is a valid render source when upstream no longer serves the file.
+
+### Existing custom artwork is not authoritative for PDF-backed papers
+
+For arXiv papers and non-arXiv papers with a direct PDF, an existing `custom/` or `*_source_art_*` thumbnail is not a curated choice to preserve. Replace it with the first page. This includes an arXiv version that inherited artwork from an earlier external record of the same paper.
+
+### Non-arXiv papers without a PDF: choose authoritative artwork
+
+Only for papers with neither an arXiv ID nor a direct PDF, use this priority order:
 
 1. A clear hero, architecture diagram, logo, or overview image visibly used by the canonical source page.
 2. Artwork used in the official project page or official GitHub README.
 3. Artwork in an explicit Hugging Face model card for the release.
-4. The first page of an official direct PDF.
-5. A title card using the real title only when no meaningful artwork or PDF exists.
+4. A title card using the real title only when no meaningful artwork exists.
 
-Prefer a recognizable overview over a dense benchmark chart. Skip artwork wider than about 2:1 (wide pipeline diagrams become unreadable on the portrait card) and use the first page of the PDF instead. Ignore badges, CI shields, unrelated dependencies, citation images, and images from unofficial forks.
+Prefer a recognizable overview over a dense benchmark chart. Skip artwork wider than about 2:1 (wide pipeline diagrams become unreadable on the portrait card). Ignore badges, CI shields, unrelated dependencies, citation images, and images from unofficial forks.
 
 For GitHub, inspect both README references and the image assets in the repository tree:
 
@@ -107,7 +116,7 @@ For every arXiv paper, use the existing repository command to render and publish
 uv run --env-file backend/keys.env pwc thumbnail PAPER_REFERENCE --json
 ```
 
-Do not run the raster compositor for an arXiv paper. For a non-arXiv direct PDF, use `ThumbnailService._convert_pdf_to_thumbnail` on the downloaded PDF, then publish the resulting image through the helper below. Inspect the render before publication.
+Do not run the raster compositor for an arXiv paper or a non-arXiv paper with a direct PDF. For a non-arXiv direct PDF stored as `source_url` or `conference_url_pdf`, the same `pwc thumbnail` command renders and publishes the first page. When the PDF is linked only from the source page, use `ThumbnailService._convert_pdf_to_thumbnail` on the downloaded PDF, then publish the resulting image through the helper below. Inspect the render before publication.
 
 If `pwc thumbnail` or the automatic path yields the blank "Untitled resource" card for a non-arXiv PDF (seen with a 32 MB PDF), download the PDF to a local file, render page 1 with `ThumbnailService._convert_pdf_to_thumbnail` from that local copy, and publish the result with the helper below.
 

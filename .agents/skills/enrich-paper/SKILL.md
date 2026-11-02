@@ -401,9 +401,9 @@ Use its read-only audit first. Then visually inspect the exact public image, bec
 - stale source content or the wrong arXiv-version title;
 - severe letterboxing, squatting, cropping, or unreadable artwork.
 
-Reuse evidence already collected during enrichment. In particular, inspect hero/overview images from the validated official repository, project page, source page, and HF model card before falling back to a PDF first page. Use `pwc thumbnail` only when the correct paper first page is the best source; otherwise use the `create-thumbnail` compositor and content-addressed publisher.
+Papers with an arXiv ID or an official direct PDF always use the PDF's first page, and any existing custom or source-art thumbnail on them is replaced. Use `pwc thumbnail` for arXiv papers and for PDFs stored as `source_url` or `conference_url_pdf`; for a PDF linked only from the source page, follow `create-thumbnail` (render the downloaded PDF with `ThumbnailService._convert_pdf_to_thumbnail` and publish through its helper), because `pwc thumbnail` would produce a title card. Only for papers with neither, reuse evidence already collected during enrichment: inspect hero/overview images from the validated official repository, project page, source page, and HF model card, then use the `create-thumbnail` compositor and content-addressed publisher.
 
-Finish with the `create-thumbnail` live checks: confirm the API's final URL, fetch that exact public response, validate its image type and portrait geometry, and visually inspect the downloaded public image. If the existing thumbnail is already authoritative and legible, preserve it and report that no replacement was needed.
+Finish with the `create-thumbnail` live checks: confirm the API's final URL, fetch that exact public response, validate its image type and portrait geometry, and visually inspect the downloaded public image. If the existing thumbnail is already the correct first page (for PDF-backed papers) or authoritative, legible artwork (for papers without a PDF), preserve it and report that no replacement was needed.
 
 ## Reporting back
 
