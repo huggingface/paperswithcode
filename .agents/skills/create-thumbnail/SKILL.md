@@ -43,7 +43,7 @@ The audit distinguishes:
 - `missing_url`: the public paper API has no thumbnail URL.
 - `broken`: the URL does not return an image successfully.
 - `review_default_external`: an external paper uses the default `external_<id>.jpg` filename. Visually inspect it because it may be a useful PDF render or a generic browser capture.
-- `healthy`: reachable image; still inspect when the user reports poor content.
+- `healthy`: reachable image; still inspect when the user reports poor content. A healthy custom or source-art image on an arXiv or PDF-backed paper still needs replacing with the first page (see section 2).
 
 Do not infer visual quality from HTTP status alone. Download candidates and use `view_image` or a montage.
 
