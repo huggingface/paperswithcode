@@ -56,6 +56,8 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "ieeexplore.ieee.org",
         # github.com/<owner>/<repo>/raw/... redirects Git LFS files here.
         "media.githubusercontent.com",
+        # ECCV conference PDFs (papers.conference_url_pdf).
+        "media.eventhosts.cc",
         "medrxiv.org",
         "microsoft.ai",
         "nature.com",

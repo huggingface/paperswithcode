@@ -267,6 +267,7 @@ def _external_pdf_service() -> ThumbnailService:
     [
         "aixiv.science",
         "ecmlpkdd-storage.s3.eu-central-1.amazonaws.com",
+        "media.eventhosts.cc",
         "microsoft.ai",
         "www.cv-foundation.org",
     ],
