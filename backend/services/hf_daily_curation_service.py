@@ -401,7 +401,9 @@ class HFDailyCurationService:
         oldest = (
             self.db.query(func.min(PaperCurationJob.created_at))
             .filter(
-                PaperCurationJob.trigger != "admin", PaperCurationJob.status == "queued"
+                PaperCurationJob.trigger != "admin",
+                PaperCurationJob.runner == "codex",
+                PaperCurationJob.status == "queued",
             )
             .scalar()
         )
@@ -434,6 +436,35 @@ class HFDailyCurationService:
                 "queue_depth": self.settings.codex_curation_queue_depth,
                 "canary_limit": self.settings.codex_curation_canary_limit,
             },
+            "pi_shadow": self._pi_shadow_status(),
+        }
+
+    def _pi_shadow_status(self) -> dict:
+        """Pi shadow outcomes of the last week; they feed no breaker or pause."""
+        since = datetime.now(UTC) - timedelta(days=7)
+
+        def count(*criteria) -> int:
+            return (
+                self.db.query(func.count(PaperCurationJob.id))
+                .filter(
+                    PaperCurationJob.runner == "pi",
+                    PaperCurationJob.created_at >= since,
+                    *criteria,
+                )
+                .scalar()
+                or 0
+            )
+
+        return {
+            "sample_rate": self.settings.curation_pi_shadow_sample_rate,
+            "max_active": self.settings.curation_pi_shadow_max_active,
+            "image": self.settings.curation_pi_jobs_image,
+            "model": self.settings.curation_pi_model,
+            "provider": self.settings.curation_pi_provider,
+            "token_configured": bool(self.settings.curation_pi_hf_token),
+            "completed_last_7_days": count(PaperCurationJob.status == "completed"),
+            "failed_last_7_days": count(PaperCurationJob.status == "failed"),
+            "pairs_compared_last_7_days": count(PaperCurationJob.pair_diff.isnot(None)),
         }
 
     def _enqueue_workflow(

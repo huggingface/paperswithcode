@@ -211,6 +211,9 @@ def retry_job(
     row = db.get(PaperCurationJob, job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    if getattr(row, "runner", "codex") == "pi":
+        # Pairs are best effort: a failed Pi run is itself a comparison result.
+        raise HTTPException(status_code=409, detail="Pi shadow jobs are not retried")
     return codex_paper_job_service.retry(db, row, settings)
 
 
@@ -375,19 +378,25 @@ def apply_mutation(
     row = _callback_job(job_id, authorization, db)
     try:
         service = _service(db)
+        # Pi shadow jobs never write, so they need no autonomous run context.
+        pi_shadow = getattr(row, "runner", "codex") == "pi"
         context = (
             _autonomous_callback_context(db, row)
-            if getattr(row, "trigger", "admin") != "admin"
+            if getattr(row, "trigger", "admin") != "admin" and not pi_shadow
             else None
         )
         if context is not None and not settings.codex_curation_direct_apply_enabled:
             service.authorize_autonomous_callback(row, body, context=context)
-        if (
+        if pi_shadow or (
             getattr(row, "trigger", "admin") != "admin"
             and not settings.codex_curation_direct_apply_enabled
         ):
             service._validate_mutation(row, body)
-            validation = service._validate_scheduled_policy(row, body)
+            validation = service._validate_scheduled_policy(
+                row,
+                service.shadow_validation_body(row, body),
+                preapply_body=body,
+            )
             row.proposal = body.model_dump(mode="json")
             row.validation_summary = {**validation, "mode": "shadow"}
             row.mutation_result = {
@@ -451,7 +460,11 @@ def store_preapply_trace(
         row.trace_status = "preapply_failed"
         row.trace_attempt_count += 1
         state = db.get(PaperCurationSchedulerState, 1)
-        if state and row.trigger != "admin":
+        if (
+            state
+            and row.trigger != "admin"
+            and getattr(row, "runner", "codex") == "codex"
+        ):
             state.consecutive_trace_failures += 1
             if state.consecutive_trace_failures >= 3:
                 state.paused_at = datetime.now(UTC)
@@ -480,7 +493,11 @@ def finalize_trace(
         row.trace_status = "finalize_failed"
         row.trace_attempt_count += 1
         state = db.get(PaperCurationSchedulerState, 1)
-        if state and row.trigger != "admin":
+        if (
+            state
+            and row.trigger != "admin"
+            and getattr(row, "runner", "codex") == "codex"
+        ):
             state.consecutive_trace_failures += 1
             if state.consecutive_trace_failures >= 3:
                 state.paused_at = datetime.now(UTC)
