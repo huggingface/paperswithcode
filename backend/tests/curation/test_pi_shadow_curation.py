@@ -774,7 +774,13 @@ def test_codex_completion_locks_and_rereads_its_pi_pair():
             return pi
 
     class Database:
+        flushed = False
+
+        def flush(self):
+            self.flushed = True
+
         def query(self, _model):
+            assert self.flushed, "pending terminal states must flush first"
             return Query()
 
         def refresh(self, row, *, with_for_update):

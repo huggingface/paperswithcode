@@ -1296,16 +1296,19 @@ class CodexPaperJobService:
         holds it (flushed, so a concurrent Codex completion waits), and a Codex
         completion locks and re-reads it. Whichever commits second sees both
         jobs terminal, so concurrent completions cannot both skip the diff.
+        Sessions do not autoflush, so pending terminal states (a reconcile
+        batch may end both halves) are flushed before the locked re-read.
         """
-        if getattr(row, "runner", "codex") == "pi":
-            pi_row = row
-            db.flush()
-            codex_row = db.get(PaperCurationJob, row.paired_job_id)
-        elif (
+        pi = getattr(row, "runner", "codex") == "pi"
+        if not pi and (
             getattr(row, "trigger", "admin") != "hf-daily-cron"
             or row.kind not in PI_SHADOW_KINDS
         ):
             return
+        db.flush()
+        if pi:
+            pi_row = row
+            codex_row = db.get(PaperCurationJob, row.paired_job_id)
         else:
             codex_row = row
             pi_row = (
