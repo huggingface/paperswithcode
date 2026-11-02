@@ -287,6 +287,38 @@ def test_approved_external_pdf_host_can_be_rendered(monkeypatch, host: str):
     assert result == b"%PDF-example"
 
 
+@pytest.mark.parametrize(
+    ("content_type", "body", "expected"),
+    [
+        ("application/octet-stream", b"%PDF-example", b"%PDF-example"),
+        ("binary/octet-stream", b"%PDF-example", b"%PDF-example"),
+        ("application/octet-stream", b"PK\x03\x04zip", None),
+    ],
+)
+def test_generic_binary_external_pdf_is_checked_by_magic_bytes(
+    monkeypatch, content_type: str, body: bytes, expected: bytes | None
+):
+    # raw.githubusercontent.com serves repository PDFs as octet-stream.
+    service = _external_pdf_service()
+
+    async def fetch(url, **kwargs):
+        if content_type not in kwargs["allowed_content_types"]:
+            raise SafeOutboundHttpError(415, "The outbound content type is not allowed")
+        return SafeFetchResult(url, 200, content_type, body)
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", fetch
+    )
+
+    result = asyncio.run(
+        service._download_external_pdf(
+            "https://github.com/microsoft/Mage/blob/main/assets/report.pdf"
+        )
+    )
+
+    assert result == expected
+
+
 @pytest.mark.parametrize("origin_status_code", [403, 404, 410])
 def test_permanent_external_pdf_error_generates_metadata_fallback(
     tmp_path: Path, monkeypatch, origin_status_code: int

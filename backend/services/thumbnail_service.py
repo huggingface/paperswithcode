@@ -79,6 +79,11 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "zenodo.org",
     }
 )
+# raw.githubusercontent.com and many object stores label PDFs as generic binary;
+# the `%PDF` magic-byte check below still rejects anything that is not a PDF.
+EXTERNAL_PDF_CONTENT_TYPES = frozenset(
+    {"application/pdf", "application/octet-stream", "binary/octet-stream"}
+)
 PERMANENT_EXTERNAL_PDF_SAFE_STATUSES = frozenset({403, 409, 413, 415, 422})
 PERMANENT_EXTERNAL_PDF_ORIGIN_STATUSES = frozenset({403, 404, 410})
 # Paper cards render thumbnails in a 160×220 box, but PDF pages have their own
@@ -649,7 +654,7 @@ class ThumbnailService:
         try:
             result = await fetch_public_resource(
                 pdf_url,
-                allowed_content_types=frozenset({"application/pdf"}),
+                allowed_content_types=EXTERNAL_PDF_CONTENT_TYPES,
                 max_bytes=self.max_pdf_size,
                 timeout_seconds=self.pdf_timeout,
                 allowed_hosts=EXTERNAL_THUMBNAIL_DIRECT_HOSTS,
