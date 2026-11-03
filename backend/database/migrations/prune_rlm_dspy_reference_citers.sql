@@ -1,15 +1,14 @@
 -- Prune Semantic Scholar citers of the RLM and DSPy source papers that only
 -- cite them in passing. Reviewed 2026-11-03 against each paper's OCR Markdown:
 -- a citer stays tagged when its title/abstract names the method or its body
--- (before the references) mentions it at least three times. The rest are
--- removed and recorded in paper_method_exclusions so the hourly reference
--- backfill does not relink them. Only reference-only links are touched.
+-- (before the references) mentions it at least three times. Every reviewed
+-- negative is recorded in paper_method_exclusions, linked or not, so the
+-- hourly reference backfill does not tag it; existing links are removed
+-- unless they carry non-reference evidence.
 
-WITH reference_only AS (
-    SELECT pm.paper_id, pm.method_id
-    FROM paper_methods pm
-    JOIN methods m ON m.id = pm.method_id AND m.slug = 'recursive-language-model'
-    JOIN (VALUES
+WITH reviewed AS (
+    SELECT p.id AS paper_id, m.id AS method_id
+    FROM (VALUES
         (56032),
         (56525),
         (57004),
@@ -42,29 +41,29 @@ WITH reference_only AS (
         (123475),
         (123747),
         (124596)
-    ) AS reviewed(paper_id) ON reviewed.paper_id = pm.paper_id
-    WHERE pm.paper_id <> m.source_paper_id
+    ) AS v(paper_id)
+    JOIN papers p ON p.id = v.paper_id
+    JOIN methods m ON m.slug = 'recursive-language-model'
+    WHERE p.id IS DISTINCT FROM m.source_paper_id
       AND NOT EXISTS (
           SELECT 1 FROM paper_method_evidence e
-          WHERE e.paper_id = pm.paper_id AND e.method_id = pm.method_id
+          WHERE e.paper_id = p.id AND e.method_id = m.id
             AND e.evidence_type <> 'reference'
       )
 ),
 excluded AS (
     INSERT INTO paper_method_exclusions (paper_id, method_id, reason)
     SELECT paper_id, method_id, 'cites the source paper without using the method'
-    FROM reference_only
+    FROM reviewed
     ON CONFLICT (paper_id, method_id) DO NOTHING
 )
 DELETE FROM paper_methods pm
-USING reference_only r
+USING reviewed r
 WHERE pm.paper_id = r.paper_id AND pm.method_id = r.method_id;
 
-WITH reference_only AS (
-    SELECT pm.paper_id, pm.method_id
-    FROM paper_methods pm
-    JOIN methods m ON m.id = pm.method_id AND m.slug = 'dspy'
-    JOIN (VALUES
+WITH reviewed AS (
+    SELECT p.id AS paper_id, m.id AS method_id
+    FROM (VALUES
         (22234),
         (23530),
         (24848),
@@ -276,20 +275,22 @@ WITH reference_only AS (
         (128383),
         (129420),
         (131698)
-    ) AS reviewed(paper_id) ON reviewed.paper_id = pm.paper_id
-    WHERE pm.paper_id <> m.source_paper_id
+    ) AS v(paper_id)
+    JOIN papers p ON p.id = v.paper_id
+    JOIN methods m ON m.slug = 'dspy'
+    WHERE p.id IS DISTINCT FROM m.source_paper_id
       AND NOT EXISTS (
           SELECT 1 FROM paper_method_evidence e
-          WHERE e.paper_id = pm.paper_id AND e.method_id = pm.method_id
+          WHERE e.paper_id = p.id AND e.method_id = m.id
             AND e.evidence_type <> 'reference'
       )
 ),
 excluded AS (
     INSERT INTO paper_method_exclusions (paper_id, method_id, reason)
     SELECT paper_id, method_id, 'cites the source paper without using the method'
-    FROM reference_only
+    FROM reviewed
     ON CONFLICT (paper_id, method_id) DO NOTHING
 )
 DELETE FROM paper_methods pm
-USING reference_only r
+USING reviewed r
 WHERE pm.paper_id = r.paper_id AND pm.method_id = r.method_id;

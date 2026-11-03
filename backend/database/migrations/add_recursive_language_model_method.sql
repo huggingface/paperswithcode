@@ -1,7 +1,8 @@
 -- Add Recursive Language Model (RLM) method, introduced by Zhang, Kraska &
 -- Khattab, "Recursive Language Models" (arXiv 2512.24601).
 -- "RLM" also abbreviates reasoning and reward language models in many
--- abstracts, so abstract linking is judged per abstract.
+-- abstracts, so abstract linking is judged per abstract and the bare
+-- acronym is left out of keywords (keyword tagging is literal).
 
 INSERT INTO methods (
     slug,
@@ -25,7 +26,7 @@ VALUES (
     'Recursive Language Model',
     'Recursive Language Model (RLM)',
     'A Recursive Language Model (RLM) is an inference strategy for arbitrarily long prompts. Instead of feeding the whole prompt into the context window, an RLM loads it as a variable in a Python REPL environment and lets the language model write code to inspect, split, and search it, recursively calling itself on selected snippets through an `llm_query` function before returning a final answer. This turns long-context processing into a form of [test-time scaling](/methods/test-time-scaling) and [context engineering](/methods/context-engineering) driven by the model itself. RLMs handle inputs up to two orders of magnitude beyond the model context window and, on long-context benchmarks such as OOLONG and BrowseComp-Plus, outperform the base model and common long-context scaffolds such as context compaction and retrieval agents at comparable or lower cost per query.',
-    'recursive language model, recursive language models, RLM, RLMs, recursive LM',
+    'recursive language model, recursive language models, recursive LM',
     (
         SELECT id
         FROM areas
