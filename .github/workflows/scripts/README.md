@@ -37,7 +37,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-refresh-conference-deadlines.timer` | `*-*-* 07:40:00`<br>`*-*-* 19:40:00` | `refresh_conference_deadlines` | `backend/scripts/refresh_conference_deadlines.py` |
 | `pwc-cron-discover-x-threads.timer` | `*-*-* 08,20:22:00` | `discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | `pwc-cron-refresh-x-post-likes.timer` | `*-*-* *:35:00` | `refresh_x_post_likes` | `backend/scripts/refresh_x_post_likes.py` |
-| `pwc-cron-post-trending-paper-to-x.timer` | `*-*-* 00/4:13:00` | `post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
+| `pwc-cron-post-trending-paper-to-x.timer` | `*-*-* 00/8:13:00` | `post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
 | `pwc-cron-post-x-insight.timer` | `*-*-* 09,17:43:00` | `post_x_insight` | `backend/scripts/post_x_insight.py` |
 | `pwc-cron-warm-paper-suggested-questions.timer` | `*-*-* *:33:00` | `warm_paper_suggested_questions` | `backend/scripts/warm_paper_suggested_questions.py` |
 | `pwc-cron-sync-3d-arena.timer` | `*-*-* *:05:00` | `sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
@@ -289,17 +289,25 @@ uv run --env-file backend/keys.env python -m backend.scripts.warm_paper_suggeste
 ```
 
 `post_trending_paper_to_x.py` posts one trending paper to the Papers with
-Code X account (@paperswithcodee) every four hours. It takes the top
-`trending_score` arXiv paper from the last 14 days that has a TL;DR and was
-never posted, renders the first page of its PDF as an image, and posts the
-title, a blank line, and the Luna TL;DR with that image, then replies with the
-paper page link. `paper_x_posts` records each posted paper so none is posted
-twice. It needs the posting account's OAuth 1.0a keys in `production-cron.env`
-(`X_POST_CONSUMER_KEY`, `X_POST_CONSUMER_SECRET`, `X_POST_ACCESS_TOKEN`,
-`X_POST_ACCESS_TOKEN_SECRET`; the X app needs Read and Write permission) and
-only previews the post without them. Posts are capped at
+Code X account (@paperswithcodee) every eight hours (00:13, 08:13, 16:13 UTC).
+It takes the top five `trending_score` arXiv papers from the last 14 days that
+have a TL;DR and were never posted, prefers the first whose organization has a
+verified X account, renders the first page of its PDF as an image, and posts
+the paper's most striking concrete result, then its name and organization.
+An organization's handle is tagged only when it is verified: a linked X thread
+(reviewed as the paper's own) posted by an account named after the
+organization, or the single X link on the organization's Hugging Face page.
+Luna (`PWC_OPENAI_API_KEY`) writes the post from the title, TL;DR, abstract,
+and the paper's Papers with Code leaderboard results; it is kept only if it
+uses no number outside those facts and exactly the verified @mentions, else a
+template leads with the TL;DR sentence that states the most results. The
+paper page link follows as a reply. `paper_x_posts` records each posted paper
+so none is posted twice. It needs the posting account's OAuth 1.0a keys in
+`production-cron.env` (`X_POST_CONSUMER_KEY`, `X_POST_CONSUMER_SECRET`,
+`X_POST_ACCESS_TOKEN`, `X_POST_ACCESS_TOKEN_SECRET`; the X app needs Read and
+Write permission) and only previews the post without them. Posts are capped at
 `PWC_X_POST_MAX_CHARS` (default 280; raise it when the account has X Premium
-long posts), dropping trailing TL;DR sentences to fit. Preview the next post
+long posts). Preview the next post (`template` in the output is the fallback)
 with:
 
 ```bash

@@ -2104,7 +2104,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     CronJobDefinition(
         id="post_trending_paper_to_x",
         scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(240, offset_minutes=13),),
+        schedule_policies=(SchedulePolicy.fixed(480, offset_minutes=13),),
         schedule_grace_minutes=30,
         systemd_timer="pwc-cron-post-trending-paper-to-x.timer",
         systemd_service="pwc-cron-post-trending-paper-to-x.service",
@@ -2112,7 +2112,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         output_evaluator="generic",
         display_name="Post Trending Paper to X",
         category="hourly",
-        schedule="13 */4 * * * (every four hours)",
+        schedule="13 */8 * * * (every eight hours)",
         script_path="backend/scripts/post_trending_paper_to_x.py",
         log_name="post_trending_paper_to_x",
         process_patterns=("backend.scripts.post_trending_paper_to_x",),
