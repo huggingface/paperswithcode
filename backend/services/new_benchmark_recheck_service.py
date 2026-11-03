@@ -246,6 +246,10 @@ class NewBenchmarkRecheckService:
             if len(queued) >= MAX_PER_RUN:
                 unscanned.append(benchmark.dataset.id)
                 continue
+            # The cap holds across runs: earlier runs' jobs count against it.
+            budget = MAX_PER_BENCHMARK - self._queued_before(benchmark)
+            if budget <= 0:
+                continue
             hits: list[tuple[int, Paper]] = []
             complete = True
             for paper in self.candidate_papers(benchmark):
@@ -262,7 +266,7 @@ class NewBenchmarkRecheckService:
             queued_papers = {item["paper_id"] for item in queued}
             hits = [hit for hit in hits if hit[1].id not in queued_papers]
             hits.sort(key=lambda hit: (-hit[0], -hit[1].id))
-            room = min(MAX_PER_BENCHMARK, MAX_PER_RUN - len(queued))
+            room = min(budget, MAX_PER_RUN - len(queued))
             for count, paper in hits[:room]:
                 item = {
                     "dataset_id": benchmark.dataset.id,
@@ -297,6 +301,15 @@ class NewBenchmarkRecheckService:
             "rechecks": queued,
             "unscanned_dataset_ids": unscanned,
         }
+
+    def _queued_before(self, benchmark: NewBenchmark) -> int:
+        return (
+            self.db.query(func.count(PaperCurationJob.id))
+            .filter(
+                PaperCurationJob.policy_version == policy_version(benchmark.dataset.id)
+            )
+            .scalar()
+        )
 
     def _index(self, benchmarks: list[NewBenchmark]) -> MentionIndex:
         """Index the benchmarks plus every dataset sharing a leading name token.

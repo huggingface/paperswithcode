@@ -270,6 +270,23 @@ def test_rechecks_are_capped_per_benchmark_and_prefer_more_mentions(db, monkeypa
     ]
 
 
+def test_per_benchmark_cap_counts_jobs_from_earlier_runs(db, monkeypatch):
+    monkeypatch.setattr(recheck_module, "MAX_PER_BENCHMARK", 2)
+    add_board(db, 1, 20, BOARD_CREATED)
+    texts = {}
+    for paper_id in (1, 2, 3, 4):
+        add_paper(db, paper_id)
+        texts[paper_id] = (body("AIME 2025: 40.0.", "AIME 2025: 41.0."), True)
+
+    first, _reads = run(db, texts)
+    second, reads = run(db, texts)
+
+    assert len(first["rechecks"]) == 2
+    assert second["rechecks"] == []
+    assert reads == []
+    assert len(rechecks(db)) == 2
+
+
 def test_text_budget_leaves_the_rest_for_the_next_run(db, monkeypatch):
     monkeypatch.setattr(recheck_module, "MAX_TEXT_READS", 1)
     add_board(db, 1, 20, BOARD_CREATED)
