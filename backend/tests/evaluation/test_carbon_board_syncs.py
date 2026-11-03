@@ -129,7 +129,7 @@ def test_parse_blueprint_bench_2_skips_human_and_floor_rows():
 def test_parse_riemann_bench_reads_visible_percentages():
     entries = _by_name(boards.parse_riemann_bench(_fixture("riemann_bench.html")))
     assert len(entries) == 44
-    assert entries["GPT 5.6 Sol"].value == pytest.approx(0.744)
+    assert entries["GPT 5.6 Sol"].value == pytest.approx(74.4)
     # "Hy" + "Hy4 Preview" names the model once.
     assert "Hy4 Preview" in entries
 
@@ -138,7 +138,7 @@ def test_parse_cwe_bench_reads_the_json_ld_item_list():
     entries = _by_name(boards.parse_cwe_bench(_fixture("cwe_bench.html")))
     assert len(entries) == 12
     assert (entries["Gemini 4 Carbon"].value, entries["Gemini 4 Carbon"].harness) == (
-        0.71,
+        71.0,
         "Antigravity",
     )
     assert "pass@4 not reported" in entries["Inkling"].detail

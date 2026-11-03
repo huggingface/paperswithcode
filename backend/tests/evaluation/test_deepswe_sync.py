@@ -242,8 +242,8 @@ def test_sync_upserts_known_rows_and_preserves_unmatched_models():
     assert stats.unmatched_models == ["new-unmapped-model"]
     rows = {row.model_name: row for row in session.query(Evaluation).all()}
     assert set(rows) == {"Claude Opus 5 (max)", "Kimi K3 (max)"}
-    assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 0.7365}
-    assert rows["Kimi K3 (max)"].metrics == {"Pass@1": 0.6851}
+    assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 73.65}
+    assert rows["Kimi K3 (max)"].metrics == {"Pass@1": 68.51}
     assert rows["Claude Opus 5 (max)"].is_open is False
     assert rows["Kimi K3 (max)"].is_open is True
     assert rows["Kimi K3 (max)"].harness == HARNESS_NAME
@@ -253,7 +253,7 @@ def test_sync_upserts_known_rows_and_preserves_unmatched_models():
     assert second.created == 0
     assert second.updated == 2
     assert session.query(Evaluation).count() == 2
-    assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 0.7365}
+    assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 73.65}
     # Without a lab there is nothing to hand to the release radar.
     assert session.query(ModelReleaseSignal).count() == 0
 
@@ -312,14 +312,14 @@ def test_unreviewed_models_match_a_model_release_or_become_signals():
     assert session.query(ModelReleaseSignal).one().sightings == 2
 
 
-def test_sync_ranks_fraction_scores_with_paper_native_results():
+def test_sync_ranks_percent_scores_with_paper_native_results():
     session = _session()
     native = Evaluation(
         paper_id=1,
         task_id=15,
         dataset_id=813,
         model_name="Paper-native result",
-        metrics={"Pass@1": 0.80},
+        metrics={"Pass@1": 80.0},
         best_metric="Pass@1",
         harness=HARNESS_NAME,
     )
