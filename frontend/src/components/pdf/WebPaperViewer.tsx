@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import MarkdownText from "@/components/MarkdownText";
@@ -7,7 +7,7 @@ import { usePdfSelection } from "@/hooks/usePdfSelection";
 import { getPaperWebMarkdown } from "@/lib/api/papers";
 import { ApiError } from "@/lib/apiTransport";
 import type { PaperSelectionDraft } from "@/lib/chat";
-import { webPaperBody } from "@/lib/paperReader";
+import { framesOriginalPage, webPaperBody } from "@/lib/paperReader";
 
 function loadErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 422) {
@@ -33,7 +33,10 @@ interface WebPaperViewerProps {
   onPaperSelectionError?: (message: string) => void;
 }
 
-/** Reads an HTML-only external paper as one Markdown page in the reader. */
+/**
+ * Reads an HTML-only external paper in the reader: its original page where the
+ * host allows framing, or its Markdown, which text selection for chat needs.
+ */
 export function WebPaperViewer({
   paperId,
   paperKey,
@@ -48,6 +51,9 @@ export function WebPaperViewer({
   onPaperSelectionError,
 }: WebPaperViewerProps) {
   const documentRef = useRef<HTMLElement>(null);
+  const frameable = framesOriginalPage(sourceUrl);
+  const [view, setView] = useState<"original" | "text">(frameable ? "original" : "text");
+  const showOriginal = frameable && view === "original";
   const query = useQuery({
     queryKey: ["paperWebMarkdown", paperId],
     queryFn: () => getPaperWebMarkdown(paperId),
@@ -63,7 +69,7 @@ export function WebPaperViewer({
   }, [onReady, ready]);
 
   usePdfSelection({
-    enabled: selectionEnabled && Boolean(paperVersion) && ready,
+    enabled: selectionEnabled && Boolean(paperVersion) && ready && !showOriginal,
     pagesRoot: documentRef,
     routeId: paperKey,
     paperVersion,
@@ -76,11 +82,26 @@ export function WebPaperViewer({
   return <div className="pdf-viewer">
     <ReaderToolbar paperTitle={paperTitle} paperHref={paperHref} resources={resources} label="Paper controls">
       <div className="pdf-toolbar-controls">
+        {frameable && <div className="reader-web-view-toggle" role="group" aria-label="Paper view">
+          <button type="button" aria-pressed={showOriginal} onClick={() => setView("original")}>Original</button>
+          <button
+            type="button"
+            aria-pressed={!showOriginal}
+            title="Readable text; select a passage to ask the chat about it"
+            onClick={() => setView("text")}
+          >Text</button>
+        </div>}
         <a href={sourceUrl} target="_blank" rel="noopener noreferrer">Open original</a>
       </div>
     </ReaderToolbar>
     <div className="pdf-scroll-frame">
-      <div className="pdf-scroll" role="region" aria-label="Paper web page">
+      {showOriginal ? <iframe
+        className="reader-web-frame"
+        src={sourceUrl}
+        title={`Original page: ${paperTitle}`}
+        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+        referrerPolicy="strict-origin-when-cross-origin"
+      /> : <div className="pdf-scroll" role="region" aria-label="Paper web page">
         {query.isPending ? <div className="pdf-loading" role="status">Preparing a readable version of this page…</div>
           : query.isError ? <div className="pdf-error" role="alert">
             <p>{loadErrorMessage(query.error)}</p>
@@ -93,7 +114,7 @@ export function WebPaperViewer({
             {!body.startsWith("# ") && <h1>{paperTitle}</h1>}
             <MarkdownText text={body} />
           </article>}
-      </div>
+      </div>}
     </div>
   </div>;
 }

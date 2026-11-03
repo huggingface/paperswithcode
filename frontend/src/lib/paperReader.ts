@@ -40,6 +40,16 @@ export function externalPaperWebPage(paper: Paper): string | null {
   return href;
 }
 
+/**
+ * Whether the reader may show a web paper's original page in a frame. GitHub
+ * Pages cannot send X-Frame-Options or CSP headers, so its pages always allow
+ * framing; other hosts often forbid it, and a blocked frame renders blank.
+ */
+export function framesOriginalPage(href: string): boolean {
+  const parsed = new URL(href);
+  return parsed.protocol === "https:" && parsed.hostname.toLowerCase().endsWith(".github.io");
+}
+
 export function paperReaderRoute(paper: Paper, fallbackRoute: string): string | null {
   if (paper.source === "external") {
     const readable = hasExternalPdf(paper) || Boolean(externalPaperWebPage(paper));
