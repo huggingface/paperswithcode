@@ -178,8 +178,8 @@ TIMERS: tuple[TimerSpec, ...] = (
     ),
     TimerSpec(
         job="post_trending_paper_to_x",
-        on_calendar=("*-*-* 00/4:13:00",),
-        description="Post a trending paper to the Papers with Code X account every four hours",
+        on_calendar=("*-*-* 00/8:13:00",),
+        description="Post a trending paper to the Papers with Code X account every eight hours",
     ),
     TimerSpec(
         job="post_x_insight",
