@@ -34,16 +34,8 @@ MMTEB_API_URL = (
 DATASET_SLUG = "mmteb-v2"
 MIN_EXPECTED_ENTRIES = 100
 MAX_EXPECTED_ENTRIES = 2_000
-MIN_SCORED_ENTRIES = {
-    "overall": 25,
-    "retrieval": 50,
-    "reranking": 50,
-}
-MIN_RESOLVED_ENTRIES = {
-    "overall": 10,
-    "retrieval": 20,
-    "reranking": 20,
-}
+MIN_SCORED_ENTRIES = {"overall": 25}
+MIN_RESOLVED_ENTRIES = {"overall": 10}
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("MMTEB v2")
 LEGACY_METHODOLOGY_PREFIX = (
     "Official MTEB leaderboard external evaluation for MTEB(Multilingual, v2):"
@@ -76,7 +68,6 @@ MODEL_ARXIV_OVERRIDES = {
 class MmtebLane:
     task_slug: str
     metric_name: str
-    api_score_key: str | None
     api_score_label: str
 
 
@@ -84,20 +75,7 @@ LANES: dict[str, MmtebLane] = {
     "overall": MmtebLane(
         task_slug="embedding-models",
         metric_name="MMTEB Score",
-        api_score_key=None,
         api_score_label="meanTask",
-    ),
-    "retrieval": MmtebLane(
-        task_slug="retrieval",
-        metric_name="Retrieval",
-        api_score_key="Retrieval",
-        api_score_label='scoresByTaskType["Retrieval"]',
-    ),
-    "reranking": MmtebLane(
-        task_slug="text-reranking",
-        metric_name="Rerank",
-        api_score_key="Reranking",
-        api_score_label='scoresByTaskType["Reranking"]',
     ),
 }
 
@@ -108,19 +86,13 @@ class MmtebEntry:
     model_url: str
     api_rank: int
     mean_task: float | None
-    scores_by_task_type: dict[str, float]
     arxiv_ids: tuple[str, ...]
     total_params: int | None
     is_open: bool
     hf_model_url: str | None
 
     def score_for(self, lane: MmtebLane) -> float | None:
-        raw = (
-            self.mean_task
-            if lane.api_score_key is None
-            else self.scores_by_task_type.get(lane.api_score_key)
-        )
-        return None if raw is None else raw * 100
+        return None if self.mean_task is None else self.mean_task * 100
 
 
 @dataclass
@@ -194,16 +166,8 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
         raise ValueError(
             "MMTEB API benchmark name does not match the configured source"
         )
-    task_types = payload.get("taskTypes")
-    if not isinstance(task_types, list) or not {"Retrieval", "Reranking"}.issubset(
-        task_types
-    ):
-        raise ValueError("MMTEB API task types do not include retrieval and reranking")
     aggregations = payload.get("aggregations")
-    if not isinstance(aggregations, list) or not {
-        "mean_task",
-        "task_types",
-    }.issubset(aggregations):
+    if not isinstance(aggregations, list) or "mean_task" not in aggregations:
         raise ValueError("MMTEB API aggregations do not match the published contract")
     rows = payload.get("rows")
     if not isinstance(rows, list):
@@ -234,19 +198,6 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
             raise ValueError(f"MMTEB API rank is invalid for {model_name}") from exc
         if api_rank < 1:
             raise ValueError(f"MMTEB API rank is invalid for {model_name}")
-
-        scores_raw = row.get("scoresByTaskType")
-        if not isinstance(scores_raw, dict):
-            raise TypeError(f"MMTEB task-type scores are invalid for {model_name}")
-        scores: dict[str, float] = {}
-        for key in ("Retrieval", "Reranking"):
-            score = _optional_score(
-                scores_raw.get(key),
-                field_name=f"{key} score",
-                model_name=model_name,
-            )
-            if score is not None:
-                scores[key] = score
 
         total_params_b = model.get("totalParamsB")
         total_params: int | None = None
@@ -279,7 +230,6 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
                     field_name="meanTask",
                     model_name=model_name,
                 ),
-                scores_by_task_type=scores,
                 arxiv_ids=_arxiv_ids(model.get("citation")),
                 total_params=total_params,
                 is_open=open_weights,
@@ -319,7 +269,7 @@ def _hf_repo_id(url: str | None) -> str | None:
 
 
 class MmtebSyncService:
-    """Replace one task-specific MMTEB lane with arXiv-backed API rows."""
+    """Replace the managed MMTEB v2 rows with arXiv-backed API rows."""
 
     def __init__(self, db: Session):
         self.db = db

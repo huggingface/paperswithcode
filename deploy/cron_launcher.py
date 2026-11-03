@@ -339,26 +339,6 @@ COMMANDS: dict[str, Job] = {
             "from the official API"
         ),
     ),
-    "sync_mmteb_retrieval": job(
-        "-m",
-        "scripts.hourly.sync_mmteb",
-        "retrieval",
-        timeout="30m",
-        idempotency=(
-            "replace arXiv-backed managed MMTEB v2 retrieval evaluation rows "
-            "from the official API"
-        ),
-    ),
-    "sync_mmteb_reranking": job(
-        "-m",
-        "scripts.hourly.sync_mmteb",
-        "reranking",
-        timeout="30m",
-        idempotency=(
-            "replace arXiv-backed managed MMTEB v2 reranking evaluation rows "
-            "from the official API"
-        ),
-    ),
     "sync_mmeb_v2": job(
         "-m",
         "scripts.hourly.sync_mmeb",

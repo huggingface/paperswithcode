@@ -243,11 +243,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync ParseBench leaderboard hourly",
     ),
     TimerSpec(
-        job="sync_mmteb_retrieval",
-        on_calendar=("*-*-* *:22:00",),
-        description="Sync MMTEB v2 retrieval leaderboard hourly",
-    ),
-    TimerSpec(
         job="sync_deepswe",
         on_calendar=("*-*-* *:25:00",),
         description="Sync DeepSWE leaderboard hourly",
@@ -326,11 +321,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="sync_artificial_analysis",
         on_calendar=("*-*-* 00/2:35:00",),
         description="Sync Artificial Analysis leaderboards every two hours",
-    ),
-    TimerSpec(
-        job="sync_mmteb_reranking",
-        on_calendar=("*-*-* *:37:00",),
-        description="Sync MMTEB v2 reranking leaderboard hourly",
     ),
     TimerSpec(
         job="sync_programbench",
