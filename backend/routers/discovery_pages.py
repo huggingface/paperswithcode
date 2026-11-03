@@ -10,7 +10,10 @@ from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.database.connection import get_database_session
-from backend.services.author_service import organization_slug_for_author
+from backend.services.author_service import (
+    merged_author_id,
+    organization_slug_for_author,
+)
 from backend.services.content_negotiation_service import (
     prefers_markdown,
     public_page_headers,
@@ -222,9 +225,10 @@ def conference_task_page(
 def author_page(
     author_id: int, request: Request, db: Session = Depends(get_database_session)
 ) -> Response:
-    org_slug = organization_slug_for_author(db, author_id)
-    if org_slug:
-        target = f"/orgs/{org_slug}"
+    merged_into = merged_author_id(db, author_id)
+    org_slug = None if merged_into else organization_slug_for_author(db, author_id)
+    if merged_into or org_slug:
+        target = f"/authors/{merged_into}" if merged_into else f"/orgs/{org_slug}"
         if request.url.query:
             target = f"{target}?{request.url.query}"
         return RedirectResponse(target, status_code=301)
