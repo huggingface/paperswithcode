@@ -220,6 +220,13 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Open one matched post from the JSON and confirm it is a paper author or the paper's own organization (business-verified account) introducing that paper, never an outside account; with apply on, confirm the paper page's X threads card shows it.
 - **Correctness:** `X search HTTP 401/403` means a bad or unentitled token and `429` an exhausted quota (the run stops at the first one). A zero `papers_scanned` means every recent candidate already has threads or used its three scans.
 
+## `refresh_x_post_likes`
+
+- **Effect:** Hourly at :35, adds an `x_post_metrics` row for every `paper_x_threads` post from the last 7 days, then reads each due post (about 1, 2, 4, 8, 12, 24, 48, 72, 120 and 144 h after posting) and updates its likes-per-hour EMA (`like_velocity`). Syndication is tried first; posts it cannot serve use the paid X API (`X_API_BEARER_TOKEN`), capped at `PWC_X_LIKES_API_DAILY_CAP` (default 300) posts per UTC day, tracked in `x_post_likes_api_usage.json` under `PWC_CRON_LOCK_DIR`. Posts the API reports unavailable get `gone_at`. Report-only (reads through syndication and rolls back) unless `PWC_X_LIKES_APPLY=true`.
+- **Freshness metrics** (dashboard Database Metrics): `last_write` = latest `x_post_metrics.last_read_at`, `tracked_posts` = posts with a pending reading. Report-only runs write nothing, so both stay empty until apply is on.
+- **Independent proof:** Pick a recently read post (`ORDER BY last_read_at DESC`), open it on X, and confirm its like count is close to `like_count`; then confirm the paper's `x_trending_component` is set after the next `calculate_paper_trending_scores` run.
+- **Correctness:** The JSON summary lists `syndication_reads`, `api_reads`, `api_reads_today`, `unread` and `api_error`. `api_error` with HTTP 401/402 means a bad token or exhausted X credits and exits 1; many `unread` with `api_reads_today` at the cap means syndication is failing and the cap is doing its job. The X part only affects rankings when `PWC_TRENDING_X_WEIGHT` in `/etc/paperswithcode/trending-cron.env` is above 0.
+
 ## `link_google_scholar_profiles`
 
 - **Effect:** Checks Wikidata Scholar-ID candidates (P1960) for authors with 3+ papers: each new author once on Semantic Scholar (ORCID / S2 author ID on 15 sampled papers) into `author_google_scholar_candidates`, then spends the SerpAPI searches left this month (minus 10) reading Scholar profiles of S2-matched candidates, largest authors first, and upserts confirmed links into `author_google_scholar_profiles`; never deletes links.

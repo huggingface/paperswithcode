@@ -149,6 +149,9 @@ class PaperVersionRefreshService:
                     hf_trending_component=previous_latest.hf_trending_component
                     if previous_latest
                     else None,
+                    x_trending_component=previous_latest.x_trending_component
+                    if previous_latest
+                    else None,
                     hf_artifacts_scanned_at=previous_latest.hf_artifacts_scanned_at
                     if previous_latest
                     else None,

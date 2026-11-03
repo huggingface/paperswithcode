@@ -1,0 +1,13 @@
+[Unit]
+Description=Refresh like counts of linked X posts in their first week
+After=network-online.target postgresql@16-main.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pwc-cron-throttled refresh_x_post_likes
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/paperswithcode/cron-slots

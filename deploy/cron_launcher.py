@@ -41,6 +41,8 @@ RESTRICTED_TRENDING_PASSTHROUGH_KEYS = frozenset(
         "PWC_DB_PORT",
         "PWC_TRENDING_PIN_ARXIV_IDS",
         "PWC_TRENDING_PIN_PAPER_IDS",
+        "PWC_TRENDING_X_MIN_LIKES_PER_HOUR",
+        "PWC_TRENDING_X_WEIGHT",
         "TZ",
     }
 )
@@ -588,6 +590,15 @@ COMMANDS: dict[str, Job] = {
             "search X once per bounded candidate paper; link author posts only "
             "when PWC_X_THREAD_DISCOVERY_APPLY=true, through the audited x_threads "
             "section"
+        ),
+    ),
+    "refresh_x_post_likes": job(
+        "-m",
+        "backend.scripts.refresh_x_post_likes",
+        timeout="30m",
+        idempotency=(
+            "read each due post once per run and write only x_post_metrics; "
+            "report-only rolls back unless PWC_X_LIKES_APPLY=true"
         ),
     ),
     "post_trending_paper_to_x": job(
