@@ -81,19 +81,26 @@ def test_result_yaml_quotes_notes():
     )
 
 
-def test_model_card_repo_accepts_card_variants_only():
+def test_model_card_accepts_card_variants_only():
+    repo = "TMaxxx/tmax-2b-v1.1"
     for url in (
-        "https://huggingface.co/TMaxxx/tmax-2b-v1.1",
-        "https://huggingface.co/TMaxxx/tmax-2b-v1.1/",
-        "https://huggingface.co/TMaxxx/tmax-2b-v1.1#evaluation-results",
-        "https://huggingface.co/TMaxxx/tmax-2b-v1.1/tree/main",
-        "https://huggingface.co/TMaxxx/tmax-2b-v1.1/blob/main/README.md",
+        f"https://huggingface.co/{repo}",
+        f"https://huggingface.co/{repo}/",
+        f"https://huggingface.co/{repo}#evaluation-results",
+        f"https://huggingface.co/{repo}/tree/main",
+        f"https://huggingface.co/{repo}/blob/main/README.md",
     ):
-        assert open_eval_prs.model_card_repo(url) == "TMaxxx/tmax-2b-v1.1"
+        assert open_eval_prs.model_card(url) == (repo, "main")
+    assert open_eval_prs.model_card(
+        f"https://huggingface.co/{repo}/tree/step-0400"
+    ) == (repo, "step-0400")
+    assert open_eval_prs.model_card(
+        f"https://huggingface.co/{repo}/blob/abc123/README.md"
+    ) == (repo, "abc123")
     for url in (
         "https://huggingface.co/datasets/TMaxxx/tmax-13k-v1.1",
         "https://huggingface.co/papers/2606.23321",
         "https://huggingface.co/org/model/blob/main/assets/report.pdf",
         "https://arxiv.org/abs/2606.23321",
     ):
-        assert open_eval_prs.model_card_repo(url) is None
+        assert open_eval_prs.model_card(url) is None

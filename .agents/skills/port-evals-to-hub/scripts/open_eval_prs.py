@@ -63,21 +63,22 @@ def result_yaml(r, source_url, source_name):
     )
 
 
-def model_card_repo(url):
-    """Model repo id when `url` points at a model card (any revision, README, anchor), else None."""
+def model_card(url):
+    """(repo id, revision) when `url` points at a model card (any revision, README, anchor), else None."""
     m = re.fullmatch(
         r"https://huggingface\.co/(?!datasets/|spaces/|papers/)([^/]+/[^/?#]+)"
-        r"(?:/tree/[^/?#]+|/blob/[^/?#]+/README\.md)?/?(?:[?#].*)?",
+        r"(?:/tree/([^/?#]+)|/blob/([^/?#]+)/README\.md)?/?(?:[?#].*)?",
         url,
     )
-    return m[1] if m else None
+    return (m[1], m[2] or m[3] or "main") if m else None
 
 
 def source_text(url):
     """Plain text of the cited source, for the findability check (model cards via raw README)."""
-    repo = model_card_repo(url)
-    if repo:
-        return hub.fetch(f"{hub.HUB}/{repo}/raw/main/README.md", raw=True) or ""
+    card = model_card(url)
+    if card:
+        repo, revision = card
+        return hub.fetch(f"{hub.HUB}/{repo}/raw/{revision}/README.md", raw=True) or ""
     url = url.replace("arxiv.org/abs/", "arxiv.org/html/")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
