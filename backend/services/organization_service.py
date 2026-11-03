@@ -49,6 +49,7 @@ ORGANIZATION_INDEX_TTL_SECONDS = 600
 _organization_index_cache: dict[str, tuple[float, Organizations]] = {}
 _organization_index_refreshing: set[str] = set()
 _organization_index_lock = threading.Lock()
+_organization_index_warmed: dict[str, threading.Event] = {}
 
 
 def _refresh_organization_index(bind, key: str) -> None:
@@ -64,14 +65,18 @@ def _refresh_organization_index(bind, key: str) -> None:
 def warm_organization_index(bind) -> None:
     """Build a worker's directory cards at startup so no visitor waits on them."""
     key = str(bind.url)
+    warmed = threading.Event()
+    _organization_index_warmed[key] = warmed
     with _organization_index_lock:
         _organization_index_refreshing.add(key)
-    threading.Thread(
-        target=_refresh_organization_index,
-        args=(bind, key),
-        name="organization-index-warm",
-        daemon=True,
-    ).start()
+
+    def warm() -> None:
+        try:
+            _refresh_organization_index(bind, key)
+        finally:
+            warmed.set()
+
+    threading.Thread(target=warm, name="organization-index-warm", daemon=True).start()
 
 
 class OrganizationService:
@@ -159,6 +164,11 @@ class OrganizationService:
         key = str(bind.url)
         cached = _organization_index_cache.get(key)
         now = time.monotonic()
+        warming = _organization_index_warmed.get(key)
+        if cached is None and warming is not None:
+            # The startup warm-up is already building these cards.
+            warming.wait()
+            cached = _organization_index_cache.get(key)
         if cached is None:
             result = self.get_organizations(curated_only=True)
             _organization_index_cache[key] = (now, result)
