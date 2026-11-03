@@ -78,16 +78,6 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `embedding-models` / `mmteb-v2`, `MMTEB Score`, official MMTEB v2 source, and only rows with the managed MMTEB methodology.
 - **Proof:** Apply the shared procedure to the complete overall cohort. Verify model identity, unique contiguous ranks, finite scores, managed-row ownership, and the public embedding-models leaderboard read.
 
-## `sync_mmteb_retrieval`
-
-- **Contract:** `retrieval` / `mmteb-v2`, `Retrieval`, official MMTEB v2 source, and only managed MMTEB rows.
-- **Proof:** Apply the shared procedure independently of the overall lane. Verify retrieval values are not copied from aggregate scores and compare the owned row set and public retrieval leaderboard.
-
-## `sync_mmteb_reranking`
-
-- **Contract:** `text-reranking` / `mmteb-v2`, `Rerank`, official MMTEB v2 source, and only managed MMTEB rows.
-- **Proof:** Apply the shared procedure independently of the other MMTEB lanes. Verify reranking task identity, values, ranks, stale-row removal, and the public text-reranking leaderboard.
-
 ## `sync_mmeb_v2`
 
 - **Contract:** `embedding-models` / `mmeb-v2`, `MMEB-v2 Score`, official MMEB source, and only rows with the managed MMEB methodology.
