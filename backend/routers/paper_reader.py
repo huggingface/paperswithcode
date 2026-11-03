@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
+from huggingface_hub.errors import HfHubHTTPError
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
@@ -13,7 +14,9 @@ from backend.services.external_page_markdown_service import (
     PAGE_MARKDOWN_MAX_BYTES,
     ExternalPageMarkdownError,
     external_page_url,
+    page_frameable,
     prepare_external_page_markdown,
+    read_status,
 )
 from backend.services.paper_layout_service import (
     PaperLayoutNotFoundError,
@@ -33,6 +36,14 @@ _NO_STORE = {"Cache-Control": "no-store"}
 
 def _error(status_code: int, detail: str) -> HTTPException:
     return HTTPException(status_code=status_code, detail=detail, headers=_NO_STORE)
+
+
+def _page_url(paper: DBPaper | None) -> str | None:
+    return paper and external_page_url(
+        source=paper.source,
+        source_url=paper.source_url,
+        conference_url_pdf=paper.conference_url_pdf,
+    )
 
 
 def _read(paper_id: str, settings: Settings) -> str:
@@ -55,11 +66,7 @@ def get_paper_web_markdown(
 ) -> PlainTextResponse:
     """Return an HTML-only external paper's page as Markdown, preparing it once."""
     paper = db.get(DBPaper, int(paper_id))
-    page_url = paper and external_page_url(
-        source=paper.source,
-        source_url=paper.source_url,
-        conference_url_pdf=paper.conference_url_pdf,
-    )
+    page_url = _page_url(paper)
     if not paper or not page_url:
         raise _error(404, "This paper has no web page to read")
     try:
@@ -87,6 +94,34 @@ def get_paper_web_markdown(
             raise _error(422, f"This page could not be read: {error.code}") from error
         markdown = _read(paper_id, settings)
     return PlainTextResponse(markdown, headers={"Cache-Control": "public, max-age=300"})
+
+
+@router.get("/papers/{paper_id}/web-page")
+def get_paper_web_page(
+    paper_id: str = Path(pattern=r"^[1-9]\d{0,18}$"),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+) -> JSONResponse:
+    """Return an HTML-only external paper's page and whether the reader may frame it.
+
+    The hourly Markdown backfill checks each page's framing headers; a page
+    not yet checked is read as Markdown.
+    """
+    page_url = _page_url(db.get(DBPaper, int(paper_id)))
+    if not page_url:
+        raise _error(404, "This paper has no web page to read")
+    try:
+        status = read_status(
+            paper_id,
+            bucket_id=settings.paper_markdown_hf_bucket_id,
+            token=settings.hf_token or None,
+        )
+    except (HfHubHTTPError, OSError, ValueError) as error:
+        raise _error(503, "Paper content storage is temporarily unavailable") from error
+    return JSONResponse(
+        {"url": page_url, "frameable": page_frameable(status, page_url)},
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 @router.get("/papers/{route_id}/layout")

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getAvailability: vi.fn(),
   getPaperWebMarkdown: vi.fn(),
+  getPaperWebPage: vi.fn(),
   showArtifact: false,
   paper: {} as Record<string, unknown>,
 }));
@@ -37,6 +38,7 @@ const arxivPaper = {
 vi.mock("@/lib/api/papers", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/api/papers")>(),
   getPaperWebMarkdown: mocks.getPaperWebMarkdown,
+  getPaperWebPage: mocks.getPaperWebPage,
 }));
 vi.mock("@/lib/api/chat", () => ({
   chatApi: { getAvailability: mocks.getAvailability },
@@ -119,6 +121,7 @@ describe("PaperReaderView", () => {
     vi.stubEnv("VITE_PAPER_READER_CHAT_ENABLED", "1");
     mocks.showArtifact = false;
     mocks.paper = arxivPaper;
+    mocks.getPaperWebPage.mockResolvedValue({ url: "", frameable: false });
     mocks.getAvailability.mockResolvedValue({
       status: "available",
       reason: null,
@@ -254,6 +257,48 @@ describe("PaperReaderView", () => {
 
     expect(await screen.findByText("Astra reads weights.")).toBeVisible();
     expect(screen.queryByTitle("Original page: Sparks of Weight-Space Programming")).not.toBeInTheDocument();
+  });
+
+  it("frames other web papers only once the server's header check allowed them", async () => {
+    mocks.getPaperWebMarkdown.mockResolvedValue("# GLM-4.7\n\nA coding model.\n");
+    mocks.getPaperWebPage.mockResolvedValue({ url: "https://z.ai/blog/glm-4.7", frameable: true });
+    mocks.paper = {
+      id: "130001",
+      arxiv_id: null,
+      title: "GLM-4.7",
+      source: "external",
+      version: "v1",
+      source_url: "https://z.ai/blog/glm-4.7",
+      url_pdf: null,
+      repositories: [],
+      project_pages: [],
+    };
+
+    renderReader("/pdf/130001");
+
+    expect(await screen.findByTitle("Original page: GLM-4.7")).toHaveAttribute("src", "https://z.ai/blog/glm-4.7");
+    expect(mocks.getPaperWebPage).toHaveBeenCalledWith("130001");
+  });
+
+  it("reads a web paper as Markdown when its framing check fails", async () => {
+    mocks.getPaperWebMarkdown.mockResolvedValue("# GLM-4.7\n\nA coding model.\n");
+    mocks.getPaperWebPage.mockRejectedValue(new Error("storage unavailable"));
+    mocks.paper = {
+      id: "130001",
+      arxiv_id: null,
+      title: "GLM-4.7",
+      source: "external",
+      version: "v1",
+      source_url: "https://z.ai/blog/glm-4.7",
+      url_pdf: null,
+      repositories: [],
+      project_pages: [],
+    };
+
+    renderReader("/pdf/130001");
+
+    expect(await screen.findByText("A coding model.")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Original" })).not.toBeInTheDocument();
   });
 
   it("only accepts an official GitHub repository for the title action", () => {

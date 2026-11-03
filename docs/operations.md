@@ -226,6 +226,15 @@ is too short or does not carry the paper's title near the top is recorded under
 `_jobs/web-status/external/<id>.json` and not scraped again; transient failures
 retry with backoff, at most three times.
 
+The same lanes check up to 60 pages per run for whether the reader may show the
+original page in a frame. Each check is a header-only GET that follows redirects
+by hand, requiring HTTPS and publicly routable addresses on every hop. The
+verdict (`framing` in the status record) is refreshed weekly, or daily for
+unreachable pages. The reader frames a page when
+`GET /api/v1/papers/{paper_id}/web-page` reports `frameable`, and always frames
+`*.github.io`, which cannot send framing headers. Every other page is read as
+Markdown.
+
 For MCP operations, start with `pwc-status --component mcp` and inspect
 `journalctl -u paperswithcode-mcp@staging.service` (or `production`). Operational
 MCP telemetry is limited to tool name, status, latency, response bytes, protocol

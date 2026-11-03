@@ -324,6 +324,17 @@ export async function getPaperWebMarkdown(paperId: string): Promise<string> {
   return response.text();
 }
 
+export interface PaperWebPage {
+  url: string;
+  /** Whether the page's headers, checked hourly, let the reader frame it. */
+  frameable: boolean;
+}
+
+/** An HTML-only external paper's web page and whether the reader may frame it. */
+export function getPaperWebPage(paperId: string): Promise<PaperWebPage> {
+  return apiRequest<PaperWebPage>(`/papers/${encodeURIComponent(paperId)}/web-page`);
+}
+
 export interface PaperLayoutBlock {
   page: number;
   label: string;
