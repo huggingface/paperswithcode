@@ -7,7 +7,7 @@ import time
 from datetime import date, timedelta
 from typing import Optional
 
-from sqlalchemy import Float, and_, cast, desc, func, or_
+from sqlalchemy import Float, and_, case, cast, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.database.organizations_setup.organizations import BY_PWC_SLUG
@@ -40,14 +40,16 @@ from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.organization_logos import organization_logo_path
 
 
-# The public directory builds ~200 cards with a top paper each (~2 s), and
+# The public directory builds ~200 cards with a top paper each (~1 s), and
 # featuring and trending change once a day. Each worker keeps its cards and,
 # once they are older than the TTL, serves them while one background thread
-# rebuilds them, so only a worker's very first request waits for the query.
+# rebuilds them. Deployed workers start building them at startup, so visitors
+# almost never wait on the query.
 ORGANIZATION_INDEX_TTL_SECONDS = 600
 _organization_index_cache: dict[str, tuple[float, Organizations]] = {}
 _organization_index_refreshing: set[str] = set()
 _organization_index_lock = threading.Lock()
+_organization_index_warmed: dict[str, threading.Event] = {}
 
 
 def _refresh_organization_index(bind, key: str) -> None:
@@ -58,6 +60,23 @@ def _refresh_organization_index(bind, key: str) -> None:
     finally:
         with _organization_index_lock:
             _organization_index_refreshing.discard(key)
+
+
+def warm_organization_index(bind) -> None:
+    """Build a worker's directory cards at startup so no visitor waits on them."""
+    key = str(bind.url)
+    warmed = threading.Event()
+    _organization_index_warmed[key] = warmed
+    with _organization_index_lock:
+        _organization_index_refreshing.add(key)
+
+    def warm() -> None:
+        try:
+            _refresh_organization_index(bind, key)
+        finally:
+            warmed.set()
+
+    threading.Thread(target=warm, name="organization-index-warm", daemon=True).start()
 
 
 class OrganizationService:
@@ -145,6 +164,11 @@ class OrganizationService:
         key = str(bind.url)
         cached = _organization_index_cache.get(key)
         now = time.monotonic()
+        warming = _organization_index_warmed.get(key)
+        if cached is None and warming is not None:
+            # The startup warm-up is already building these cards.
+            warming.wait()
+            cached = _organization_index_cache.get(key)
         if cached is None:
             result = self.get_organizations(curated_only=True)
             _organization_index_cache[key] = (now, result)
@@ -169,13 +193,50 @@ class OrganizationService:
         curated_only: bool = False,
     ) -> Organizations:
         try:
-            paper_count_col = func.count(func.distinct(DBPaper.id)).label("paper_count")
-            first_year_col = func.min(
-                func.extract("year", DBPaper.date_published)
-            ).label("first_year")
-            latest_year_col = func.max(
-                func.extract("year", DBPaper.date_published)
-            ).label("latest_year")
+            active_score, _max_stars = correlated_paper_score_expressions(
+                get_settings().trending_ranking_mode
+            )
+            # One pass over the eligible linked papers yields each
+            # organization's paper stats and its top paper; the eligibility
+            # predicate trims every abstract, so a second pass costs ~1 s.
+            linked = (
+                select(
+                    PaperOrganization.organization_id.label("organization_id"),
+                    DBPaper.id.label("paper_id"),
+                    DBPaper.date_published.label("date_published"),
+                    func.row_number()
+                    .over(
+                        partition_by=PaperOrganization.organization_id,
+                        order_by=(
+                            desc(active_score),
+                            desc(DBPaper.date_published),
+                            desc(DBPaper.id),
+                        ),
+                    )
+                    .label("rank"),
+                )
+                .join(DBPaper, DBPaper.id == PaperOrganization.paper_id)
+                .where(eligible_paper_filter())
+                .subquery()
+            )
+            stats = (
+                select(
+                    linked.c.organization_id,
+                    func.count(func.distinct(linked.c.paper_id)).label("paper_count"),
+                    func.min(func.extract("year", linked.c.date_published)).label(
+                        "first_year"
+                    ),
+                    func.max(func.extract("year", linked.c.date_published)).label(
+                        "latest_year"
+                    ),
+                    func.max(case((linked.c.rank == 1, linked.c.paper_id))).label(
+                        "top_paper_id"
+                    ),
+                )
+                .group_by(linked.c.organization_id)
+                .subquery()
+            )
+            paper_count_col = func.coalesce(stats.c.paper_count, 0)
             latest_snapshot_dates = (
                 self.db.query(
                     OrganizationTrendingHistory.organization_id.label(
@@ -192,21 +253,11 @@ class OrganizationService:
                 self.db.query(
                     DBOrganization,
                     paper_count_col,
-                    first_year_col,
-                    latest_year_col,
-                    OrganizationTrendingHistory.raw_score,
+                    stats.c.first_year,
+                    stats.c.latest_year,
+                    stats.c.top_paper_id,
                 )
-                .outerjoin(
-                    PaperOrganization,
-                    DBOrganization.id == PaperOrganization.organization_id,
-                )
-                .outerjoin(
-                    DBPaper,
-                    and_(
-                        DBPaper.id == PaperOrganization.paper_id,
-                        eligible_paper_filter(),
-                    ),
-                )
+                .outerjoin(stats, stats.c.organization_id == DBOrganization.id)
                 .outerjoin(
                     latest_snapshot_dates,
                     latest_snapshot_dates.c.organization_id == DBOrganization.id,
@@ -220,12 +271,11 @@ class OrganizationService:
                         == latest_snapshot_dates.c.snapshot_date,
                     ),
                 )
-                .group_by(DBOrganization.id, OrganizationTrendingHistory.raw_score)
             )
             if curated_only:
                 # The reviewed manifest plus every org established enough to be
                 # auto-featured, so backfilled institutions reach the directory.
-                rows = rows.having(
+                rows = rows.filter(
                     or_(
                         DBOrganization.slug.in_(BY_PWC_SLUG),
                         paper_count_col >= AUTO_FEATURE_MIN_PAPERS,
@@ -243,49 +293,20 @@ class OrganizationService:
                 rows = rows.order_by(desc(paper_count_col), DBOrganization.name)
             rows = rows.all()
 
-            top_by_org: dict[int, DBPaper] = {}
-            if rows:
-                org_ids = [row[0].id for row in rows]
-                active_score, _max_stars = correlated_paper_score_expressions(
-                    get_settings().trending_ranking_mode
+            top_paper_ids = [row[4] for row in rows if row[4] is not None]
+            papers = {
+                paper.id: paper
+                for paper in self.db.query(DBPaper).filter(
+                    DBPaper.id.in_(top_paper_ids)
                 )
-                # Rank ids only, then load just each organization's top paper
-                # instead of every eligible paper row.
-                candidates = (
-                    self.db.query(PaperOrganization.organization_id, DBPaper.id)
-                    .join(DBPaper, DBPaper.id == PaperOrganization.paper_id)
-                    .filter(
-                        PaperOrganization.organization_id.in_(org_ids),
-                        eligible_paper_filter(),
-                    )
-                    .order_by(
-                        PaperOrganization.organization_id,
-                        desc(active_score),
-                        desc(DBPaper.date_published),
-                        desc(DBPaper.id),
-                    )
-                    .all()
-                )
-                top_paper_ids: dict[int, int] = {}
-                for organization_id, paper_id in candidates:
-                    top_paper_ids.setdefault(organization_id, paper_id)
-                papers = {
-                    paper.id: paper
-                    for paper in self.db.query(DBPaper).filter(
-                        DBPaper.id.in_(top_paper_ids.values())
-                    )
-                }
-                top_by_org = {
-                    organization_id: papers[paper_id]
-                    for organization_id, paper_id in top_paper_ids.items()
-                }
+            }
 
             results = [
                 self._organization_to_api(
                     db_org,
                     paper_count or 0,
                     trending_rank=(index if featured_only else None),
-                    top_paper=top_by_org.get(db_org.id),
+                    top_paper=papers.get(top_paper_id),
                     first_year=int(first_year) if first_year is not None else None,
                     latest_year=int(latest_year) if latest_year is not None else None,
                 )
@@ -294,7 +315,7 @@ class OrganizationService:
                     paper_count,
                     first_year,
                     latest_year,
-                    _,
+                    top_paper_id,
                 ) in enumerate(rows, start=1)
             ]
             return Organizations(count=len(results), results=results)

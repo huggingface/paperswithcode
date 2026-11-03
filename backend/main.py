@@ -352,6 +352,12 @@ async def lifespan(app: FastAPI):
         pool_startup_task = asyncio.create_task(replenish_pool_at_startup())
         maintenance_task = asyncio.create_task(maintain_sandboxes())
 
+    if settings.is_deployed:
+        from backend.database.connection import db_manager
+        from backend.services.organization_service import warm_organization_index
+
+        warm_organization_index(db_manager.engine)
+
     async with AsyncExitStack() as gateway_stack:
         if settings.chat_enabled and settings.chat_pwc_mcp_enabled:
             from backend.chat_gateway_app import (
