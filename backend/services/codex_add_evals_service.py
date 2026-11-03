@@ -221,11 +221,16 @@ def _is_callback_validation_rejection(row: PaperCurationJob) -> bool:
     return (getattr(row, "validation_summary", None) or {}).get("status") == "rejected"
 
 
-# The runner's generic failure for a callback that never got a response: the
-# HF Job could not reach the site, which says nothing about the curation itself.
+# The runner's generic failure for one of its own callbacks to the site
+# (bootstrap, context, complete), which says nothing about the curation itself.
+# An apply runs inside Codex, whose rejections never surface under these names.
+# HTTPError and JSONDecodeError are almost always the edge answering for us (a
+# Cloudflare 5xx or an empty or HTML body). A systemic rejection, such as a
+# release that cannot serve its bootstrap bundle, still trips the transport
+# breaker below.
 _TRANSPORT_FAILURE = re.compile(
     r"^Remote runner failed \((URLError|RemoteDisconnected|TimeoutError|"
-    r"ConnectionResetError|IncompleteRead)\)\.$"
+    r"ConnectionResetError|IncompleteRead|HTTPError|JSONDecodeError)\)\.$"
 )
 
 
