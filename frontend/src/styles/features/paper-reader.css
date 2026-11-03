@@ -198,6 +198,13 @@
 .reader-web-document th, .reader-web-document td { padding: 6px 10px; border: 1px solid #e4e4e7; }
 .reader-web-document a { color: #1c68ef; }
 .reader-web-document ::selection { background: rgb(45 125 255 / .3); }
+/* The original page of a web paper whose host allows framing. */
+.reader-web-frame { flex: 1; width: 100%; min-height: 0; border: 0; background: #fff; }
+.reader-web-view-toggle { display: inline-flex; }
+.reader-web-view-toggle button { border-radius: 0; }
+.reader-web-view-toggle button:first-child { border-radius: 8px 0 0 8px; }
+.reader-web-view-toggle button:last-child { border-left: 0; border-radius: 0 8px 8px 0; }
+.reader-web-view-toggle button[aria-pressed="true"] { background: var(--bg-subtle); border-color: var(--hairline-strong); }
 @media (max-width: 640px) {
   .reader-web-document { padding: 20px 16px 48px; font-size: 15px; }
 }

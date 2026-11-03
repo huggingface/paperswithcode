@@ -228,6 +228,34 @@ describe("PaperReaderView", () => {
     expect(screen.getByText("Paper chat")).toBeVisible();
   });
 
+  it("shows a GitHub Pages paper's original page and switches to its Markdown text", async () => {
+    mocks.getPaperWebMarkdown.mockResolvedValue("# Sparks of Weight-Space Programming\n\nAstra reads weights.\n");
+    mocks.paper = {
+      id: "131739",
+      arxiv_id: null,
+      title: "Sparks of Weight-Space Programming",
+      source: "external",
+      version: "v1",
+      source_url: "https://rikiyat.github.io/blog/weight-space-programming/",
+      url_pdf: null,
+      repositories: [],
+      project_pages: [],
+    };
+
+    renderReader("/pdf/131739");
+
+    const frame = await screen.findByTitle("Original page: Sparks of Weight-Space Programming");
+    expect(frame.tagName).toBe("IFRAME");
+    expect(frame).toHaveAttribute("src", "https://rikiyat.github.io/blog/weight-space-programming/");
+    expect(frame.getAttribute("sandbox")).not.toContain("allow-top-navigation");
+    expect(screen.getByRole("button", { name: "Original" })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Text" }));
+
+    expect(await screen.findByText("Astra reads weights.")).toBeVisible();
+    expect(screen.queryByTitle("Original page: Sparks of Weight-Space Programming")).not.toBeInTheDocument();
+  });
+
   it("only accepts an official GitHub repository for the title action", () => {
     const repository = (url: string, isOfficial: boolean) => ({
       id: url,
