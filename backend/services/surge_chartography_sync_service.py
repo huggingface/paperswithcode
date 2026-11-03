@@ -389,18 +389,13 @@ def _curated_notes(row: Evaluation) -> str:
     return methodology
 
 
-def _fraction(score: Decimal) -> Decimal:
-    return score / 100
-
-
 def _score_matches(stored: Any, published: Decimal) -> bool:
-    """A stored fraction is current when it rounds to the published percent."""
+    """A stored percent is current when it rounds to the published percent."""
     if isinstance(stored, bool) or not isinstance(stored, (int, float)):
         return False
     exponent = published.as_tuple().exponent
     places = -exponent if isinstance(exponent, int) and exponent < 0 else 0
-    percent = Decimal(str(stored)) * 100
-    return percent.quantize(Decimal(1).scaleb(-places)) == published
+    return Decimal(str(stored)).quantize(Decimal(1).scaleb(-places)) == published
 
 
 class SurgeChartographySyncService:
@@ -547,7 +542,7 @@ class SurgeChartographySyncService:
                 if paper_id is None:
                     stats.missing_papers.append(entry.label)
                     continue
-                metrics = {METRIC_NAME: float(_fraction(entry.score))}
+                metrics = {METRIC_NAME: float(entry.score)}
                 row = rows_by_identity.get((paper_id, model_name))
                 if row is None:
                     row = Evaluation(

@@ -307,7 +307,7 @@ def parse_riemann_bench(html: str) -> list[LeaderboardEntry]:
         entries.append(
             LeaderboardEntry(
                 label,
-                float(value / 100),
+                float(value),
                 f"{value}% Pass@1{setting}",
                 lab=brand_text[:200],
             )
@@ -354,7 +354,7 @@ def parse_cwe_bench(html: str) -> list[LeaderboardEntry]:
         entries.append(
             LeaderboardEntry(
                 name,
-                float(pass1 / 100),
+                float(pass1),
                 f"programmatic pass@1 {pass1}% (pass@4 {match['pass4']})",
                 harness=match["harness"].strip(),
             )

@@ -56,47 +56,47 @@ HTML = (Path(__file__).parent / "fixtures" / "surge_chartography.html").read_tex
 
 # The 41 rows hand-imported on 2026-10-17: model_name -> stored Pass@1.
 PRODUCTION_ROWS = {
-    "Gemini 4 Argon (no tools)": 0.716,
-    "GPT-6 Astra (no tools)": 0.71,
-    "Claude Opus 5.5 (no tools)": 0.663,
-    "GPT-6 Sol (no tools)": 0.536,
-    "Claude Fable 5.1 (no tools)": 0.462,
-    "GPT-5.6 Sol (no tools)": 0.45,
-    "Gemini 3.8 Flash (no tools)": 0.409,
-    "Gemini 3.7 Flash (no tools)": 0.404,
-    "Claude Fable 5 (no tools)": 0.348,
-    "GPT-5.6 Terra (no tools)": 0.34,
-    "Gemini 3.6 Flash (no tools)": 0.34,
-    "Muse Spark 1.2 (no tools)": 0.321,
-    "GPT-5.6 Luna (no tools)": 0.314,
-    "GPT-5.5 (no tools)": 0.31,
-    "GPT-5.4 (no tools)": 0.296,
-    "GPT-6 Luna (no tools)": 0.291,
-    "Qwen3.8-Max (no tools)": 0.291,
-    "Muse Spark 1.3 (no tools)": 0.276,
-    "Claude Opus 5 (no tools)": 0.273,
-    "Kimi K3 (no tools)": 0.266,
-    "Gemini 3.1 Pro (no tools)": 0.261,
-    "Muse Spark 1.1 (no tools)": 0.244,
-    "Grok 4.6 (no tools)": 0.205,
-    "Qwen3.8-Flash (no tools)": 0.174,
-    "Muse Glimmer-30B (no tools)": 0.172,
-    "Grok 4.5 (no tools)": 0.17,
-    "Claude Sonnet 5 (no tools)": 0.166,
-    "Claude Opus 4.7 (no tools)": 0.165,
-    "GLM-5.3-Flash (no tools)": 0.163,
-    "Qwen3.5-Plus (no tools)": 0.159,
-    "Claude Opus 4.8 (no tools)": 0.159,
-    "Qwen3.7-Plus (no tools)": 0.158,
-    "Grok 4.7 (no tools)": 0.147,
-    "Grok 4.3 (no tools)": 0.129,
-    "Kimi K2.5 (no tools)": 0.126,
-    "Kimi K2.6 (no tools)": 0.122,
-    "DeepSeek-V4.1-Flash (no tools)": 0.116,
-    "Gemini 3.5 Flash-Lite (no tools)": 0.102,
-    "Inkling (no tools)": 0.1,
-    "Inkling-Small (no tools)": 0.091,
-    "Mistral Large 3 (no tools)": 0.09,
+    "Gemini 4 Argon (no tools)": 71.6,
+    "GPT-6 Astra (no tools)": 71,
+    "Claude Opus 5.5 (no tools)": 66.3,
+    "GPT-6 Sol (no tools)": 53.6,
+    "Claude Fable 5.1 (no tools)": 46.2,
+    "GPT-5.6 Sol (no tools)": 45,
+    "Gemini 3.8 Flash (no tools)": 40.9,
+    "Gemini 3.7 Flash (no tools)": 40.4,
+    "Claude Fable 5 (no tools)": 34.8,
+    "GPT-5.6 Terra (no tools)": 34,
+    "Gemini 3.6 Flash (no tools)": 34,
+    "Muse Spark 1.2 (no tools)": 32.1,
+    "GPT-5.6 Luna (no tools)": 31.4,
+    "GPT-5.5 (no tools)": 31,
+    "GPT-5.4 (no tools)": 29.6,
+    "GPT-6 Luna (no tools)": 29.1,
+    "Qwen3.8-Max (no tools)": 29.1,
+    "Muse Spark 1.3 (no tools)": 27.6,
+    "Claude Opus 5 (no tools)": 27.3,
+    "Kimi K3 (no tools)": 26.6,
+    "Gemini 3.1 Pro (no tools)": 26.1,
+    "Muse Spark 1.1 (no tools)": 24.4,
+    "Grok 4.6 (no tools)": 20.5,
+    "Qwen3.8-Flash (no tools)": 17.4,
+    "Muse Glimmer-30B (no tools)": 17.2,
+    "Grok 4.5 (no tools)": 17,
+    "Claude Sonnet 5 (no tools)": 16.6,
+    "Claude Opus 4.7 (no tools)": 16.5,
+    "GLM-5.3-Flash (no tools)": 16.3,
+    "Qwen3.5-Plus (no tools)": 15.9,
+    "Claude Opus 4.8 (no tools)": 15.9,
+    "Qwen3.7-Plus (no tools)": 15.8,
+    "Grok 4.7 (no tools)": 14.7,
+    "Grok 4.3 (no tools)": 12.9,
+    "Kimi K2.5 (no tools)": 12.6,
+    "Kimi K2.6 (no tools)": 12.2,
+    "DeepSeek-V4.1-Flash (no tools)": 11.6,
+    "Gemini 3.5 Flash-Lite (no tools)": 10.2,
+    "Inkling (no tools)": 10,
+    "Inkling-Small (no tools)": 9.1,
+    "Mistral Large 3 (no tools)": 9,
 }
 TASK_ID = 8
 DATASET_ID = 2701
@@ -199,7 +199,7 @@ def _seed_production(session: Session) -> None:
             task_id=TASK_ID,
             dataset_id=WITH_TOOLS_DATASET_ID,
             model_name="Claude Opus 5.5",
-            metrics={METRIC_NAME: 0.5},
+            metrics={METRIC_NAME: 50.0},
             methodology="Anthropic system card.",
             external=True,
         )
@@ -295,7 +295,7 @@ def test_first_run_adopts_every_hand_imported_row():
     rows = _rows(session)
     assert len(rows) == 41
     argon = rows["Gemini 4 Argon (no tools)"]
-    assert argon.best_rank == 1 and argon.metrics == {METRIC_NAME: 0.716}
+    assert argon.best_rank == 1 and argon.metrics == {METRIC_NAME: 71.6}
     assert argon.methodology.startswith(
         f'{MANAGED_METHODOLOGY_PREFIX} Official leaderboard entry "Gemini 4 Argon" '
         "(High reasoning): 71.6% Pass@1"
@@ -309,7 +309,7 @@ def test_first_run_adopts_every_hand_imported_row():
     again = SurgeChartographySyncService(session).sync(parse_surge_chartography(HTML))
     assert (again.adopted, again.created, again.changed) == (0, 0, 0)
     assert _rows(session, WITH_TOOLS_DATASET_ID)["Claude Opus 5.5"].metrics == {
-        METRIC_NAME: 0.5
+        METRIC_NAME: 50.0
     }
     assert _rows(session)["Gemini 4 Argon (no tools)"].methodology == argon.methodology
 
@@ -328,7 +328,7 @@ def test_score_and_configuration_updates_revise_the_row():
     )
     assert (stats.changed, stats.created, stats.adopted) == (1, 0, 0)
     argon = _rows(session)["Gemini 4 Argon (no tools)"]
-    assert argon.metrics == {METRIC_NAME: 0.7325}
+    assert argon.metrics == {METRIC_NAME: 73.25}
     assert '"Gemini 4 Argon" (Max reasoning): 73.25% Pass@1' in argon.methodology
     assert argon.methodology.endswith(
         "Hand-reviewed notes for Gemini 4 Argon (no tools)."
@@ -352,7 +352,7 @@ def test_new_mapped_rows_are_created_and_new_labels_reported():
     assert stats.unreviewed == ["Nova 2"]
     assert stats.missing_upstream == []
     created = _rows(session)["Mistral Large 3 (no tools)"]
-    assert created.metrics == {METRIC_NAME: 0.09}
+    assert created.metrics == {METRIC_NAME: 9.0}
     assert created.is_open and created.external_source_url == SURGE_CHARTOGRAPHY_URL
     # Its row shows no lab logo, so there is no lab to hand to the radar.
     assert session.query(ModelReleaseSignal).count() == 0
@@ -387,7 +387,7 @@ def test_new_labels_are_auto_matched_or_handed_to_the_radar():
     assert (kimi.paper_id, kimi.is_open, kimi.metrics) == (
         2001,
         False,
-        {METRIC_NAME: 0.126},
+        {METRIC_NAME: 12.6},
     )
     assert '"Kimi K3.5" (Thinking on): 12.6% Pass@1' in kimi.methodology
     signal = session.query(ModelReleaseSignal).one()
