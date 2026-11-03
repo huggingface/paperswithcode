@@ -44,7 +44,7 @@ VALUES (
     'DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines',
     'https://github.com/stanfordnlp/dspy/blob/main/dspy/predict/chain_of_thought.py',
     NULL,
-    '[DSPy: Compiling Declarative Language Model Calls into Self-Improving Pipelines](/paper/2310.03714)',
+    '[Learning DSPy (1): The power of good abstractions](https://thedataquarry.com/blog/learning-dspy-1-the-power-of-good-abstractions/), Prashanth Rao',
     'always',
     ARRAY[]::text[]
 )
