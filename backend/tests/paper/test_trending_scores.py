@@ -210,20 +210,23 @@ def test_x_only_paper_stays_unscored_while_x_weight_is_zero():
     assert clears == [2]
 
     updates, clears = cron.build_score_changes(
-        population, github_corpus, hf_corpora, x_sorted=[50.0], x_weight=1 / 3
+        population, github_corpus, hf_corpora, x_sorted=[50.0], x_weight=1.0
     )
     by_id = {update["id"]: update for update in updates}
     assert by_id[2]["x"] == 1.0
-    assert by_id[2]["score"] == pytest.approx(100 / 3, abs=1e-3)
-    assert by_id[1]["score"] == pytest.approx(100 / 3, abs=1e-3)
+    assert by_id[2]["score"] == pytest.approx(100, abs=1e-3)
+    # The GitHub-only paper keeps its score: X only lifts.
+    assert by_id[1]["score"] == pytest.approx(50, abs=1e-3)
     assert clears == []
 
 
-def test_x_settings_reject_a_weight_that_would_silence_github_and_hf(monkeypatch):
+def test_x_settings_accept_a_full_lift_and_reject_out_of_range(monkeypatch):
     cron = _load_module()
-    monkeypatch.setenv("PWC_TRENDING_X_WEIGHT", "1")
+    monkeypatch.setenv("PWC_TRENDING_X_WEIGHT", "1.5")
     with pytest.raises(ValueError, match="PWC_TRENDING_X_WEIGHT"):
         cron.x_settings()
+    monkeypatch.setenv("PWC_TRENDING_X_WEIGHT", "1")
+    assert cron.x_settings() == (1.0, 1.0)
     monkeypatch.setenv("PWC_TRENDING_X_WEIGHT", "0.3333")
     monkeypatch.setenv("PWC_TRENDING_X_MIN_LIKES_PER_HOUR", "2")
     assert cron.x_settings() == (0.3333, 2.0)

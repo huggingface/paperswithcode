@@ -172,14 +172,23 @@ def test_hf_aggregators_are_excluded_by_fan_out_and_denylist():
     assert not is_hf_aggregator("model", "tardellirs/paper-pulse", 1)
 
 
-def test_x_weight_takes_its_share_equally_from_github_and_hf():
-    assert composite_score(1.0, 1.0, 1.0, x_weight=1 / 3) == pytest.approx(SCORE_SCALE)
-    assert composite_score(1.0, 0.0, 0.0, x_weight=1 / 3) == pytest.approx(
-        SCORE_SCALE / 3
+def test_x_only_lifts_the_github_hf_score():
+    # A paper without X data keeps its GitHub/HF score.
+    assert composite_score(1.0, 0.0, 0.0, x_weight=1.0) == pytest.approx(
+        SCORE_SCALE * GITHUB_WEIGHT
     )
-    assert composite_score(0.0, 0.0, 1.0, x_weight=1 / 3) == pytest.approx(
-        SCORE_SCALE / 3
+    # A faster X rank lifts the paper, a slower one never lowers it.
+    assert composite_score(0.2, 0.2, 0.9, x_weight=1.0) == pytest.approx(
+        SCORE_SCALE * 0.9
     )
+    assert composite_score(0.8, 0.8, 0.5, x_weight=1.0) == pytest.approx(
+        SCORE_SCALE * 0.8
+    )
+    # The weight scales the lift; a viral post alone can reach the top.
+    assert composite_score(0.0, 0.0, 1.0, x_weight=0.5) == pytest.approx(
+        SCORE_SCALE / 2
+    )
+    assert composite_score(0.0, 0.0, 1.0, x_weight=1.0) == pytest.approx(SCORE_SCALE)
     # Weighted at 0, X never changes a score.
     assert composite_score(0.4, 0.6, 1.0) == composite_score(0.4, 0.6)
 
@@ -192,7 +201,7 @@ def test_slow_x_posts_count_for_nothing_and_stay_out_of_the_corpus():
     assert x_component(40.0, corpus, 1.0) == 1.0
 
     score, g, h, x = compute_paper_score(
-        0.0, [], [], {}, x_raw=40.0, x_sorted=corpus, x_weight=1 / 3
+        0.0, [], [], {}, x_raw=40.0, x_sorted=corpus, x_weight=1.0
     )
     assert (g, h, x) == (0.0, 0.0, 1.0)
-    assert score == pytest.approx(SCORE_SCALE / 3)
+    assert score == pytest.approx(SCORE_SCALE)
