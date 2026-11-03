@@ -715,3 +715,14 @@ def test_chat_executor_units_cannot_read_environment_files():
         for line in unit.splitlines():
             if "chgrp" in line:
                 assert line.startswith("ExecStartPost=+"), line
+
+
+def test_x_post_likes_settings_survive_cron_overlay_rewrites():
+    keys = {"PWC_X_LIKES_APPLY", "PWC_X_LIKES_API_DAILY_CAP"}
+    current = {key: f"{key}=existing" for key in keys}
+
+    cron = configure_host_env.cron_passthrough_credentials(
+        {"PWC_GITHUB_TOKEN": "PWC_GITHUB_TOKEN=github"}, current
+    )
+
+    assert {key: cron[key] for key in keys} == current
