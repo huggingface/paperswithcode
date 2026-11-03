@@ -36,6 +36,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-link-google-scholar-profiles.timer` | `Wed *-*-* 05:20:00` | `link_google_scholar_profiles` | `backend/scripts/link_google_scholar_profiles.py` |
 | `pwc-cron-refresh-conference-deadlines.timer` | `*-*-* 07:40:00`<br>`*-*-* 19:40:00` | `refresh_conference_deadlines` | `backend/scripts/refresh_conference_deadlines.py` |
 | `pwc-cron-discover-x-threads.timer` | `*-*-* 08,20:22:00` | `discover_x_threads` | `backend/scripts/discover_x_threads.py` |
+| `pwc-cron-refresh-x-post-likes.timer` | `*-*-* *:35:00` | `refresh_x_post_likes` | `backend/scripts/refresh_x_post_likes.py` |
 | `pwc-cron-post-trending-paper-to-x.timer` | `*-*-* 00/4:13:00` | `post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
 | `pwc-cron-post-x-insight.timer` | `*-*-* 09,17:43:00` | `post_x_insight` | `backend/scripts/post_x_insight.py` |
 | `pwc-cron-warm-paper-suggested-questions.timer` | `*-*-* *:33:00` | `warm_paper_suggested_questions` | `backend/scripts/warm_paper_suggested_questions.py` |
@@ -181,6 +182,24 @@ history and stores them on repositories for the trending API/view pipeline.
 
 `update_citations.py` pulls citation counts from Semantic Scholar for ArXiv
 papers. Runs are bounded so hourly runs do not pile up under API throttling.
+
+`refresh_x_post_likes.py` tracks how fast linked X posts gain likes, for the
+X part of the paper trending score. Hourly at :35 it adds an `x_post_metrics`
+row for each `paper_x_threads` post from the last week, then reads each post
+about 1, 2, 4, 8, 12, 24, 48, 72, 120 and 144 hours after posting and keeps an
+EMA of likes per hour. Reads use the free embed syndication endpoint first and
+fall back to the paid X API (`X_API_BEARER_TOKEN`) for at most
+`PWC_X_LIKES_API_DAILY_CAP` posts per UTC day (default 300). It only reports,
+reading through syndication and rolling back, unless `PWC_X_LIKES_APPLY=true`.
+`calculate_paper_trending_scores` ranks each paper's fastest post from the last
+week against the others (posts under `PWC_TRENDING_X_MIN_LIKES_PER_HOUR`,
+default 1, count for nothing) and weighs it by `PWC_TRENDING_X_WEIGHT` from
+`/etc/paperswithcode/trending-cron.env` (default 0; GitHub and Hugging Face
+share the rest equally).
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.refresh_x_post_likes --max-posts 20
+```
 
 `discover_x_threads.py` finds X posts in which authors introduce recent
 papers and links them to the paper page's "X threads" card. Twice a day it

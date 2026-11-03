@@ -69,6 +69,8 @@ CRON_ONLY_KEYS = {
     "PWC_CONFERENCE_DEADLINES_HF_TOKEN",
     "PWC_GITHUB_TOKEN_HOT",
     "PWC_SEMANTIC_SCHOLAR_API_KEY_2",
+    "PWC_X_LIKES_API_DAILY_CAP",
+    "PWC_X_LIKES_APPLY",
     "PWC_X_THREAD_DISCOVERY_APPLY",
     "X_API_BEARER_TOKEN",
     "PWC_X_POST_MAX_CHARS",
@@ -213,6 +215,12 @@ def existing_or_random(lines: dict[str, str], key: str) -> str:
     return decoded_value(line) if line else secrets.token_urlsafe(48)
 
 
+# Operator-tuned trending score settings kept across trending-cron.env rewrites.
+TRENDING_SCORE_SETTINGS = frozenset(
+    {"PWC_TRENDING_X_WEIGHT", "PWC_TRENDING_X_MIN_LIKES_PER_HOUR"}
+)
+
+
 def trending_cron_values(
     legacy: dict[str, str],
     current: dict[str, str],
@@ -228,7 +236,7 @@ def trending_cron_values(
         **{
             key: decoded_value(line)
             for key, line in current.items()
-            if key.startswith("PWC_TRENDING_PIN_")
+            if key.startswith("PWC_TRENDING_PIN_") or key in TRENDING_SCORE_SETTINGS
         },
     }
 

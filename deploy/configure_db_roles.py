@@ -79,9 +79,9 @@ REVOKE ALL ON SCHEMA public FROM pwc_cron_trending;
 REVOKE CREATE ON SCHEMA public FROM pwc_cron_trending;
 GRANT CONNECT ON DATABASE {database} TO pwc_cron_trending;
 GRANT USAGE ON SCHEMA public TO pwc_cron_trending;
-GRANT SELECT ON papers, paper_repositories, repositories, repository_star_history, paper_hf_artifacts, hf_artifacts TO pwc_cron_trending;
+GRANT SELECT ON papers, paper_repositories, repositories, repository_star_history, paper_hf_artifacts, hf_artifacts, paper_x_threads, x_post_metrics TO pwc_cron_trending;
 GRANT UPDATE (trending_score, trending_score_updated_at, updated_at) ON repositories TO pwc_cron_trending;
-GRANT UPDATE (trending_score, github_trending_component, hf_trending_component, trending_score_updated_at, updated_at) ON papers TO pwc_cron_trending;
+GRANT UPDATE (trending_score, github_trending_component, hf_trending_component, x_trending_component, trending_score_updated_at, updated_at) ON papers TO pwc_cron_trending;
 
 DO $$
 DECLARE
@@ -148,8 +148,8 @@ BEGIN
                relation.relname = 'papers'
                AND attribute.attname IN (
                    'trending_score', 'github_trending_component',
-                   'hf_trending_component', 'trending_score_updated_at',
-                   'updated_at'
+                   'hf_trending_component', 'x_trending_component',
+                   'trending_score_updated_at', 'updated_at'
                )
            )
     ) THEN

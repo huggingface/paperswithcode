@@ -9,6 +9,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -437,6 +438,28 @@ class PaperXThreadScan(Base):
         JSONB, nullable=False, server_default=text("'[]'")
     )
     linked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class XPostMetrics(Base):
+    """Like velocity of one linked X post, refreshed during its first week."""
+
+    __tablename__ = "x_post_metrics"
+
+    tweet_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    like_count: Mapped[Optional[int]] = mapped_column(Integer)
+    # Smoothed likes per hour (EMA over readings).
+    like_velocity: Mapped[Optional[float]] = mapped_column(Float)
+    last_read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # "syndication" or "api".
+    last_source: Mapped[Optional[str]] = mapped_column(String(16))
+    read_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # NULL once the reading schedule is finished or the post is gone.
+    next_read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    gone_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class PaperXPost(Base):

@@ -172,6 +172,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Discover author X threads for trending papers twice daily",
     ),
     TimerSpec(
+        job="refresh_x_post_likes",
+        on_calendar=("*-*-* *:35:00",),
+        description="Refresh like counts of linked X posts in their first week",
+    ),
+    TimerSpec(
         job="post_trending_paper_to_x",
         on_calendar=("*-*-* 00/4:13:00",),
         description="Post a trending paper to the Papers with Code X account every four hours",

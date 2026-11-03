@@ -16,6 +16,8 @@ from backend.utils.trending import (
     apply_decaying_pin,
     compute_paper_score,
     composite_score,
+    x_component,
+    x_corpus,
     decaying_pin_floor,
     github_component,
     hf_component,
@@ -99,7 +101,7 @@ def test_deepseek_like_paper_trends_on_hf_alone():
     models = sorted_positive([1, 4, 46, 102])
     by_kind = {"model": models, "dataset": [], "space": []}
 
-    deepseek_score, g, h = compute_paper_score(
+    deepseek_score, g, h, _ = compute_paper_score(
         github_raw=0.0,
         github_sorted=github_sorted,
         artifact_scores=[("model", 102), ("model", 46), ("model", 4), ("model", 1)],
@@ -109,9 +111,9 @@ def test_deepseek_like_paper_trends_on_hf_alone():
     assert h == 1.0
     assert deepseek_score == SCORE_SCALE * HF_WEIGHT  # 50
 
-    mid_github, _, _ = compute_paper_score(2.0, github_sorted, [], by_kind)
-    top_github, _, _ = compute_paper_score(20.0, github_sorted, [], by_kind)
-    both, _, _ = compute_paper_score(20.0, github_sorted, [("model", 102)], by_kind)
+    mid_github, *_ = compute_paper_score(2.0, github_sorted, [], by_kind)
+    top_github, *_ = compute_paper_score(20.0, github_sorted, [], by_kind)
+    both, *_ = compute_paper_score(20.0, github_sorted, [("model", 102)], by_kind)
 
     # HF-only DeepSeek paper beats a mid GitHub paper and ties the top one.
     assert deepseek_score > mid_github
@@ -123,7 +125,7 @@ def test_deepseek_like_paper_trends_on_hf_alone():
 
 
 def test_no_signal_paper_scores_zero():
-    score, g, h = compute_paper_score(0.0, [1.0, 2.0], [], {"model": [1.0]})
+    score, g, h, _ = compute_paper_score(0.0, [1.0, 2.0], [], {"model": [1.0]})
     assert (score, g, h) == (0.0, 0.0, 0.0)
 
 
@@ -168,3 +170,29 @@ def test_hf_aggregators_are_excluded_by_fan_out_and_denylist():
     assert is_hf_aggregator("space", "tardellirs/paper-pulse", 1)
     # The denylist is per kind: a same-named repo of another kind still counts.
     assert not is_hf_aggregator("model", "tardellirs/paper-pulse", 1)
+
+
+def test_x_weight_takes_its_share_equally_from_github_and_hf():
+    assert composite_score(1.0, 1.0, 1.0, x_weight=1 / 3) == pytest.approx(SCORE_SCALE)
+    assert composite_score(1.0, 0.0, 0.0, x_weight=1 / 3) == pytest.approx(
+        SCORE_SCALE / 3
+    )
+    assert composite_score(0.0, 0.0, 1.0, x_weight=1 / 3) == pytest.approx(
+        SCORE_SCALE / 3
+    )
+    # Weighted at 0, X never changes a score.
+    assert composite_score(0.4, 0.6, 1.0) == composite_score(0.4, 0.6)
+
+
+def test_slow_x_posts_count_for_nothing_and_stay_out_of_the_corpus():
+    corpus = x_corpus([0.2, 0.9, 1.0, 5.0, 40.0], min_likes_per_hour=1.0)
+    assert corpus == [1.0, 5.0, 40.0]
+    assert x_component(0.9, corpus, 1.0) == 0.0
+    assert x_component(5.0, corpus, 1.0) == pytest.approx(2 / 3)
+    assert x_component(40.0, corpus, 1.0) == 1.0
+
+    score, g, h, x = compute_paper_score(
+        0.0, [], [], {}, x_raw=40.0, x_sorted=corpus, x_weight=1 / 3
+    )
+    assert (g, h, x) == (0.0, 0.0, 1.0)
+    assert score == pytest.approx(SCORE_SCALE / 3)

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Refresh like counts of linked X posts in their first week
+
+[Timer]
+OnCalendar=*-*-* *:35:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-refresh-x-post-likes.service
+
+[Install]
+WantedBy=timers.target
