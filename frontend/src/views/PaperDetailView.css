@@ -590,6 +590,15 @@
   --highlight-text: oklch(0.42 0.1 295);
   --highlight-border: oklch(0.85 0.07 295);
 }
+.ml-intern-icon {
+  display: inline-flex;
+  color: #c2410c;
+}
+
+.dark .ml-intern-icon {
+  color: #fdba74;
+}
+
 .dark .introduced-banner--framework {
   --highlight-bg: oklch(0.27 0.04 295);
   --highlight-text: oklch(0.82 0.1 295);

@@ -585,7 +585,7 @@ const PaperDetailView: React.FC = () => {
               rel="noopener noreferrer"
               title="Ask Hugging Face ML Intern to reproduce this paper"
             >
-              <Icon name="sparkle" size={12} /> Reproduce with ML Intern
+              <span className="ml-intern-icon"><Icon name="robot" size={12} /></span> Reproduce with ML Intern
             </a>
             <PaperAgentEdits paperId={Number(paper.id)} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
