@@ -10,7 +10,7 @@ export function PaperAgentEdits({ paperId }: { paperId: number }) {
   const [promptOpen, setPromptOpen] = useState(false);
   const prompt = `Help me edit https://paperswithcode.co/paper/${paperId} using the public pwc CLI from https://github.com/huggingface/pwc-cli. Install or update the CLI following its README, then run pwc skills add to load its instructions. Run pwc auth login --paper ${paperId}; I will authorize this paper in my browser. Export with pwc paper edit export ${paperId} --output edits.json, make explicit operations for the corrections I request, and preview before submitting. For organization changes, use an organizations operation with payload {"organization_ids": [existing organization IDs]}; this replaces the paper’s organization links and publishes directly. Use existing organizations, benchmark and metric definitions, preserve unrelated entries, and cite source URLs where available. Never print or copy credentials. Ask me what to change if I have not specified it.`;
   return <>
-    <button type="button" className="action-btn" title="Edit this paper page with Claude, Codex, Cursor, or OpenCode" onClick={() => { setCopied(false); setCopyError(false); setPromptOpen(true); }}>Edit with your agent<AgentLogos /></button>
+    <button type="button" className="action-btn" title="Edit this paper page with Claude, Codex, Cursor, or OpenCode" onClick={() => { setCopied(false); setCopyError(false); setPromptOpen(true); }}><AgentLogos />Edit with your agent</button>
     <Dialog open={promptOpen} onOpenChange={setPromptOpen}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>

@@ -16,7 +16,7 @@ const logos = [
 
 export function AgentLogos() {
   return (
-    <span className="ml-1 inline-flex shrink-0 items-center gap-1.5" aria-hidden="true">
+    <span className="inline-flex shrink-0 items-center gap-1.5" aria-hidden="true">
       {logos.map(({ name, light, dark }) => (
         <span key={name} title={name} className="inline-flex h-[18px] w-[18px]">
           <img src={light} alt="" width={18} height={18} className="h-full w-full object-contain dark:hidden" />
