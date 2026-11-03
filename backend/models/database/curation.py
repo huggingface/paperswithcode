@@ -358,7 +358,8 @@ class PaperCurationJob(Base):
         ),
         CheckConstraint(
             "trigger IN ('admin', 'hf-daily-cron', 'hf-trending-cron', "
-            "'benchmark-promotion', 'benchmark-gap-cron', 'model-release-radar')",
+            "'benchmark-promotion', 'benchmark-gap-cron', 'model-release-radar', "
+            "'pi-shadow')",
             name="paper_curation_jobs_trigger_check",
         ),
         Index("idx_paper_curation_jobs_queue", "status", "created_at"),
@@ -383,8 +384,14 @@ class PaperCurationJob(Base):
             "kind",
             "policy_version",
             unique=True,
+            # Pi shadow rows run beside the Codex stage they mirror.
             postgresql_where=text(
-                "trigger <> 'admin' AND status IN ('queued', 'dispatching', 'running')"
+                "trigger NOT IN ('admin', 'pi-shadow') "
+                "AND status IN ('queued', 'dispatching', 'running')"
+            ),
+            sqlite_where=text(
+                "trigger NOT IN ('admin', 'pi-shadow') "
+                "AND status IN ('queued', 'dispatching', 'running')"
             ),
         ),
         Index(

@@ -810,3 +810,44 @@ def test_production_pi_image_pins_the_current_runner_pair():
     )
     assert float(values["PWC_CURATION_PI_SHADOW_SAMPLE_RATE"]) == 0.2
     assert "PWC_CURATION_PI_HF_TOKEN" not in values
+
+
+def test_pi_shadow_row_inserts_beside_its_running_codex_stage():
+    """The table's trigger check and one-active-stage index admit the pair."""
+    from sqlalchemy import create_engine  # noqa: PLC0415
+    from sqlalchemy.dialects.postgresql import JSONB  # noqa: PLC0415
+    from sqlalchemy.ext.compiler import compiles  # noqa: PLC0415
+    from sqlalchemy.orm import Session  # noqa: PLC0415
+
+    from backend.models.database import PaperCurationJob  # noqa: PLC0415
+
+    @compiles(JSONB, "sqlite")
+    def _jsonb_as_json(_element, _compiler, **_kw):
+        return "JSON"
+
+    engine = create_engine("sqlite:///:memory:")
+    PaperCurationJob.__table__.create(engine)
+    stage = {
+        "kind": "add-evals",
+        "paper_id": 42,
+        "policy_version": "hf-daily-v1",
+        "requested_by": "hf-daily-cron",
+    }
+    with Session(engine) as db:
+        codex = PaperCurationJob(
+            id=uuid.uuid4(), trigger="hf-daily-cron", status="running", **stage
+        )
+        db.add(codex)
+        db.flush()
+        db.add(
+            PaperCurationJob(
+                id=uuid.uuid4(),
+                trigger=PI_SHADOW_TRIGGER,
+                status="queued",
+                runner="pi",
+                paired_job_id=codex.id,
+                **stage,
+            )
+        )
+        db.flush()
+        assert db.query(PaperCurationJob).count() == 2
