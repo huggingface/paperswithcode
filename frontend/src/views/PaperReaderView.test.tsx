@@ -252,11 +252,34 @@ describe("PaperReaderView", () => {
     expect(frame).toHaveAttribute("src", "https://rikiyat.github.io/blog/weight-space-programming/");
     expect(frame.getAttribute("sandbox")).not.toContain("allow-top-navigation");
     expect(screen.getByRole("button", { name: "Original" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("link", { name: "Open original" }))
+      .toHaveAttribute("href", "https://rikiyat.github.io/blog/weight-space-programming/");
 
     fireEvent.click(screen.getByRole("button", { name: "Text" }));
 
     expect(await screen.findByText("Astra reads weights.")).toBeVisible();
     expect(screen.queryByTitle("Original page: Sparks of Weight-Space Programming")).not.toBeInTheDocument();
+  });
+
+  it("drops Open original when the project page is the same page", async () => {
+    mocks.getPaperWebMarkdown.mockResolvedValue("# Sparks\n\nAstra reads weights.\n");
+    mocks.paper = {
+      id: "131739",
+      arxiv_id: null,
+      title: "Sparks of Weight-Space Programming",
+      source: "external",
+      version: "v1",
+      source_url: "https://rikiyat.github.io/blog/weight-space-programming/",
+      url_pdf: null,
+      repositories: [],
+      project_pages: [{ url: "http://www.rikiyat.github.io/blog/weight-space-programming", is_official: true }],
+    };
+
+    renderReader("/pdf/131739");
+
+    expect(await screen.findByRole("link", { name: "Open project page at rikiyat.github.io" }))
+      .toHaveAttribute("href", "http://www.rikiyat.github.io/blog/weight-space-programming");
+    expect(screen.queryByRole("link", { name: "Open original" })).not.toBeInTheDocument();
   });
 
   it("frames other web papers only once the server's header check allowed them", async () => {

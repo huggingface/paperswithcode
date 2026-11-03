@@ -51,6 +51,15 @@ export function framesOriginalPage(href: string): boolean {
   return parsed.protocol === "https:" && parsed.hostname.toLowerCase().endsWith(".github.io");
 }
 
+/** Whether two links open the same page, ignoring scheme, `www.`, and a trailing slash. */
+export function sameWebPage(left: string, right: string): boolean {
+  const key = (href: string) => {
+    const parsed = new URL(href);
+    return `${parsed.hostname.replace(/^www\./, "")}${parsed.pathname.replace(/\/+$/, "")}${parsed.search}`;
+  };
+  return key(left) === key(right);
+}
+
 export function paperReaderRoute(paper: Paper, fallbackRoute: string): string | null {
   if (paper.source === "external") {
     const readable = hasExternalPdf(paper) || Boolean(externalPaperWebPage(paper));
