@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable
 
+from huggingface_hub.errors import HfHubHTTPError
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -36,7 +37,10 @@ from backend.services.abstract_mention_service import (
     tokenize,
 )
 from backend.services.codex_add_evals_service import NEW_BENCHMARK_POLICY_PREFIX
-from backend.services.paper_markdown_service import read_paper_markdown_bounded
+from backend.services.paper_markdown_service import (
+    PaperMarkdownStorageError,
+    read_paper_markdown_bounded,
+)
 from backend.utils.urls import get_paper_route_identifier
 
 logger = logging.getLogger(__name__)
@@ -56,6 +60,8 @@ MARKDOWN_MAX_BYTES = 400_000
 # mention. An abstract that names it at all is enough.
 MIN_MARKDOWN_MENTIONS = 2
 _ACTIVE = ("queued", "dispatching", "running")
+# Failed or canceled re-checks free their paper and their slot in the cap.
+_HELD = (*_ACTIVE, "completed")
 _REFERENCES = re.compile(
     r"^(#{1,6})\s*(?:\d+\.?\s*)?(references|bibliography)\s*$", re.I
 )
@@ -98,7 +104,7 @@ class NewBenchmarkRecheckService:
         db: Session,
         settings,
         *,
-        read_text: Callable[[Paper], tuple[str, bool]] | None = None,
+        read_text: Callable[[Paper], tuple[str, bool] | None] | None = None,
     ):
         self.db = db
         self.settings = settings
@@ -187,8 +193,11 @@ class NewBenchmarkRecheckService:
                 PaperCurationJob.paper_id.in_(paper_ids),
                 or_(
                     PaperCurationJob.status.in_(_ACTIVE),
-                    PaperCurationJob.policy_version
-                    == policy_version(benchmark.dataset.id),
+                    (
+                        PaperCurationJob.policy_version
+                        == policy_version(benchmark.dataset.id)
+                    )
+                    & PaperCurationJob.status.in_(_HELD),
                     (PaperCurationJob.created_at >= benchmark.created_at)
                     & (PaperCurationJob.status == "completed"),
                 ),
@@ -208,12 +217,19 @@ class NewBenchmarkRecheckService:
     def mentions(
         self, paper: Paper, benchmark: NewBenchmark, index: MentionIndex
     ) -> int | None:
-        """Mentions of the benchmark in the paper's text, or None past the budget."""
+        """Mentions of the benchmark in the paper's text.
+
+        None means the benchmark cannot be finished this run: the read budget
+        is spent or Markdown storage is failing. The next run retries it.
+        """
         if paper.id not in self._texts:
             if self.text_reads >= MAX_TEXT_READS:
                 return None
             self.text_reads += 1
-            text_value, from_markdown = self.read_text(paper)
+            stored = self.read_text(paper)
+            if stored is None:
+                return None
+            text_value, from_markdown = stored
             if from_markdown:
                 text_value = without_references(text_value)
             self._texts[paper.id] = (text_value, from_markdown)
@@ -306,7 +322,8 @@ class NewBenchmarkRecheckService:
         return (
             self.db.query(func.count(PaperCurationJob.id))
             .filter(
-                PaperCurationJob.policy_version == policy_version(benchmark.dataset.id)
+                PaperCurationJob.policy_version == policy_version(benchmark.dataset.id),
+                PaperCurationJob.status.in_(_HELD),
             )
             .scalar()
         )
@@ -338,8 +355,8 @@ class NewBenchmarkRecheckService:
             entity for entity in datasets if heads(entity) & wanted_heads
         )
 
-    def _read_stored_text(self, paper: Paper) -> tuple[str, bool]:
-        """Stored paper Markdown, else the abstract."""
+    def _read_stored_text(self, paper: Paper) -> tuple[str, bool] | None:
+        """Stored paper Markdown, else the abstract; None while storage fails."""
         try:
             markdown, _ = read_paper_markdown_bounded(
                 paper.arxiv_id or str(paper.id),
@@ -347,6 +364,9 @@ class NewBenchmarkRecheckService:
                 token=self.settings.hf_token or None,
                 max_bytes=MARKDOWN_MAX_BYTES,
             )
+        except (PaperMarkdownStorageError, HfHubHTTPError) as error:
+            logger.warning("Markdown storage failed for paper %s: %s", paper.id, error)
+            return None
         except ValueError as error:  # not converted yet, or not readable
             logger.info("No stored Markdown for paper %s: %s", paper.id, error)
             return paper.abstract or "", False

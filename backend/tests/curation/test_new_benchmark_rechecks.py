@@ -287,6 +287,35 @@ def test_per_benchmark_cap_counts_jobs_from_earlier_runs(db, monkeypatch):
     assert len(rechecks(db)) == 2
 
 
+def test_failed_rechecks_free_their_paper_and_cap_slot(db, monkeypatch):
+    monkeypatch.setattr(recheck_module, "MAX_PER_BENCHMARK", 1)
+    add_board(db, 1, 20, BOARD_CREATED)
+    add_paper(db, 1)
+    texts = {1: (body("AIME 2025: 40.0.", "AIME 2025: 41.0."), True)}
+    run(db, texts)
+    rechecks(db)[1].status = "failed"
+    db.flush()
+
+    result, _reads = run(db, texts)
+
+    assert [item["paper_id"] for item in result["rechecks"]] == [1]
+
+
+def test_storage_failure_defers_the_benchmark_instead_of_using_abstracts(db):
+    add_board(db, 1, 20, BOARD_CREATED)
+    add_paper(db, 1, abstract="We reach 61% on AIME 2025.")
+    service = NewBenchmarkRecheckService(
+        db, get_settings(), read_text=lambda paper: None
+    )
+
+    result = service.reconcile(
+        since=NOW - timedelta(days=2), job_service=CodexPaperJobService()
+    )
+
+    assert result["rechecks"] == []
+    assert result["unscanned_dataset_ids"] == [20]
+
+
 def test_text_budget_leaves_the_rest_for_the_next_run(db, monkeypatch):
     monkeypatch.setattr(recheck_module, "MAX_TEXT_READS", 1)
     add_board(db, 1, 20, BOARD_CREATED)
