@@ -97,6 +97,15 @@ def get_or_create_author_by_name(db: Session, name: str) -> DBAuthor:
     return author
 
 
+def merged_author_id(db: Session, author_id: int) -> Optional[int]:
+    """Return the author an ID was merged into, or None if it was not merged."""
+    return (
+        db.query(AuthorAlias.author_id)
+        .filter(AuthorAlias.alias_id == author_id)
+        .scalar()
+    )
+
+
 class AuthorService:
     """Service class for author-related operations."""
 
@@ -106,12 +115,7 @@ class AuthorService:
     def _resolve_author_id(self, author_id: str) -> int:
         """Map an author ID merged into another author to the surviving ID."""
         requested_id = int(author_id)
-        merged_into = (
-            self.db.query(AuthorAlias.author_id)
-            .filter(AuthorAlias.alias_id == requested_id)
-            .scalar()
-        )
-        return merged_into or requested_id
+        return merged_author_id(self.db, requested_id) or requested_id
 
     def get_authors(
         self,
