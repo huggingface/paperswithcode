@@ -347,11 +347,33 @@ def test_runner_exception_names_outside_transport_still_count(completion):
         db,
         job,
         report="",
-        error="Remote runner failed (JSONDecodeError).",
+        error="Remote runner failed (CalledProcessError).",
         settings=settings,
     )
 
     assert state.consecutive_apply_failures == 1
+
+
+def test_runner_callback_blips_and_awaiting_markdown_do_not_pause(completion):
+    # The rows that paused production dispatch on 2026-11-03 at 04:31 UTC.
+    db, service, settings, job = completion
+    job.parent_workflow_id = None
+    state = db.get(PaperCurationSchedulerState, 1)
+    state.consecutive_apply_failures = 0
+    _add_history(db, job, [None] * 24)
+    errors = [
+        "Remote runner failed (JSONDecodeError).",
+        "Remote runner failed (HTTPError).",
+        "[awaiting_markdown] Awaiting paper Markdown extraction: 2511.00001",
+        "Remote runner failed (JSONDecodeError).",
+    ]
+    for error in errors:
+        job.status = "running"
+        db.commit()
+        service.complete(db, job, report="", error=error, settings=settings)
+
+    assert state.consecutive_apply_failures == 0
+    assert state.paused_at is None
 
 
 def test_last_canary_completion_releases_backlog_without_autoflush(completion):
