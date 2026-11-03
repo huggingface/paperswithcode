@@ -19,11 +19,13 @@ rank** over the live corpus, which puts both on a comparable, saturation-free
 
     X   = quantile_rank(fastest linked X post likes/hour, all live post velocities)
 
-    paper_trending_score = SCORE_SCALE * (w_g * G + w_h * H + w_x * X)
+    paper_trending_score = SCORE_SCALE * max(w_g * G + w_h * H, w_x * X)
 
-The X weight ``w_x`` is configurable (``PWC_TRENDING_X_WEIGHT``, default 0) and
-takes its share equally from GitHub and HF, so ``w_g = w_h = (1 - w_x) / 2`` and
-the weights always sum to 1. Posts slower than
+X only lifts: few papers have a linked post, so blending it in linearly would
+cap every paper without one below the X-tracked papers. As a lift, a paper
+without X data keeps its GitHub/HF score, and a viral post can carry a paper to
+the top on its own. The X weight ``w_x`` scales that lift
+(``PWC_TRENDING_X_WEIGHT`` in [0, 1], default 0 = off, 1 = full). Posts slower than
 ``PWC_TRENDING_X_MIN_LIKES_PER_HOUR`` (default 1) count for nothing and stay out
 of the X corpus: the corpus is small and pre-selected for notable papers, so a
 slow post would otherwise rank mid-table.
@@ -51,13 +53,12 @@ from __future__ import annotations
 import bisect
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-# Blend weights between the GitHub and Hugging Face components, both scaled by
-# (1 - X weight). Equal weights so the top of each signal reaches the same
+# Blend weights between the GitHub and Hugging Face components. Equal weights so the top of each signal reaches the same
 # single-signal ceiling.
 GITHUB_WEIGHT = 0.5
 HF_WEIGHT = 0.5
 
-# Default X weight (off) and the slowest X post that still counts, in likes/hour.
+# Default X lift weight (off) and the slowest X post that still counts, in likes/hour.
 DEFAULT_X_WEIGHT = 0.0
 DEFAULT_X_MIN_LIKES_PER_HOUR = 1.0
 # Only posts from the last week count; refresh_x_post_likes stops reading them.
@@ -237,12 +238,8 @@ def composite_score(
     x_weight: float = DEFAULT_X_WEIGHT,
 ) -> float:
     """Combine the normalized components into the final paper score."""
-    rest = 1.0 - x_weight
-    return SCORE_SCALE * (
-        GITHUB_WEIGHT * rest * g_component
-        + HF_WEIGHT * rest * h_component
-        + x_weight * x_component
-    )
+    github_hf = GITHUB_WEIGHT * g_component + HF_WEIGHT * h_component
+    return SCORE_SCALE * max(github_hf, x_weight * x_component)
 
 
 def compute_paper_score(

@@ -193,9 +193,10 @@ fall back to the paid X API (`X_API_BEARER_TOKEN`) for at most
 reading through syndication and rolling back, unless `PWC_X_LIKES_APPLY=true`.
 `calculate_paper_trending_scores` ranks each paper's fastest post from the last
 week against the others (posts under `PWC_TRENDING_X_MIN_LIKES_PER_HOUR`,
-default 1, count for nothing) and weighs it by `PWC_TRENDING_X_WEIGHT` from
-`/etc/paperswithcode/trending-cron.env` (default 0; GitHub and Hugging Face
-share the rest equally).
+default 1, count for nothing). The X rank only lifts a paper: the score is the
+higher of the GitHub/Hugging Face score and the X rank scaled by
+`PWC_TRENDING_X_WEIGHT` from `/etc/paperswithcode/trending-cron.env` (default 0
+= off, 1 = full lift).
 
 ```bash
 uv run --env-file backend/keys.env python -m backend.scripts.refresh_x_post_likes --max-posts 20

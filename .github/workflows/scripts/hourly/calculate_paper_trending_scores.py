@@ -3,9 +3,9 @@ Calculate Composite Paper Trending Scores
 
 Computes a paper-level trending score that blends the existing GitHub star
 velocity EMA (``repositories.trending_score``, stars/hour) with Hugging Face
-artifact Hub trending scores (``hf_artifacts.trending_score``) and, when
+artifact Hub trending scores (``hf_artifacts.trending_score``). When
 ``PWC_TRENDING_X_WEIGHT`` is above 0, the like velocity of the paper's fastest
-linked X post (``x_post_metrics.like_velocity``). The formula lives in
+linked X post (``x_post_metrics.like_velocity``) can lift that score. The formula lives in
 ``backend/utils/trending.py`` so it is unit-testable without a DB.
 
 Pipeline:
@@ -74,8 +74,8 @@ def log(message: str):
 def x_settings() -> tuple[float, float]:
     """Return the configured ``(x_weight, x_min_likes_per_hour)``."""
     weight = float(os.getenv("PWC_TRENDING_X_WEIGHT") or DEFAULT_X_WEIGHT)
-    if not 0.0 <= weight < 1.0:
-        raise ValueError("PWC_TRENDING_X_WEIGHT must be in [0, 1)")
+    if not 0.0 <= weight <= 1.0:
+        raise ValueError("PWC_TRENDING_X_WEIGHT must be in [0, 1]")
     min_likes = float(
         os.getenv("PWC_TRENDING_X_MIN_LIKES_PER_HOUR") or DEFAULT_X_MIN_LIKES_PER_HOUR
     )
