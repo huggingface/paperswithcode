@@ -745,6 +745,8 @@ HTML = {"content-type": "text/html; charset=utf-8"}
         ),
         ({URL: httpx.Response(200, headers=HTML)}, False, (False, "private_address")),
         ({URL: httpx.Response(404, headers=HTML)}, True, (False, "http_status")),
+        ({URL: httpx.Response(302, headers=HTML)}, True, (False, "http_status")),
+        ({URL: httpx.Response(200, headers=HTML)}, None, (False, "unreachable")),
         (
             {URL: httpx.Response(200, headers={"content-type": "application/pdf"})},
             True,
@@ -782,17 +784,18 @@ def test_public_host_rejects_any_private_address(monkeypatch):
         "mixed.example": ["93.184.215.14", "10.0.0.5"],
         "local.example": ["fe80::1%eth0"],
     }
-    monkeypatch.setattr(
-        service.socket,
-        "getaddrinfo",
-        lambda host, *args, **kwargs: [
-            (None, None, None, "", (address, 443)) for address in addresses[host]
-        ],
-    )
+
+    def getaddrinfo(host, *args, **kwargs):
+        if host not in addresses:
+            raise service.socket.gaierror("Name or service not known")
+        return [(None, None, None, "", (address, 443)) for address in addresses[host]]
+
+    monkeypatch.setattr(service.socket, "getaddrinfo", getaddrinfo)
 
     assert service._public_host("public.example")
     assert not service._public_host("mixed.example")
-    assert not service._public_host("local.example")
+    assert service._public_host("local.example") is False
+    assert service._public_host("missing.example") is None
 
 
 def test_framing_due_rechecks_stale_moved_and_unreachable_pages():

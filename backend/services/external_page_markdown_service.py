@@ -443,12 +443,15 @@ def _prepare(
     return content_sha256
 
 
-def _public_host(hostname: str) -> bool:
-    """Whether every address the host resolves to is publicly routable."""
+def _public_host(hostname: str) -> bool | None:
+    """Whether every address the host resolves to is publicly routable.
+
+    ``None`` means the name did not resolve, which may be transient.
+    """
     try:
         infos = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
     except (socket.gaierror, UnicodeError):
-        return False
+        return None
     return bool(infos) and all(
         ipaddress.ip_address(str(info[4][0]).split("%", 1)[0]).is_global
         for info in infos
@@ -490,23 +493,32 @@ def check_page_framing(
         timeout=timeout_seconds, headers={"User-Agent": FRAME_CHECK_USER_AGENT}
     ) as client:
         for _ in range(FRAME_CHECK_MAX_REDIRECTS + 1):
-            parsed = urlsplit(url)
-            if parsed.scheme != "https" or not parsed.hostname:
+            try:
+                parsed = urlsplit(url)
+                hostname = parsed.hostname
+            except ValueError:
+                return False, "invalid_url"
+            if parsed.scheme != "https" or not hostname:
                 return False, "insecure"
-            if not _public_host(parsed.hostname):
+            public = _public_host(hostname)
+            if public is None:
+                return False, "unreachable"
+            if not public:
                 return False, "private_address"
             try:
                 with client.stream("GET", url) as response:
-                    if response.is_redirect:
+                    if response.has_redirect_location:
                         url = urljoin(url, response.headers["location"])
                         continue
-                    if response.status_code >= 400:
+                    if not response.is_success:
                         return False, "http_status"
                     content_type = response.headers.get("content-type", "")
                     if not content_type.lower().startswith("text/html"):
                         return False, "not_html"
                     blocker = _frame_blocker(response.headers)
                     return blocker is None, blocker or "allowed"
+            except httpx.InvalidURL:
+                return False, "invalid_url"
             except httpx.HTTPError:
                 return False, "unreachable"
     return False, "too_many_redirects"
