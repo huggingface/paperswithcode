@@ -7,7 +7,7 @@ import { usePdfSelection } from "@/hooks/usePdfSelection";
 import { getPaperWebMarkdown, getPaperWebPage } from "@/lib/api/papers";
 import { ApiError } from "@/lib/apiTransport";
 import type { PaperSelectionDraft } from "@/lib/chat";
-import { framesOriginalPage, webPaperBody } from "@/lib/paperReader";
+import { framesOriginalPage, sameWebPage, webPaperBody } from "@/lib/paperReader";
 
 function loadErrorMessage(error: unknown): string {
   if (error instanceof ApiError && error.status === 422) {
@@ -89,6 +89,8 @@ export function WebPaperViewer({
   });
 
   const body = query.data ? webPaperBody(query.data) : "";
+  // The project-page chip already opens the original when it is the same page.
+  const projectPageIsOriginal = Boolean(resources?.projectPage && sameWebPage(resources.projectPage.href, sourceUrl));
   return <div className="pdf-viewer">
     <ReaderToolbar paperTitle={paperTitle} paperHref={paperHref} resources={resources} label="Paper controls">
       <div className="pdf-toolbar-controls">
@@ -101,7 +103,7 @@ export function WebPaperViewer({
             onClick={() => setView("text")}
           >Text</button>
         </div>}
-        <a href={sourceUrl} target="_blank" rel="noopener noreferrer">Open original</a>
+        {!projectPageIsOriginal && <a href={sourceUrl} target="_blank" rel="noopener noreferrer">Open original</a>}
       </div>
     </ReaderToolbar>
     <div className="pdf-scroll-frame">
