@@ -362,7 +362,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   // so neither list misrepresents its own signal.
   const trendingTasks = useQuery({
     queryKey: ["trending-tasks-sidebar"],
-    queryFn: () => catalogApi.trendingTasks({ limit: 8, level: 0 }),
+    queryFn: () => catalogApi.trendingTasks({ limit: 8, level: 0, min_recent_papers: 10 }),
     staleTime: TEN_MINUTES,
   });
 
