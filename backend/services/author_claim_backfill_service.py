@@ -413,7 +413,23 @@ class AuthorClaimCleanup:
         self.db.flush()
 
     def split_namesakes(self) -> None:
-        """Move unclaimed links without coauthor evidence to name-only authors."""
+        """Move unclaimed links without coauthor evidence to name-only authors.
+
+        Only bylines that two or more HF accounts publish under move: a second
+        account proves namesakes exist. A name with one account may just be
+        that person's unclaimed papers, so it stays.
+        """
+        # An account renamed by a claim still counts under its former name.
+        accounts = Counter(
+            key
+            for author_id, name in self.db.query(Author.id, Author.name).filter(
+                Author.hf_id.isnot(None)
+            )
+            for key in {
+                _name_key(name),
+                _name_key(self.original_names.get(author_id, name)),
+            }
+        )
         rows = self.db.execute(
             text(
                 """
@@ -474,6 +490,9 @@ class AuthorClaimCleanup:
                 )
                 continue
             key = _name_key(byline_name)
+            if accounts[key] < 2:
+                self.stats.counts["split_skipped_unique_name"] += 1
+                continue
             namesake = namesakes.get(key)
             if namesake is None:
                 namesake = get_or_create_author_by_name(self.db, byline_name)

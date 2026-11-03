@@ -112,6 +112,12 @@ def _authors_of(session, paper_id):
     }
 
 
+def _add_second_hao_account(session):
+    # A second HF account publishing as "Hao Li" proves namesakes exist.
+    session.add(Author(id=30, name="Hao Li", hf_username="hao-li-2", hf_id="hf-2"))
+    session.commit()
+
+
 def _cleanup(session):
     entries = []
     return AuthorClaimCleanup(session, entries.append), entries
@@ -145,6 +151,7 @@ def test_replayed_claims_mark_links_and_hand_other_claims_to_their_account(
 
 def test_split_keeps_coauthor_backed_papers_and_moves_the_rest(tmp_path):
     session = _session()
+    _add_second_hao_account(session)
     cleanup, entries = _cleanup(session)
     cleanup.replay_claims(_cache(tmp_path, {"2601.00001": [_claim("Hao Li", HAO)]}))
 
@@ -169,6 +176,7 @@ def test_split_keeps_coauthor_backed_papers_and_moves_the_rest(tmp_path):
 
 def test_split_uses_the_byline_name_of_a_row_renamed_by_its_claim(tmp_path):
     session = _session()
+    _add_second_hao_account(session)
     cleanup, entries = _cleanup(session)
     # HF matched hao-li to a "Hao Li" byline; the account is really Zed Jia,
     # who claims paper 1 as "Zed Jia" and so renames the row.
@@ -194,6 +202,19 @@ def test_split_uses_the_byline_name_of_a_row_renamed_by_its_claim(tmp_path):
     # Paper 5 has no cached byline, and the row was renamed: unsure, stays.
     assert (10, False) in _authors_of(session, 5)
     assert cleanup.stats.counts["split_skipped_name_not_on_byline"] == 2
+
+
+def test_split_leaves_names_with_a_single_hf_account_alone(tmp_path):
+    session = _session()
+    cleanup, entries = _cleanup(session)
+    cleanup.replay_claims(_cache(tmp_path, {"2601.00001": [_claim("Hao Li", HAO)]}))
+
+    cleanup.split_namesakes()
+
+    for paper_id in (3, 4, 5):
+        assert (10, False) in _authors_of(session, paper_id)
+    assert cleanup.stats.counts["split_skipped_unique_name"] == 3
+    assert not [e for e in entries if e["phase"] == "split"]
 
 
 def test_split_leaves_rows_without_any_claim_alone():
