@@ -822,88 +822,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
-        id="sync_mmteb_retrieval",
-        scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=22),),
-        schedule_grace_minutes=20,
-        systemd_timer="pwc-cron-sync-mmteb-retrieval.timer",
-        systemd_service="pwc-cron-sync-mmteb-retrieval.service",
-        systemd_extra_units=(),
-        output_evaluator="generic",
-        display_name="Sync MMTEB v2 Retrieval",
-        category="hourly",
-        schedule="22 * * * * (hourly)",
-        script_path="hourly/sync_mmteb.py",
-        log_name="sync_mmteb_retrieval",
-        process_patterns=("scripts.hourly.sync_mmteb retrieval",),
-        lock_file=(
-            "/var/lib/paperswithcode/production/cron-locks/sync_mmteb_retrieval.lock"
-        ),
-        expected_runtime_minutes=5,
-        stale_after_minutes=150,
-        critical=False,
-        healthy_no_work_allowed=False,
-        db_freshness_query="""
-            SELECT max(e.updated_at) AS last_write,
-                   count(*) FILTER (
-                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
-                   ) AS recent_writes,
-                   count(*) AS matched_evaluations
-            FROM evaluations e
-            JOIN tasks t ON t.id = e.task_id
-            JOIN datasets d ON d.id = e.dataset_id
-            WHERE t.slug = 'retrieval'
-              AND d.slug = 'mmteb-v2'
-              AND e.best_metric = 'Retrieval'
-              AND e.methodology LIKE
-                  'Managed by the Papers with Code MMTEB v2 live sync.%'
-        """,
-        workflow_file="cron-sync-mmteb-retrieval.yml",
-        workflow_jobs=("run",),
-        dashboard_group="leaderboard_sync",
-    ),
-    CronJobDefinition(
-        id="sync_mmteb_reranking",
-        scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=37),),
-        schedule_grace_minutes=20,
-        systemd_timer="pwc-cron-sync-mmteb-reranking.timer",
-        systemd_service="pwc-cron-sync-mmteb-reranking.service",
-        systemd_extra_units=(),
-        output_evaluator="generic",
-        display_name="Sync MMTEB v2 Reranking",
-        category="hourly",
-        schedule="37 * * * * (hourly)",
-        script_path="hourly/sync_mmteb.py",
-        log_name="sync_mmteb_reranking",
-        process_patterns=("scripts.hourly.sync_mmteb reranking",),
-        lock_file=(
-            "/var/lib/paperswithcode/production/cron-locks/sync_mmteb_reranking.lock"
-        ),
-        expected_runtime_minutes=5,
-        stale_after_minutes=150,
-        critical=False,
-        healthy_no_work_allowed=False,
-        db_freshness_query="""
-            SELECT max(e.updated_at) AS last_write,
-                   count(*) FILTER (
-                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
-                   ) AS recent_writes,
-                   count(*) AS matched_evaluations
-            FROM evaluations e
-            JOIN tasks t ON t.id = e.task_id
-            JOIN datasets d ON d.id = e.dataset_id
-            WHERE t.slug = 'text-reranking'
-              AND d.slug = 'mmteb-v2'
-              AND e.best_metric = 'Rerank'
-              AND e.methodology LIKE
-                  'Managed by the Papers with Code MMTEB v2 live sync.%'
-        """,
-        workflow_file="cron-sync-mmteb-reranking.yml",
-        workflow_jobs=("run",),
-        dashboard_group="leaderboard_sync",
-    ),
-    CronJobDefinition(
         id="sync_mmeb_v2",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=12),),
@@ -2150,6 +2068,36 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             SELECT max(last_scanned_at) AS last_write,
                    count(*) FILTER (WHERE linked_at IS NOT NULL) AS linked_papers
             FROM paper_x_thread_scans
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
+        id="refresh_x_post_likes",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=35),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-refresh-x-post-likes.timer",
+        systemd_service="pwc-cron-refresh-x-post-likes.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="X Post Like Refresh",
+        category="hourly",
+        schedule="35 * * * * (hourly)",
+        script_path="backend/scripts/refresh_x_post_likes.py",
+        log_name="refresh_x_post_likes",
+        process_patterns=("backend.scripts.refresh_x_post_likes",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/refresh_x_post_likes.lock"
+        ),
+        expected_runtime_minutes=3,
+        stale_after_minutes=180,
+        critical=False,
+        # Hours without a due post, and report-only runs, write nothing.
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(last_read_at) AS last_write,
+                   count(*) FILTER (WHERE next_read_at IS NOT NULL) AS tracked_posts
+            FROM x_post_metrics
         """,
         workflow_freshness_required=False,
     ),

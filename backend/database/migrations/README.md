@@ -77,6 +77,8 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_paper_curation_jobs.sql` | durable admin-triggered Hugging Face paper-curation Jobs |
 | `add_curation_bootstrap_bundle_store.sql` | `paper_curation_bootstrap_bundles`: one content-addressed bootstrap snapshot per distinct bundle, referenced by `paper_curation_jobs.bootstrap_bundle_sha256` instead of a ~100 KB copy per job; apply as `postgres` before deploying (backfilled 2026-10-28) |
 | `drop_curation_legacy_bootstrap_bundle.sql` | Drops the emptied legacy `paper_curation_jobs.bootstrap_bundle`; apply as `postgres` only after the release that no longer maps it is live, and it refuses while any job still holds a bundle |
+| `add_curation_pi_shadow_runner.sql` | `paper_curation_jobs.runner`, `paired_job_id`, `context_snapshot`, and `pair_diff` for shadow-only Pi curation jobs paired with Codex stages; additive, apply as `postgres` (public and staging) before deploying |
+| `allow_pi_shadow_curation_trigger.sql` | Adds `pi-shadow` to `paper_curation_jobs_trigger_check` and leaves Pi shadow rows out of `uq_active_scheduled_paper_curation_stage`, so a Pi pair can run beside its Codex stage; public only, apply as `postgres` before merging |
 | `add_autonomous_paper_curation.sql` | two-stage HF daily workflows, trace provenance, scheduler state, and benchmark-gap backlog |
 | `add_autonomous_operations.sql` | Fail-closed operator controls, immutable run/action evidence, global repair lease, provider state, attempt budgets, and Codex execution accounting |
 | `add_autonomous_release_broker.sql` | Root-owned single-use exact-SHA deploy/rollback authorization consumption |

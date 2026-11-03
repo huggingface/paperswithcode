@@ -528,7 +528,19 @@ def test_merged_organization_slug_redirects_to_canonical_page(client):
     assert response.headers["location"] == "/orgs/google?q=vision"
 
 
+def test_merged_author_redirects_to_the_author_it_was_merged_into(client, monkeypatch):
+    monkeypatch.setattr(
+        discovery_pages,
+        "merged_author_id",
+        lambda db, author_id: 181986 if author_id == 251936 else None,
+    )
+    response = client.get("/authors/251936?has_code=true", follow_redirects=False)
+    assert response.status_code == 301
+    assert response.headers["location"] == "/authors/181986?has_code=true"
+
+
 def test_author_naming_an_organization_redirects_to_its_page(client, monkeypatch):
+    monkeypatch.setattr(discovery_pages, "merged_author_id", lambda db, author_id: None)
     monkeypatch.setattr(
         discovery_pages,
         "organization_slug_for_author",
@@ -556,6 +568,7 @@ def test_discovery_page_classes_support_head(client, monkeypatch, path, method_n
     monkeypatch.setattr(
         DiscoveryPageService, method_name, lambda self, *args, **kwargs: _page()
     )
+    monkeypatch.setattr(discovery_pages, "merged_author_id", lambda db, author_id: None)
     monkeypatch.setattr(
         discovery_pages, "organization_slug_for_author", lambda db, author_id: None
     )

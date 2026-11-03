@@ -172,6 +172,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Discover author X threads for trending papers twice daily",
     ),
     TimerSpec(
+        job="refresh_x_post_likes",
+        on_calendar=("*-*-* *:35:00",),
+        description="Refresh like counts of linked X posts in their first week",
+    ),
+    TimerSpec(
         job="post_trending_paper_to_x",
         on_calendar=("*-*-* 00/4:13:00",),
         description="Post a trending paper to the Papers with Code X account every four hours",
@@ -241,11 +246,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="sync_parsebench",
         on_calendar=("*-*-* *:20:00",),
         description="Sync ParseBench leaderboard hourly",
-    ),
-    TimerSpec(
-        job="sync_mmteb_retrieval",
-        on_calendar=("*-*-* *:22:00",),
-        description="Sync MMTEB v2 retrieval leaderboard hourly",
     ),
     TimerSpec(
         job="sync_deepswe",
@@ -326,11 +326,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="sync_artificial_analysis",
         on_calendar=("*-*-* 00/2:35:00",),
         description="Sync Artificial Analysis leaderboards every two hours",
-    ),
-    TimerSpec(
-        job="sync_mmteb_reranking",
-        on_calendar=("*-*-* *:37:00",),
-        description="Sync MMTEB v2 reranking leaderboard hourly",
     ),
     TimerSpec(
         job="sync_programbench",

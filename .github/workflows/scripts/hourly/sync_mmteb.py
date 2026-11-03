@@ -1,4 +1,4 @@
-"""Refresh one arXiv-backed MMTEB v2 task-specific leaderboard."""
+"""Refresh the arXiv-backed MMTEB v2 overall leaderboard."""
 
 import argparse
 

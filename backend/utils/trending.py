@@ -17,9 +17,20 @@ rank** over the live corpus, which puts both on a comparable, saturation-free
     a_i = kind_weight_i * quantile_rank(hf_trending_score_i, all live scores of that kind)
     H   = 1 - prod(1 - a_i)        # weighted soft-OR: diminishing returns, stays in [0, 1]
 
-    paper_trending_score = SCORE_SCALE * (GITHUB_WEIGHT * G + HF_WEIGHT * H)
+    X   = quantile_rank(fastest linked X post likes/hour, all live post velocities)
 
-Consequences:
+    paper_trending_score = SCORE_SCALE * max(w_g * G + w_h * H, w_x * X)
+
+X only lifts: few papers have a linked post, so blending it in linearly would
+cap every paper without one below the X-tracked papers. As a lift, a paper
+without X data keeps its GitHub/HF score, and a viral post can carry a paper to
+the top on its own. The X weight ``w_x`` scales that lift
+(``PWC_TRENDING_X_WEIGHT`` in [0, 1], default 0 = off, 1 = full). Posts slower than
+``PWC_TRENDING_X_MIN_LIKES_PER_HOUR`` (default 1) count for nothing and stay out
+of the X corpus: the corpus is small and pre-selected for notable papers, so a
+slow post would otherwise rank mid-table.
+
+Consequences (with X off):
 - A paper at the very top of GitHub velocity (G=1) and a paper with a top-of-Hub
   model (H=1) both reach SCORE_SCALE * 0.5 -> they rank together at the top, so a
   paper can trend purely on its Hugging Face artifacts (the DeepSeek-V4 case).
@@ -42,10 +53,16 @@ from __future__ import annotations
 import bisect
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-# Blend weights between the GitHub and Hugging Face components. Equal weights so
-# the top of each signal reaches the same single-signal ceiling.
+# Blend weights between the GitHub and Hugging Face components. Equal weights so the top of each signal reaches the same
+# single-signal ceiling.
 GITHUB_WEIGHT = 0.5
 HF_WEIGHT = 0.5
+
+# Default X lift weight (off) and the slowest X post that still counts, in likes/hour.
+DEFAULT_X_WEIGHT = 0.0
+DEFAULT_X_MIN_LIKES_PER_HOUR = 1.0
+# Only posts from the last week count; refresh_x_post_likes stops reading them.
+X_POST_WINDOW_DAYS = 7
 
 # Per-kind importance of HF artifacts (applied to the quantile rank).
 KIND_WEIGHTS: Dict[str, float] = {
@@ -200,9 +217,29 @@ def hf_component(
     return 1.0 - product
 
 
-def composite_score(g_component: float, h_component: float) -> float:
+def x_corpus(velocities: Iterable[float], min_likes_per_hour: float) -> List[float]:
+    """Sorted X velocities fast enough to count (the X rank corpus)."""
+    return sorted_positive(v for v in velocities if v >= min_likes_per_hour)
+
+
+def x_component(
+    x_raw: float, x_sorted: Sequence[float], min_likes_per_hour: float
+) -> float:
+    """Quantile-rank X component for a paper's fastest linked post."""
+    if x_raw < min_likes_per_hour:
+        return 0.0
+    return quantile_rank(x_sorted, x_raw)
+
+
+def composite_score(
+    g_component: float,
+    h_component: float,
+    x_component: float = 0.0,
+    x_weight: float = DEFAULT_X_WEIGHT,
+) -> float:
     """Combine the normalized components into the final paper score."""
-    return SCORE_SCALE * (GITHUB_WEIGHT * g_component + HF_WEIGHT * h_component)
+    github_hf = GITHUB_WEIGHT * g_component + HF_WEIGHT * h_component
+    return SCORE_SCALE * max(github_hf, x_weight * x_component)
 
 
 def compute_paper_score(
@@ -211,8 +248,14 @@ def compute_paper_score(
     artifact_scores: Iterable[Tuple[str, float]],
     sorted_by_kind: Dict[str, Sequence[float]],
     kind_weights: Dict[str, float] = KIND_WEIGHTS,
-) -> Tuple[float, float, float]:
-    """Compute ``(score, g_component, h_component)`` for one paper."""
+    *,
+    x_raw: float = 0.0,
+    x_sorted: Sequence[float] = (),
+    x_weight: float = DEFAULT_X_WEIGHT,
+    x_min_likes_per_hour: float = DEFAULT_X_MIN_LIKES_PER_HOUR,
+) -> Tuple[float, float, float, float]:
+    """Compute ``(score, g_component, h_component, x_component)`` for one paper."""
     g = github_component(github_raw, github_sorted)
     h = hf_component(artifact_scores, sorted_by_kind, kind_weights)
-    return composite_score(g, h), g, h
+    x = x_component(x_raw, x_sorted, x_min_likes_per_hour)
+    return composite_score(g, h, x, x_weight), g, h, x

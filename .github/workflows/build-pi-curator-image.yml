@@ -1,0 +1,67 @@
+name: Build Pi curator image
+
+# Publishes the shadow-only Pi paper-curation runner to the same Hugging Face
+# container repository as the Codex runner, under pi- tags. Production pins the
+# pushed digest, never a tag; see docs/operations.md ("Remote paper curation").
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - jobs/Dockerfile.pi-curator
+      - jobs/run_pi_curation.py
+      - jobs/run_paper_curation.py
+
+permissions: {}
+
+concurrency:
+  group: build-pi-curator-image-${{ github.ref }}
+
+jobs:
+  build:
+    environment: hf-publish
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the curator image repository from the operator profile
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import tomllib
+          profile = tomllib.load(open("config/operator.toml", "rb"))["huggingface"]
+          print(f"IMAGE={profile['curator_image_repository']}")
+          print(f"REGISTRY_USER={profile['namespace']}")
+          PY
+      - name: Tag with the runner content hash
+        id: runner
+        run: echo "tag=pi-runner-$(cat jobs/run_paper_curation.py jobs/run_pi_curation.py | sha256sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: cr.hf.co
+          username: ${{ env.REGISTRY_USER }}
+          password: ${{ secrets.HF_REGISTRY_TOKEN }}
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: jobs/Dockerfile.pi-curator
+          platforms: linux/amd64
+          provenance: false
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:pi-${{ github.sha }}
+            ${{ env.IMAGE }}:${{ steps.runner.outputs.tag }}
+      - name: Report the immutable reference
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          RUNNER_TAG: ${{ steps.runner.outputs.tag }}
+        run: |
+          {
+            echo "Pin \`PWC_CURATION_PI_JOBS_IMAGE\` to:"
+            echo
+            echo "    $IMAGE:$RUNNER_TAG@$DIGEST"
+            echo
+            echo "Tags: \`pi-$GITHUB_SHA\`, \`$RUNNER_TAG\`"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -75,6 +75,12 @@ function formatResourceLinkLabel(url: string, fallback: string): string {
   }
 }
 
+function mlInternReproduceUrl(title: string, arxivId: string | null | undefined): string {
+  const reference = arxivId ? ` (arXiv:${stripArxivVersion(arxivId)})` : "";
+  const params = new URLSearchParams({ mode: "ml-intern", prompt: `Reproduce ${title}${reference}` });
+  return `https://huggingface.co/chat/?${params.toString()}`;
+}
+
 const PaperDetailView: React.FC = () => {
   const { arxivId: rawArxivId } = useParams<{ arxivId: string }>();
   const navigate = useNavigate();
@@ -572,6 +578,15 @@ const PaperDetailView: React.FC = () => {
                 <Icon name="external" size={12} /> Conference
               </a>
             )}
+            <a
+              className="action-btn"
+              href={mlInternReproduceUrl(paper.title, paper.arxiv_id)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Ask Hugging Face ML Intern to reproduce this paper"
+            >
+              <Icon name="sparkle" size={12} /> Reproduce with ML Intern
+            </a>
             <PaperAgentEdits paperId={Number(paper.id)} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
               <CodexPaperJobDialog

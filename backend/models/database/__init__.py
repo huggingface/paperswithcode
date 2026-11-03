@@ -175,6 +175,7 @@ from backend.models.database.resources import (
     PaperXTrending,
     XInsightPost,
     PaperXThreadScan,
+    XPostMetrics,
     PaperRepository,
 )
 from backend.models.database.taxonomy import (
@@ -332,6 +333,7 @@ __all__ = [
     "PaperXTrending",
     "XInsightPost",
     "PaperXThreadScan",
+    "XPostMetrics",
     "PaperRepository",
     "Area",
     "Task",

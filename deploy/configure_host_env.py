@@ -69,6 +69,8 @@ CRON_ONLY_KEYS = {
     "PWC_CONFERENCE_DEADLINES_HF_TOKEN",
     "PWC_GITHUB_TOKEN_HOT",
     "PWC_SEMANTIC_SCHOLAR_API_KEY_2",
+    "PWC_X_LIKES_API_DAILY_CAP",
+    "PWC_X_LIKES_APPLY",
     "PWC_X_THREAD_DISCOVERY_APPLY",
     "X_API_BEARER_TOKEN",
     "PWC_X_POST_MAX_CHARS",
@@ -213,6 +215,12 @@ def existing_or_random(lines: dict[str, str], key: str) -> str:
     return decoded_value(line) if line else secrets.token_urlsafe(48)
 
 
+# Operator-tuned trending score settings kept across trending-cron.env rewrites.
+TRENDING_SCORE_SETTINGS = frozenset(
+    {"PWC_TRENDING_X_WEIGHT", "PWC_TRENDING_X_MIN_LIKES_PER_HOUR"}
+)
+
+
 def trending_cron_values(
     legacy: dict[str, str],
     current: dict[str, str],
@@ -228,7 +236,7 @@ def trending_cron_values(
         **{
             key: decoded_value(line)
             for key, line in current.items()
-            if key.startswith("PWC_TRENDING_PIN_")
+            if key.startswith("PWC_TRENDING_PIN_") or key in TRENDING_SCORE_SETTINGS
         },
     }
 
@@ -1616,6 +1624,7 @@ def production_codex_values(
         "PWC_CODEX_JOBS_OPENAI_API_KEY": decoded_value(legacy["OPENAI_API_KEY"]),
         "PWC_CODEX_JOBS_TOKEN": decoded_value(legacy["PWC_HF_TOKEN"]),
         **production_codex_image_values(),
+        **(production_pi_shadow_values() if scheduled else {}),
         "PWC_CODEX_JOBS_CLI_VERSION": "0.75.0",
         "PWC_CODEX_JOBS_MODEL": "gpt-6-luna",
         "PWC_CODEX_JOBS_REASONING_EFFORT": "medium",
@@ -1638,6 +1647,24 @@ def production_codex_image_values() -> dict[str, str]:
             "@sha256:3c4c6b16737946f69a0390f3c014ffea5a46be8b7e63633e804c21d3e0046496"
         ),
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",
+    }
+
+
+def production_pi_shadow_values() -> dict[str, str]:
+    """Shadow-only Pi runs on a stable 20% of scheduled daily papers.
+
+    Production only: the startup check refuses a positive sample rate without
+    scheduled curation, which staging never runs. The inference-only
+    PWC_CURATION_PI_HF_TOKEN is stored separately and preserved.
+    """
+    return {
+        "PWC_CURATION_PI_JOBS_IMAGE": (
+            f"{OPERATOR.curator_image_repository}:pi-runner-1d2d6f1fda61"
+            "@sha256:383882d977ba6c17fd0d6d18cf5c1f031bdf36b2c55f519130cd41fffaae08d0"
+        ),
+        "PWC_CURATION_PI_SHADOW_SAMPLE_RATE": "0.2",
+        "PWC_CURATION_PI_SHADOW_MAX_ACTIVE": "2",
+        "PWC_CURATION_PI_BILL_TO": "huggingface",
     }
 
 
@@ -2098,7 +2125,7 @@ def main() -> int:
             parser.error("production Codex image mode must run alone")
         if args.confirm != "UPDATE_PRODUCTION_CODEX_IMAGE":
             parser.error("--confirm must be UPDATE_PRODUCTION_CODEX_IMAGE")
-        values = production_codex_image_values()
+        values = {**production_codex_image_values(), **production_pi_shadow_values()}
         targets = (
             (CONFIG_ROOT / "production.env", "pwc-production"),
             (CONFIG_ROOT / "production-cron.env", "pwc-cron"),
@@ -2113,7 +2140,7 @@ def main() -> int:
         ]
         for path, lines, group in updates:
             write_env(path, lines, group)
-        print("updated production and CRON Codex image pin")
+        print("updated production and CRON Codex and Pi image pins")
         return 0
     if args.modal_profile and not args.production_chat_seal_only:
         parser.error("--modal-profile requires --production-chat-seal-only")

@@ -149,6 +149,9 @@ class Paper(Base):
     hf_trending_component: Mapped[Optional[float]] = mapped_column(
         Numeric(12, 4), nullable=True
     )
+    x_trending_component: Mapped[Optional[float]] = mapped_column(
+        Numeric(12, 4), nullable=True
+    )
     # When this paper was last scanned for linked Hugging Face artifacts.
     hf_artifacts_scanned_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True

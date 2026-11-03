@@ -250,6 +250,18 @@ class PaperCurationJob(Base):
     retry_of_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("paper_curation_jobs.id"), nullable=True
     )
+    # "pi" jobs are shadow-only comparison runs paired with a Codex job; they
+    # never apply mutations and stay outside every scheduled lane and breaker.
+    runner: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="codex", server_default="codex"
+    )
+    paired_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("paper_curation_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    context_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    pair_diff: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     audit_status: Mapped[str] = mapped_column(
         String(24), nullable=False, default="unreviewed", server_default="unreviewed"
     )
@@ -346,7 +358,8 @@ class PaperCurationJob(Base):
         ),
         CheckConstraint(
             "trigger IN ('admin', 'hf-daily-cron', 'hf-trending-cron', "
-            "'benchmark-promotion', 'benchmark-gap-cron', 'model-release-radar')",
+            "'benchmark-promotion', 'benchmark-gap-cron', 'model-release-radar', "
+            "'pi-shadow')",
             name="paper_curation_jobs_trigger_check",
         ),
         Index("idx_paper_curation_jobs_queue", "status", "created_at"),
@@ -371,8 +384,14 @@ class PaperCurationJob(Base):
             "kind",
             "policy_version",
             unique=True,
+            # Pi shadow rows run beside the Codex stage they mirror.
             postgresql_where=text(
-                "trigger <> 'admin' AND status IN ('queued', 'dispatching', 'running')"
+                "trigger NOT IN ('admin', 'pi-shadow') "
+                "AND status IN ('queued', 'dispatching', 'running')"
+            ),
+            sqlite_where=text(
+                "trigger NOT IN ('admin', 'pi-shadow') "
+                "AND status IN ('queued', 'dispatching', 'running')"
             ),
         ),
         Index(

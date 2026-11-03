@@ -49,6 +49,7 @@ def test_restricted_trending_environment_drops_broad_credentials():
         "PWC_DB_PASSWORD": "broad-secret",
         "PWC_TRENDING_DB_PASSWORD": "restricted-secret",
         "PWC_TRENDING_PIN_ARXIV_IDS": "2601.00001:72",
+        "PWC_TRENDING_X_WEIGHT": "0.3333",
         "PWC_GITHUB_TOKEN": "must-not-leak",
         "OPENAI_API_KEY": "must-not-leak",
         "PWC_CHAT_LANGFUSE_SECRET_KEY": "must-not-leak",
@@ -62,6 +63,7 @@ def test_restricted_trending_environment_drops_broad_credentials():
     assert environment["PWC_DB_USER"] == "pwc_cron_trending"
     assert environment["PWC_DB_PASSWORD"] == "restricted-secret"
     assert environment["PWC_TRENDING_PIN_ARXIV_IDS"] == "2601.00001:72"
+    assert environment["PWC_TRENDING_X_WEIGHT"] == "0.3333"
     assert "PWC_TRENDING_DB_PASSWORD" not in environment
     assert "PWC_GITHUB_TOKEN" not in environment
     assert "OPENAI_API_KEY" not in environment
@@ -101,7 +103,8 @@ def test_trending_database_role_has_only_scoring_capabilities():
     assert "REVOKE CREATE ON SCHEMA public" in sql
     assert (
         "GRANT SELECT ON papers, paper_repositories, repositories, "
-        "repository_star_history, paper_hf_artifacts, hf_artifacts"
+        "repository_star_history, paper_hf_artifacts, hf_artifacts, "
+        "paper_x_threads, x_post_metrics"
     ) in sql
     assert (
         "GRANT UPDATE (trending_score, trending_score_updated_at, updated_at) "
@@ -109,7 +112,8 @@ def test_trending_database_role_has_only_scoring_capabilities():
     ) in sql
     assert (
         "GRANT UPDATE (trending_score, github_trending_component, "
-        "hf_trending_component, trending_score_updated_at, updated_at) ON papers"
+        "hf_trending_component, x_trending_component, trending_score_updated_at, "
+        "updated_at) ON papers"
     ) in sql
     for taxonomy_table in ("tasks", "methods", "datasets", "metrics", "conferences"):
         assert f"'{taxonomy_table}'" in sql
@@ -121,6 +125,7 @@ def test_trending_environment_rotation_preserves_existing_role_password():
     current = {
         "PWC_TRENDING_DB_PASSWORD": "PWC_TRENDING_DB_PASSWORD=stable-secret",
         "PWC_TRENDING_PIN_ARXIV_IDS": "PWC_TRENDING_PIN_ARXIV_IDS=2601.1:72",
+        "PWC_TRENDING_X_WEIGHT": "PWC_TRENDING_X_WEIGHT=0.3333",
     }
     password = configure_host_env.existing_or_random(
         current, "PWC_TRENDING_DB_PASSWORD"
@@ -138,6 +143,7 @@ def test_trending_environment_rotation_preserves_existing_role_password():
 
     assert values["PWC_TRENDING_DB_PASSWORD"] == "stable-secret"
     assert values["PWC_TRENDING_PIN_ARXIV_IDS"] == "2601.1:72"
+    assert values["PWC_TRENDING_X_WEIGHT"] == "0.3333"
 
 
 @pytest.mark.parametrize(
@@ -340,8 +346,6 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_open_asr"]["timeout"] == "30m"
     assert status["jobs"]["sync_open_tts"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmteb_overall"]["timeout"] == "30m"
-    assert status["jobs"]["sync_mmteb_retrieval"]["timeout"] == "30m"
-    assert status["jobs"]["sync_mmteb_reranking"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmeb_v2"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmeb_v3"]["timeout"] == "30m"
     assert status["jobs"]["sync_artificial_analysis"]["timeout"] == "30m"

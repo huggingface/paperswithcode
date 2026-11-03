@@ -123,3 +123,15 @@ def validate_codex_jobs_configuration(settings: Settings) -> None:
             raise RuntimeError(
                 "scheduled paper curation requires an immutable curator image"
             )
+    if settings.curation_pi_shadow_sample_rate > 0:
+        if not settings.codex_curation_scheduler_enabled:
+            raise RuntimeError("Pi shadow curation requires scheduled curation")
+        if not re.fullmatch(r".+@sha256:[0-9a-f]{64}", settings.curation_pi_jobs_image):
+            raise RuntimeError("Pi shadow curation requires an immutable Pi image")
+        if not settings.curation_pi_hf_token or settings.curation_pi_hf_token in {
+            settings.codex_jobs_token,
+            settings.hf_token,
+        }:
+            raise RuntimeError(
+                "Pi shadow curation requires its own inference-only HF token"
+            )

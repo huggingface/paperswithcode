@@ -3,14 +3,17 @@ Calculate Composite Paper Trending Scores
 
 Computes a paper-level trending score that blends the existing GitHub star
 velocity EMA (``repositories.trending_score``, stars/hour) with Hugging Face
-artifact Hub trending scores (``hf_artifacts.trending_score``). The formula
-lives in ``backend/utils/trending.py`` so it is unit-testable without a DB.
+artifact Hub trending scores (``hf_artifacts.trending_score``). When
+``PWC_TRENDING_X_WEIGHT`` is above 0, the like velocity of the paper's fastest
+linked X post (``x_post_metrics.like_velocity``) can lift that score. The formula lives in
+``backend/utils/trending.py`` so it is unit-testable without a DB.
 
 Pipeline:
   1. Load the scoring population: latest-version papers published in the last
-     year, with their best official-repo velocity and linked HF artifact scores.
-  2. Derive corpus normalization scales (95th percentiles) for GitHub velocity
-     and per-kind HF trending scores.
+     year, with their best official-repo velocity, linked HF artifact scores,
+     and fastest linked X post from the last week.
+  2. Derive the quantile-rank corpora for GitHub velocity, per-kind HF
+     trending scores, and X like velocity.
   3. Compute the composite score per paper and persist it to
      ``papers.trending_score`` (+ debug components). Papers with no live signal
      are cleared to NULL so they drop out of the composite feed.
@@ -32,7 +35,10 @@ from sqlalchemy import text
 
 from backend.database.connection import db_manager
 from backend.utils.trending import (
+    DEFAULT_X_MIN_LIKES_PER_HOUR,
+    DEFAULT_X_WEIGHT,
     KIND_WEIGHTS,
+    X_POST_WINDOW_DAYS,
     apply_decaying_pin,
     compute_paper_score,
     decaying_pin_floor,
@@ -40,6 +46,7 @@ from backend.utils.trending import (
     parse_trending_paper_id_pin_specs,
     parse_trending_pin_specs,
     sorted_positive,
+    x_corpus,
 )
 
 # Score papers published within this window (bounds the work; older papers fall
@@ -64,13 +71,25 @@ def log(message: str):
     print(f"{timestamp} - {message}", flush=True)
 
 
+def x_settings() -> tuple[float, float]:
+    """Return the configured ``(x_weight, x_min_likes_per_hour)``."""
+    weight = float(os.getenv("PWC_TRENDING_X_WEIGHT") or DEFAULT_X_WEIGHT)
+    if not 0.0 <= weight <= 1.0:
+        raise ValueError("PWC_TRENDING_X_WEIGHT must be in [0, 1]")
+    min_likes = float(
+        os.getenv("PWC_TRENDING_X_MIN_LIKES_PER_HOUR") or DEFAULT_X_MIN_LIKES_PER_HOUR
+    )
+    return weight, min_likes
+
+
 def load_population(session, cutoff):
-    """Return ``{paper_id: {"github_raw", "existing", "artifacts"}}``.
+    """Return ``{paper_id: {"github_raw", "existing", "artifacts", "x_raw"}}``.
 
     - ``github_raw``: best fresh official-repo stars/hour (0.0 if none).
     - ``existing``: whether the paper currently has a non-null trending_score.
     - ``artifacts``: list of ``(kind, trending_score)`` for linked HF artifacts,
       excluding aggregators (see ``is_hf_aggregator``).
+    - ``x_raw``: likes/hour of the fastest linked X post from the last week.
     """
     log("Loading paper population (GitHub component)...")
     github_rows = session.execute(
@@ -102,6 +121,7 @@ def load_population(session, cutoff):
             "github_raw": float(row.github_raw) if row.github_raw is not None else 0.0,
             "existing": bool(row.existing),
             "artifacts": [],
+            "x_raw": 0.0,
         }
     log(f"Population size: {len(population)} papers")
 
@@ -143,6 +163,31 @@ def load_population(session, cutoff):
     log(f"HF artifact score links: {hf_links}")
     log(f"HF aggregator links ignored: {aggregator_links}")
 
+    log("Loading X like velocity component...")
+    x_rows = session.execute(
+        text("""
+            SELECT t.paper_id, MAX(m.like_velocity) AS x_raw
+            FROM paper_x_threads t
+            JOIN x_post_metrics m ON m.tweet_id = t.tweet_id
+            JOIN papers p ON p.id = t.paper_id
+            WHERE p.is_latest_version = TRUE
+              AND p.date_published >= :cutoff
+              AND m.gone_at IS NULL
+              AND m.like_velocity > 0
+              AND m.posted_at >= NOW() - (:window_days || ' days')::interval
+            GROUP BY t.paper_id
+        """),
+        {"cutoff": cutoff, "window_days": str(X_POST_WINDOW_DAYS)},
+    ).fetchall()
+    x_papers = 0
+    for row in x_rows:
+        entry = population.get(row.paper_id)
+        if entry is None:
+            continue
+        entry["x_raw"] = float(row.x_raw)
+        x_papers += 1
+    log(f"Papers with a live X post: {x_papers}")
+
     return population
 
 
@@ -168,7 +213,16 @@ def derive_corpora(population):
     return github_sorted, sorted_by_kind
 
 
-def build_score_changes(population, github_sorted, sorted_by_kind, paper_ids=None):
+def build_score_changes(
+    population,
+    github_sorted,
+    sorted_by_kind,
+    paper_ids=None,
+    *,
+    x_sorted=(),
+    x_weight=DEFAULT_X_WEIGHT,
+    x_min_likes_per_hour=DEFAULT_X_MIN_LIKES_PER_HOUR,
+):
     """Compute updates/clears for all papers or an explicit target set."""
     selected = sorted(population) if paper_ids is None else sorted(set(paper_ids))
     updates = []
@@ -177,19 +231,25 @@ def build_score_changes(population, github_sorted, sorted_by_kind, paper_ids=Non
         entry = population.get(paper_id)
         if entry is None:
             continue
-        score, github_component, hf_component = compute_paper_score(
+        score, github_component, hf_component, x_component = compute_paper_score(
             entry["github_raw"],
             github_sorted,
             entry["artifacts"],
             sorted_by_kind,
+            x_raw=entry["x_raw"],
+            x_sorted=x_sorted,
+            x_weight=x_weight,
+            x_min_likes_per_hour=x_min_likes_per_hour,
         )
-        if github_component > 0 or hf_component > 0:
+        # With X weighted at 0, an X-only paper scores 0 and stays unscored.
+        if score > 0:
             updates.append(
                 {
                     "id": paper_id,
                     "score": round(score, 4),
                     "g": round(github_component, 4),
                     "h": round(hf_component, 4),
+                    "x": round(x_component, 4),
                 }
             )
         elif entry["existing"]:
@@ -239,11 +299,19 @@ def calculate_paper_scores(session, paper_ids=None) -> dict:
         return {"population": 0, "selected": 0, "written": 0, "cleared": 0}
 
     github_sorted, sorted_by_kind = derive_corpora(population)
+    x_weight, x_min_likes_per_hour = x_settings()
+    x_sorted = x_corpus(
+        (entry["x_raw"] for entry in population.values()), x_min_likes_per_hour
+    )
+    log(f"X like velocity corpus: n={len(x_sorted)}, weight={x_weight}")
     updates, clears = build_score_changes(
         population,
         github_sorted,
         sorted_by_kind,
         paper_ids=paper_ids,
+        x_sorted=x_sorted,
+        x_weight=x_weight,
+        x_min_likes_per_hour=x_min_likes_per_hour,
     )
     if paper_ids is None:
         # The population only covers the window, so aged-out scores would
@@ -270,6 +338,7 @@ def write_scores(session, updates, clears):
                 SET trending_score = :score,
                     github_trending_component = :g,
                     hf_trending_component = :h,
+                    x_trending_component = :x,
                     trending_score_updated_at = NOW(),
                     updated_at = NOW()
                 WHERE id = :id
@@ -289,6 +358,7 @@ def write_scores(session, updates, clears):
                 SET trending_score = NULL,
                     github_trending_component = NULL,
                     hf_trending_component = NULL,
+                    x_trending_component = NULL,
                     trending_score_updated_at = NOW(),
                     updated_at = NOW()
                 WHERE id = ANY(:ids)

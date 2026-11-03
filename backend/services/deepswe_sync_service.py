@@ -561,7 +561,7 @@ class DeepSweSyncService:
                 row.model_name = _model_name(entry)
                 row.harness = HARNESS_NAME
                 row.methodology = _methodology(entry, leaderboard)
-                row.metrics = {METRIC_NAME: entry.pass_at_1}
+                row.metrics = {METRIC_NAME: round(entry.pass_at_1 * 100, 2)}
                 row.uses_additional_data = False
                 row.is_open = is_open
                 if hf_model_url:

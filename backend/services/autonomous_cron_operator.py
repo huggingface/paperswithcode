@@ -95,8 +95,6 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     "sync_tabarena": ("backend/services/tabarena_sync_service.py",),
     "sync_open_asr": ("backend/services/open_asr_sync_service.py",),
     "sync_mmteb_overall": ("backend/services/mmteb_sync_service.py",),
-    "sync_mmteb_retrieval": ("backend/services/mmteb_sync_service.py",),
-    "sync_mmteb_reranking": ("backend/services/mmteb_sync_service.py",),
     "sync_mmeb_v2": ("backend/services/mmeb_sync_service.py",),
     "sync_mmeb_v3": ("backend/services/mmeb_sync_service.py",),
     "sync_deepswe": ("backend/services/deepswe_sync_service.py",),
@@ -165,6 +163,7 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     ),
     "scan_model_releases": ("backend/services/model_release_radar_service.py",),
     "discover_x_threads": ("backend/services/x_thread_discovery_service.py",),
+    "refresh_x_post_likes": ("backend/services/x_post_likes_service.py",),
     "post_trending_paper_to_x": ("backend/services/x_trending_post_service.py",),
     "warm_paper_suggested_questions": (
         "backend/services/paper_suggested_questions_service.py",
@@ -237,8 +236,6 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "sync_tabarena": ("backend/tests/evaluation/test_tabarena_sync.py",),
     "sync_open_asr": ("backend/tests/evaluation/test_open_asr_sync.py",),
     "sync_mmteb_overall": ("backend/tests/evaluation/test_mmteb_sync.py",),
-    "sync_mmteb_retrieval": ("backend/tests/evaluation/test_mmteb_sync.py",),
-    "sync_mmteb_reranking": ("backend/tests/evaluation/test_mmteb_sync.py",),
     "sync_mmeb_v2": ("backend/tests/evaluation/test_mmeb_sync.py",),
     "sync_mmeb_v3": ("backend/tests/evaluation/test_mmeb_sync.py",),
     "sync_deepswe": ("backend/tests/evaluation/test_deepswe_sync.py",),
@@ -284,6 +281,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     ),
     "scan_model_releases": ("backend/tests/test_model_release_radar_service.py",),
     "discover_x_threads": ("backend/tests/test_x_thread_discovery_service.py",),
+    "refresh_x_post_likes": ("backend/tests/test_x_post_likes_service.py",),
     "post_trending_paper_to_x": ("backend/tests/test_x_trending_post_service.py",),
     "warm_paper_suggested_questions": (
         "backend/tests/test_paper_suggested_questions_warm_service.py",

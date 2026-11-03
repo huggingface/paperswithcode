@@ -91,7 +91,6 @@ def _entry(
         model_url=model_url,
         api_rank=1,
         mean_task=0.72,
-        scores_by_task_type={"Retrieval": 0.81, "Reranking": 0.63},
         arxiv_ids=arxiv_ids,
         total_params=1_500_000_000,
         is_open=True,
@@ -117,17 +116,9 @@ def _session() -> Session:
         ],
     )
     session = Session(engine)
-    tasks = [
-        Task(id=17, name="Embedding models", slug="embedding-models"),
-        Task(id=23, name="Retrieval", slug="retrieval"),
-        Task(id=510, name="Text Reranking", slug="text-reranking"),
-    ]
+    tasks = [Task(id=17, name="Embedding models", slug="embedding-models")]
     dataset = Dataset(id=106, name="MMTEB v2", slug="mmteb-v2")
-    metrics = [
-        Metric(id=165, name="MMTEB Score", direction="higher_is_better"),
-        Metric(id=1130, name="Retrieval", direction="higher_is_better"),
-        Metric(id=1129, name="Rerank", direction="higher_is_better"),
-    ]
+    metrics = [Metric(id=165, name="MMTEB Score", direction="higher_is_better")]
     session.add_all([*tasks, dataset, *metrics])
     for task, metric in zip(tasks, metrics, strict=True):
         session.add(TaskDataset(task_id=task.id, dataset_id=dataset.id))
@@ -202,10 +193,7 @@ def test_parse_and_fetch_official_mmteb_api_contract():
     assert entries[0].arxiv_ids == ("2501.00000",)
     assert entries[0].total_params == 1_500_000_000
     assert entries[0].hf_model_url == "https://huggingface.co/example/model-0"
-    assert entries[0].scores_by_task_type == {
-        "Retrieval": 0.8,
-        "Reranking": 0.6,
-    }
+    assert entries[0].mean_task == 0.7
 
 
 def test_parser_fails_closed_on_wrong_benchmark_or_truncated_payload():
@@ -376,27 +364,6 @@ def test_sync_keeps_only_arxiv_resolved_models_and_is_idempotent():
     assert second.created == 0
     assert second.updated == 2
     assert session.query(Evaluation).count() == 3
-
-
-@pytest.mark.parametrize(
-    ("lane_id", "expected"),
-    [("retrieval", 81.0), ("reranking", 63.0)],
-)
-def test_task_type_lanes_use_their_exact_api_score(lane_id: str, expected: float):
-    session = _session()
-    entry = _entry(
-        "alpha",
-        ("2501.00001",),
-        model_url="https://huggingface.co/example/alpha",
-    )
-
-    MmtebSyncService(session).sync([entry], lane_id=lane_id)
-
-    lane = LANES[lane_id]
-    task = session.query(Task).filter_by(slug=lane.task_slug).one()
-    row = session.query(Evaluation).filter_by(task_id=task.id).one()
-    assert row.best_metric == lane.metric_name
-    assert row.metrics == {lane.metric_name: expected}
 
 
 def test_dry_run_rolls_back_all_evaluation_and_paper_changes():

@@ -78,16 +78,6 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `embedding-models` / `mmteb-v2`, `MMTEB Score`, official MMTEB v2 source, and only rows with the managed MMTEB methodology.
 - **Proof:** Apply the shared procedure to the complete overall cohort. Verify model identity, unique contiguous ranks, finite scores, managed-row ownership, and the public embedding-models leaderboard read.
 
-## `sync_mmteb_retrieval`
-
-- **Contract:** `retrieval` / `mmteb-v2`, `Retrieval`, official MMTEB v2 source, and only managed MMTEB rows.
-- **Proof:** Apply the shared procedure independently of the overall lane. Verify retrieval values are not copied from aggregate scores and compare the owned row set and public retrieval leaderboard.
-
-## `sync_mmteb_reranking`
-
-- **Contract:** `text-reranking` / `mmteb-v2`, `Rerank`, official MMTEB v2 source, and only managed MMTEB rows.
-- **Proof:** Apply the shared procedure independently of the other MMTEB lanes. Verify reranking task identity, values, ranks, stale-row removal, and the public text-reranking leaderboard.
-
 ## `sync_mmeb_v2`
 
 - **Contract:** `embedding-models` / `mmeb-v2`, `MMEB-v2 Score`, official MMEB source, and only rows with the managed MMEB methodology.
@@ -229,6 +219,13 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Freshness metrics** (dashboard Database Metrics): `last_write` = latest `paper_x_thread_scans.last_scanned_at` (degraded after 25 h without a scan), `linked_papers` = scanned papers with a linked thread. The job prints its JSON summary to stdout only, so the journal shows just start/finish lines; use `--show-candidates` or the scan table for run results.
 - **Independent proof:** Open one matched post from the JSON and confirm it is a paper author or the paper's own organization (business-verified account) introducing that paper, never an outside account; with apply on, confirm the paper page's X threads card shows it.
 - **Correctness:** `X search HTTP 401/403` means a bad or unentitled token and `429` an exhausted quota (the run stops at the first one). A zero `papers_scanned` means every recent candidate already has threads or used its three scans.
+
+## `refresh_x_post_likes`
+
+- **Effect:** Hourly at :35, adds an `x_post_metrics` row for every `paper_x_threads` post from the last 7 days, then reads each due post (about 1, 2, 4, 8, 12, 24, 48, 72, 120 and 144 h after posting) and updates its likes-per-hour EMA (`like_velocity`). Syndication is tried first; posts it cannot serve use the paid X API (`X_API_BEARER_TOKEN`), capped at `PWC_X_LIKES_API_DAILY_CAP` (default 300) posts per UTC day, tracked in `x_post_likes_api_usage.json` under `PWC_CRON_LOCK_DIR`. Posts the API reports unavailable get `gone_at`. Report-only (reads through syndication and rolls back) unless `PWC_X_LIKES_APPLY=true`.
+- **Freshness metrics** (dashboard Database Metrics): `last_write` = latest `x_post_metrics.last_read_at`, `tracked_posts` = posts with a pending reading. Report-only runs write nothing, so both stay empty until apply is on.
+- **Independent proof:** Pick a recently read post (`ORDER BY last_read_at DESC`), open it on X, and confirm its like count is close to `like_count`; then confirm the paper's `x_trending_component` is set after the next `calculate_paper_trending_scores` run.
+- **Correctness:** The JSON summary lists `syndication_reads`, `api_reads`, `api_reads_today`, `unread` and `api_error`. `api_error` with HTTP 401/402 means a bad token or exhausted X credits and exits 1; many `unread` with `api_reads_today` at the cap means syndication is failing and the cap is doing its job. The X part only affects rankings when `PWC_TRENDING_X_WEIGHT` in `/etc/paperswithcode/trending-cron.env` is above 0, and then it can only lift a paper: the score is the higher of the GitHub/HF score and 100 × weight × `x_trending_component`.
 
 ## `link_google_scholar_profiles`
 
