@@ -13,11 +13,12 @@ import hashlib
 import ipaddress
 import json
 import re
+import socket
 import threading
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 from huggingface_hub import HfApi, HfFileSystem
@@ -62,8 +63,29 @@ LANDING_PAGE_HOSTS = frozenset(
     }
 )
 
+# Whether the reader can show a page itself in a frame is checked from its
+# response headers. Framing rarely changes; an unreachable page is checked
+# again sooner.
+FRAME_CHECK_TIMEOUT_SECONDS = 10
+FRAME_CHECK_MAX_REDIRECTS = 5
+FRAME_CHECK_MAX_AGE = timedelta(days=7)
+FRAME_CHECK_RETRY_AGE = timedelta(days=1)
+FRAME_CHECK_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/130.0 Safari/537.36"
+)
+# frame-ancestors sources that admit the reader at https://paperswithcode.co.
+FRAMING_SOURCES = frozenset(
+    {"*", "https:", "paperswithcode.co", "https://paperswithcode.co"}
+)
+
 _page_locks: dict[str, threading.Lock] = {}
 _page_locks_guard = threading.Lock()
+
+
+def _page_lock(paper_id: str) -> threading.Lock:
+    with _page_locks_guard:
+        return _page_locks.setdefault(paper_id, threading.Lock())
 
 
 class ExternalPageMarkdownError(ValueError):
@@ -262,7 +284,8 @@ def web_markdown_pending(paper, *, bucket_id: str, token: str | None) -> bool:
 
 def retry_due(status: dict, *, now: datetime | None = None) -> bool:
     """Whether a page with this status record may be scraped again."""
-    if not status or status.get("status") == "succeeded":
+    # A record holding only a framing check has no scrape attempt yet.
+    if status.get("status") in {None, "succeeded"}:
         return True
     if not status.get("retryable"):
         return False
@@ -291,6 +314,7 @@ def _write_status(
         error and error.retryable and (not counted or attempts < MAX_ATTEMPTS)
     )
     record = {
+        **({"framing": prior["framing"]} if "framing" in prior else {}),
         **payload,
         "paper_key": f"external/{paper_id}",
         "source": "external_page",
@@ -333,9 +357,7 @@ def prepare_external_page_markdown(
     pay for the same unreadable page again before it is due. Bucket errors
     surface as a retryable ``storage_unavailable``.
     """
-    with _page_locks_guard:
-        lock = _page_locks.setdefault(paper_id, threading.Lock())
-    with lock:
+    with _page_lock(paper_id):
         try:
             return _prepare(
                 paper_id=paper_id,
@@ -419,3 +441,136 @@ def _prepare(
         token=token,
     )
     return content_sha256
+
+
+def _public_host(hostname: str) -> bool | None:
+    """Whether every address the host resolves to is publicly routable.
+
+    ``None`` means the name did not resolve, which may be transient.
+    """
+    try:
+        infos = socket.getaddrinfo(hostname, 443, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError):
+        return None
+    return bool(infos) and all(
+        ipaddress.ip_address(str(info[4][0]).split("%", 1)[0]).is_global
+        for info in infos
+    )
+
+
+def _frame_blocker(headers: httpx.Headers) -> str | None:
+    """Name the response header that forbids framing, if any.
+
+    Browsers ignore X-Frame-Options when a CSP frame-ancestors directive is
+    present, so that directive decides first.
+    """
+    ancestors = [
+        sources.lower().split()
+        for policy in headers.get_list("content-security-policy", split_commas=True)
+        for directive in policy.split(";")
+        for name, _, sources in [directive.strip().partition(" ")]
+        if name.lower() == "frame-ancestors"
+    ]
+    if ancestors:
+        allowed = all(
+            {source.rstrip("/") for source in sources} & FRAMING_SOURCES
+            for sources in ancestors
+        )
+        return None if allowed else "frame_ancestors"
+    return "x_frame_options" if headers.get_list("x-frame-options") else None
+
+
+def check_page_framing(
+    url: str, *, timeout_seconds: float = FRAME_CHECK_TIMEOUT_SECONDS
+) -> tuple[bool, str]:
+    """Whether the reader can show ``url`` in a frame, and the reason.
+
+    Redirects are followed by hand so every hop must be HTTPS (the reader's
+    frame cannot load mixed content) on a publicly routable address. Only
+    response headers are read, and only the verdict is kept.
+    """
+    with httpx.Client(
+        timeout=timeout_seconds, headers={"User-Agent": FRAME_CHECK_USER_AGENT}
+    ) as client:
+        for _ in range(FRAME_CHECK_MAX_REDIRECTS + 1):
+            try:
+                parsed = urlsplit(url)
+                hostname = parsed.hostname
+            except ValueError:
+                return False, "invalid_url"
+            if parsed.scheme != "https" or not hostname:
+                return False, "insecure"
+            public = _public_host(hostname)
+            if public is None:
+                return False, "unreachable"
+            if not public:
+                return False, "private_address"
+            try:
+                with client.stream("GET", url) as response:
+                    if response.has_redirect_location:
+                        url = urljoin(url, response.headers["location"])
+                        continue
+                    if not response.is_success:
+                        return False, "http_status"
+                    content_type = response.headers.get("content-type", "")
+                    if not content_type.lower().startswith("text/html"):
+                        return False, "not_html"
+                    blocker = _frame_blocker(response.headers)
+                    return blocker is None, blocker or "allowed"
+            except httpx.InvalidURL:
+                return False, "invalid_url"
+            except httpx.HTTPError:
+                return False, "unreachable"
+    return False, "too_many_redirects"
+
+
+def framing_due(status: dict, page_url: str, *, now: datetime | None = None) -> bool:
+    """Whether a page's framing check is missing, for another URL, or stale."""
+    framing = status.get("framing")
+    if not isinstance(framing, dict) or framing.get("page_url") != page_url:
+        return True
+    max_age = (
+        FRAME_CHECK_RETRY_AGE
+        if framing.get("reason") == "unreachable"
+        else FRAME_CHECK_MAX_AGE
+    )
+    checked_at = framing.get("checked_at")
+    if not isinstance(checked_at, str):
+        return True
+    return datetime.fromisoformat(checked_at) + max_age <= (now or datetime.now(UTC))
+
+
+def page_frameable(status: dict, page_url: str) -> bool:
+    """Whether the last framing check let the reader frame this exact URL."""
+    framing = status.get("framing")
+    return (
+        isinstance(framing, dict)
+        and framing.get("page_url") == page_url
+        and framing.get("frameable") is True
+    )
+
+
+def record_page_framing(
+    paper_id: str, page_url: str, *, bucket_id: str, token: str | None
+) -> bool:
+    """Check a page's framing and store the verdict in its status record."""
+    frameable, reason = check_page_framing(page_url)
+    with _page_lock(paper_id):
+        status = read_status(paper_id, bucket_id=bucket_id, token=token)
+        status["framing"] = {
+            "page_url": page_url,
+            "frameable": frameable,
+            "reason": reason,
+            "checked_at": datetime.now(UTC).isoformat(),
+        }
+        HfApi(token=token).batch_bucket_files(
+            bucket_id,
+            add=[
+                (
+                    json.dumps(status, sort_keys=True, indent=2).encode(),
+                    status_key(paper_id),
+                )
+            ],
+            token=token,
+        )
+    return frameable

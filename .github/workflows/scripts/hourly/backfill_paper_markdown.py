@@ -30,7 +30,9 @@ from backend.scripts.generate_missing_paper_markdown import (
 from backend.services.external_page_markdown_service import (
     ExternalPageMarkdownError,
     external_page_url,
+    framing_due,
     prepare_external_page_markdown,
+    record_page_framing,
     retry_due,
     status_key as external_page_status_key,
 )
@@ -76,6 +78,9 @@ EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS = 30
 # Firecrawl scrapes per invocation; the live and full lanes each run hourly.
 EXTERNAL_PAGE_SCRAPE_LIMIT = 20
 EXTERNAL_PAGE_SCRAPE_TIMEOUT_SECONDS = 60
+# Header-only framing checks per invocation, so the reader can show pages that
+# allow it as themselves.
+EXTERNAL_PAGE_FRAME_CHECK_LIMIT = 60
 PROBE_SCRIPT = (
     Path(__file__).resolve().parents[4]
     / "backend"
@@ -412,7 +417,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
             if paper_markdown_bucket_key(paper_id, source="external") not in existing
         ]
         statuses = self._status_records(
-            [external_page_status_key(paper_id) for paper_id in missing]
+            [external_page_status_key(paper_id) for paper_id in pages]
         )
         due = [
             paper_id
@@ -420,16 +425,38 @@ class PaperMarkdownBackfillJob(CronJobBase):
             if retry_due(statuses.get(external_page_status_key(paper_id), {}))
         ]
         selected = due[:EXTERNAL_PAGE_SCRAPE_LIMIT]
+        framing = [
+            paper_id
+            for paper_id in pages
+            if framing_due(
+                statuses.get(external_page_status_key(paper_id), {}),
+                pages[paper_id][1],
+            )
+        ]
         counts = {
             "external_pages_eligible": len(pages),
             "external_pages_missing": len(missing),
             "external_pages_due": len(due),
             "external_pages_published": 0,
             "external_pages_failed": 0,
+            "external_pages_framing_due": len(framing),
+            "external_pages_framing_checked": 0,
+            "external_pages_frameable": 0,
         }
-        if not self.should_execute or not self.settings.firecrawl_api_key:
+        if not self.should_execute:
             return counts
+        if self.settings.firecrawl_api_key:
+            counts.update(self._scrape_external_pages(pages, selected))
+        counts.update(
+            self._check_external_page_framing(
+                pages, framing[:EXTERNAL_PAGE_FRAME_CHECK_LIMIT]
+            )
+        )
+        return counts
 
+    def _scrape_external_pages(
+        self, pages: dict[str, tuple[str, str]], selected: list[str]
+    ) -> dict[str, int]:
         def prepare(paper_id: str) -> bool:
             title, url = pages[paper_id]
             try:
@@ -451,9 +478,38 @@ class PaperMarkdownBackfillJob(CronJobBase):
 
         with ThreadPoolExecutor(max_workers=4) as executor:
             outcomes = list(executor.map(prepare, selected))
-        counts["external_pages_published"] = sum(outcomes)
-        counts["external_pages_failed"] = len(outcomes) - sum(outcomes)
-        return counts
+        return {
+            "external_pages_published": sum(outcomes),
+            "external_pages_failed": len(outcomes) - sum(outcomes),
+        }
+
+    def _check_external_page_framing(
+        self, pages: dict[str, tuple[str, str]], selected: list[str]
+    ) -> dict[str, int]:
+        def check(paper_id: str) -> bool | None:
+            try:
+                return record_page_framing(
+                    paper_id,
+                    pages[paper_id][1],
+                    bucket_id=self.settings.paper_markdown_hf_bucket_id,
+                    token=self.settings.hf_token or None,
+                )
+            except (HfHubHTTPError, OSError, ValueError) as error:
+                self.logger.info(
+                    "external page framing check failed for %s: %s", paper_id, error
+                )
+                return None
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            outcomes = [
+                outcome
+                for outcome in executor.map(check, selected)
+                if outcome is not None
+            ]
+        return {
+            "external_pages_framing_checked": len(outcomes),
+            "external_pages_frameable": sum(outcomes),
+        }
 
     def _semantic_records(
         self,

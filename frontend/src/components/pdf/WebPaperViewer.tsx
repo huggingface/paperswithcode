@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import MarkdownText from "@/components/MarkdownText";
 import { ReaderToolbar, type PdfToolbarResources } from "@/components/pdf/PdfToolbar";
 import { usePdfSelection } from "@/hooks/usePdfSelection";
-import { getPaperWebMarkdown } from "@/lib/api/papers";
+import { getPaperWebMarkdown, getPaperWebPage } from "@/lib/api/papers";
 import { ApiError } from "@/lib/apiTransport";
 import type { PaperSelectionDraft } from "@/lib/chat";
 import { framesOriginalPage, webPaperBody } from "@/lib/paperReader";
@@ -51,8 +51,18 @@ export function WebPaperViewer({
   onPaperSelectionError,
 }: WebPaperViewerProps) {
   const documentRef = useRef<HTMLElement>(null);
-  const frameable = framesOriginalPage(sourceUrl);
-  const [view, setView] = useState<"original" | "text">(frameable ? "original" : "text");
+  const knownFrameable = framesOriginalPage(sourceUrl);
+  const pageQuery = useQuery({
+    queryKey: ["paperWebPage", paperId],
+    queryFn: () => getPaperWebPage(paperId),
+    enabled: !knownFrameable,
+    staleTime: 5 * 60_000,
+    // Without an answer the page is read as Markdown.
+    retry: false,
+  });
+  const deciding = !knownFrameable && pageQuery.isPending;
+  const frameable = knownFrameable || pageQuery.data?.frameable === true;
+  const [view, setView] = useState<"original" | "text">("original");
   const showOriginal = frameable && view === "original";
   const query = useQuery({
     queryKey: ["paperWebMarkdown", paperId],
@@ -95,26 +105,28 @@ export function WebPaperViewer({
       </div>
     </ReaderToolbar>
     <div className="pdf-scroll-frame">
-      {showOriginal ? <iframe
-        className="reader-web-frame"
-        src={sourceUrl}
-        title={`Original page: ${paperTitle}`}
-        sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-        referrerPolicy="strict-origin-when-cross-origin"
-      /> : <div className="pdf-scroll" role="region" aria-label="Paper web page">
-        {query.isPending ? <div className="pdf-loading" role="status">Preparing a readable version of this page…</div>
-          : query.isError ? <div className="pdf-error" role="alert">
-            <p>{loadErrorMessage(query.error)}</p>
-            <div>
-              <button type="button" onClick={() => void query.refetch()}>Retry</button>
-              {" "}<a href={sourceUrl} target="_blank" rel="noopener noreferrer">Open original</a>
+      {deciding ? <div className="pdf-loading" role="status">Loading the paper…</div>
+        : showOriginal ? <iframe
+          className="reader-web-frame"
+          src={sourceUrl}
+          title={`Original page: ${paperTitle}`}
+          sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+          referrerPolicy="strict-origin-when-cross-origin"
+        />
+        : <div className="pdf-scroll" role="region" aria-label="Paper web page">
+          {query.isPending ? <div className="pdf-loading" role="status">Preparing a readable version of this page…</div>
+            : query.isError ? <div className="pdf-error" role="alert">
+              <p>{loadErrorMessage(query.error)}</p>
+              <div>
+                <button type="button" onClick={() => void query.refetch()}>Retry</button>
+                {" "}<a href={sourceUrl} target="_blank" rel="noopener noreferrer">Open original</a>
+              </div>
             </div>
-          </div>
-          : <article ref={documentRef} className="reader-web-document" data-page="1">
-            {!body.startsWith("# ") && <h1>{paperTitle}</h1>}
-            <MarkdownText text={body} />
-          </article>}
-      </div>}
+            : <article ref={documentRef} className="reader-web-document" data-page="1">
+              {!body.startsWith("# ") && <h1>{paperTitle}</h1>}
+              <MarkdownText text={body} />
+            </article>}
+        </div>}
     </div>
   </div>;
 }

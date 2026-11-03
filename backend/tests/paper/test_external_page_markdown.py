@@ -611,15 +611,26 @@ def test_hourly_backfill_prepares_a_bounded_batch_of_due_pages(monkeypatch):
         }
     }
 
+    framed = []
+    monkeypatch.setattr(
+        MODULE,
+        "record_page_framing",
+        lambda paper_id, page_url, **kwargs: framed.append(paper_id) or True,
+    )
+
     counts = job._prepare_external_pages()
 
     assert prepared == ["3"]
+    assert framed == ["1", "2", "3"]
     assert counts == {
         "external_pages_eligible": 3,
         "external_pages_missing": 2,
         "external_pages_due": 1,
         "external_pages_published": 1,
         "external_pages_failed": 0,
+        "external_pages_framing_due": 3,
+        "external_pages_framing_checked": 3,
+        "external_pages_frameable": 3,
     }
 
 
@@ -682,3 +693,179 @@ def test_web_markdown_pending_never_waits_on_unreadable_pages(
     )
     if "#" not in source_url:
         assert checked == ["hf://buckets/b/c/external/131370.md"]
+
+
+@pytest.mark.parametrize(
+    ("headers", "blocker"),
+    [
+        ({}, None),
+        ({"X-Frame-Options": "SAMEORIGIN"}, "x_frame_options"),
+        ({"Content-Security-Policy": "frame-ancestors 'self'"}, "frame_ancestors"),
+        ({"Content-Security-Policy": "default-src 'self'; frame-ancestors *"}, None),
+        (
+            {
+                "Content-Security-Policy": "frame-ancestors https://paperswithcode.co/",
+                "X-Frame-Options": "DENY",
+            },
+            None,
+        ),
+        ({"Content-Security-Policy": "default-src 'self'"}, None),
+    ],
+)
+def test_frame_blocker_follows_browser_precedence(headers, blocker):
+    assert service._frame_blocker(httpx.Headers(headers)) == blocker
+
+
+def _framing_client(monkeypatch, handler, *, public=True):
+    real_client = httpx.Client
+    monkeypatch.setattr(
+        service.httpx,
+        "Client",
+        lambda **kwargs: real_client(transport=httpx.MockTransport(handler), **kwargs),
+    )
+    monkeypatch.setattr(service, "_public_host", lambda host: public)
+
+
+HTML = {"content-type": "text/html; charset=utf-8"}
+
+
+@pytest.mark.parametrize(
+    ("responses", "public", "expected"),
+    [
+        ({URL: httpx.Response(200, headers=HTML)}, True, (True, "allowed")),
+        (
+            {URL: httpx.Response(200, headers=HTML | {"X-Frame-Options": "DENY"})},
+            True,
+            (False, "x_frame_options"),
+        ),
+        (
+            {URL: httpx.Response(301, headers={"location": "http://example.com/a"})},
+            True,
+            (False, "insecure"),
+        ),
+        ({URL: httpx.Response(200, headers=HTML)}, False, (False, "private_address")),
+        ({URL: httpx.Response(404, headers=HTML)}, True, (False, "http_status")),
+        ({URL: httpx.Response(302, headers=HTML)}, True, (False, "http_status")),
+        ({URL: httpx.Response(200, headers=HTML)}, None, (False, "unreachable")),
+        (
+            {URL: httpx.Response(200, headers={"content-type": "application/pdf"})},
+            True,
+            (False, "not_html"),
+        ),
+        (
+            {
+                URL: httpx.Response(302, headers={"location": "/blog/moved"}),
+                "https://www.liquid.ai/blog/moved": httpx.Response(200, headers=HTML),
+            },
+            True,
+            (True, "allowed"),
+        ),
+    ],
+)
+def test_check_page_framing(monkeypatch, responses, public, expected):
+    _framing_client(
+        monkeypatch, lambda request: responses[str(request.url)], public=public
+    )
+
+    assert service.check_page_framing(URL) == expected
+
+
+def test_check_page_framing_stops_at_a_redirect_loop(monkeypatch):
+    _framing_client(
+        monkeypatch, lambda request: httpx.Response(302, headers={"location": URL})
+    )
+
+    assert service.check_page_framing(URL) == (False, "too_many_redirects")
+
+
+def test_public_host_rejects_any_private_address(monkeypatch):
+    addresses = {
+        "public.example": ["93.184.215.14"],
+        "mixed.example": ["93.184.215.14", "10.0.0.5"],
+        "local.example": ["fe80::1%eth0"],
+    }
+
+    def getaddrinfo(host, *args, **kwargs):
+        if host not in addresses:
+            raise service.socket.gaierror("Name or service not known")
+        return [(None, None, None, "", (address, 443)) for address in addresses[host]]
+
+    monkeypatch.setattr(service.socket, "getaddrinfo", getaddrinfo)
+
+    assert service._public_host("public.example")
+    assert not service._public_host("mixed.example")
+    assert service._public_host("local.example") is False
+    assert service._public_host("missing.example") is None
+
+
+def test_framing_due_rechecks_stale_moved_and_unreachable_pages():
+    now = datetime(2026, 11, 3, tzinfo=UTC)
+
+    def status(reason="allowed", age=timedelta(hours=1), page_url=URL):
+        return {
+            "framing": {
+                "page_url": page_url,
+                "frameable": reason == "allowed",
+                "reason": reason,
+                "checked_at": (now - age).isoformat(),
+            }
+        }
+
+    assert service.framing_due({}, URL, now=now)
+    assert not service.framing_due(status(), URL, now=now)
+    assert service.framing_due(status(age=timedelta(days=8)), URL, now=now)
+    assert service.framing_due(status(page_url="https://example.com/old"), URL, now=now)
+    assert not service.framing_due(
+        status("x_frame_options", timedelta(days=2)), URL, now=now
+    )
+    assert service.framing_due(status("unreachable", timedelta(days=2)), URL, now=now)
+
+
+def test_framing_record_keeps_scrape_status_and_survives_a_scrape(monkeypatch):
+    bucket = FakeBucket().install(monkeypatch)
+    monkeypatch.setattr(service, "check_page_framing", lambda url: (True, "allowed"))
+
+    assert service.record_page_framing(
+        "123294", URL, bucket_id="huggingface/pwc-papers-content", token=None
+    )
+    status = json.loads(bucket.files[service.status_key("123294")])
+    assert service.page_frameable(status, URL)
+    assert not service.page_frameable(status, "https://example.com/other")
+    # A framing-only record is not a scrape attempt.
+    assert service.retry_due(status)
+
+    monkeypatch.setattr(
+        service, "scrape_page", lambda *args, **kwargs: ScrapedPage(TITLE, ARTICLE)
+    )
+    _prepare()
+
+    status = json.loads(bucket.files[service.status_key("123294")])
+    assert status["status"] == "succeeded"
+    assert service.page_frameable(status, URL)
+
+
+@pytest.mark.parametrize(
+    ("status", "frameable"),
+    [
+        ({}, False),
+        ({"framing": {"page_url": URL, "frameable": True}}, True),
+        ({"framing": {"page_url": URL, "frameable": False}}, False),
+    ],
+)
+def test_web_page_reports_whether_the_reader_may_frame_it(
+    monkeypatch, reader_client, status, frameable
+):
+    client, _ = reader_client
+    monkeypatch.setattr(paper_reader, "read_status", lambda *args, **kwargs: status)
+
+    response = client.get("/api/v1/papers/123294/web-page")
+
+    assert response.status_code == 200
+    assert response.json() == {"url": URL, "frameable": frameable}
+
+
+def test_web_page_is_not_found_without_a_web_page(reader_client):
+    client, state = reader_client
+    state["paper"] = None
+
+    assert client.get("/api/v1/papers/123294/web-page").status_code == 404
