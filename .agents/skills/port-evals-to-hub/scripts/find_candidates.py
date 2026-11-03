@@ -132,13 +132,14 @@ def main():
         info = facts[r["repo"]]
         r["model_created"] = (info.get("createdAt") or "")[:10]
         r["downloads"] = info.get("downloads", 0)
-        r["status"] = (
-            "repo_missing"
-            if not info
-            else "already_declared"
-            if r["hub"] in declared[r["repo"]]
-            else "candidate"
-        )
+        if not info:
+            r["status"] = "repo_missing"
+        elif declared[r["repo"]] is None:
+            r["status"] = "discussions_disabled"
+        elif r["hub"] in declared[r["repo"]]:
+            r["status"] = "already_declared"
+        else:
+            r["status"] = "candidate"
     rows.sort(key=lambda r: r.get("model_created", ""), reverse=True)
     rows.sort(key=lambda r: (r["status"] != "candidate", r["org_tier"] != "major"))
     fields = [

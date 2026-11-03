@@ -18,7 +18,7 @@ All scripts live in `.agents/skills/port-evals-to-hub/scripts/` and run from the
 | Script | Purpose |
 | --- | --- |
 | `hub_leaderboard.py` | Library: leaderboard views, predicted and live ranks, view links, exact benchmark names, eval.yaml task ids, org vs personal account, benchmarks already declared on a repo. |
-| `find_candidates.py OUT.csv` | Read-only DB query. Lists PwC evals with an `hf_model_url` on the mapped leaderboards, with status `candidate`, `on_board`, `already_declared`, `personal_account`, or `repo_missing`; candidates from major labs first, newest models first. |
+| `find_candidates.py OUT.csv` | Read-only DB query. Lists PwC evals with an `hf_model_url` on the mapped leaderboards, with status `candidate`, `on_board`, `already_declared`, `personal_account`, `discussions_disabled`, or `repo_missing`; candidates from major labs first, newest models first. |
 | `open_eval_prs.py SPEC.json [--apply]` | Checks every result in a spec, prints the PRs, and with `--apply` opens them and appends them to the registry. |
 | `sweep_eval_prs.py [--apply]` | Re-checks every registered PR: repoints links to a view where the result is visible, removes invisible results, closes PRs left with none. |
 

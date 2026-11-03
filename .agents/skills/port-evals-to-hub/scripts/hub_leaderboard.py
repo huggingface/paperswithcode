@@ -13,6 +13,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from huggingface_hub import HfApi
+from huggingface_hub.errors import HfHubHTTPError
+
 HUB = "https://huggingface.co"
 TIERS = [
     "500B",
@@ -63,8 +66,12 @@ def token():
     return _token
 
 
-def fetch(url, raw=False):
-    """GET a Hub URL with the user's token, retrying rate limits. Returns None when missing, gated, or private (401/403/404)."""
+def fetch(url, raw=False, missing_ok=True):
+    """GET a Hub URL with the user's token, retrying rate limits.
+
+    Returns None for a missing, gated, or private resource (401/403/404) when `missing_ok`; callers whose
+    decisions depend on the answer (leaderboards) pass False so an error never reads as "no entries".
+    """
     req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token()}"})
     for attempt in range(6):
         try:
@@ -72,7 +79,7 @@ def fetch(url, raw=False):
                 body = f.read().decode("utf8", "replace")
             return body if raw else json.loads(body)
         except urllib.error.HTTPError as e:
-            if e.code in (401, 403, 404):
+            if missing_ok and e.code in (401, 403, 404):
                 return None
             if e.code != 429 or attempt == 5:
                 raise
@@ -84,7 +91,9 @@ def board(ds, task, view):
     key = (ds, task, tuple(sorted(view.items())))
     if key not in _cache:
         query = urllib.parse.urlencode({"task_id": task, **view})
-        _cache[key] = fetch(f"{HUB}/api/datasets/{ds}/leaderboard?{query}") or []
+        _cache[key] = fetch(
+            f"{HUB}/api/datasets/{ds}/leaderboard?{query}", missing_ok=False
+        )
     return _cache[key]
 
 
@@ -130,15 +139,22 @@ def namespace_kind(namespace):
 
 
 def declared_datasets(repo):
-    """Benchmark dataset ids already declared in .eval_results on main or in any open PR."""
+    """Benchmark dataset ids already declared in .eval_results on main or in any open PR.
+
+    Returns None when the repo has discussions disabled: no PR can be opened there.
+    """
     found = set()
-    revisions = ["main"] + [
-        f"refs/pr/{d['num']}"
-        for d in (
-            fetch(f"{HUB}/api/models/{repo}/discussions?type=pull_request&status=open")
-            or {}
-        ).get("discussions", [])
-    ]
+    try:  # get_repo_discussions paginates through every open PR
+        open_prs = list(
+            HfApi(token=token()).get_repo_discussions(
+                repo, discussion_type="pull_request", discussion_status="open"
+            )
+        )
+    except HfHubHTTPError as e:
+        if e.response.status_code == 403 and "disabled" in str(e):
+            return None
+        raise
+    revisions = ["main"] + [f"refs/pr/{d.num}" for d in open_prs]
     for rev in revisions:
         info = (
             fetch(

@@ -63,11 +63,21 @@ def result_yaml(r, source_url, source_name):
     )
 
 
+def model_card_repo(url):
+    """Model repo id when `url` points at a model card (any revision, README, anchor), else None."""
+    m = re.fullmatch(
+        r"https://huggingface\.co/(?!datasets/|spaces/|papers/)([^/]+/[^/?#]+)"
+        r"(?:/tree/[^/?#]+|/blob/[^/?#]+/README\.md)?/?(?:[?#].*)?",
+        url,
+    )
+    return m[1] if m else None
+
+
 def source_text(url):
     """Plain text of the cited source, for the findability check (model cards via raw README)."""
-    m = re.fullmatch(r"https://huggingface\.co/([^/]+/[^/?#]+)", url)
-    if m:
-        return hub.fetch(f"{hub.HUB}/{m[1]}/raw/main/README.md", raw=True) or ""
+    repo = model_card_repo(url)
+    if repo:
+        return hub.fetch(f"{hub.HUB}/{repo}/raw/main/README.md", raw=True) or ""
     url = url.replace("arxiv.org/abs/", "arxiv.org/html/")
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     try:
@@ -88,6 +98,9 @@ def check(spec):
         )
         return None
     declared = hub.declared_datasets(repo)
+    if declared is None:
+        print(f"  {repo}: discussions are disabled, so no PR can be opened; skipped")
+        return None
     text = source_text(spec["source_url"])
     keep, views = [], {}
     for r in spec["results"]:
