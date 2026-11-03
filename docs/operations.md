@@ -802,6 +802,14 @@ work; an operator, token-guardrail, or policy pause still stops it. They use the
 `create_benchmark_from_gap` capability, the only autonomous path that creates
 datasets, metrics, or tasks (see `docs/autonomous-operations.md`).
 
+The same run also queues add-evals re-checks (trigger `benchmark-promotion`,
+policy `new-benchmark-<dataset id>`) for already-indexed papers whose stored
+Markdown names a benchmark whose first leaderboard row is from the last two
+days, whatever created it. `new_benchmark_recheck_service` caps them at 5 per
+benchmark and 20 per run, and the dispatcher runs at most two at once, so the
+admin lane cannot starve daily curation. The curator verifies every row; a
+mention alone writes nothing.
+
 Both kinds run on the existing curator image: the runner treats them as
 paper-less jobs, `jobs/url_preflight.py` skips paper sources for them, and the
 instructions live in the bootstrapped `remote-paper-curation` skill. Apply

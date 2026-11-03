@@ -587,7 +587,8 @@ COMMANDS: dict[str, Job] = {
         timeout="30m",
         idempotency=(
             "queue at most one daily overseer review of eligible benchmark-gap "
-            "candidates and at most 40 add-benchmark jobs per UTC day"
+            "candidates and at most 40 add-benchmark jobs per UTC day, then at "
+            "most one add-evals re-check per paper and new benchmark (20 per run)"
         ),
     ),
     "scan_model_releases": job(

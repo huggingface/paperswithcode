@@ -93,6 +93,10 @@ SCHEDULED_HEALTH_PAUSES = frozenset(
 # every worker from interactive admin and scheduled daily work.
 EXTERNAL_PAPER_POLICY_VERSION = "external-paper-v1"
 EXTERNAL_PAPER_MAX_ACTIVE = 2
+# Re-checks queued when a new leaderboard appears share the admin lane under
+# the same kind of cap (policy versions `new-benchmark-<dataset id>`).
+NEW_BENCHMARK_POLICY_PREFIX = "new-benchmark-"
+NEW_BENCHMARK_MAX_ACTIVE = 2
 JobStatus = Literal[
     "queued",
     "dispatching",
@@ -792,6 +796,18 @@ class CodexPaperJobService:
             if external_active >= EXTERNAL_PAPER_MAX_ACTIVE:
                 admin_rows = admin_rows.filter(
                     PaperCurationJob.policy_version != EXTERNAL_PAPER_POLICY_VERSION
+                )
+            new_benchmark_active = sum(
+                (getattr(item, "policy_version", None) or "").startswith(
+                    NEW_BENCHMARK_POLICY_PREFIX
+                )
+                for item in active
+            )
+            if new_benchmark_active >= NEW_BENCHMARK_MAX_ACTIVE:
+                admin_rows = admin_rows.filter(
+                    ~PaperCurationJob.policy_version.startswith(
+                        NEW_BENCHMARK_POLICY_PREFIX
+                    )
                 )
             row = admin_rows.order_by(
                 PaperCurationJob.priority,

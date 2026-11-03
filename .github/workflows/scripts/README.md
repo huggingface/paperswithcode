@@ -239,10 +239,23 @@ the most specific task, and one to three metrics; the backend validates and
 writes the rows, then requeues add-evals for the papers that reported the gap.
 Rejected candidates return for review once their paper count doubles; deferred
 ones after 14 days. Both kinds share the scheduler pause and run at most two at
-a time. Inspect or dry-run it with:
+a time.
+
+The same run then re-checks older papers against new leaderboards, however
+they were created (gap review, the add-benchmark skill, a sync, or by hand). For
+each dataset whose first `task_dataset_metrics` row is from the last two days,
+it reads the stored paper Markdown (else the abstract) of up to 50 of the
+newest papers already curated on that task before the board existed and with
+no row in the dataset's family, and queues add-evals (trigger
+`benchmark-promotion`, priority 50, policy `new-benchmark-<dataset id>`) for the
+papers that name it at least twice outside their references: at most 5 per
+benchmark and 20 per run, from at most 400 Markdown reads. The dispatcher runs
+at most two of these at once so daily curation keeps its workers. Inspect or
+dry-run it with:
 
 ```bash
 uv run --env-file backend/keys.env python -m backend.scripts.enqueue_benchmark_gap_review --status
+uv run --env-file backend/keys.env python -m backend.scripts.enqueue_benchmark_gap_review --dry-run
 ```
 
 `warm_paper_suggested_questions.py` pre-generates the three paper-page

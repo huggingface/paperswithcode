@@ -161,6 +161,7 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     ),
     "enqueue_benchmark_gap_review": (
         "backend/services/benchmark_gap_review_service.py",
+        "backend/services/new_benchmark_recheck_service.py",
     ),
     "scan_model_releases": ("backend/services/model_release_radar_service.py",),
     "discover_x_threads": ("backend/services/x_thread_discovery_service.py",),
@@ -279,6 +280,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     ),
     "enqueue_benchmark_gap_review": (
         "backend/tests/curation/test_benchmark_gap_review.py",
+        "backend/tests/curation/test_new_benchmark_rechecks.py",
     ),
     "scan_model_releases": ("backend/tests/test_model_release_radar_service.py",),
     "discover_x_threads": ("backend/tests/test_x_thread_discovery_service.py",),
