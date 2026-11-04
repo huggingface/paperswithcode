@@ -4,10 +4,11 @@ description: >-
   Process the user's X (Twitter) bookmarks into Papers with Code: find every
   bookmarked post that announces a paper, index missing arXiv papers, add
   non-arXiv releases as external papers, enrich each paper (code, project page,
-  HF artifacts, tags, thumbnail), and link the announcement thread to
-  the paper's X threads section. Use whenever the user asks to check, sweep,
-  triage, or process their X/Twitter bookmarks, or to make sure bookmarked paper
-  tweets are indexed, enriched, or have their X threads added.
+  HF artifacts, tags, thumbnail), add its evaluation results to existing
+  leaderboards, and link the announcement thread to the paper's X threads
+  section. Use whenever the user asks to check, sweep, triage, or process their
+  X/Twitter bookmarks, or to make sure bookmarked paper tweets are indexed,
+  enriched, evaluated, or have their X threads added.
 ---
 
 # Process X Bookmarks
@@ -100,7 +101,27 @@ one paper per subagent, and collect what each changed. Do not re-enrich papers
 with no gaps unless the bookmark shows something missing (for example the post
 links a repository the page lacks).
 
-## 5. Link the X threads
+## 5. Add evaluation results
+
+Always run this step, not only on request. For every kept paper (indexed,
+external, or already in the catalog) that has no evaluation rows, run the
+`add-evals` skill, one paper per subagent, each with its own scratch
+subdirectory. Find those papers with:
+
+```bash
+PGPASSWORD=$(grep ^PWC_DB_PASSWORD backend/keys.env | cut -d= -f2) \
+  psql -h localhost -U paperswithcode_user -d paperswithcode_hf -At -c \
+  "SELECT p.id, p.title FROM papers p WHERE p.id IN (<ids>)
+   AND NOT EXISTS (SELECT 1 FROM evaluations e WHERE e.paper_id = p.id)"
+```
+
+`add-evals` imports only the paper's own models on benchmarks that already
+exist with the exact metric configured; many papers (planning environments,
+new benchmarks) end with nothing to add, which is a valid outcome. Papers that
+already have evaluations are left alone unless the bookmark shows results the
+page lacks. Collect each subagent's rows and ranks for the report.
+
+## 6. Link the X threads
 
 Policy (user decision, 2026-10-30): link posts that introduce, announce or
 substantively explain the paper. The poster may be an author, the paper's own
@@ -132,7 +153,7 @@ uv run --env-file backend/keys.env python .agents/skills/process-x-bookmarks/scr
 The API captures a preview from X's public syndication endpoint and rejects
 unavailable posts; report those.
 
-## 6. Verify and report
+## 7. Verify and report
 
 Re-run the triage on the same `--max` and confirm every kept paper bookmark is
 `linked` with no unexpected gaps. Report to the user:
@@ -140,4 +161,6 @@ Re-run the triage on the same `--max` and confirm every kept paper bookmark is
 - bookmarks scanned, paper bookmarks found, skipped (with one-line reasons)
 - papers indexed and external papers added (with `https://paperswithcode.co/paper/<id>` links)
 - papers enriched and what changed
+- evaluations added (benchmark, metric, value, rank) and papers left without
+  any because no existing leaderboard fits
 - threads linked, and bookmarks left for their decision
