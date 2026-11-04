@@ -135,6 +135,21 @@ Checks performed:
 
 It does not recompute ranks; use `EvaluationService.recalculate_ranks`.
 
+## Artificial Analysis Scores on Hub Model Repos
+
+`backend/scripts/sync_aa_eval_results_prs.py` is a uv script that runs as a
+scheduled Hugging Face Job. It ports Artificial Analysis scores for GPQA
+Diamond, MMLU-Pro, Terminal-Bench 2.1 and Terminal-Bench 4.0 to open-weight
+Hub model repos as `.eval_results/` PRs. It matches each AA model only to an
+exact name in its creator's official Hub org, skips gated repos and
+ambiguous, dated or quantized matches, and skips benchmarks a repo already
+reports on `main` or in an open PR. Dry-run is the default; `--apply` opens
+at most `--max-prs` PRs as the token's account.
+
+```bash
+env -u HF_TOKEN ARTIFICIAL_ANALYSIS_API_KEY=… uv run --no-project --script backend/scripts/sync_aa_eval_results_prs.py
+```
+
 ## Troubleshooting
 
 | Problem | Fix |
