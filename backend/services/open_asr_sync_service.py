@@ -45,21 +45,9 @@ MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Open ASR")
 MIN_EXPECTED_ENTRIES = 40
 MAX_EXPECTED_ENTRIES = 150
 
-DEFAULT_COLUMNS = [
-    "RTFx ⬆️️",
-    "License",
-    "AMI-Cleaned",
-    "Earnings22-Cleaned-AA-chunked",
-    "Gigaspeech-Cleaned",
-    "LS Clean",
-    "LS Other",
-    "SPGISpeech",
-    "URGENT24",
-    "Voice Arena Monsoon",
-    "Voxpopuli-AA-Cleaned",
-    "Private (scripted)",
-    "Private (conversational)",
-]
+MAIN_TABLE_API = "/_main_table_update"
+# Read for open/proprietary status; text columns do not enter the WER average.
+LICENSE_COLUMN = "License"
 
 
 def _leaderboard_value(payload: Any) -> Any:
@@ -325,7 +313,7 @@ def parse_open_asr_leaderboard(payload: Any) -> list[OpenAsrEntry]:
     rows = payload.get("data")
     if not isinstance(headers, list) or not isinstance(rows, list):
         raise TypeError("Open ASR response must contain headers and data lists")
-    required = {"Rank", "model", "Average WER ⬇️", "RTFx ⬆️️", "License"}
+    required = {"Rank", "model", "Average WER ⬇️", "RTFx ⬆️️", LICENSE_COLUMN}
     if not required.issubset(headers):
         raise ValueError("Open ASR response is missing required columns")
     if not MIN_EXPECTED_ENTRIES <= len(rows) <= MAX_EXPECTED_ENTRIES:
@@ -345,7 +333,7 @@ def parse_open_asr_leaderboard(payload: Any) -> list[OpenAsrEntry]:
         rank_value = _number(row[indexes["Rank"]])
         wer = _number(row[indexes["Average WER ⬇️"]])
         rtfx = _number(row[indexes["RTFx ⬆️️"]], optional=True)
-        license_name = str(row[indexes["License"]]).strip()
+        license_name = str(row[indexes[LICENSE_COLUMN]]).strip()
         rank = int(rank_value) if rank_value is not None else 0
         if not model_id or len(model_id) > 255 or "/" not in model_id:
             raise ValueError("Open ASR row has an invalid model identifier")
@@ -374,6 +362,28 @@ def parse_open_asr_leaderboard(payload: Any) -> list[OpenAsrEntry]:
     return sorted(entries, key=lambda entry: entry.rank)
 
 
+def default_table_columns(client: Any) -> list[str]:
+    """Return the Space's default column selection plus the License column.
+
+    Average WER covers only the selected dataset columns, so a pinned list
+    drifts from the public default whenever the Space changes it (on
+    2026-11-02 it dropped LibriSpeech and every synced WER read ~0.7 low).
+    """
+    endpoint = client.view_api(return_format="dict", print_info=False)[
+        "named_endpoints"
+    ][MAIN_TABLE_API]
+    columns = next(
+        parameter["parameter_default"]
+        for parameter in endpoint["parameters"]
+        if parameter["parameter_name"] == "selected_columns"
+    )
+    if not isinstance(columns, list) or not all(
+        isinstance(column, str) for column in columns
+    ):
+        raise TypeError("Open ASR default columns must be a list of names")
+    return columns if LICENSE_COLUMN in columns else [*columns, LICENSE_COLUMN]
+
+
 def fetch_open_asr_leaderboard(
     client_factory: Callable[..., Any] = Client,
 ) -> list[OpenAsrEntry]:
@@ -386,8 +396,8 @@ def fetch_open_asr_leaderboard(
         search_query="",
         show_proprietary=True,
         show_llm=False,
-        selected_columns=DEFAULT_COLUMNS,
-        api_name="/_main_table_update",
+        selected_columns=default_table_columns(client),
+        api_name=MAIN_TABLE_API,
     )
     return parse_open_asr_leaderboard(_leaderboard_value(payload))
 
