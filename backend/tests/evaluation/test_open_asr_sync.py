@@ -33,6 +33,7 @@ from backend.services.open_asr_sync_service import (
     OpenAsrSyncService,
     _model_identity_matches_paper,
     display_model_names,
+    default_table_columns,
     fetch_open_asr_leaderboard,
     parse_open_asr_leaderboard,
 )
@@ -122,6 +123,32 @@ def _session() -> Session:
     return session
 
 
+SPACE_DEFAULT_COLUMNS = ["RTFx ⬆️️", "AMI-Cleaned", "SPGISpeech"]
+
+
+def _view_api(*, return_format, print_info, default=SPACE_DEFAULT_COLUMNS):
+    assert (return_format, print_info) == ("dict", False)
+    parameters = [
+        {"parameter_name": "version_id", "parameter_default": "latest"},
+        {"parameter_name": "selected_columns", "parameter_default": list(default)},
+    ]
+    return {"named_endpoints": {"/_main_table_update": {"parameters": parameters}}}
+
+
+def test_default_columns_follow_space_and_keep_license_once():
+    class Client:
+        view_api = staticmethod(_view_api)
+
+    assert default_table_columns(Client()) == [*SPACE_DEFAULT_COLUMNS, "License"]
+
+    class LicensedClient:
+        @staticmethod
+        def view_api(**kwargs):
+            return _view_api(**kwargs, default=["License", "AMI-Cleaned"])
+
+    assert default_table_columns(LicensedClient()) == ["License", "AMI-Cleaned"]
+
+
 def test_parse_and_fetch_public_leaderboard_contract():
     payload = _payload()
 
@@ -129,6 +156,8 @@ def test_parse_and_fetch_public_leaderboard_contract():
         def __init__(self, url, *, verbose):
             assert url == SPACE_APP_URL
             assert verbose is False
+
+        view_api = staticmethod(_view_api)
 
         def predict(
             self,
@@ -142,23 +171,9 @@ def test_parse_and_fetch_public_leaderboard_contract():
         ):
             assert version_id == "latest"
             assert (search_query, show_proprietary, show_llm) == ("", True, False)
-            # The current English default averages all eleven datasets. Keeping
-            # the old Earnings22 name fails; omitting a dataset changes scores.
-            assert selected_columns == [
-                "RTFx ⬆️️",
-                "License",
-                "AMI-Cleaned",
-                "Earnings22-Cleaned-AA-chunked",
-                "Gigaspeech-Cleaned",
-                "LS Clean",
-                "LS Other",
-                "SPGISpeech",
-                "URGENT24",
-                "Voice Arena Monsoon",
-                "Voxpopuli-AA-Cleaned",
-                "Private (scripted)",
-                "Private (conversational)",
-            ]
+            # The Space's published default decides which datasets the
+            # average covers; License is added only to read open status.
+            assert selected_columns == [*SPACE_DEFAULT_COLUMNS, "License"]
             assert api_name == "/_main_table_update"
             return {
                 "datatype": ["str", "str", "markdown", "number", "number"],
@@ -176,6 +191,8 @@ def test_fetch_accepts_table_and_plot_update_tuple():
     class FakeClient:
         def __init__(self, url, *, verbose):
             pass
+
+        view_api = staticmethod(_view_api)
 
         def predict(self, **_kwargs):
             table = {"datatype": ["str"], "value": payload}
