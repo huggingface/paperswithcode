@@ -2121,8 +2121,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             "post_trending_paper_to_x.lock"
         ),
         expected_runtime_minutes=2,
-        # A run with nothing left to post writes no row, so allow a quiet day.
-        stale_after_minutes=1440,
+        # A run skips its slot when no paper is worth posting (no clear SOTA
+        # or well-known lab), which can last days, so allow a quiet week.
+        stale_after_minutes=10080,
         critical=False,
         healthy_no_work_allowed=True,
         db_freshness_query="""

@@ -288,19 +288,23 @@ run only fills newcomers once the backlog is done. Count the work with:
 uv run --env-file backend/keys.env python -m backend.scripts.warm_paper_suggested_questions --dry-run
 ```
 
-`post_trending_paper_to_x.py` posts one trending paper to the Papers with
-Code X account (@paperswithcodee) every eight hours (00:13, 08:13, 16:13 UTC).
-It takes the top five `trending_score` arXiv papers from the last 14 days that
-have a TL;DR and were never posted, prefers the first whose organization has a
-verified X account, renders the first page of its PDF as an image, and posts
-the paper's most striking concrete result, then its name and organization.
-An organization's handle is tagged only when it is verified: a linked X thread
-(reviewed as the paper's own) posted by an account named after the
-organization, or the single X link on the organization's Hugging Face page.
-Luna (`PWC_OPENAI_API_KEY`) writes the post from the title, TL;DR, abstract,
-and the paper's Papers with Code leaderboard results; it is kept only if it
-uses no number outside those facts and exactly the verified @mentions, else a
-template leads with the TL;DR sentence that states the most results. The
+`post_trending_paper_to_x.py` posts at most one trending paper to the Papers
+with Code X account (@paperswithcodee) every eight hours (00:13, 08:13, 16:13
+UTC), and only when one is worth it. It looks at the top ten `trending_score`
+arXiv papers from the last 14 days that have a TL;DR and were never posted,
+and keeps those with a clear SOTA (first on a Papers with Code leaderboard with
+at least 5 entries, ahead of every other paper's best by at least 1%) or a
+well-known lab whose official X account is known (`NOTABLE_X_HANDLES` in
+`backend/services/x_trending_post_service.py`, each handle checked on the X
+API; labs mapped to None need a reviewed thread posted by the lab or the
+single X link on its Hugging Face page). Papers with both go first. A SOTA post
+reads "Congrats @lab: <model> is SOTA on <benchmark>!" and the score against
+the previous best. Otherwise Luna (`PWC_OPENAI_API_KEY`) writes the post from
+the title, TL;DR, abstract, and leaderboard results; it is kept only if it uses
+no number outside those facts, exactly the lab @mentions, and opens with a
+comparison or a claim rather than a bare score or a small delta, else a
+template leads with such a TL;DR sentence. When nothing qualifies, the slot is
+skipped and each candidate's reason is in the run summary (`skipped`). The
 paper page link follows as a reply. `paper_x_posts` records each posted paper
 so none is posted twice. It needs the posting account's OAuth 1.0a keys in
 `production-cron.env` (`X_POST_CONSUMER_KEY`, `X_POST_CONSUMER_SECRET`,
