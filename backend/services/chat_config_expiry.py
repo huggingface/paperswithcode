@@ -40,6 +40,19 @@ def _pricing_expiry(verified_at: str, max_age_days: int) -> datetime | None:
     return datetime.combine(first_stale_day, datetime.min.time(), tzinfo=UTC)
 
 
+def _utc_timestamp(seconds: float) -> datetime | None:
+    """Convert a configured epoch value, or ``None`` if it is out of range.
+
+    Startup only bounds key lifetimes, not absolute values, so a value in the
+    wrong unit (milliseconds for seconds) must not raise during startup.
+    """
+
+    try:
+        return datetime.fromtimestamp(seconds, UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def _authorization_key_expiry(keys_json: str) -> datetime | None:
     try:
         not_after = json.loads(keys_json)["current"]["not_after"]
@@ -47,7 +60,7 @@ def _authorization_key_expiry(keys_json: str) -> datetime | None:
         return None
     if not isinstance(not_after, int):
         return None
-    return datetime.fromtimestamp(not_after, UTC)
+    return _utc_timestamp(not_after)
 
 
 def chat_config_expiries(settings: Settings) -> list[ConfigExpiry]:
@@ -82,7 +95,7 @@ def chat_config_expiries(settings: Settings) -> list[ConfigExpiry]:
             (
                 (
                     "executor_admission_key",
-                    datetime.fromtimestamp(admission_not_after_ms / 1_000, UTC)
+                    _utc_timestamp(admission_not_after_ms / 1_000)
                     if admission_not_after_ms > 0
                     else None,
                     "PWC_CHAT_EXECUTOR_ADMISSION_KEY_NOT_AFTER_MS",

@@ -208,3 +208,29 @@ def test_deploy_preflight_reads_env_file_overrides(tmp_path):
     }
     env_file.write_text("PWC_CHAT_OPENROUTER_PRICING_VERIFIED_AT=2026-10-30\n")
     assert config_expiry_preflight.expiring(REPOSITORY_ROOT, env_file, now) == {}
+
+
+@pytest.mark.parametrize("not_after", [10**20, -(10**20)])
+def test_out_of_range_key_timestamps_never_raise(not_after):
+    """Milliseconds in the seconds field must not crash the startup warning."""
+
+    keys_json = json.dumps({"current": {"not_after": not_after}})
+    settings = _settings(
+        chat_openrouter_pricing_verified_at="2026-11-05",
+        chat_executor_remote_transport_enabled=True,
+        chat_executor_admission_key_not_after_ms=10**20,
+        chat_executor_authorization_keys_json=keys_json,
+    )
+
+    assert [expiry.name for expiry in chat_config_expiries(settings)] == [
+        "openrouter_pricing"
+    ]
+    assert config_expiry_preflight.config_expiries(
+        config_expiry_preflight.release_defaults(REPOSITORY_ROOT),
+        {
+            "chat_openrouter_pricing_verified_at": "2026-11-05",
+            "chat_executor_remote_transport_enabled": "true",
+            "chat_executor_admission_key_not_after_ms": str(10**20),
+            "chat_executor_authorization_keys_json": keys_json,
+        },
+    ).keys() == {"openrouter_pricing"}

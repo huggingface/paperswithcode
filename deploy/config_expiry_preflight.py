@@ -76,6 +76,13 @@ def _pricing_expiry(verified_at: object, max_age_days: object) -> datetime | Non
     return datetime.combine(first_stale_day, datetime.min.time(), tzinfo=timezone.utc)
 
 
+def _utc_timestamp(seconds: float) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(seconds, timezone.utc)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def config_expiries(
     defaults: dict[str, object], overrides: dict[str, str]
 ) -> dict[str, datetime]:
@@ -101,9 +108,7 @@ def config_expiries(
         except ValueError:
             admission_ms = 0
         expiries["executor_admission_key"] = (
-            datetime.fromtimestamp(admission_ms / 1_000, timezone.utc)
-            if admission_ms > 0
-            else None
+            _utc_timestamp(admission_ms / 1_000) if admission_ms > 0 else None
         )
         try:
             not_after = json.loads(
@@ -112,9 +117,7 @@ def config_expiries(
         except (json.JSONDecodeError, KeyError, TypeError):
             not_after = None
         expiries["executor_authorization_key"] = (
-            datetime.fromtimestamp(not_after, timezone.utc)
-            if isinstance(not_after, int)
-            else None
+            _utc_timestamp(not_after) if isinstance(not_after, int) else None
         )
     return {name: when for name, when in expiries.items() if when is not None}
 
