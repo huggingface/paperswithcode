@@ -2,6 +2,8 @@
 -- Math (FrontierScience), Reasoning (CritPt) and Agents (Terminal-Bench-Science). Each board moves whole (links, metric and
 -- every evaluation in one transaction) so the single-board trigger passes.
 
+BEGIN;
+
 INSERT INTO tasks (
     name, slug, description, keywords, area_id, level, parent_id,
     image_url, image_credit, useful_leaderboards
@@ -37,13 +39,16 @@ INSERT INTO science_boards VALUES
     ('terminal-bench-science-0-1'),
     ('critpt');
 
-INSERT INTO task_datasets (task_id, dataset_id)
-SELECT t.id, d.id
+INSERT INTO task_datasets (task_id, dataset_id, supports_harness)
+SELECT t.id, d.id, bool_or(old.supports_harness)
 FROM datasets d
 JOIN science_boards b ON b.slug = d.slug
+JOIN task_datasets old ON old.dataset_id = d.id
 CROSS JOIN tasks t
 WHERE t.slug = 'scientific-reasoning'
-ON CONFLICT DO NOTHING;
+GROUP BY t.id, d.id
+ON CONFLICT (task_id, dataset_id) DO UPDATE
+    SET supports_harness = task_datasets.supports_harness OR EXCLUDED.supports_harness;
 
 INSERT INTO task_dataset_metrics (task_id, dataset_id, metric_id)
 SELECT DISTINCT t.id, tdm.dataset_id, tdm.metric_id
@@ -85,3 +90,5 @@ CROSS JOIN tasks t
 WHERE t.slug = 'scientific-reasoning'
   AND d.introducing_paper_id IS NOT NULL
 ON CONFLICT (paper_id, task_id) DO UPDATE SET source = 'manual';
+
+COMMIT;
