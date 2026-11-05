@@ -305,6 +305,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `scene-graph-generation` — Scene Graph Generation
 - `scene-text-detection` — Scene Text Detection
 - `scene-text-recognition` — Scene Text Recognition
+- `scientific-reasoning` — Scientific Reasoning
 - `semi-supervised-image-classification` — Semi-Supervised Image Classification
 - `semi-supervised-object-detection` — Semi-Supervised Object Detection
 - `sentiment-analysis` — Sentiment Analysis
