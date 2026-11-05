@@ -1,4 +1,4 @@
-"""Papers trending on X: the daily "AI Papers on X" sheet and its homepage feed.
+"""Papers trending on X: the daily "AI Papers on X" sheet.
 
 A headless routine exports each dated sheet tab and replaces that day's rows
 through the admin API. ArXiv papers missing from the catalog are imported;
@@ -8,22 +8,18 @@ they are reported back as unresolved.
 
 from datetime import date
 
-from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.database import Paper as DBPaper, PaperXTrending
-from backend.models.papers import Papers
 from backend.models.x_trending import (
     XTrendingDayResult,
     XTrendingPaperInput,
     XTrendingUnresolved,
 )
-from backend.services.paper_feed_executor import GENERAL_ORDERING, PaperFeedExecutor
 from backend.services.paper_ingestion_service import (
     PaperIngestionError,
     PaperIngestionService,
 )
-from backend.services.paper_service import PaperService
 
 
 class XTrendingService:
@@ -100,41 +96,3 @@ class XTrendingService:
             .first()
         )
         return paper, "" if paper else "no external paper with this source URL"
-
-    def feed(
-        self,
-        *,
-        page: int,
-        page_size: int,
-        start_date: date | None,
-        end_date: date | None,
-        include_resources: bool,
-        has_code: bool,
-        has_hf_artifacts: bool,
-    ) -> Papers:
-        """Papers ever shared on X, published within the window, by trending score.
-
-        Like the other homepage tabs, the window filters on publication date.
-        """
-        shared = select(PaperXTrending.paper_id)
-        # Match the stored paper's arXiv id too, so a newer version that has
-        # since become the latest row stays in the feed.
-        shared_arxiv_ids = select(DBPaper.arxiv_id).where(
-            DBPaper.id.in_(shared), DBPaper.arxiv_id.is_not(None)
-        )
-        papers = PaperService(self.db)
-        return PaperFeedExecutor(papers).execute(
-            self.db.query(DBPaper).filter(
-                or_(DBPaper.id.in_(shared), DBPaper.arxiv_id.in_(shared_arxiv_ids))
-            ),
-            page=page,
-            page_size=page_size,
-            order_by="trending",
-            order_dir="desc",
-            ordering=GENERAL_ORDERING,
-            has_code=has_code,
-            has_hf_artifacts=has_hf_artifacts,
-            start_date=start_date,
-            end_date=end_date,
-            include_resources=include_resources,
-        )

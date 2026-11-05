@@ -7,7 +7,6 @@ export const paperQueryKeys = {
   feeds: {
     list: ["papers"],
     infinite: ["papers-infinite"],
-    xTrending: ["x-trending-papers-infinite"],
     following: ["research-feed"],
     search: ["paper-search-feed"],
     task: ["task-papers-infinite"],

@@ -18,10 +18,8 @@ from backend.models.database import (
     PaperXTrending,
     Repository,
 )
-from backend.models.papers import Paper as PaperCard
 from backend.models.x_trending import XTrendingPaperInput
 from backend.services.paper_ingestion_service import PaperIngestionError
-from backend.services.paper_service import PaperService
 from backend.services.x_trending_service import XTrendingService
 
 
@@ -48,7 +46,7 @@ def paper(ident, *, score=None, arxiv_id=None, source="arxiv", source_url=None):
 
 
 @pytest.fixture
-def db(monkeypatch):
+def db():
     engine = create_engine("sqlite://")
     Base.metadata.create_all(
         engine,
@@ -64,17 +62,7 @@ def db(monkeypatch):
             )
         ],
     )
-    monkeypatch.setattr(
-        PaperService,
-        "hydrate_cards",
-        lambda self, rows, **_: [
-            PaperCard.model_construct(id=str(row.id)) for row in rows
-        ],
-    )
     with Session(engine) as session:
-        monkeypatch.setattr(
-            PaperService(session).settings, "trending_ranking_mode", "composite"
-        )
         session.add_all(
             [
                 paper(1, score=5.0, arxiv_id="2610.00001"),
@@ -117,19 +105,6 @@ def replace(db, day, rows):
     return asyncio.run(XTrendingService(db, FakeIngestion(db)).replace_day(day, rows))
 
 
-def feed(db, **window):
-    response = XTrendingService(db).feed(
-        page=1,
-        page_size=10,
-        start_date=window.get("start_date"),
-        end_date=window.get("end_date"),
-        include_resources=False,
-        has_code=False,
-        has_hf_artifacts=False,
-    )
-    return [card.id for card in response.results]
-
-
 def test_replace_day_imports_matches_and_reports_unresolved(db):
     result = replace(
         db,
@@ -157,38 +132,6 @@ def test_replace_day_imports_matches_and_reports_unresolved(db):
     assert [entry.paper_id for entry in db.query(PaperXTrending).all()] == [2]
 
 
-def test_feed_orders_by_trending_score_within_publication_window(db):
-    replace(
-        db,
-        date(2026, 10, 29),
-        [row(1, arxiv_id="2610.00001"), row(2, arxiv_id="2610.00003")],
-    )
-    replace(
-        db,
-        date(2026, 10, 30),
-        [row(1, arxiv_id="2610.00002"), row(2, arxiv_id="2610.00004")],
-    )
-    # Paper 4 has the top score and was shared this week, but was published
-    # in August, outside the window.
-    db.get(Paper, 4).date_published = date(2026, 8, 1)
-    db.commit()
-
-    window = {"start_date": date(2026, 8, 25), "end_date": date(2026, 9, 1)}
-    # Unscored paper 3 stays listed after the scored ones.
-    assert feed(db, **window) == ["2", "1", "3"]
-    assert feed(db) == ["4", "2", "1", "3"]
-
-
 def test_input_needs_an_identifier():
     with pytest.raises(ValueError):
         XTrendingPaperInput(rank=1, title="No link")
-
-
-def test_feed_follows_a_newer_version_of_a_shared_paper(db):
-    replace(db, date(2026, 10, 30), [row(1, arxiv_id="2610.00001")])
-    db.get(Paper, 1).is_latest_version = False
-    newer = paper(7, score=5.0, arxiv_id="2610.00001")
-    newer.version = "v2"
-    db.add(newer)
-    db.commit()
-    assert feed(db) == ["7"]

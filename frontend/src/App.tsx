@@ -285,7 +285,8 @@ const Shell: React.FC = () => {
       <Route element={<SiteLayout />}>
         <Route path="/" element={<FeedView />} />
         <Route path="/following" element={<FollowingView />} />
-        <Route path="/x-trending" element={<FeedView xTrending />} />
+        {/* The trending (X) tab merged into the homepage feed. */}
+        <Route path="/x-trending" element={<Navigate to="/" replace />} />
         {/* Keep new and persisted chats on the same route instance. A new
             turn replaces /chat with /chat/:sessionId as soon as the server
             allocates it; sibling routes would unmount ChatView and abort

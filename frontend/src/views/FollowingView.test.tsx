@@ -22,7 +22,6 @@ function renderFeed(path = '/following') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[path]}><Routes>
     <Route path="/" element={<FeedView />} /><Route path="/following" element={<FollowingView />} />
-    <Route path="/x-trending" element={<FeedView xTrending />} />
   </Routes></MemoryRouter></QueryClientProvider>);
 }
 beforeEach(() => {
@@ -57,7 +56,7 @@ it('renders following in the existing tab row with standard paper cards and thum
   expect(screen.getByText('Full abstract.')).toBeInTheDocument();
   const tab = screen.getByRole('button', { name: 'following' });
   expect(tab).toHaveClass('active');
-  expect(tab.parentElement?.textContent).toBe('trendingtrending (X)following');
+  expect(tab.parentElement?.textContent).toBe('trendingfollowing');
   expect(screen.queryByText('Discover')).not.toBeInTheDocument();
   expect(papersApi.list).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'trending' }));
@@ -415,17 +414,8 @@ it('shows the feed for an account that follows only a topic', async () => {
   expect(await screen.findByText('A paper')).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Build your personal research feed' })).not.toBeInTheDocument();
 });
-it('lists papers shared on X under the trending (X) tab, over a month window by default', async () => {
-  const xTrending = vi.spyOn(papersApi, 'xTrending').mockResolvedValue({ count: 1, results: [paper], next_page: null, previous_page: null } as never);
+it('has no separate trending (X) tab: X likes are part of the trending score', async () => {
   renderFeed('/');
-  fireEvent.click(await screen.findByRole('button', { name: 'trending (X)' }));
-  expect(await screen.findByText('A paper')).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'trending (X)' })).toHaveClass('active');
-  expect(screen.getByRole('button', { name: 'trending' })).not.toHaveClass('active');
-  expect(screen.getByText('Papers people share most on X, picked daily')).toBeInTheDocument();
-  expect(xTrending).toHaveBeenCalledWith(expect.objectContaining({ page: 1, page_size: 30, include_resources: true }));
-  const { start_date, end_date } = xTrending.mock.calls[0][0]!;
-  expect(start_date && end_date && start_date < end_date).toBeTruthy();
-  expect((Date.parse(end_date!) - Date.parse(start_date!)) / 86_400_000).toBeGreaterThan(7);
-  expect(researchApi.following).not.toHaveBeenCalled();
+  expect(await screen.findByRole('button', { name: 'trending' })).toHaveClass('active');
+  expect(screen.queryByRole('button', { name: 'trending (X)' })).not.toBeInTheDocument();
 });
