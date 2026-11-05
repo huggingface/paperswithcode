@@ -13,6 +13,8 @@ Nginx is responsible for forwarding ``/paper/{id}`` and the legacy
 ``/papers/{id}`` shape to the backend; all other static fall-through is
 unchanged. arXiv-shaped ``/abs/{id}`` and ``/pdf/{id}.pdf`` URLs redirect to
 the paper page and the PDF reader, so swapping ``arxiv.org`` for our host works.
+Legacy paperswithcode.com slugs (``/paper/attention-is-all-you-need``)
+redirect to the paper's arXiv route.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ from backend.services.content_negotiation_service import (
     public_page_headers,
 )
 from backend.services.default_og_image import get_default_og_image_bytes
+from backend.services.legacy_url_service import LegacyUrlService
 from backend.services.paper_seo_service import (
     PRODUCTION_ORIGIN,
     build_paper_seo_document,
@@ -116,6 +119,13 @@ def _render_paper_html(
         normalized_id = normalize_paper_route_identifier(paper_id)
         if validate_arxiv_id(normalized_id):
             return _render_unindexed_arxiv_paper()
+        legacy_path = LegacyUrlService(db).paper_path(paper_id)
+        if legacy_path is not None:
+            return RedirectResponse(
+                url=legacy_path,
+                status_code=301,
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
         return _render_missing_paper()
     except DatabaseError as exc:
         logger.warning("Database error rendering /paper/%s: %s", paper_id, exc)
