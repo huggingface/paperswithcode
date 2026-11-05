@@ -76,7 +76,7 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         # The open-weight checkpoint, three weeks of RL past the API preview.
         "Mistral Large 4 OSS": ModelIdentity(
             "Mistral Large 4",
-            source_url="https://mistral.ai/news/mistral-large-4/",
+            source_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/assets/technical_report.pdf",
             is_open=True,
             hf_model_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B",
         ),
@@ -893,6 +893,192 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
         "qwen3.7 plus": ModelIdentity(
             "Qwen3.7-Plus", source_url="https://www.qwencloud.com/models/qwen3.7-plus"
+        ),
+    },
+    "critpt": {
+        "Claude Fable 5.1 (max)": ModelIdentity(
+            "Claude Fable 5.1 (max)",
+            source_url="https://www.anthropic.com/claude-fable-and-mythos-5-1",
+        ),
+        "Claude Haiku 5.5 (max)": ModelIdentity(
+            "Claude Haiku 5.5 (max)",
+            source_url="https://www.anthropic.com/claude-haiku-5-5",
+        ),
+        "Claude Opus 5.5 (max)": ModelIdentity(
+            "Claude Opus 5.5 (max)",
+            source_url="https://www.anthropic.com/claude-opus-5-5",
+        ),
+        "Claude Sonnet 5.5 (max)": ModelIdentity(
+            "Claude Sonnet 5.5 (max)",
+            source_url="https://www.anthropic.com/claude-sonnet-5-5",
+        ),
+        "GLM-5.3 (max)": ModelIdentity(
+            "GLM-5.3 (max)", source_url="https://z.ai/blog/glm-5.3", is_open=True
+        ),
+        "GPT-5.6 Sol (max)": ModelIdentity(
+            "GPT-5.6 Sol (max)", source_url="https://openai.com/index/gpt-5-6/"
+        ),
+        "GPT-6 Astra (max)": ModelIdentity(
+            "GPT-6 Astra (max)", source_url="https://openai.com/index/gpt-6-astra/"
+        ),
+        "GPT-6 Luna (max)": ModelIdentity(
+            "GPT-6 Luna (max)",
+            source_url="https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+        ),
+        "GPT-6.1 Sol (max)": ModelIdentity(
+            "GPT-6.1 Sol (max)",
+            source_url="https://openai.com/index/introducing-gpt-6-1-sol/",
+        ),
+        "GPT-6.1 Terra (max)": ModelIdentity(
+            "GPT-6.1 Terra (max)",
+            source_url="https://openai.com/index/introducing-gpt-6-1-terra",
+        ),
+        "Gemini 3.8 Flash (high)": ModelIdentity(
+            "Gemini 3.8 Flash (high)",
+            source_url="https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/",
+        ),
+        "Grok 4.7 (xhigh)": ModelIdentity(
+            "Grok 4.7 (xhigh)", source_url="https://x.ai/news/grok-4-7"
+        ),
+        "Inkling (xhigh)": ModelIdentity(
+            "Inkling",
+            source_url="https://thinkingmachines.ai/news/introducing-inkling/",
+            is_open=True,
+        ),
+        "Kimi K3.1 Pro": ModelIdentity(
+            "Kimi K3.1 Pro", source_url="https://www.kimi.com/blog/kimi-k3-1-pro"
+        ),
+        "MiMo-V2.6-Pro": ModelIdentity(
+            "MiMo-V2.6-Pro", arxiv_id="2610.11959", is_open=True
+        ),
+        "MiniMax-M3.1-Flash": ModelIdentity(
+            "MiniMax-M3.1-Flash",
+            source_url="https://www.minimax.io/blog/minimax-m31f",
+            is_open=True,
+        ),
+        "Mistral Large 4 (high)": ModelIdentity(
+            "Mistral Large 4 (high)",
+            source_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/assets/technical_report.pdf",
+            is_open=True,
+        ),
+        "Muse Spark Open (xhigh)": ModelIdentity(
+            "Muse Spark Open (xhigh)",
+            source_url="https://research.meta.ai/blog/muse-spark-open",
+            is_open=True,
+        ),
+        "Muse Wonder (max)": ModelIdentity(
+            "Muse Wonder (max)", source_url="https://research.meta.ai/blog/muse-wonder"
+        ),
+        "Muse Wonder Full (max)": ModelIdentity(
+            "Muse Wonder Full (max)",
+            source_url="https://research.meta.ai/blog/muse-wonder",
+        ),
+        "Qwen3.8 27B (xhigh)": ModelIdentity(
+            "Qwen3.8 27B (xhigh)",
+            source_url="https://huggingface.co/Qwen/Qwen3.8-27B",
+            is_open=True,
+        ),
+        "Qwen3.8 Max (0902)": ModelIdentity(
+            "Qwen3.8 Max (0902)", source_url="https://qwen.ai/blog?id=qwen3.8"
+        ),
+    },
+    "critpt-v2": {
+        "Beam 1.0": ModelIdentity(
+            "Beam 1.0",
+            source_url="https://reflection.ai/blog/introducing-beam",
+            is_open=True,
+        ),
+        "Claude Fable 5.1 (max)": ModelIdentity(
+            "Claude Fable 5.1 (max)",
+            source_url="https://www.anthropic.com/claude-fable-and-mythos-5-1",
+        ),
+        "Claude Haiku 5.5 (max)": ModelIdentity(
+            "Claude Haiku 5.5 (max)",
+            source_url="https://www.anthropic.com/claude-haiku-5-5",
+        ),
+        "Claude Opus 5.5 (max)": ModelIdentity(
+            "Claude Opus 5.5 (max)",
+            source_url="https://www.anthropic.com/claude-opus-5-5",
+        ),
+        "Claude Sonnet 5.5 (max)": ModelIdentity(
+            "Claude Sonnet 5.5 (max)",
+            source_url="https://www.anthropic.com/claude-sonnet-5-5",
+        ),
+        "GLM-5.3 (max)": ModelIdentity(
+            "GLM-5.3 (max)", source_url="https://z.ai/blog/glm-5.3", is_open=True
+        ),
+        "GPT-6 Astra (max)": ModelIdentity(
+            "GPT-6 Astra (max)", source_url="https://openai.com/index/gpt-6-astra/"
+        ),
+        "GPT-6 Luna (max)": ModelIdentity(
+            "GPT-6 Luna (max)",
+            source_url="https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+        ),
+        "GPT-6.1 Sol (max)": ModelIdentity(
+            "GPT-6.1 Sol (max)",
+            source_url="https://openai.com/index/introducing-gpt-6-1-sol/",
+        ),
+        "GPT-6.1 Terra (max)": ModelIdentity(
+            "GPT-6.1 Terra (max)",
+            source_url="https://openai.com/index/introducing-gpt-6-1-terra",
+        ),
+        "Gemini 3.8 Flash (high)": ModelIdentity(
+            "Gemini 3.8 Flash (high)",
+            source_url="https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/",
+        ),
+        "Gemini 4 Carbon (high)": ModelIdentity(
+            "Gemini 4 Carbon (high)",
+            source_url="https://deepmind.google/blog/gemini-4-carbon-our-next-frontier-model/",
+        ),
+        "Grok 4.7 (xhigh)": ModelIdentity(
+            "Grok 4.7 (xhigh)", source_url="https://x.ai/news/grok-4-7"
+        ),
+        "Inkling (xhigh)": ModelIdentity(
+            "Inkling (xhigh)",
+            source_url="https://thinkingmachines.ai/news/introducing-inkling/",
+            is_open=True,
+        ),
+        "K2 Horizon 375B A23B": ModelIdentity(
+            "K2 Horizon 375B A23B", source_url="https://ifm.ai/blog/k2/", is_open=True
+        ),
+        "Kimi K3.1 Pro": ModelIdentity(
+            "Kimi K3.1 Pro", source_url="https://www.kimi.com/blog/kimi-k3-1-pro"
+        ),
+        "MiMo-V2.6-Pro": ModelIdentity(
+            "MiMo-V2.6-Pro", arxiv_id="2610.11959", is_open=True
+        ),
+        "MiniMax-M3.1-Flash": ModelIdentity(
+            "MiniMax-M3.1-Flash",
+            source_url="https://www.minimax.io/blog/minimax-m31f",
+            is_open=True,
+        ),
+        "Mistral Large 4 (high)": ModelIdentity(
+            "Mistral Large 4 (high)",
+            source_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/assets/technical_report.pdf",
+            is_open=True,
+        ),
+        "Muse Spark Open (xhigh)": ModelIdentity(
+            "Muse Spark Open (xhigh)",
+            source_url="https://research.meta.ai/blog/muse-spark-open",
+            is_open=True,
+        ),
+        "Muse Wonder (max)": ModelIdentity(
+            "Muse Wonder (max)", source_url="https://research.meta.ai/blog/muse-wonder"
+        ),
+        "Muse Wonder Full (max)": ModelIdentity(
+            "Muse Wonder Full (max)",
+            source_url="https://research.meta.ai/blog/muse-wonder",
+        ),
+        "Nemotron 3.5 Super VL": ModelIdentity(
+            "Nemotron 3.5 Super VL", arxiv_id="2610.22019", is_open=True
+        ),
+        "Qwen3.8 27B (xhigh)": ModelIdentity(
+            "Qwen3.8 27B (xhigh)",
+            source_url="https://huggingface.co/Qwen/Qwen3.8-27B",
+            is_open=True,
+        ),
+        "Qwen3.8 Max (0902)": ModelIdentity(
+            "Qwen3.8 Max (0902)", source_url="https://qwen.ai/blog?id=qwen3.8"
         ),
     },
 }

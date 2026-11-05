@@ -174,6 +174,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 - **Contract:** `patcheval-verified` on task `cybersecurity`; Accuracy (%) 0–100 = repaired / 230, harness from the Agent column (codex → Codex, Opencode → OpenCode, trae → Trae CLI); the "Results on PatchEval-Verified" table in https://raw.githubusercontent.com/bytedance/PatchEval/main/README.md; typically 5–200 rows (9 on 2026-10-29).
 - **Proof:** Same as `sync_cybergym`; the hand-imported FrogNano row (Leaf harness) is not upstream and stays unmanaged.
+
+## `sync_critpt` and `sync_critpt_v2`
+
+- **Contract:** `critpt` and `critpt-v2` on task `scientific-reasoning`; Accuracy (%) 0–100 = the model record's `critpt` (original dataset, no harness) or `critptAgentic` (v2, code-execution sandbox) × 100, read from the Next.js data embedded in https://artificialanalysis.ai/evaluations/critpt and /critpt-v2 (charted models only; not the Data API, so no API quota); typically 15–300 rows (27 and 28 on 2026-11-05). K2 Horizon, Nemotron 3.5 Super VL and Beam are excluded on `critpt` because their self-reported rows stay.
+- **Proof:** Same as `sync_cybergym`; older hand-imported Artificial Analysis rows for models AA no longer charts stay unmanaged.
+
 ## `sync_physics_iq_verified`
 
 - **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.

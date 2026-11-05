@@ -369,6 +369,8 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_exploitgym"]["timeout"] == "30m"
     assert status["jobs"]["sync_cybergym"]["timeout"] == "30m"
     assert status["jobs"]["sync_patcheval_verified"]["timeout"] == "30m"
+    assert status["jobs"]["sync_critpt"]["timeout"] == "30m"
+    assert status["jobs"]["sync_critpt_v2"]["timeout"] == "30m"
     assert status["jobs"]["sync_coarena"]["timeout"] == "30m"
     assert status["jobs"]["sync_arc_prize"]["timeout"] == "30m"
 

@@ -15,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
@@ -46,6 +47,8 @@ PATCHEVAL_VERIFIED_URL = "https://github.com/bytedance/PatchEval"
 PATCHEVAL_VERIFIED_README_URL = (
     "https://raw.githubusercontent.com/bytedance/PatchEval/main/README.md"
 )
+CRITPT_URL = "https://artificialanalysis.ai/evaluations/critpt"
+CRITPT_V2_URL = "https://artificialanalysis.ai/evaluations/critpt-v2"
 
 
 def _text(node) -> str:
@@ -504,6 +507,88 @@ def parse_patcheval_verified(markdown: str) -> list[LeaderboardEntry]:
     return entries
 
 
+# --- Artificial Analysis evaluation pages (CritPt, CritPt v2) ---------------
+
+# The pages are server-rendered Next.js; the model records arrive as JSON text
+# in ``self.__next_f.push([1, "..."])`` script chunks.
+_RSC_CHUNK = re.compile(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)')
+
+
+def _enclosing_object(text: str, index: int) -> Any:
+    """Decode the JSON object that contains ``index``, or None."""
+    depth = 0
+    start = index
+    while start > 0:
+        start -= 1
+        if text[start] == "}":
+            depth += 1
+        elif text[start] == "{":
+            if depth == 0:
+                break
+            depth -= 1
+    try:
+        return json.JSONDecoder().raw_decode(text, start)[0]
+    except json.JSONDecodeError:
+        return None
+
+
+def parse_artificial_analysis_evaluation(
+    html: str, key: str, what: str
+) -> list[LeaderboardEntry]:
+    """Read each charted model's ``key`` score (0-1) from an AA evaluation page."""
+    chunks = _RSC_CHUNK.findall(html)
+    if not chunks:
+        raise ValueError(f"{what} page has no Next.js data chunks")
+    text = "".join(json.loads(chunk) for chunk in chunks)
+    scores: dict[str, tuple[str, float, str]] = {}
+    for match in re.finditer(rf'"{re.escape(key)}":', text):
+        record = _enclosing_object(text, match.start())
+        if not isinstance(record, dict) or "shortName" not in record:
+            continue
+        score = record.get(key)
+        if score is None:
+            continue
+        slug, name = record.get("slug"), str(record.get("shortName") or "").strip()
+        if not slug or not name or len(name) > 200:
+            raise ValueError(f"{what} model record is malformed: {slug!r}")
+        if isinstance(score, bool) or not isinstance(score, int | float):
+            raise ValueError(f"{what} score is invalid for {name!r}")
+        if not 0 <= score <= 1:
+            raise ValueError(f"{what} score is outside 0-1 for {name!r}")
+        lab = str((record.get("creator") or {}).get("name") or "")
+        if scores.setdefault(slug, (name, score, lab)) != (name, score, lab):
+            raise ValueError(f"{what} lists {slug!r} with two different scores")
+    entries = [
+        LeaderboardEntry(
+            name,
+            round(score * 100, 2),
+            f"{round(score * 100, 2)}% accuracy (Artificial Analysis model {slug})",
+            lab=lab,
+        )
+        for slug, (name, score, lab) in scores.items()
+    ]
+    _unique(entries, what)
+    check_entry_count(entries, what, 15, 300)
+    return entries
+
+
+def parse_critpt(html: str) -> list[LeaderboardEntry]:
+    return parse_artificial_analysis_evaluation(html, "critpt", "CritPt")
+
+
+def parse_critpt_v2(html: str) -> list[LeaderboardEntry]:
+    return parse_artificial_analysis_evaluation(html, "critptAgentic", "CritPt v2")
+
+
+# Models whose own release reports a CritPt score already on the board; the
+# self-reported row stays and the Artificial Analysis rerun is left out.
+CRITPT_SELF_REPORTED = {
+    "K2 Horizon 375B A23B": "self-reported row from the K2 Horizon release is kept",
+    "Nemotron 3.5 Super VL": "self-reported row from the model card is kept",
+    "Beam 1.0": "self-reported row from Reflection's Beam release is kept",
+}
+
+
 # --- Board registry -----------------------------------------------------------
 
 
@@ -667,5 +752,34 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             protocol="230 real-world Go, JavaScript and Python CVEs, one patch per case, graded by each case's Docker validation entrypoint with the strengthened PatchEval-Verified PoC tests.",
         ),
         _fetching(PATCHEVAL_VERIFIED_README_URL, parse_patcheval_verified),
+    ),
+    "sync_critpt": BoardSync(
+        LiveLeaderboard(
+            source="Artificial Analysis CritPt",
+            provider="artificial-analysis-critpt",
+            url=CRITPT_URL,
+            task_slug="scientific-reasoning",
+            dataset_slug="critpt",
+            metric="Accuracy",
+            identities=IDENTITIES["critpt"],
+            min_selected=10,
+            excluded=CRITPT_SELF_REPORTED,
+            protocol="Original CritPt dataset: all 70 research-level physics challenges, answered without an agent harness and graded by the benchmark authors' server; independent evaluation by Artificial Analysis.",
+        ),
+        _fetching(CRITPT_URL, parse_critpt),
+    ),
+    "sync_critpt_v2": BoardSync(
+        LiveLeaderboard(
+            source="Artificial Analysis CritPt v2",
+            provider="artificial-analysis-critpt",
+            url=CRITPT_V2_URL,
+            task_slug="scientific-reasoning",
+            dataset_slug="critpt-v2",
+            metric="Accuracy",
+            identities=IDENTITIES["critpt-v2"],
+            min_selected=10,
+            protocol="CritPt v2, the authors' revision of the 70 research-level physics challenges; models solve them with a code-execution tool in an offline Linux sandbox; independent evaluation by Artificial Analysis.",
+        ),
+        _fetching(CRITPT_V2_URL, parse_critpt_v2),
     ),
 }

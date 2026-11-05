@@ -172,6 +172,45 @@ def test_parse_cybergym_keeps_the_default_model_focused_level_1_view():
     assert len(entries) == 44
 
 
+def test_parse_critpt_reads_the_original_no_harness_scores():
+    entries = _by_name(boards.parse_critpt(_fixture("aa_critpt.html")))
+    assert len(entries) == 27
+    assert entries["GPT-6 Astra (max)"].value == 31.71
+    assert entries["GPT-6 Astra (max)"].lab == "OpenAI"
+    assert entries["GPT-6 Astra (max)"].harness is None
+    # Models charted only on the v2 page have no original-dataset score.
+    assert "Gemini 4 Carbon (high)" not in entries
+
+
+def test_parse_critpt_v2_reads_the_agentic_score_not_the_hard_one():
+    entries = _by_name(boards.parse_critpt_v2(_fixture("aa_critpt_v2.html")))
+    assert len(entries) == 28
+    assert entries["GPT-6 Astra (max)"].value == 83.14
+    assert entries["Gemini 4 Carbon (high)"].value == 82.29
+    assert "gemini-4-carbon" in entries["Gemini 4 Carbon (high)"].detail
+
+
+def test_parse_critpt_fails_when_the_page_layout_changes():
+    source = _fixture("aa_critpt.html")
+    with pytest.raises(ValueError, match="no Next.js data chunks"):
+        boards.parse_critpt(source.replace("self.__next_f.push", "self.__x.push"))
+    with pytest.raises(ValueError, match="has 0 entries"):
+        boards.parse_critpt(source.replace('\\"critpt\\"', '\\"critPt\\"'))
+
+
+def test_critpt_keeps_self_reported_rows_and_reviews_aa_names():
+    board = boards.BOARD_SYNCS["sync_critpt"].board
+    for name in ("K2 Horizon 375B A23B", "Nemotron 3.5 Super VL", "Beam 1.0"):
+        assert board.excluded[name]
+        assert name not in board.identities
+    # Hand-imported Artificial Analysis rows keep their model names.
+    assert board.identities["Inkling (xhigh)"].model_name == "Inkling"
+    assert board.identities["GPT-5.6 Sol (max)"].model_name == "GPT-5.6 Sol (max)"
+    v2 = boards.BOARD_SYNCS["sync_critpt_v2"].board
+    assert v2.dataset_slug == "critpt-v2" and not v2.excluded
+    assert "Beam 1.0" in v2.identities
+
+
 def test_parse_cybergym_waits_for_held_back_rows():
     data = json.loads(_fixture("cybergym.json"))
     row = next(r for r in data["level1"] if r["model"] == "GLM-5.1")
@@ -247,6 +286,13 @@ def test_parse_patcheval_verified_reads_the_readme_results_table():
             "header changed",
         ),
         (
+            boards.parse_critpt_v2,
+            "aa_critpt_v2.html",
+            '\\"critptAgentic\\":0.831428571428571',
+            '\\"critptAgentic\\":83.1428571428571',
+            "outside 0-1",
+        ),
+        (
             boards.parse_patcheval_verified,
             "patcheval_verified.md",
             "193/230",
@@ -273,6 +319,8 @@ def test_every_board_has_identities_and_a_configured_fetcher():
         "sync_exploitgym",
         "sync_cybergym",
         "sync_patcheval_verified",
+        "sync_critpt",
+        "sync_critpt_v2",
     }
     for sync in boards.BOARD_SYNCS.values():
         assert len(sync.board.identities) >= sync.board.min_selected
@@ -526,7 +574,11 @@ def test_cybergym_excludes_preview_and_training_checkpoints(name):
 def test_vals_index_maps_the_open_mistral_large_4_release():
     identity = IDENTITIES["vals-index-v2-2"]["Mistral Large 4 OSS"]
     assert identity.is_open
-    assert identity.source_url == "https://mistral.ai/news/mistral-large-4/"
+    # The paper's source moved to the technical report on 2026-11-02.
+    assert identity.source_url == (
+        "https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/"
+        "assets/technical_report.pdf"
+    )
     assert IDENTITIES["vals-index-v2-2"]["Mercury 3"].source_url == (
         "https://www.inceptionlabs.ai/blog/introducing-mercury-3"
     )
