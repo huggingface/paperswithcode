@@ -85,6 +85,10 @@ class LiveLeaderboard:
     protocol: str
     # Upstream names the board deliberately leaves out, with the reason.
     excluded: dict[str, str] = field(default_factory=dict)
+    # Whether a hand-imported row for the same paper and model name becomes
+    # managed. Off for third-party reruns that must sit beside self-reported
+    # rows instead of overwriting them.
+    adopt_unmanaged: bool = True
 
     @property
     def managed_prefix(self) -> str:
@@ -359,7 +363,7 @@ class LiveLeaderboardSyncService:
                 methodology = self._methodology(entry)
                 # A hand-imported row may record the harness as "Not reported".
                 row = rows_by_identity.get(key)
-                if row is None:
+                if row is None and board.adopt_unmanaged:
                     fallback = unmanaged_by_model.get((paper_id, model_name))
                     if fallback is not None and id(fallback) not in published:
                         row = fallback

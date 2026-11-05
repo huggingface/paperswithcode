@@ -63,6 +63,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-patcheval-verified.timer` | `*-*-* *:21:00` | `sync_patcheval_verified` | `.github/workflows/scripts/hourly/sync_patcheval_verified.py` |
 | `pwc-cron-sync-critpt.timer` | `*-*-* 00/2:52:00` | `sync_critpt` | `.github/workflows/scripts/hourly/sync_critpt.py` |
 | `pwc-cron-sync-critpt-v2.timer` | `*-*-* 01/2:52:00` | `sync_critpt_v2` | `.github/workflows/scripts/hourly/sync_critpt_v2.py` |
+| `pwc-cron-sync-terminal-bench-science.timer` | `*-*-* 00/2:54:00` | `sync_terminal_bench_science` | `.github/workflows/scripts/hourly/sync_terminal_bench_science.py` |
 | `pwc-cron-sync-physics-iq-verified.timer` | `*-*-* *:28:00` | `sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
 | `pwc-cron-sync-artificial-analysis.timer` | `*-*-* 00/2:35:00` | `sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
 | `pwc-cron-sync-programbench.timer` | `*-*-* *:40:00` | `sync_programbench` | `.github/workflows/scripts/hourly/sync_programbench.py` |
@@ -456,7 +457,8 @@ current; `sync_cybergym.py` (the site's default model-focused Level 1 view) and
 `sync_patcheval_verified.py` (the README results table) do the same for two
 more Cybersecurity boards, and `sync_critpt.py` / `sync_critpt_v2.py` keep the
 CritPt and CritPt v2 Scientific Reasoning boards current from the Artificial
-Analysis evaluation pages (the model records embedded in the server-rendered
+Analysis evaluation pages, as `sync_terminal_bench_science.py` does for
+Terminal-Bench-Science 0.1 (mini-SWE-agent rows beside the vendors' own runs) (the model records embedded in the server-rendered
 Next.js data, not the rate-limited Data API; CritPt rows that the model's own
 release already reports are kept and the rerun excluded). Each parses its official leaderboard in
 `backend/services/carbon_board_syncs.py` (failing on any layout change or an

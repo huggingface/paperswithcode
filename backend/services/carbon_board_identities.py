@@ -1082,3 +1082,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
     },
 }
+
+# Artificial Analysis charts the same models on its Terminal-Bench-Science page.
+IDENTITIES["terminal-bench-science-0-1"] = IDENTITIES["critpt-v2"]

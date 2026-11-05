@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync Terminal-Bench-Science leaderboard from Artificial Analysis every two hours
+
+[Timer]
+OnCalendar=*-*-* 00/2:54:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-terminal-bench-science.service
+
+[Install]
+WantedBy=timers.target
