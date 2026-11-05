@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import re
 from typing import Optional
 from urllib.parse import quote
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
-from backend.models.database import Dataset, LegacyPwcSlug, Method
+from backend.models.database import Dataset, LegacyPwcSlug, Method, Task
+
+
+def _name_key(name: str) -> str:
+    """Case- and punctuation-free key, so "SQuAD2.0" matches "SQuAD 2.0"."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
 
 
 class LegacyUrlService:
@@ -47,8 +53,9 @@ class LegacyUrlService:
             self.db.query(Dataset.slug)
             .filter(
                 or_(
-                    func.lower(Dataset.name) == name.lower(),
-                    Dataset.aliases.any(name),
+                    func.regexp_replace(func.lower(Dataset.name), "[^a-z0-9]", "", "g")
+                    == _name_key(name),
+                    text(":name = ANY(datasets.aliases)").bindparams(name=name),
                 )
             )
             .order_by(Dataset.num_papers.desc(), Dataset.id)
@@ -70,14 +77,18 @@ class LegacyUrlService:
 
     def sota_path(self, slug: str) -> Optional[str]:
         """``/sota/<task>-on-<dataset>`` leaderboards map to the dataset's
-        benchmark page."""
+        benchmark page, else to the task page when only the task survives."""
         name = self._legacy_target("sota", slug)
         match = self._dataset_slug_by_name(name) if name else None
-        if match is None:
-            parts = slug.split("-on-")
-            for start in range(1, len(parts)):
-                candidate = "-on-".join(parts[start:])
-                if self._dataset_exists(candidate):
-                    match = candidate
-                    break
-        return f"/benchmark/{match}" if match else None
+        if match is not None:
+            return f"/benchmark/{match}"
+        parts = slug.split("-on-")
+        for split in range(1, len(parts)):
+            candidate = "-on-".join(parts[split:])
+            if self._dataset_exists(candidate):
+                return f"/benchmark/{candidate}"
+        for split in range(len(parts) - 1, 0, -1):
+            task_slug = "-on-".join(parts[:split])
+            if self.db.query(Task.id).filter(Task.slug == task_slug).first():
+                return f"/tasks/{task_slug}"
+        return None

@@ -125,3 +125,10 @@ def test_importer_reads_each_legacy_dump(tmp_path):
         ("sota", "real-time-object-detection-on-coco", "COCO"),
         ("paper", "attention", "1706.03762"),
     ]
+
+
+def test_dataset_name_key_ignores_case_and_punctuation():
+    from backend.services.legacy_url_service import _name_key
+
+    assert _name_key("SQuAD2.0") == _name_key("SQuAD 2.0") == "squad20"
+    assert _name_key("Mini-Imagenet") == _name_key("MiniImageNet")
