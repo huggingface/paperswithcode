@@ -119,6 +119,7 @@
   transition: border-color 0.15s, color 0.15s;
 }
 .chat-example:hover { border-color: var(--hairline-strong); color: var(--ink); }
+a.chat-example { text-decoration: none; }
 .chat-paper-inline-highlight {
   color: var(--accent-text);
   text-decoration-line: underline;

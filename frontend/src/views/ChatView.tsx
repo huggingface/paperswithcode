@@ -36,6 +36,7 @@ import {
   stopChatAutoSend,
 } from "@/lib/chatLaunch";
 import { READER_CHAT_PROMPTS, SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
+import { mlInternReproduceUrl } from "@/lib/mlIntern";
 import { emptyChatDraft } from "@/lib/paperSelection";
 import { ApiError } from "@/lib/apiTransport";
 import { isStagingEnvironment } from "@/lib/apiUrl";
@@ -69,7 +70,7 @@ const withReaderSelection = (
 export interface ChatExperienceProps {
   mode?: "general" | "paper";
   routeSessionId?: string;
-  primaryPaper?: { id: string; routeId: string; title: string };
+  primaryPaper?: { id: string; routeId: string; title: string; arxivId?: string | null };
   currentPage?: () => number;
   paperSelection?: PaperSelectionDraft;
   onPaperSelectionChange?: (selection?: PaperSelectionDraft) => void;
@@ -437,6 +438,13 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             variant="empty"
             {...surfaceProps}
             suggestions={mode === "paper" ? READER_CHAT_PROMPTS : SUGGESTED_CHAT_PROMPTS}
+            suggestionLinks={mode === "paper" && primaryPaper && <a
+              className="chat-example"
+              href={mlInternReproduceUrl(primaryPaper.title, primaryPaper.arxivId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Ask Hugging Face ML Intern to reproduce this paper"
+            >Reproduce with ML Intern</a>}
           />
         </ChatEmptyState> : <>
           <ChatConversation

@@ -347,7 +347,7 @@ function PaperReaderExperience({ routeId }: { routeId: string }) {
     : paper && chatReady ? <ChatExperience
     mode="paper"
     routeSessionId={activeSessionId}
-    primaryPaper={{ id: paper.id, routeId: canonicalRoute, title: paper.title }}
+    primaryPaper={{ id: paper.id, routeId: canonicalRoute, title: paper.title, arxivId: paper.arxiv_id }}
     currentPage={() => currentPageRef.current}
     paperSelection={paperSelection}
     onPaperSelectionChange={handlePaperSelectionChange}
