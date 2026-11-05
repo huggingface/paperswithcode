@@ -208,6 +208,9 @@ def legacy_dataset_page(
 def legacy_method_page(
     slug: str, db: Session = Depends(get_database_session)
 ) -> Response:
+    task_slug = METHOD_SLUGS_MOVED_TO_TASKS.get(slug)
+    if task_slug is not None:
+        return _legacy_redirect(f"/tasks/{task_slug}")
     return _legacy_redirect(LegacyUrlService(db).method_path(slug))
 
 

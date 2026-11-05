@@ -132,3 +132,10 @@ def test_dataset_name_key_ignores_case_and_punctuation():
 
     assert _name_key("SQuAD2.0") == _name_key("SQuAD 2.0") == "squad20"
     assert _name_key("Mini-Imagenet") == _name_key("MiniImageNet")
+
+
+def test_legacy_method_moved_to_task_redirects_to_the_task(client):
+    response = client.get("/method/continual-learning", follow_redirects=False)
+
+    assert response.status_code == 301
+    assert response.headers["location"] == "/tasks/continual-learning"
