@@ -252,6 +252,49 @@ def test_daily_curation_cli_dispatches_one_explicit_canary_job(monkeypatch, caps
     }
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_scheduled_daily_curation_reaps_ended_remote_jobs_first(
+    monkeypatch, capsys, dry_run
+):
+    calls = []
+    db = object()
+    settings = object()
+
+    def session():
+        yield db
+
+    class Jobs:
+        def reconcile(self, job_db, job_settings):
+            calls.append(("jobs", job_db, job_settings))
+
+    class Service:
+        def __init__(self, _db, service_settings):
+            self.settings = service_settings
+            self.job_service = Jobs()
+
+        def reconcile(self, **kwargs):
+            calls.append(("cohort", kwargs["dry_run"]))
+            return {"queued": 0}
+
+    monkeypatch.setattr(curation_cli, "get_database_session", session)
+    monkeypatch.setattr(curation_cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(curation_cli, "HFDailyCurationService", Service)
+    argv = ["enqueue_hf_daily_paper_curation"] + (["--dry-run"] if dry_run else [])
+    monkeypatch.setattr(sys, "argv", argv)
+
+    assert curation_cli.main() == 0
+    expected = (
+        [("cohort", True)]
+        if dry_run
+        else [
+            ("jobs", db, settings),
+            ("cohort", False),
+        ]
+    )
+    assert calls == expected
+    assert json.loads(capsys.readouterr().out) == {"queued": 0}
+
+
 def test_daily_curation_cli_exits_nonzero_when_canary_does_not_launch(
     monkeypatch, capsys
 ):

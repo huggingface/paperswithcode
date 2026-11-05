@@ -96,6 +96,11 @@ def main() -> int:
         elif args.disable_dispatch:
             result = service.set_dispatch(False, reason=args.reason)
         else:
+            if not args.dry_run:
+                # Fail remote Jobs that ended without calling back (for
+                # example during an API outage) so their rows stop holding
+                # dispatch slots. Otherwise only admin page reads reap them.
+                service.job_service.reconcile(db, service.settings)
             result = service.reconcile(
                 today=args.date,
                 lookback_days=args.lookback_days,
