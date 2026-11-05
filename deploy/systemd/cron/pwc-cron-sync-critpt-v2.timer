@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync CritPt v2 leaderboard from Artificial Analysis every two hours
+
+[Timer]
+OnCalendar=*-*-* 01/2:52:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-critpt-v2.service
+
+[Install]
+WantedBy=timers.target

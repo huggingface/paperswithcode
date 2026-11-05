@@ -515,6 +515,24 @@ COMMANDS: dict[str, Job] = {
             "validated official leaderboard; never creates papers"
         ),
     ),
+    "sync_critpt": job(
+        "-m",
+        "scripts.hourly.sync_critpt",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed CritPt evaluation rows from the validated "
+            "Artificial Analysis evaluation page; never creates papers"
+        ),
+    ),
+    "sync_critpt_v2": job(
+        "-m",
+        "scripts.hourly.sync_critpt_v2",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed CritPt v2 evaluation rows from the validated "
+            "Artificial Analysis evaluation page; never creates papers"
+        ),
+    ),
     "sync_physics_iq_verified": job(
         "-m",
         "scripts.hourly.sync_physics_iq_verified",
