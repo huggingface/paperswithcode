@@ -102,8 +102,9 @@ _CLAIM = re.compile(
 )
 # A lead with a number must compare it with something.
 _COMPARISON = re.compile(
-    r"\b(?:outperform|beat|exceed|surpass|ahead of|than|versus|vs\b|compared|"
-    r"state-of-the-art|sota|first|best|top|lead|match|rival|record)",
+    r"\b(?:outperform\w*|beat(?:s|ing)?|exceed\w*|surpass\w*|ahead of|than|"
+    r"versus|vs|compared|state-of-the-art|sota|first|best|tops?|topped|"
+    r"leads?|leading|match(?:es|ed|ing)?|rival(?:s|ed|ing)?|record)\b",
     re.IGNORECASE,
 )
 _SMALL_DELTA = re.compile(

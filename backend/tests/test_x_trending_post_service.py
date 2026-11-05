@@ -64,6 +64,10 @@ def test_good_lead_needs_a_comparison_for_numbers_and_no_small_delta():
     assert not service.good_lead("History Forcing reaches 79.82 on VBench-Long.")
     assert not service.good_lead("It improves scores by 0.3 points over Beta.")
     assert not service.good_lead("Alpha is +0.4% better than Beta.")
+    # Words that merely start like a comparison do not count.
+    assert not service.good_lead("Alpha scores 79.82 on the VBench leaderboard.")
+    assert not service.good_lead("Alpha recorded 12 topics.")
+    assert service.good_lead("Alpha leads the board with 87, topping Beta.")
     assert compose_post("A: B", "Alpha scores 79.82 on VBench.", max_chars=280) is None
 
 
