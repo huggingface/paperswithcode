@@ -533,6 +533,15 @@ COMMANDS: dict[str, Job] = {
             "Artificial Analysis evaluation page; never creates papers"
         ),
     ),
+    "sync_terminal_bench_science": job(
+        "-m",
+        "scripts.hourly.sync_terminal_bench_science",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Terminal-Bench-Science evaluation rows from the "
+            "validated Artificial Analysis evaluation page; never creates papers"
+        ),
+    ),
     "sync_physics_iq_verified": job(
         "-m",
         "scripts.hourly.sync_physics_iq_verified",

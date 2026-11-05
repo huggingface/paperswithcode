@@ -155,6 +155,10 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
         "backend/services/carbon_board_syncs.py",
         "backend/services/live_leaderboard_sync.py",
     ),
+    "sync_terminal_bench_science": (
+        "backend/services/carbon_board_syncs.py",
+        "backend/services/live_leaderboard_sync.py",
+    ),
     "sync_frontiercode": ("backend/services/frontiercode_sync_service.py",),
     "sync_coarena": ("backend/services/coarena_sync_service.py",),
     "sync_arc_prize": ("backend/services/arc_prize_sync_service.py",),
@@ -275,6 +279,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "sync_patcheval_verified": ("backend/tests/evaluation/test_carbon_board_syncs.py",),
     "sync_critpt": ("backend/tests/evaluation/test_carbon_board_syncs.py",),
     "sync_critpt_v2": ("backend/tests/evaluation/test_carbon_board_syncs.py",),
+    "sync_terminal_bench_science": (
+        "backend/tests/evaluation/test_carbon_board_syncs.py",
+    ),
     "sync_frontiercode": ("backend/tests/evaluation/test_frontiercode_sync.py",),
     "sync_coarena": ("backend/tests/evaluation/test_coarena_sync.py",),
     "sync_arc_prize": ("backend/tests/evaluation/test_arc_prize_sync.py",),

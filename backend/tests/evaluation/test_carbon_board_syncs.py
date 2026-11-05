@@ -198,6 +198,19 @@ def test_parse_critpt_fails_when_the_page_layout_changes():
         boards.parse_critpt(source.replace('\\"critpt\\"', '\\"critPt\\"'))
 
 
+def test_parse_terminal_bench_science_tags_aa_runs_with_mini_swe_agent():
+    entries = _by_name(
+        boards.parse_terminal_bench_science(_fixture("aa_terminal_bench_science.html"))
+    )
+    assert len(entries) == 28
+    assert entries["Gemini 4 Carbon (high)"].value == 64.76
+    assert entries["Gemini 4 Carbon (high)"].harness == "mini-SWE-agent"
+    # A zero is a real result, not a missing score.
+    assert entries["Inkling (xhigh)"].value == 0
+    board = boards.BOARD_SYNCS["sync_terminal_bench_science"].board
+    assert not board.adopt_unmanaged
+
+
 def test_critpt_keeps_self_reported_rows_and_reviews_aa_names():
     board = boards.BOARD_SYNCS["sync_critpt"].board
     for name in ("K2 Horizon 375B A23B", "Nemotron 3.5 Super VL", "Beam 1.0"):
@@ -321,6 +334,7 @@ def test_every_board_has_identities_and_a_configured_fetcher():
         "sync_patcheval_verified",
         "sync_critpt",
         "sync_critpt_v2",
+        "sync_terminal_bench_science",
     }
     for sync in boards.BOARD_SYNCS.values():
         assert len(sync.board.identities) >= sync.board.min_selected
@@ -464,6 +478,31 @@ def test_sync_adopts_a_hand_imported_row_and_its_unreported_harness():
         [_entry("Opus 5.5 (xhigh)", 3.61), _entry("Sol 5.6 (xhigh)", 4.7)]
     )
     assert (again.created, again.changed, again.adopted) == (0, 0, 0)
+
+
+def test_sync_without_adoption_keeps_a_vendor_row_beside_the_rerun():
+    session = _session()
+    vendor = Evaluation(
+        paper_id=1,
+        task_id=TASK_ID,
+        dataset_id=DATASET_ID,
+        model_name="Claude Opus 5.5",
+        harness="Claude Code",
+        metrics={METRIC: 5.9},
+        best_metric=METRIC,
+        methodology="Hand import from the system card.",
+        is_open=False,
+    )
+    session.add(vendor)
+    session.commit()
+    stats = LiveLeaderboardSyncService(session, _board(adopt_unmanaged=False)).sync(
+        [_entry("Opus 5.5 (xhigh)", 3.61), _entry("Sol 5.6 (xhigh)", 4.7)]
+    )
+    assert (stats.adopted, stats.created) == (0, 2)
+    assert (vendor.harness, vendor.metrics) == ("Claude Code", {METRIC: 5.9})
+    assert (
+        session.query(Evaluation).filter_by(model_name="Claude Opus 5.5").count() == 2
+    )
 
 
 def test_sync_skips_excluded_names_and_reports_rows_that_leave_upstream():

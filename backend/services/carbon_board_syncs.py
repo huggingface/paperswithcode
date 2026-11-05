@@ -49,6 +49,9 @@ PATCHEVAL_VERIFIED_README_URL = (
 )
 CRITPT_URL = "https://artificialanalysis.ai/evaluations/critpt"
 CRITPT_V2_URL = "https://artificialanalysis.ai/evaluations/critpt-v2"
+TERMINAL_BENCH_SCIENCE_URL = (
+    "https://artificialanalysis.ai/evaluations/terminal-bench-science"
+)
 
 
 def _text(node) -> str:
@@ -533,7 +536,7 @@ def _enclosing_object(text: str, index: int) -> Any:
 
 
 def parse_artificial_analysis_evaluation(
-    html: str, key: str, what: str
+    html: str, key: str, what: str, harness: str | None = None
 ) -> list[LeaderboardEntry]:
     """Read each charted model's ``key`` score (0-1) from an AA evaluation page."""
     chunks = _RSC_CHUNK.findall(html)
@@ -563,6 +566,7 @@ def parse_artificial_analysis_evaluation(
             name,
             round(score * 100, 2),
             f"{round(score * 100, 2)}% accuracy (Artificial Analysis model {slug})",
+            harness=harness,
             lab=lab,
         )
         for slug, (name, score, lab) in scores.items()
@@ -578,6 +582,12 @@ def parse_critpt(html: str) -> list[LeaderboardEntry]:
 
 def parse_critpt_v2(html: str) -> list[LeaderboardEntry]:
     return parse_artificial_analysis_evaluation(html, "critptAgentic", "CritPt v2")
+
+
+def parse_terminal_bench_science(html: str) -> list[LeaderboardEntry]:
+    return parse_artificial_analysis_evaluation(
+        html, "terminalBenchScience", "Terminal-Bench-Science", "mini-SWE-agent"
+    )
 
 
 # Models whose own release reports a CritPt score already on the board; the
@@ -781,5 +791,21 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             protocol="CritPt v2, the authors' revision of the 70 research-level physics challenges; models solve them with a code-execution tool in an offline Linux sandbox; independent evaluation by Artificial Analysis.",
         ),
         _fetching(CRITPT_V2_URL, parse_critpt_v2),
+    ),
+    "sync_terminal_bench_science": BoardSync(
+        LiveLeaderboard(
+            source="Artificial Analysis Terminal-Bench-Science",
+            provider="artificial-analysis-critpt",
+            url=TERMINAL_BENCH_SCIENCE_URL,
+            task_slug="scientific-reasoning",
+            dataset_slug="terminal-bench-science-0-1",
+            metric="Accuracy",
+            identities=IDENTITIES["terminal-bench-science-0-1"],
+            min_selected=10,
+            # Vendors' own runs (Claude Code, unnamed harnesses) stay as they are.
+            adopt_unmanaged=False,
+            protocol="All 70 Terminal-Bench-Science 0.1.0 tasks (life, physical, mathematical, engineering and earth science), run with the mini-swe-agent harness; pass@1 averaged over three repeats per task; independent evaluation by Artificial Analysis.",
+        ),
+        _fetching(TERMINAL_BENCH_SCIENCE_URL, parse_terminal_bench_science),
     ),
 }

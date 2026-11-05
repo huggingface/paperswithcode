@@ -180,6 +180,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `critpt` and `critpt-v2` on task `scientific-reasoning`; Accuracy (%) 0–100 = the model record's `critpt` (original dataset, no harness) or `critptAgentic` (v2, code-execution sandbox) × 100, read from the Next.js data embedded in https://artificialanalysis.ai/evaluations/critpt and /critpt-v2 (charted models only; not the Data API, so no API quota); typically 15–300 rows (27 and 28 on 2026-11-05). K2 Horizon, Nemotron 3.5 Super VL and Beam are excluded on `critpt` because their self-reported rows stay.
 - **Proof:** Same as `sync_cybergym`; older hand-imported Artificial Analysis rows for models AA no longer charts stay unmanaged.
 
+## `sync_terminal_bench_science`
+
+- **Contract:** `terminal-bench-science-0-1` on task `scientific-reasoning`; Accuracy (%) 0–100 = the model record's `terminalBenchScience` × 100 from the Next.js data in https://artificialanalysis.ai/evaluations/terminal-bench-science; harness `mini-SWE-agent` (AA runs all 70 tasks with mini-swe-agent, pass@1 over three repeats); typically 15–300 rows (28 on 2026-11-05). `adopt_unmanaged=False`: vendor rows (Claude Code, unnamed harness) are never overwritten, so a model can have one row per harness.
+- **Proof:** Same as `sync_cybergym`.
+
 ## `sync_physics_iq_verified`
 
 - **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.
