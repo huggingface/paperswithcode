@@ -28,6 +28,7 @@ import { useChatModelSelection } from "@/components/chat/useChatModelSelection";
 import { useChatSessionActions, useChatSessionCache } from "@/components/chat/useChatSessionActions";
 import { useInferenceAuthorization } from "@/components/chat/useInferenceAuthorization";
 import { PanelIcon, Spinner } from "@/components/chat/icons";
+import { Icon } from "@/components/Icon";
 import { useChat } from "@/hooks/useChat";
 import { DEFAULT_REASONING_EFFORT, isChatLive, type ChatDraft, type PaperSelectionDraft } from "@/lib/chat";
 import {
@@ -444,7 +445,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
               target="_blank"
               rel="noopener noreferrer"
               title="Ask Hugging Face ML Intern to reproduce this paper"
-            >Reproduce with ML Intern</a>}
+            ><span className="chat-example-icon"><Icon name="robot" size={14} /></span>Reproduce with ML Intern</a>}
           />
         </ChatEmptyState> : <>
           <ChatConversation
