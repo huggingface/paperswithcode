@@ -119,7 +119,18 @@
   transition: border-color 0.15s, color 0.15s;
 }
 .chat-example:hover { border-color: var(--hairline-strong); color: var(--ink); }
-a.chat-example { text-decoration: none; }
+a.chat-example {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-decoration: none;
+}
+.chat-example-icon {
+  display: inline-flex;
+  color: #c2410c;
+}
+.dark .chat-example-icon { color: #fdba74; }
 .chat-paper-inline-highlight {
   color: var(--accent-text);
   text-decoration-line: underline;
