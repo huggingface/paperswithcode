@@ -307,7 +307,7 @@ const FOLLOW_KIND_LABELS: Record<FollowKind, string> = {
 };
 const FOLLOW_KIND_ORDER = Object.keys(FOLLOW_KIND_LABELS) as FollowKind[];
 
-type FeedMode = "trending" | "x" | "following";
+type FeedMode = "trending" | "following";
 
 const FEED_PAGE_SIZE = 30;
 const FOLLOWING_PAGE_SIZE = 40;
@@ -373,7 +373,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const infinite = usePaperFeedQuery<FeedPage>(
     following
       ? [...paperQueryKeys.feeds.following, user?.hf_subject, followingFilters]
-      : [...(mode === "x" ? paperQueryKeys.feeds.xTrending : paperQueryKeys.feeds.trending), dateFilters],
+      : [...paperQueryKeys.feeds.trending, dateFilters],
     async (page) => {
       if (following) {
         const entries = await researchApi.following(page, followingFilters);
@@ -381,9 +381,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
         return { results: entries, next_page };
       }
       const params = { ...dateFilters, page, page_size: FEED_PAGE_SIZE, include_resources: true };
-      return toFeedPage(mode === "x"
-        ? papersApi.xTrending(params)
-        : papersApi.list({ ...params, order_by: "trending", order_dir: "desc", latest_only: true }));
+      return toFeedPage(papersApi.list({ ...params, order_by: "trending", order_dir: "desc", latest_only: true }));
     },
     { enabled: !following || !!user, initialPage: following ? 0 : 1 },
   );
@@ -465,7 +463,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
           <h1 className="feed-title">
             Trending <em>Research</em>
           </h1>
-          <div className="feed-subtitle">{mode === "x" ? "Papers people share most on X, picked daily" : "Curated daily from arXiv and Hugging Face"}</div>
+          <div className="feed-subtitle">Curated daily from arXiv and Hugging Face</div>
         </div>
       </div>
 
@@ -578,7 +576,6 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               <div className="paper-feed-toolbar-controls">
                 <div className="sort-options">
                   <button className={`sort-btn ${mode === "trending" ? "active" : ""}`} onClick={() => showTab("/")}>trending</button>
-                  <button className={`sort-btn ${mode === "x" ? "active" : ""}`} onClick={() => showTab("/x-trending")}>trending (X)</button>
                   <button className={`sort-btn ${following ? "active" : ""}`} onClick={() => showTab("/following")}>following</button>
                 </div>
               </div>
@@ -642,7 +639,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 cards={cards}
                 skeleton="card"
                 rootMargin="400px"
-                empty={error ? null : topicOnly ? <>No papers about your topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(true)}>edit your topic</button>.</> : following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : mode === "x" ? "No papers shared on X in this window." : "No papers in this window."}
+                empty={error ? null : topicOnly ? <>No papers about your topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(true)}>edit your topic</button>.</> : following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}
               />
             )}
           </div>
@@ -653,8 +650,8 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
 };
 
 // Routes render the public feeds through this; FollowingView renders the following mode.
-const FeedView: React.FC<{ xTrending?: boolean }> = ({ xTrending = false }) => (
-  <HomeFeed mode={xTrending ? "x" : "trending"} />
+const FeedView: React.FC = () => (
+  <HomeFeed mode="trending" />
 );
 
 export default FeedView;

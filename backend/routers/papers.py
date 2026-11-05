@@ -526,51 +526,6 @@ def search_papers_feed(
     )
 
 
-@router.get(
-    "/papers/x-trending",
-    response_model=Papers,
-    summary="Papers trending on X, ordered by trending score",
-)
-def get_x_trending_papers(
-    page: int = Query(1, ge=1, le=100, description="Page number (1-based)"),
-    page_size: int = Query(30, ge=1, le=100, description="Papers per page"),
-    start_date: Optional[date] = Query(
-        None, description="Inclusive earliest publication date (YYYY-MM-DD)"
-    ),
-    end_date: Optional[date] = Query(
-        None, description="Inclusive latest publication date (YYYY-MM-DD)"
-    ),
-    include_resources: bool = Query(
-        False, description="Include repositories and project pages"
-    ),
-    has_code: bool = Query(
-        False, description="Only include papers with a linked GitHub repository"
-    ),
-    has_hf_artifacts: bool = Query(
-        False, description="Only include papers with linked Hugging Face artifacts"
-    ),
-    db: Session = Depends(get_database_session),
-):
-    """List papers from the daily "AI Papers on X" picks.
-
-    Like the homepage trending feed, the date window filters on publication
-    date and papers are ordered by the same trending score.
-    """
-    if start_date is not None and end_date is not None and start_date > end_date:
-        raise HTTPException(
-            status_code=422, detail="start_date must be on or before end_date"
-        )
-    return XTrendingService(db).feed(
-        page=page,
-        page_size=page_size,
-        start_date=start_date,
-        end_date=end_date,
-        include_resources=include_resources,
-        has_code=has_code,
-        has_hf_artifacts=has_hf_artifacts,
-    )
-
-
 @router.put(
     "/papers/x-trending/{shared_on}",
     response_model=XTrendingDayResult,
