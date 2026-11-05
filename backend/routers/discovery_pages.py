@@ -24,6 +24,7 @@ from backend.services.discovery_page_service import (
     DiscoveryPage,
     DiscoveryPageService,
 )
+from backend.services.legacy_url_service import LegacyUrlService
 from backend.services.public_page_markdown_service import render_discovery_markdown
 from backend.services.spa_shell_service import load_index_html
 
@@ -41,6 +42,9 @@ RESERVED_TOP_LEVEL_PREFIXES = frozenset(
         "tasks",
         "task",
         "methods",
+        "method",
+        "sota",
+        "dataset",
         "benchmark",
         "conferences",
         "organizations",
@@ -176,6 +180,38 @@ def task_page(
 @router.api_route("/task/{slug}", methods=["GET", "HEAD"], include_in_schema=False)
 def legacy_task_page(slug: str) -> RedirectResponse:
     return RedirectResponse(f"/tasks/{slug}", status_code=301)
+
+
+def _legacy_redirect(path: str | None) -> Response:
+    if path is None:
+        return _not_found()
+    return RedirectResponse(
+        path, status_code=301, headers={"Cache-Control": "public, max-age=3600"}
+    )
+
+
+@router.api_route("/sota/{slug}", methods=["GET", "HEAD"], include_in_schema=False)
+def legacy_sota_page(
+    slug: str, db: Session = Depends(get_database_session)
+) -> Response:
+    return _legacy_redirect(LegacyUrlService(db).sota_path(slug))
+
+
+@router.api_route("/dataset/{slug}", methods=["GET", "HEAD"], include_in_schema=False)
+def legacy_dataset_page(
+    slug: str, db: Session = Depends(get_database_session)
+) -> Response:
+    return _legacy_redirect(LegacyUrlService(db).dataset_path(slug))
+
+
+@router.api_route("/method/{slug}", methods=["GET", "HEAD"], include_in_schema=False)
+def legacy_method_page(
+    slug: str, db: Session = Depends(get_database_session)
+) -> Response:
+    task_slug = METHOD_SLUGS_MOVED_TO_TASKS.get(slug)
+    if task_slug is not None:
+        return _legacy_redirect(f"/tasks/{task_slug}")
+    return _legacy_redirect(LegacyUrlService(db).method_path(slug))
 
 
 @router.api_route("/methods/{slug}", methods=["GET", "HEAD"], include_in_schema=False)

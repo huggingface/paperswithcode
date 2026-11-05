@@ -25,6 +25,7 @@ from backend.database.connection import get_database_session
 from backend.main import create_app
 from backend.models.papers import Paper
 from backend.routers import paper_pages
+from backend.services.legacy_url_service import LegacyUrlService
 from backend.services import default_og_image, social_meta_service, spa_shell_service
 from backend.services.paper_service import PaperService
 from backend.services.social_meta_service import (
@@ -550,6 +551,7 @@ def test_paper_route_returns_404_when_paper_missing(client, monkeypatch):
 
 def test_paper_route_returns_standalone_404_for_invalid_identifier(client, monkeypatch):
     _stub_paper_lookup_missing(monkeypatch)
+    monkeypatch.setattr(LegacyUrlService, "paper_path", lambda self, slug: None)
 
     response = client.get("/paper/not-an-arxiv-id")
 
@@ -557,6 +559,20 @@ def test_paper_route_returns_standalone_404_for_invalid_identifier(client, monke
     assert 'name="robots" content="noindex"' in response.text
     assert "<h1>Paper not found</h1>" in response.text
     assert '<div id="root">' not in response.text
+
+
+def test_legacy_pwc_paper_slug_redirects_to_arxiv_route(client, monkeypatch):
+    _stub_paper_lookup_missing(monkeypatch)
+    monkeypatch.setattr(
+        LegacyUrlService,
+        "paper_path",
+        lambda self, slug: "/paper/1706.03762" if slug == "attention-is-all" else None,
+    )
+
+    response = client.get("/paper/attention-is-all", follow_redirects=False)
+
+    assert response.status_code == 301
+    assert response.headers["location"] == "/paper/1706.03762"
 
 
 def test_legacy_papers_route_redirects_to_canonical_url(client, monkeypatch):

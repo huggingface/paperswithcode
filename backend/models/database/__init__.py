@@ -119,6 +119,7 @@ from backend.models.database.frameworks import (
     FrameworkPlatform,
     TaskFramework,
 )
+from backend.models.database.legacy_urls import LegacyPwcSlug
 from backend.models.database.identity import (
     AuthSession,
     UserBookmark,
@@ -286,6 +287,7 @@ __all__ = [
     "FrameworkDomain",
     "FrameworkCategory",
     "Framework",
+    "LegacyPwcSlug",
     "FrameworkPlatform",
     "TaskFramework",
     "AuthSession",

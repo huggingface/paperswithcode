@@ -135,6 +135,19 @@ Checks performed:
 
 It does not recompute ranks; use `EvaluationService.recalculate_ranks`.
 
+## Legacy paperswithcode.com URLs
+
+`/paper/<slug>`, `/sota/<task>-on-<dataset>`, `/dataset/<slug>` and
+`/method/<slug>` from the old site 301 to the current paper, benchmark, task or
+method page. `legacy_pwc_slugs` (migration `add_legacy_pwc_slugs.sql`) stores
+what each slug named; routes resolve it against the live catalog per request,
+so new benchmarks and indexed papers start resolving without a reload. Refill
+it from the dumps (re-runnable upsert):
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.import_legacy_pwc_slugs --apply
+```
+
 ## Troubleshooting
 
 | Problem | Fix |
