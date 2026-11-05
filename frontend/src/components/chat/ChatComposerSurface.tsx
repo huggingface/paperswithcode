@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import Composer from "./Composer";
 import { BillingNotice } from "./ChatNotices";
@@ -15,6 +15,8 @@ interface ChatComposerSurfaceProps {
   /** Why the last send was rejected; shown next to the restored draft. */
   error?: string;
   suggestions?: readonly string[];
+  /** Extra links shown after the suggestions in the empty state. */
+  suggestionLinks?: ReactNode;
 }
 
 export function ChatComposerSurface({
@@ -25,6 +27,7 @@ export function ChatComposerSurface({
   paused,
   error,
   suggestions = [],
+  suggestionLinks,
 }: ChatComposerSurfaceProps) {
   const content = <>
     {!sponsored && <BillingNotice provider={provider} />}
@@ -57,6 +60,7 @@ export function ChatComposerSurface({
             : {}),
         })}
       >{example}</button>)}
+      {suggestionLinks}
     </div>}
   </>;
 
