@@ -31,6 +31,7 @@ import {
   type PaperEditSection,
 } from "@/lib/paperCuration";
 import { stripArxivVersion } from "@/lib/utils";
+import { mlInternReproduceUrl } from "@/lib/mlIntern";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -73,12 +74,6 @@ function formatResourceLinkLabel(url: string, fallback: string): string {
   } catch {
     return fallback;
   }
-}
-
-function mlInternReproduceUrl(title: string, arxivId: string | null | undefined): string {
-  const reference = arxivId ? ` (arXiv:${stripArxivVersion(arxivId)})` : "";
-  const params = new URLSearchParams({ mode: "ml-intern", prompt: `Reproduce ${title}${reference}` });
-  return `https://huggingface.co/chat/?${params.toString()}`;
 }
 
 const PaperDetailView: React.FC = () => {
