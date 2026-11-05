@@ -33,6 +33,19 @@ def test_deployed_runtime_validation(tmp_path: Path, environment: str):
     assert validate_runtime(settings) == profile_features(environment)
 
 
+def test_stale_openrouter_pricing_does_not_stop_backend_startup(tmp_path: Path):
+    """A pricing date passing must disable OpenRouter chat, not the whole site."""
+
+    release = make_bundle(tmp_path, chat=True)
+    settings = deployed_settings(tmp_path, release, "staging")
+    settings.chat_openrouter_pricing_verified_at = "2000-01-01"
+    assert validate_runtime(settings) == profile_features("staging")
+
+    settings.chat_openrouter_pricing_verified_at = "not-a-date"
+    with pytest.raises(RuntimeError, match="durable accounting"):
+        validate_runtime(settings)
+
+
 def test_staging_runtime_rejects_unapproved_team_environment_policy(tmp_path: Path):
     release = make_bundle(tmp_path, chat=True)
     settings = deployed_settings(tmp_path, release, "staging")

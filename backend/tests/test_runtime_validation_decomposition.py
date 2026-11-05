@@ -747,6 +747,37 @@ def test_persistent_executor_transport_accepts_only_fully_armed_ordinary_mode(
     runtime_validation.validate_external_pi_migration_policy(settings)
 
 
+def test_expired_executor_keys_do_not_stop_backend_startup(settings_factory):
+    """Key windows are enforced when keys are used, not at worker startup."""
+
+    settings, _release = settings_factory("staging")
+    _arm_persistent_executor_transport(settings)
+    past = int(time.time()) - 90 * 24 * 60 * 60
+    settings.chat_executor_admission_key_not_before_ms = past * 1_000
+    settings.chat_executor_admission_key_not_after_ms = (past + 60) * 1_000
+    settings.chat_executor_authorization_keys_json = (
+        '{"current":{"key_id":"authorization-v1","public_key":"'
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",'
+        f'"not_before":{past},"not_after":{past + 60}'
+        "}}"
+    )
+
+    runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+@pytest.mark.parametrize("lifetime_seconds", [0, 30 * 24 * 60 * 60 + 1])
+def test_executor_key_windows_must_stay_bounded(settings_factory, lifetime_seconds):
+    settings, _release = settings_factory("staging")
+    _arm_persistent_executor_transport(settings)
+    start_ms = settings.chat_executor_admission_key_not_before_ms
+    settings.chat_executor_admission_key_not_after_ms = (
+        start_ms + lifetime_seconds * 1_000
+    )
+
+    with pytest.raises(RuntimeError, match="admission key window is invalid"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
 def test_persistent_executor_transport_requires_runtime_credentials(settings_factory):
     settings, _release = settings_factory("staging")
     _arm_persistent_executor_transport(settings)

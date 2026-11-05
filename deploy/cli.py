@@ -49,7 +49,7 @@ try:
         slot_status as external_pi_slot_status,
         stop_slot_if_enabled,
     )
-    from deploy import build_sandbox, mcp_release
+    from deploy import build_sandbox, config_expiry_preflight, mcp_release
 except ModuleNotFoundError:
     from release import (  # type: ignore[no-redef]
         ENVIRONMENTS,
@@ -83,6 +83,7 @@ except ModuleNotFoundError:
         stop_slot_if_enabled,
     )
     import build_sandbox  # type: ignore[no-redef]
+    import config_expiry_preflight  # type: ignore[no-redef]
     import mcp_release  # type: ignore[no-redef]
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
@@ -359,6 +360,39 @@ def _configured_chat_enabled(environment: str) -> bool:
     if configured not in {"true", "false"}:
         raise DeployError(f"{config_path} must set PWC_CHAT_ENABLED to true or false")
     return configured == "true"
+
+
+def require_chat_config_runway(
+    environment: str, release: Path, *, allow_expiring: bool
+) -> None:
+    """Refuse a release whose chat configuration expires within a week.
+
+    An expired value only disables the affected chat route, but nobody should
+    find out from users. ``--allow-expiring-chat-config`` lets an urgent
+    hotfix through without renewing first.
+    """
+
+    if not _configured_chat_enabled(environment):
+        return
+    expiring = config_expiry_preflight.expiring(
+        release,
+        CONFIG_ROOT / f"{environment}.env",
+        datetime.now(timezone.utc),
+    )
+    if not expiring:
+        return
+    summary = ", ".join(
+        f"{name} expires {when.isoformat()}" for name, when in sorted(expiring.items())
+    )
+    if allow_expiring:
+        print(f"WARNING: deploying with expiring chat configuration: {summary}")
+        return
+    raise DeployError(
+        f"chat configuration expires within "
+        f"{config_expiry_preflight.EXPIRY_WARNING_WINDOW.days} days ({summary}); "
+        f"renew it in {CONFIG_ROOT / f'{environment}.env'} or pass "
+        "--allow-expiring-chat-config"
+    )
 
 
 def require_production_chat_monitor(environment: str) -> None:
@@ -1624,6 +1658,11 @@ def deploy(args: argparse.Namespace) -> int:
         require_production_chat_monitor(args.environment)
         sha = resolve_sha(args.source, args.environment)
         release = prepare_release(sha, args.environment)
+        require_chat_config_runway(
+            args.environment,
+            release,
+            allow_expiring=getattr(args, "allow_expiring_chat_config", False),
+        )
         runtime, runtime_built = prepare_runtime(release, RUNTIMES)
         external_pi_runtime = None
         external_pi_runtime_built = False
@@ -1988,6 +2027,7 @@ def parser_for(program: str) -> argparse.ArgumentParser:
         parser.add_argument("--qualify-only", action="store_true")
         parser.add_argument("--legacy-bridge", action="store_true")
         parser.add_argument("--refresh-environment", action="store_true")
+        parser.add_argument("--allow-expiring-chat-config", action="store_true")
         parser.add_argument("--component", choices=("site", "mcp"), default="site")
         parser.set_defaults(handler=deploy)
     elif program.endswith("pwc-rollback"):
