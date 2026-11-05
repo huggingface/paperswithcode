@@ -185,3 +185,47 @@ def test_environment_config_directory_is_search_only(tmp_path: Path, monkeypatch
 
     assert config.parent.stat().st_mode & 0o777 == 0o711
     assert config.stat().st_mode & 0o777 == 0o640
+
+
+def test_deploy_refuses_chat_configuration_expiring_within_a_week(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from datetime import date, timedelta
+
+    repository_root = Path(__file__).resolve().parents[3]
+    monkeypatch.setattr(deploy_cli, "CONFIG_ROOT", tmp_path)
+    soon = (date.today() - timedelta(days=25)).isoformat()
+    later = date.today().isoformat()
+    env_file = tmp_path / "production.env"
+
+    env_file.write_text(
+        f"PWC_CHAT_ENABLED=true\nPWC_CHAT_OPENROUTER_PRICING_VERIFIED_AT={soon}\n"
+    )
+    with pytest.raises(deploy_cli.DeployError, match="openrouter_pricing expires"):
+        deploy_cli.require_chat_config_runway(
+            "production", repository_root, allow_expiring=False
+        )
+    deploy_cli.require_chat_config_runway(
+        "production", repository_root, allow_expiring=True
+    )
+
+    env_file.write_text(
+        f"PWC_CHAT_ENABLED=true\nPWC_CHAT_OPENROUTER_PRICING_VERIFIED_AT={later}\n"
+    )
+    deploy_cli.require_chat_config_runway(
+        "production", repository_root, allow_expiring=False
+    )
+
+    env_file.write_text(
+        f"PWC_CHAT_ENABLED=false\nPWC_CHAT_OPENROUTER_PRICING_VERIFIED_AT={soon}\n"
+    )
+    deploy_cli.require_chat_config_runway(
+        "production", repository_root, allow_expiring=False
+    )
+
+
+def test_deploy_parser_accepts_expiring_chat_config_override():
+    args = deploy_cli.parser_for("pwc-deploy").parse_args(
+        ["staging", "main", "--allow-expiring-chat-config"]
+    )
+    assert args.allow_expiring_chat_config is True

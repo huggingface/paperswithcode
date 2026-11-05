@@ -16,6 +16,7 @@ import httpx
 from sqlalchemy.exc import SQLAlchemyError
 
 from backend.config import Settings, get_settings
+from backend.services.chat_config_expiry import expiring_chat_config
 from backend.database.connection import db_manager
 from backend.services.chat_operational_alert_service import (
     LIFECYCLE_ALERT_NAMES,
@@ -50,6 +51,7 @@ HISTORY_LIMIT = 100
 HEALTH_RECORD = "chat-operational-alert-health.json"
 MAX_RELIABILITY_FINDINGS = 32
 EXECUTOR_ALERT_OWNER = "chat-operational-monitor"
+CONFIG_EXPIRY_LEVELS = {"expiring": "warning", "expired": "critical"}
 
 
 def empty_state() -> dict[str, Any]:
@@ -70,6 +72,7 @@ def empty_state() -> dict[str, Any]:
         "observed_provider_runtime_revision": None,
         "operational_counts": {},
         "runtime_active": {},
+        "config_expiry_active": {},
         "events": [],
     }
 
@@ -93,6 +96,7 @@ def load_state(path: Path) -> dict[str, Any]:
     state.setdefault("observed_provider_runtime_revision", None)
     state.setdefault("operational_counts", {})
     state.setdefault("runtime_active", {})
+    state.setdefault("config_expiry_active", {})
     if (
         not isinstance(state["lifecycle_active"], list)
         or len(state["lifecycle_active"]) > len(LIFECYCLE_ALERT_NAMES)
@@ -139,6 +143,11 @@ def load_state(path: Path) -> dict[str, Any]:
         for name, entry in state["runtime_active"].items()
     ):
         raise TypeError("chat operational alert state has invalid runtime state")
+    if not isinstance(state["config_expiry_active"], dict) or any(
+        not isinstance(name, str) or len(name) > 64 or level not in CONFIG_EXPIRY_LEVELS
+        for name, level in state["config_expiry_active"].items()
+    ):
+        raise TypeError("chat operational alert state has invalid expiry state")
     provider_digest = state["observed_provider_digest"]
     if provider_digest is not None and (
         not isinstance(provider_digest, str)
@@ -534,6 +543,59 @@ async def deliver_pending(state: dict[str, Any], settings: Settings) -> int:
     return delivered
 
 
+def collect_config_expiry_events(
+    state: dict[str, Any], settings: Settings, now: datetime
+) -> list[dict[str, Any]]:
+    """Alert once per level change for chat configuration that expires with time.
+
+    Classification keys carry the expiry date so the content-free payload says
+    when each value must be renewed.
+    """
+
+    expiring = expiring_chat_config(settings, now)
+    current = {
+        expiry.name: (
+            "expired" if expiry.remaining(now) <= timedelta(0) else "expiring"
+        )
+        for expiry in expiring
+    }
+    expires_on = {
+        expiry.name: expiry.expires_at.date().isoformat() for expiry in expiring
+    }
+    previous = state["config_expiry_active"]
+    events: list[dict[str, Any]] = []
+    for level, severity in CONFIG_EXPIRY_LEVELS.items():
+        entered = sorted(
+            name
+            for name, current_level in current.items()
+            if current_level == level and previous.get(name) != level
+        )
+        if entered:
+            events.append(
+                new_event(
+                    f"chat_config_{level}",
+                    now=now,
+                    count=len(entered),
+                    classifications={
+                        f"{name}@{expires_on[name]}": 1 for name in entered
+                    },
+                    severity=severity,
+                )
+            )
+    renewed = sorted(set(previous) - set(current))
+    if renewed:
+        events.append(
+            new_event(
+                "chat_config_expiry_recovered",
+                now=now,
+                count=len(renewed),
+                classifications={name: 1 for name in renewed},
+            )
+        )
+    state["config_expiry_active"] = current
+    return events
+
+
 def collect_events(
     state: dict[str, Any], settings: Settings, now: datetime
 ) -> tuple[list[dict[str, Any]], bool]:
@@ -657,6 +719,7 @@ def collect_events(
         if state["provider_monitor_failed"]:
             events.append(new_event("provider_monitor_recovered", now=now))
         state["provider_monitor_failed"] = False
+    events.extend(collect_config_expiry_events(state, settings, now))
     return events, collection_failed
 
 

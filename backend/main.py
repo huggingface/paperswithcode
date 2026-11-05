@@ -123,6 +123,18 @@ async def lifespan(app: FastAPI):
     print(f"🌍 Environment: {settings.environment}")
     print(f"📦 Release: {settings.release_id}")
     validate_runtime(settings)
+    if settings.is_deployed:
+        from backend.services.chat_config_expiry import expiring_chat_config
+
+        now = datetime.now(UTC)
+        for expiry in expiring_chat_config(settings, now):
+            logging.getLogger(__name__).warning(
+                "chat configuration %s expires at %s (%s remaining); renew %s",
+                expiry.name,
+                expiry.expires_at.isoformat(),
+                expiry.remaining(now),
+                expiry.renewal,
+            )
     if settings.chat_enabled and not settings.chat_require_auth:
         raise RuntimeError("PWC_CHAT_REQUIRE_AUTH must remain enabled")
 

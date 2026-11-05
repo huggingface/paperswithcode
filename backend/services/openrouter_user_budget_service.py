@@ -138,6 +138,7 @@ def safe_maximum_microusd(
     bounds: RequestBounds,
     *,
     now: datetime | None = None,
+    enforce_freshness: bool = True,
 ) -> int:
     """Return a strict configured price bound or fail closed.
 
@@ -145,6 +146,9 @@ def safe_maximum_microusd(
     input is deliberately charged at the full input rate. Output reasoning is
     inside the provider's bounded ``max_tokens`` value. Non-text modalities
     fail closed because they can carry separate provider fees.
+
+    ``enforce_freshness=False`` is only for startup validation: a stale pricing
+    date must refuse OpenRouter requests, not stop the whole backend.
     """
 
     current = (now or datetime.now(UTC)).astimezone(UTC)
@@ -154,7 +158,7 @@ def safe_maximum_microusd(
         raise OpenRouterPricingUnavailable(
             "OpenRouter pricing date is invalid"
         ) from error
-    if current.date() - verified > timedelta(
+    if enforce_freshness and current.date() - verified > timedelta(
         days=settings.chat_openrouter_pricing_max_age_days
     ):
         raise OpenRouterPricingUnavailable("OpenRouter pricing is stale")

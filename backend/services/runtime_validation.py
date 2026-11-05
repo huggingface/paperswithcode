@@ -6,7 +6,6 @@ import base64
 import grp
 import json
 import stat
-import time
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -316,7 +315,10 @@ def validate_external_pi_migration_policy(settings: Settings) -> ChatRuntimeProf
                 current_authorization_key["not_after"]
                 - current_authorization_key["not_before"]
             )
-            now_seconds = int(time.time())
+            # Whether the window covers the current time is enforced where the
+            # key is used (executor_transport/src/admission.rs), not here: an
+            # expiring key must not stop every backend worker at its next
+            # restart. See backend/services/chat_config_expiry.py.
             if (
                 set(current_authorization_key)
                 != {"key_id", "public_key", "not_before", "not_after"}
@@ -332,9 +334,6 @@ def validate_external_pi_migration_policy(settings: Settings) -> ChatRuntimeProf
                 or current_authorization_key["not_after"]
                 <= current_authorization_key["not_before"]
                 or authorization_window > 30 * 24 * 60 * 60
-                or not current_authorization_key["not_before"]
-                <= now_seconds
-                <= current_authorization_key["not_after"]
             ):
                 raise ValueError
             previous_authorization_key = authorization_keys.get("previous")
@@ -366,7 +365,7 @@ def validate_external_pi_migration_policy(settings: Settings) -> ChatRuntimeProf
             raise RuntimeError(
                 "remote executor authorization key configuration is invalid"
             ) from None
-        now_ms = int(time.time() * 1_000)
+        # sign_admission() enforces the current time against this window.
         if (
             settings.chat_executor_admission_key_not_before_ms <= 0
             or settings.chat_executor_admission_key_not_after_ms
@@ -374,9 +373,6 @@ def validate_external_pi_migration_policy(settings: Settings) -> ChatRuntimeProf
             or settings.chat_executor_admission_key_not_after_ms
             - settings.chat_executor_admission_key_not_before_ms
             > 30 * 24 * 60 * 60 * 1_000
-            or not settings.chat_executor_admission_key_not_before_ms
-            <= now_ms
-            <= settings.chat_executor_admission_key_not_after_ms
         ):
             raise RuntimeError("remote executor admission key window is invalid")
         if settings.chat_workspace_snapshots_enabled:

@@ -394,6 +394,7 @@ sudo pwc-cron mirror_thumbnails_to_disk
 | AI URL extraction stalls | Inspect production CRON health and the matching immutable-release job logs; do not rerun it from the checkout. |
 | Pending edits not landing in DB | Confirm the submitter is signed in (HF session cookie); the `POST /api/v1/me/paper-edits` endpoint requires `require_user`. Then run `SELECT * FROM pending_paper_edits WHERE status='pending' ORDER BY created_at DESC LIMIT 10;` to inspect recent submissions. |
 | Cron logs filling disk | Verify `systemd-tmpfiles` policy; production CRON logs are bounded to 30 days. Use `pwc-status` to include disk usage in the audit. |
+| `chat_config_expiring` / `chat_config_expired` alert, or `pwc-deploy` refuses with "chat configuration expires" | A dated chat value (pinned OpenRouter/OpenAI pricing, executor keys) is within 7 days of expiry or past it. Only the affected chat route fails closed; the site keeps serving. Re-check the pinned prices or rotate the key, update the named `PWC_*` value in `/etc/paperswithcode/<env>.env` (back the file up first), and restart the backend slot. `--allow-expiring-chat-config` lets an urgent hotfix deploy through. See `backend/services/chat_config_expiry.py`. |
 
 ## Pending Paper Edits Review
 

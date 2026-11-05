@@ -302,6 +302,9 @@ def _validate_chat_openrouter_policy(settings: Settings) -> None:
         safe_maximum_microusd,
     )
 
+    # Pricing freshness depends on the wall clock, so it is enforced per
+    # request (chat on the affected routes fails closed) rather than here,
+    # where a stale date would stop every worker and take down the whole site.
     try:
         credential_keyring(settings)
         maximum = max(
@@ -313,6 +316,7 @@ def _validate_chat_openrouter_policy(settings: Settings) -> None:
                     maximum_output_tokens=PROVIDER_OUTPUT_TOKEN_LIMIT,
                     payload={"messages": [{"role": "user", "content": "x"}]},
                 ),
+                enforce_freshness=False,
             )
             for route in settings.chat_openrouter_routes
         )
