@@ -1,11 +1,13 @@
 """Production entrypoint for posting a trending paper to X.
 
-Posts a top trending recent arXiv paper that has a TL;DR and was never posted,
-preferring one whose organization has a verified X account: the first PDF page
-as an image and a post that leads with the paper's most striking result, then
-its name and organization, followed by a reply with the paper page link. Luna
-writes the post (PWC_OPENAI_API_KEY); without the key, or when Luna's text
-fails a check, a template is used. Needs the posting account's
+Posts a top trending recent arXiv paper that has a TL;DR, was never posted,
+and is worth posting: a clear Papers with Code SOTA, or a well-known lab whose
+official X account is known. A SOTA post states the result against the
+previous best; otherwise Luna writes the post (PWC_OPENAI_API_KEY), falling
+back to a template, and either has to open with a comparison or a claim. When
+no candidate qualifies the slot is skipped, and `skipped` in the printed
+summary gives each reason. The first PDF page is the image, and a reply
+carries the paper page link. Needs the posting account's
 OAuth 1.0a keys (X_POST_CONSUMER_KEY, X_POST_CONSUMER_SECRET,
 X_POST_ACCESS_TOKEN, X_POST_ACCESS_TOKEN_SECRET); without them, or with
 --dry-run, it only prints the post it would make.

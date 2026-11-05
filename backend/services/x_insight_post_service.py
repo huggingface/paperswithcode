@@ -38,13 +38,15 @@ from backend.models.database import (
     XInsightPost,
 )
 from backend.services.benchmark_trend_service import _support_weighted_score
-from backend.services.metric_value_service import parse_metric_value
 from backend.services.method_service import MethodService
 from backend.services.task_service import TaskService
 from backend.services.x_insight_cards import Bar, render_bar_card, render_list_card
 from backend.services.x_trending_post_service import (
+    Row,
     XPoster,
+    fmt,
     hf_org_x_handle,
+    leaderboard_rows,
     luna_text,
     numbers,
     organization_x_handle,
@@ -94,12 +96,6 @@ class Insight:
     link: str
     image: bytes
     facts: dict[str, Any] = field(default_factory=dict)
-
-
-def fmt(value: float) -> str:
-    """Compact metric value: at most two decimals, no trailing zeros."""
-    text = f"{value:.1f}" if abs(value) >= 100 else f"{value:.2f}"
-    return text.rstrip("0").rstrip(".") if "." in text else text
 
 
 def fmt_lift(value: float) -> str:
@@ -198,39 +194,6 @@ def compose_list(head: str, labels: list[str], max_chars: int = 280) -> str:
 # --- New SOTA -------------------------------------------------------------
 
 
-@dataclass
-class Row:
-    evaluation_id: int
-    paper_id: int
-    model: str
-    value: float
-
-
-def _leaderboard(db: Session, dataset_id: int, metric: str) -> list[Row]:
-    """Every result for this benchmark and metric, across all tasks.
-
-    A benchmark can have a leaderboard under several tasks (IFEval under both
-    Instruction Following and Language Modeling); a new SOTA has to beat them
-    all, or the site itself would contradict the post.
-    """
-    rows = db.execute(
-        select(
-            Evaluation.id,
-            Evaluation.paper_id,
-            Evaluation.model_name,
-            Evaluation.metrics[metric].astext,
-        ).where(
-            Evaluation.dataset_id == dataset_id,
-            Evaluation.metrics.has_key(metric),
-        )
-    ).all()
-    parsed = [
-        Row(row[0], row[1], row[2] or "Unnamed model", parse_metric_value(row[3]))
-        for row in rows
-    ]
-    return [row for row in parsed if row.value is not None]
-
-
 def _distinct_models(rows: list[Row], limit: int) -> list[Row]:
     seen: set[str] = set()
     result = []
@@ -274,7 +237,7 @@ def new_sota(
         subject = f"{dataset.id}:{metric}:{paper.id}"
         if sota_posted(db, subject):
             continue
-        rows = _leaderboard(db, dataset.id, metric)
+        rows = leaderboard_rows(db, dataset.id, metric)
         if len(rows) < SOTA_MIN_ENTRIES or (best and len(rows) <= best[0]):
             continue
         direction = db.scalar(select(Metric.direction).where(Metric.name == metric))
