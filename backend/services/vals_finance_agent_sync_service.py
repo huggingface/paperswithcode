@@ -468,13 +468,24 @@ def parse_vals_finance_agent(html: str) -> list[ValsEntry]:
     """Parse the leaderboard table, failing on any layout change."""
     if not isinstance(html, str) or not html.strip():
         raise TypeError("Vals AI response must be non-empty HTML")
-    tables = BeautifulSoup(html, "html.parser").find_all("table")
-    if len(tables) != 1:
-        raise ValueError(f"Vals AI page has {len(tables)} tables; expected 1")
-    rows = tables[0].find_all("tr")
-    header = tuple(_text(cell) for cell in rows[0].find_all(["th", "td"]))
-    if header[: len(TABLE_HEADER)] != TABLE_HEADER:
-        raise ValueError(f"Vals AI table header changed: {header!r}")
+    # The page also renders sample answers whose Markdown can contain tables,
+    # so pick the leaderboard by its header instead of by position.
+    leaderboards = []
+    for table in BeautifulSoup(html, "html.parser").find_all("table"):
+        rows = table.find_all("tr")
+        header = (
+            tuple(_text(cell) for cell in rows[0].find_all(["th", "td"]))
+            if rows
+            else ()
+        )
+        if header[: len(TABLE_HEADER)] == TABLE_HEADER:
+            leaderboards.append((rows, header))
+    if len(leaderboards) != 1:
+        raise ValueError(
+            f"Vals AI page has {len(leaderboards)} leaderboard tables with header "
+            f"{TABLE_HEADER!r}; expected 1"
+        )
+    rows, header = leaderboards[0]
     entries: list[ValsEntry] = []
     seen: set[str] = set()
     for row in rows[1:]:

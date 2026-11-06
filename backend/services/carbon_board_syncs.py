@@ -161,7 +161,9 @@ def parse_swe_sweep(html: str) -> list[LeaderboardEntry]:
 # --- Andon Labs: Vending-Bench 2 and Blueprint-Bench 2 ------------------------
 
 _SCRIPT_URL = re.compile(r'(?:href|src)="([^"]*/_app/immutable/[^"]+\.js)"')
-_VB2_RUNS = re.compile(r"(?<![\w$])vb2:\{")
+# Minified object literal before 2026-11-02, a JSON.parse string since.
+_VB2_RUNS = re.compile(r'(?<![\w$"])(?:vb2|"vb2"):\{')
+_NODE_IDS = re.compile(r"node_ids:\s*\[([\d,\s]+)\]")
 
 
 def parse_vending_bench_2(chunk: str) -> list[LeaderboardEntry]:
@@ -201,13 +203,28 @@ def fetch_vending_bench_2(client: httpx.Client | None = None) -> list[Leaderboar
     try:
         page = fetch_text(VENDING_BENCH_2_URL, active_client)
         seen: set[str] = set()
-        # Start from the page's route modules and follow their imports to
-        # the shared chunk that holds the run data.
-        queue = [
+        scripts = [
             httpx.URL(VENDING_BENCH_2_URL).join(url)
             for url in _SCRIPT_URL.findall(page)
-            if "/nodes/" in url
         ]
+        # Start from the page's route modules and follow their imports to
+        # the shared chunk that holds the run data.
+        queue = [url for url in scripts if "/nodes/" in url.path]
+        # Since 2026-11-02 the page preloads only its layout nodes; the
+        # route's own node is named by hydration's node_ids and resolved
+        # through the app entry's node table.
+        node_ids = _NODE_IDS.search(page)
+        app = next((url for url in scripts if "/entry/app." in url.path), None)
+        if node_ids and app is not None:
+            app_source = fetch_text(str(app), active_client)
+            for node_id in node_ids[1].replace(" ", "").split(","):
+                queue.extend(
+                    app.join(path)
+                    for path in re.findall(
+                        rf"[\"'`](\.\./nodes/{node_id}\.[\w-]+\.js)[\"'`]",
+                        app_source,
+                    )
+                )
         while queue and len(seen) < 150:
             url = queue.pop(0)
             if str(url) in seen:
