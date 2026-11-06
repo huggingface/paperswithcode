@@ -5,31 +5,38 @@ import { ArrowRight, Check, Plus } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { catalogApi } from '@/lib/api/catalog';
 import { hfLoginUrl } from '@/lib/apiUrl';
-import { researchApi, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion } from '@/lib/api/research';
+import { researchApi, TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
-import { researchQueryKeys, TEN_MINUTES } from '@/lib/api/queryKeys';
-import { stashPendingFollows, stashPendingTopic, useResearchFollows, useSaveFollows, useSaveTopic, type FollowPick } from '@/lib/researchTopic';
+import { TEN_MINUTES } from '@/lib/api/queryKeys';
+import {
+  stashPendingFollows, stashPendingTopic, useRemoveTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic,
+  type FollowPick,
+} from '@/lib/researchTopic';
 
 // Suggestions fetched per group; each group shows as many as fit in two rows, after everything already followed,
 // and links to its full listing for more.
 const SUGGESTIONS_PER_GROUP = 16;
 
 /** Builds the Following feed in a pop-up, so /following shows no input field next to the chat box:
- * a free-text topic plus trending tasks and methods, popular authors, and organizations to follow. Guests sign in on submit, and
- * /following saves what they picked when they return. */
-export default function TopicDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+ * a free-text topic (the one with `topicId`, or a new one) plus the other followed topics, trending tasks and methods,
+ * popular authors, and organizations to follow. Guests sign in on submit, and /following saves what they picked when they return. */
+export default function TopicDialog({ open, topicId = null, onOpenChange }: {
+  open: boolean;
+  topicId?: number | null;
+  onOpenChange: (open: boolean) => void;
+}) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="topic-dialog" aria-describedby={undefined}>
-      <TopicDialogForm onDone={() => onOpenChange(false)} />
+      <TopicDialogForm key={topicId ?? 'new'} topicId={topicId} onDone={() => onOpenChange(false)} />
     </DialogContent>
   </Dialog>;
 }
 
-function TopicDialogForm({ onDone }: { onDone: () => void }) {
+function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: () => void }) {
   const { user } = useAuth();
   const location = useLocation();
-  const topic = useQuery({ queryKey: researchQueryKeys.topic(user?.hf_subject), queryFn: researchApi.topic, enabled: !!user });
+  const topics = useResearchTopics();
   const follows = useResearchFollows();
   const tasks = useQuery({
     queryKey: ['trending-tasks-follow'],
@@ -53,21 +60,28 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
   // The follow state chosen per chip; submit sends only those that differ from the current follows,
   // so chips stay right when a partial save refreshes the follows.
   const [selection, setSelection] = useState<FollowPick[]>([]);
+  // Other followed topics show as chips; unselecting one removes it on submit.
+  const [removals, setRemovals] = useState<number[]>([]);
   const saveTopic = useSaveTopic();
+  const removeTopics = useRemoveTopics();
   const saveFollows = useSaveFollows();
-  const saved = topic.data?.text ?? '';
+  const editing = topics.data?.find(topic => topic.id === topicId);
+  const otherTopics = topics.data?.filter(topic => topic.id !== topicId) ?? [];
+  const pendingRemovals = removals.filter(id => otherTopics.some(topic => topic.id === id));
+  const saved = editing?.text ?? '';
   const value = draft ?? saved;
   const trimmed = value.trim().replace(/\s+/g, ' ');
   // Saving the same text again restarts a backfill that gave up.
-  const retry = topic.data?.status === 'failed' && trimmed === saved;
-  const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry);
-  const saving = saveTopic.isPending || saveFollows.isPending;
+  const retry = editing?.status === 'failed' && trimmed === saved;
+  const atLimit = !editing && (topics.data?.length ?? 0) - pendingRemovals.length >= TOPIC_LIMIT;
+  const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry) && !atLimit;
+  const saving = saveTopic.isPending || removeTopics.isPending || saveFollows.isPending;
   const isFollowed = (kind: FollowKind, id: string) =>
     follows.data?.some(follow => follow.kind === kind && String(follow.entity_id) === id) ?? false;
   const isSelected = (kind: FollowKind, id: string) =>
     selection.find(pick => pick.kind === kind && pick.id === id)?.follow ?? isFollowed(kind, id);
   const changes = selection.filter(pick => pick.follow !== isFollowed(pick.kind, pick.id));
-  const submittable = !saving && (topicSavable || changes.length > 0);
+  const submittable = !saving && (topicSavable || changes.length > 0 || pendingRemovals.length > 0);
   const toggle = (kind: FollowKind, id: string, name: string) => setSelection(current => [
     ...current.filter(pick => pick.kind !== kind || pick.id !== id),
     { kind, id, name, follow: !isSelected(kind, id) },
@@ -80,10 +94,13 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
       window.location.href = hfLoginUrl(`${location.pathname}${location.search}`);
       return;
     }
-    // Save the follows and the topic independently, so one failing still saves the other.
+    // Save the follows, removals, and the topic independently, so one failing still saves the others.
+    // Removals run before the topic save, so freeing a slot lets a new topic in at the limit.
+    const removed = pendingRemovals.length ? removeTopics.mutateAsync(pendingRemovals) : Promise.resolve();
     const saves = [
       ...(changes.length ? [saveFollows.mutateAsync(changes)] : []),
-      ...(topicSavable ? [saveTopic.mutateAsync(trimmed)] : []),
+      removed,
+      ...(topicSavable ? [removed.catch(() => undefined).then(() => saveTopic.mutateAsync({ id: editing?.id, text: trimmed }))] : []),
     ];
     void Promise.allSettled(saves).then(results => {
       if (results.every(result => result.status === 'fulfilled')) onDone();
@@ -125,11 +142,16 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
     submit();
   }}>
     <DialogTitle className="topic-dialog-title">
-      {saved || follows.data?.length ? 'Edit your research feed' : 'Build your research feed'}
+      {topics.data?.length || follows.data?.length ? 'Edit your research feed' : 'Build your research feed'}
     </DialogTitle>
     <div className="topic-dialog-group">
-      <h3><label htmlFor="topic-dialog-input">Describe a topic in your own words</label></h3>
-      <p className="topic-dialog-hint">A model reads every new paper and adds the ones that match to your Following feed.</p>
+      <h3><label htmlFor="topic-dialog-input">
+        {editing ? 'Edit this topic' : topics.data?.length ? 'Add a topic in your own words' : 'Describe a topic in your own words'}
+      </label></h3>
+      <p className="topic-dialog-hint">
+        {atLimit ? `You follow ${TOPIC_LIMIT} topics, the most allowed. Remove one below to add another.`
+          : 'A model reads every new paper and adds the ones that match to your Following feed.'}
+      </p>
       <textarea id="topic-dialog-input" className="research-topic-input" rows={4} maxLength={TOPIC_MAX_LENGTH}
         aria-label="Research topic"
         placeholder="e.g. diffusion policies for robot manipulation, or speculative decoding for LLM inference"
@@ -142,22 +164,36 @@ function TopicDialogForm({ onDone }: { onDone: () => void }) {
         }} />
       <span className="research-topic-count">{value.length}/{TOPIC_MAX_LENGTH}</span>
     </div>
+    {otherTopics.length > 0 && <div className="topic-dialog-group">
+      <h3>{editing ? 'Your other topics' : 'Your topics'}</h3>
+      <div className="topic-dialog-chips">
+        {otherTopics.map(topic => {
+          const on = !removals.includes(topic.id);
+          return <button key={topic.id} type="button" className="topic-dialog-chip" aria-pressed={on} disabled={saving}
+            title={topic.text}
+            onClick={() => setRemovals(current => on ? [...current, topic.id] : current.filter(id => id !== topic.id))}>
+            {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}
+            {topic.label ?? topic.text}
+          </button>;
+        })}
+      </div>
+    </div>}
     {chips('Trending tasks', 'task', tasks.data?.results ?? [], { to: '/tasks', label: 'Browse tasks' })}
     {chips('Trending methods', 'method', methods.data?.results ?? [], { to: '/methods', label: 'Browse methods' })}
     {chips('Benchmarks', 'benchmark', [], { to: '/tasks', label: 'Browse benchmarks' })}
     {chips('Popular authors', 'author', suggested(suggestions.data?.authors))}
     {chips('Popular organizations', 'organization', suggested(suggestions.data?.organizations),
       { to: '/organizations', label: 'Browse organizations' })}
-    {(saveTopic.error || saveFollows.error) && <p className="settings-token-error" role="alert">
+    {(saveTopic.error || removeTopics.error || saveFollows.error) && <p className="settings-token-error" role="alert">
       Could not save your feed. Please try again.
     </p>}
     <div className="topic-dialog-actions">
-      {saved && <button type="button" className="research-follow-action topic-dialog-remove" disabled={saving}
-        onClick={() => saveTopic.mutate(null, { onSuccess: onDone })}>Remove topic</button>}
+      {editing && <button type="button" className="research-follow-action topic-dialog-remove" disabled={saving}
+        onClick={() => removeTopics.mutate([editing.id], { onSuccess: onDone })}>Remove topic</button>}
       <button type="button" className="research-follow-action" disabled={saving} onClick={onDone}>Cancel</button>
       <button type="submit" className="research-topic-save" disabled={!submittable}>
-        {changes.some(change => change.follow === false) ? 'Save'
-          : changes.length ? 'Follow' : retry ? 'Retry' : saved ? 'Update topic' : 'Follow'}
+        {changes.some(change => change.follow === false) || pendingRemovals.length ? 'Save'
+          : changes.length ? 'Follow' : retry ? 'Retry' : editing ? 'Update topic' : 'Follow'}
       </button>
     </div>
   </form>;

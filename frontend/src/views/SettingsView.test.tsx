@@ -192,7 +192,7 @@ describe("SettingsView provider-aware chat billing", () => {
     expect(await screen.findByRole("heading", { name: "Inference Providers" })).toBeVisible();
     expect(await screen.findByRole("heading", { name: "OpenRouter" })).toBeVisible();
     // Billing cards only; the research topic editor has its own h3.
-    expect(screen.getAllByRole("heading", { level: 3 }).filter(h => h.textContent !== "Topic")).toHaveLength(2);
+    expect(screen.getAllByRole("heading", { level: 3 }).filter(h => h.textContent !== "Topics")).toHaveLength(2);
     expect(await screen.findByText("96% left")).toBeVisible();
     expect(screen.getByText(/Direct OpenAI usage is provided by Papers With Code/i)).toBeVisible();
     expect(screen.queryByLabelText(/OpenAI API key/i)).not.toBeInTheDocument();

@@ -55,7 +55,7 @@ export const adminQueryKeys = {
 
 export const researchQueryKeys = {
   follows: (subject: string | undefined) => ["research-follows", subject] as const,
-  topic: (subject: string | undefined) => ["research-topic", subject] as const,
+  topics: (subject: string | undefined) => ["research-topics", subject] as const,
   email: (subject: string | undefined) => ["research-email", subject] as const,
   feed: (subject: string | undefined) => [...paperQueryKeys.feeds.following, subject] as const,
 } as const;

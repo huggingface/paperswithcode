@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { researchApi, type FollowKind } from '@/lib/api/research';
+import { researchApi, type FollowKind, type ResearchTopic } from '@/lib/api/research';
 import { researchQueryKeys } from '@/lib/api/queryKeys';
 import { useOptionalAuth } from '@/lib/authContext';
 
@@ -46,19 +46,57 @@ export function useSetFollow<Change extends FollowChange = FollowChange>(
   });
 }
 
-/** Saves (or, with `null`, removes) the signed-in account's topic and refreshes what depends on it. */
+export const isTopicBuilding = (topic: ResearchTopic) => topic.status === 'pending' || topic.status === 'running';
+
+/** The signed-in account's topics, oldest first; polled every `pollMs` while one is still being matched. */
+export function useResearchTopics(enabled = true, pollMs = 5000) {
+  const user = useOptionalAuth()?.user;
+  return useQuery({
+    queryKey: researchQueryKeys.topics(user?.hf_subject),
+    queryFn: researchApi.topics,
+    enabled: enabled && !!user,
+    refetchInterval: query => query.state.data?.some(isTopicBuilding) ? pollMs : false,
+  });
+}
+
+/** Adds a topic, or with `id` replaces that topic's text. */
+export interface TopicSave {
+  id?: number;
+  text: string;
+}
+
+/** Refreshes the topics and what depends on them; resolves once the topics have reloaded. */
+function refreshTopics(client: QueryClient, subject: string | undefined) {
+  void invalidateResearch(client, subject, { follows: false });
+  return client.invalidateQueries({ queryKey: researchQueryKeys.topics(subject) });
+}
+
+/** Saves one of the signed-in account's topics and refreshes what depends on it. */
 export function useSaveTopic(onSaved?: () => void) {
   const user = useOptionalAuth()?.user;
   const client = useQueryClient();
   return useMutation({
-    mutationFn: async (text: string | null) => text === null ? (await researchApi.clearTopic(), null) : researchApi.setTopic(text),
-    onSuccess: data => {
-      client.setQueryData(researchQueryKeys.topic(user?.hf_subject), data);
+    mutationFn: ({ id, text }: TopicSave) => id === undefined ? researchApi.addTopic(text) : researchApi.updateTopic(id, text),
+    onSuccess: async () => {
       // Any saved topic supersedes one a guest stashed before signing in.
       clearPendingTopic();
+      await refreshTopics(client, user?.hf_subject);
       onSaved?.();
-      void invalidateResearch(client, user?.hf_subject, { follows: false });
     },
+  });
+}
+
+/** Stops following the given topics, refreshing what depends on them even when some fail. */
+export function useRemoveTopics() {
+  const user = useOptionalAuth()?.user;
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: number[]) => {
+      const results = await Promise.allSettled(ids.map(id => researchApi.removeTopic(id)));
+      const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected');
+      if (failure) throw failure.reason;
+    },
+    onSettled: () => void refreshTopics(client, user?.hf_subject),
   });
 }
 

@@ -31,7 +31,7 @@ from backend.models.research import (
     ResearchEntry,
     ResearchFeedEntry,
 )
-from backend.models.database.research import ResearchTopic
+from backend.models.database.research import ResearchTopic, ResearchTopicFollow
 from backend.services.organization_service import OrganizationService
 from backend.services.research_topic_service import THRESHOLD as TOPIC_THRESHOLD
 from backend.utils.author_photos import author_image_url
@@ -147,14 +147,16 @@ class Interest(NamedTuple):
 
 
 def interests(db: Session, subject: str) -> dict[tuple[str, int], Interest]:
-    """Entity follows plus the account's free-text topic, named as reasons show them."""
+    """Entity follows plus the account's free-text topics, named as reasons show them."""
     found = {
         (f.kind, f.entity_id): Interest(f.kind, f.entity_id, f.name)
         for f in follows(db, subject)
     }
-    sub = db.get(ResearchSubscription, subject)
-    topic = sub and sub.topic_id and db.get(ResearchTopic, sub.topic_id)
-    if topic:
+    for topic in db.scalars(
+        select(ResearchTopic)
+        .join(ResearchTopicFollow, ResearchTopicFollow.topic_id == ResearchTopic.id)
+        .where(ResearchTopicFollow.hf_subject == subject)
+    ):
         name = topic.label or topic.text
         short = name if len(name) <= 80 else name[:79].rstrip() + "…"
         found["topic", topic.id] = Interest("topic", topic.id, f"\u201c{short}\u201d")
@@ -210,9 +212,9 @@ def default_email_on(
     """
     sub = subscription(db, subject)
     db.refresh(sub, with_for_update=True)
-    follows_something = sub.topic_id is not None or db.scalar(
+    follows_something = db.scalar(
         select(exists().where(ResearchFollow.hf_subject == subject))
-    )
+    ) or db.scalar(select(exists().where(ResearchTopicFollow.hf_subject == subject)))
     if (
         email
         and not sub.enabled
@@ -295,8 +297,7 @@ MATCH_SQL = """
 WITH RECURSIVE interests AS (
  SELECT kind,entity_id,created_at FROM research_follows WHERE hf_subject=:subject
  UNION ALL
- SELECT 'topic',topic_id,topic_set_at FROM research_subscriptions
- WHERE hf_subject=:subject AND topic_id IS NOT NULL
+ SELECT 'topic',topic_id,created_at FROM research_topic_follows WHERE hf_subject=:subject
 ), descendants(root,id) AS (
  SELECT entity_id,entity_id FROM interests WHERE kind='task'
  UNION SELECT d.root,t.id FROM tasks t JOIN descendants d ON t.parent_id=d.id
@@ -473,6 +474,7 @@ def feed_entries(
     has_code: bool = False,
     has_hf_artifacts: bool = False,
     topic_only: bool = False,
+    topic_id: int | None = None,
 ) -> list[ResearchFeedEntry]:
     """Filter and rank matches like the home feed, then explain only the returned page."""
     from backend.services.paper_service import PaperService
@@ -487,12 +489,16 @@ def feed_entries(
             cutoff=cutoff,
             topic_threshold=TOPIC_THRESHOLD,
         )
-        .columns(column("id", Integer), column("kind", String))
+        .columns(
+            column("id", Integer), column("kind", String), column("entity_id", Integer)
+        )
         .subquery("matches")
     )
     matched_ids = select(matches.c.id)
-    if topic_only:
+    if topic_only or topic_id is not None:
         matched_ids = matched_ids.where(matches.c.kind == "topic")
+    if topic_id is not None:
+        matched_ids = matched_ids.where(matches.c.entity_id == topic_id)
     service = PaperService(db)
     query = db.query(DBPaper).filter(DBPaper.id.in_(matched_ids))
     if has_code:

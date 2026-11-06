@@ -47,6 +47,7 @@ class TopicSuggestion(BaseModel):
 
 
 class TopicView(BaseModel):
+    id: int
     text: str
     # Few-word summary of a long description; null for short ones.
     label: str | None = None

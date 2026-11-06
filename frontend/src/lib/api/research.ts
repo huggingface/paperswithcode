@@ -28,6 +28,7 @@ export interface ResearchTopicSuggestion {
   url: string;
 }
 export interface ResearchTopic {
+  id: number;
   text: string;
   /** Few-word summary of a long description; null for short ones. */
   label: string | null;
@@ -39,6 +40,8 @@ export interface ResearchTopic {
   suggestions: ResearchTopicSuggestion[];
 }
 export const TOPIC_MAX_LENGTH = 300;
+/** How many topics an account may follow. */
+export const TOPIC_LIMIT = 10;
 export interface ResearchEmail {
   enabled: boolean;
   email: string | null;
@@ -58,7 +61,10 @@ export interface ResearchEntry {
 export interface FollowingFilters {
   startDate?: string;
   endDate?: string;
+  /** Only papers matching any followed topic. */
   topicOnly?: boolean;
+  /** Only papers matching this topic. */
+  topicId?: number;
 }
 export const researchApi = {
   follows: () => apiRequest<ResearchFollow[]>('/me/follows'),
@@ -71,13 +77,17 @@ export const researchApi = {
     if (filters.endDate) params.set('end_date', filters.endDate);
     if (!filters.startDate && !filters.endDate) params.set('all_time', 'true');
     if (filters.topicOnly) params.set('topic_only', 'true');
+    if (filters.topicId !== undefined) params.set('topic_id', String(filters.topicId));
     return apiRequest<ResearchEntry[]>(`/me/following?${params}`);
   },
-  topic: () => apiRequest<ResearchTopic | null>('/me/topic'),
-  setTopic: (text: string) => apiRequest<ResearchTopic>('/me/topic', {
+  topics: () => apiRequest<ResearchTopic[]>('/me/topics'),
+  addTopic: (text: string) => apiRequest<ResearchTopic>('/me/topics', {
+    method: 'POST', body: JSON.stringify({ text }),
+  }),
+  updateTopic: (id: number, text: string) => apiRequest<ResearchTopic>(`/me/topics/${id}`, {
     method: 'PUT', body: JSON.stringify({ text }),
   }),
-  clearTopic: () => apiRequest<void>('/me/topic', { method: 'DELETE' }),
+  removeTopic: (id: number) => apiRequest<void>(`/me/topics/${id}`, { method: 'DELETE' }),
   email: () => apiRequest<ResearchEmail>('/me/research-email'),
   setEmail: (enabled: boolean) => apiRequest<ResearchEmail>('/me/research-email', {
     method: 'PUT', body: JSON.stringify({ enabled }),

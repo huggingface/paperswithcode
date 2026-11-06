@@ -19,13 +19,15 @@ strength, publication date, popularity, then canonical ID; round-robin
 selection balances coverage and counts each paper once. Up to 100 interests
 may be followed. Feed pages contain 40 entries.
 
-## Free-text topic
+## Free-text topics
 
-Each account may also describe one topic in its own words (up to 300
-characters, edited in `/settings` or from the Following feed). Topics are
+Each account may also describe up to ten topics in its own words (up to 300
+characters each, edited in `/settings` or from the Following feed). Topics are
 shared rows in `research_topics`, keyed by normalized text (lowercase,
-collapsed whitespace, trailing punctuation stripped); subscriptions point at
-one through `research_subscriptions.topic_id`. Jev (`jev-1.14` through
+collapsed whitespace, trailing punctuation stripped); accounts follow them
+through `research_topic_follows`. The API is `GET/POST /me/topics` and
+`PUT/DELETE /me/topics/{id}`; the older single-topic `/me/topic` reads and
+replaces the oldest topic. Jev (`jev-1.14` through
 OpenRouter's `systemone` endpoint) scores each paper's card (title, authors,
 organizations, venue, task/method/benchmark tags, abstract) against the topic,
 and `research_topic_verdicts` keeps the raw score with the card's SHA-256 and
@@ -37,6 +39,8 @@ locally).
 
 Topic matches join entity matches in one feed, deduplicated by paper and
 ranked by the same trending order; the reason line names the topic in quotes.
+The feed's `topic_id` parameter (`/following?topic=<id>`) shows one topic's
+matches; `topic_only` shows every topic's.
 A new topic is backfilled by the per-minute `backfill_research_topics` job:
 every paper from the last 90 days, then up to 3,000 older papers ranked by
 dense + lexical reciprocal rank fusion, judged once in batches of 500 until a
@@ -48,7 +52,7 @@ retries up to five times, and CRON health flags papers left unjudged for six
 hours. Staging has its own topic tables and no topic CRON, so staging topics
 stay pending.
 
-Digests list up to 10 topic matches first under "New on your topic", then
+Digests list up to 10 topic matches first under "New on your topics", then
 entity follows. Topic matches use the same paper discovery events as entity
 follows, so only papers discovered after the topic was set can be emailed;
 backfilled papers are feed-only.

@@ -1,9 +1,9 @@
 import FollowingIntro from "@/components/FollowingIntro";
 import TopicDialog from "@/components/TopicDialog";
 import { isAuthDisabled } from "@/lib/apiUrl";
-import { clearPendingTopic, readPendingFollows, readPendingTopic, useResearchFollows, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
+import { clearPendingTopic, isTopicBuilding, readPendingFollows, readPendingTopic, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
-import { researchApi, type FollowKind } from "@/lib/api/research";
+import { researchApi, TOPIC_LIMIT, type FollowKind, type ResearchTopic } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -338,14 +338,17 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     const next = new URLSearchParams(searchParams);
     next.delete("order_by");
     next.delete("only");
+    next.delete("topic");
     const query = next.toString();
     navigate(query ? `${path}?${query}` : path);
   };
 
-  const topicFilterHref = (active: boolean) => {
+  // `?topic=<id>` shows one topic's papers; `?only=topic` (older links) shows every topic's.
+  const topicFilterHref = (topicId: number | null) => {
     const next = new URLSearchParams(searchParams);
-    if (active) next.set("only", "topic");
-    else next.delete("only");
+    next.delete("only");
+    if (topicId === null) next.delete("topic");
+    else next.set("topic", String(topicId));
     const query = next.toString();
     return query ? `/following?${query}` : "/following";
   };
@@ -367,8 +370,10 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   });
 
   const topicOnly = following && searchParams.get("only") === "topic";
+  const topicParam = following ? Number(searchParams.get("topic") ?? NaN) : NaN;
+  const topicId = Number.isInteger(topicParam) ? topicParam : undefined;
   const dateFilters = { start_date: dateRange.startDate, end_date: dateRange.endDate };
-  const followingFilters = { ...dateRange, topicOnly };
+  const followingFilters = { ...dateRange, topicOnly, topicId };
   // Following pages by offset; the public feeds by page number.
   const infinite = usePaperFeedQuery<FeedPage>(
     following
@@ -386,25 +391,26 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     { enabled: !following || !!user, initialPage: following ? 0 : 1 },
   );
   const follows = useResearchFollows(following);
-  const topic = useQuery({
-    queryKey: researchQueryKeys.topic(user?.hf_subject),
-    queryFn: researchApi.topic,
-    enabled: following && !!user,
-    refetchInterval: query => query.state.data && ["pending", "running"].includes(query.state.data.status) ? 10000 : false,
-  });
-  const topicBuilding = !!topic.data && ["pending", "running"].includes(topic.data.status);
-  const topicName = topic.data ? topic.data.label ?? topic.data.text : "";
-  const [editingTopic, setEditingTopic] = useState(false);
-  // Refresh the feed once a new topic's backfill finishes.
+  const topics = useResearchTopics(following, 10000);
+  const topicName = (topic: ResearchTopic) => topic.label ?? topic.text;
+  const building = topics.data?.filter(isTopicBuilding) ?? [];
+  const topicBuilding = building.length > 0;
+  const filteredTopic = topics.data?.find(topic => topic.id === topicId);
+  // The pop-up edits one topic (its id) or adds one (null); undefined while closed.
+  const [editingTopic, setEditingTopic] = useState<number | null | undefined>(undefined);
+  const canAddTopic = (topics.data?.length ?? 0) < TOPIC_LIMIT;
+  // Refresh the feed each time a topic's backfill finishes, even while others still run.
   const queryClient = useQueryClient();
-  const wasBuilding = useRef(false);
+  const buildingIds = building.map(topic => topic.id).join(",");
+  const wasBuilding = useRef<string[]>([]);
   useEffect(() => {
-    if (wasBuilding.current && !topicBuilding) {
+    const now = buildingIds ? buildingIds.split(",") : [];
+    if (wasBuilding.current.some(id => !now.includes(id))) {
       void queryClient.invalidateQueries({ queryKey: researchQueryKeys.feed(user?.hf_subject) });
     }
-    wasBuilding.current = topicBuilding;
-  }, [topicBuilding, queryClient, user?.hf_subject]);
-  const noFollows = following && !!user && follows.data?.length === 0 && topic.isSuccess && !topic.data;
+    wasBuilding.current = now;
+  }, [buildingIds, queryClient, user?.hf_subject]);
+  const noFollows = following && !!user && follows.data?.length === 0 && topics.isSuccess && topics.data.length === 0;
   const showIntro = (following && !auth?.isLoading && !user) || noFollows;
   const canBuildFeed = !!user || !isAuthDisabled();
   // The pop-up opens on its own only when the intro first shows to a visitor who arrived without follows:
@@ -413,10 +419,10 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const [hadFollows, setHadFollows] = useState(false);
   const [restoringPicks] = useState(() => !!readPendingTopic() || readPendingFollows().length > 0);
   const [introShown, setIntroShown] = useState(false);
-  if (!hadFollows && (!!topic.data || !!follows.data?.length)) setHadFollows(true);
+  if (!hadFollows && (!!topics.data?.length || !!follows.data?.length)) setHadFollows(true);
   if (showIntro && !introShown) {
     setIntroShown(true);
-    if (canBuildFeed && !hadFollows && !restoringPicks) setEditingTopic(true);
+    if (canBuildFeed && !hadFollows && !restoringPicks) setEditingTopic(null);
   }
   // Save the topic a guest submitted before signing in; it stays stashed until the save succeeds.
   const pendingSave = useSaveTopic();
@@ -424,11 +430,11 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const pendingStarted = useRef(false);
   useEffect(() => {
     const pending = readPendingTopic();
-    if (!user || !topic.isSuccess || !pending || pendingStarted.current) return;
+    if (!user || !topics.isSuccess || !pending || pendingStarted.current) return;
     pendingStarted.current = true;
-    if (pending === topic.data?.text) clearPendingTopic();
-    else savePendingTopic(pending);
-  }, [user, topic.isSuccess, topic.data, savePendingTopic]);
+    if (topics.data.some(topic => topic.text === pending)) clearPendingTopic();
+    else savePendingTopic({ text: pending });
+  }, [user, topics.isSuccess, topics.data, savePendingTopic]);
   // Likewise follow the tasks and methods a guest picked in the pop-up before signing in.
   const pendingFollows = useSaveFollows();
   const { mutate: savePendingFollows } = pendingFollows;
@@ -483,19 +489,30 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>Couldn't load your follows.</div>
               )}
               <div className="sidebar-links">
-                {topic.data && (
-                  <div className={`sidebar-follow-topic ${topicOnly ? "active" : ""}`}>
-                    <Link
-                      to={topicFilterHref(!topicOnly)}
-                      className="sidebar-link sidebar-follow-link"
-                      title={topicOnly ? "Show papers from everything you follow" : `Show only papers about “${topic.data.text}”`}
-                      aria-current={topicOnly ? "true" : undefined}
-                    >
-                      <span className="sidebar-follow-kind">Topic</span>
-                      <span className="sidebar-follow-name">{topicName}</span>
-                    </Link>
-                    <button type="button" className="sidebar-follow-edit" aria-label="Edit topic"
-                      aria-expanded={editingTopic} onClick={() => setEditingTopic(true)}>edit</button>
+                {!!topics.data?.length && (
+                  <div className="sidebar-follow-group sidebar-follow-topics">
+                    <span className="sidebar-follow-kind">{topics.data.length === 1 ? "Topic" : "Topics"}</span>
+                    {topics.data.map((topic) => {
+                      const active = topic.id === topicId;
+                      return (
+                        <div key={topic.id} className={`sidebar-follow-topic ${active ? "active" : ""}`}>
+                          <Link
+                            to={topicFilterHref(active ? null : topic.id)}
+                            className="sidebar-link sidebar-follow-link"
+                            title={active ? "Show papers from everything you follow" : `Show only papers about “${topic.text}”`}
+                            aria-current={active ? "true" : undefined}
+                          >
+                            <span className="sidebar-follow-name">{topicName(topic)}</span>
+                          </Link>
+                          <button type="button" className="sidebar-follow-edit" aria-label={`Edit topic ${topicName(topic)}`}
+                            aria-expanded={editingTopic === topic.id} onClick={() => setEditingTopic(topic.id)}>edit</button>
+                        </div>
+                      );
+                    })}
+                    {canAddTopic && (
+                      <button type="button" className="sidebar-follow-add" aria-expanded={editingTopic === null}
+                        onClick={() => setEditingTopic(null)}>+ Add topic</button>
+                    )}
                   </div>
                 )}
                 {followGroups.map((group) => (
@@ -597,7 +614,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
             {pendingSave.isError && pendingSave.variables && (
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>
-                  Could not follow “{pendingSave.variables}”. <button type="button" onClick={() => savePendingTopic(pendingSave.variables)}>Try again</button>
+                  Could not follow “{pendingSave.variables.text}”. <button type="button" onClick={() => savePendingTopic(pendingSave.variables)}>Try again</button>
                 </AlertDescription>
               </Alert>
             )}
@@ -610,28 +627,34 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               </Alert>
             )}
 
-            {following && !!user && topic.isSuccess && !follows.isPending && !noFollows && (!topic.data ? (
+            {following && !!user && topics.isSuccess && !follows.isPending && !noFollows && (topics.data.length === 0 ? (
               <div className="following-topic-note" role="status">
                 Describe a topic in your own words, and a model adds matching new papers to this feed.{" "}
-                <button type="button" className="link-button" onClick={() => setEditingTopic(true)}>Follow a topic</button>
+                <button type="button" className="link-button" onClick={() => setEditingTopic(null)}>Follow a topic</button>
               </div>
             ) : topicBuilding ? (
               <div className="following-topic-note" role="status">
-                Showing the closest papers about “{topicName}” now. A model is reading papers to refine these matches, which takes a few minutes.
+                Showing the closest papers about {building.map(topic => `“${topicName(topic)}”`).join(" and ")} now. A model is reading papers to refine these matches, which takes a few minutes.
               </div>
             ) : null)}
 
-            {following && canBuildFeed && <TopicDialog open={editingTopic} onOpenChange={setEditingTopic} />}
+            {following && canBuildFeed && (
+              <TopicDialog
+                open={editingTopic !== undefined}
+                topicId={editingTopic ?? null}
+                onOpenChange={(open) => { if (!open) setEditingTopic(undefined); }}
+              />
+            )}
 
-            {topicOnly && topic.data && (
+            {(topicOnly || filteredTopic) && (
               <div className="following-topic-note following-topic-filter" role="status">
-                Showing only papers about “{topicName}”.{" "}
-                <Link to={topicFilterHref(false)}>Show everything you follow</Link>
+                Showing only papers about {filteredTopic ? `“${topicName(filteredTopic)}”` : "your topics"}.{" "}
+                <Link to={topicFilterHref(null)}>Show everything you follow</Link>
               </div>
             )}
 
             {showIntro ? (
-              <FollowingIntro onBuild={canBuildFeed ? () => setEditingTopic(true) : undefined} />
+              <FollowingIntro onBuild={canBuildFeed ? () => setEditingTopic(null) : undefined} />
             ) : (
               <PaperFeedList
                 query={infinite}
@@ -639,7 +662,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 cards={cards}
                 skeleton="card"
                 rootMargin="400px"
-                empty={error ? null : topicOnly ? <>No papers about your topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(true)}>edit your topic</button>.</> : following ? <>No papers from your topic or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}
+                empty={error ? null : filteredTopic ? <>No papers about this topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(filteredTopic.id)}>edit the topic</button>.</> : topicOnly ? <>No papers about your topics match these filters. Widen the date range or follow more topics.</> : following ? <>No papers from your topics or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}
               />
             )}
           </div>
