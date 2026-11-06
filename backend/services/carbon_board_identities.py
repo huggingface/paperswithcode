@@ -704,7 +704,7 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             hf_model_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B",
         ),
         "Qwen3.8-Max (0902)": ModelIdentity(
-            "Qwen3.8-Max", source_url="https://qwen.ai/blog?id=qwen3.8"
+            "Qwen3.8-Max", source_url="https://qwen.ai/blog?id=qwen3.8", is_open=True
         ),
         "Kimi K3.1 Pro": ModelIdentity(
             "Kimi K3.1 Pro",
