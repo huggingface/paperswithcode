@@ -629,13 +629,58 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             "MAI-Thinking-1",
             source_url="https://microsoft.ai/wp-content/uploads/2026/06/main_20260602_2.pdf",
         ),
-    },
-    "cwe-bench-v1": {
+        # Re-run on the v1.1 answer keys (2026-11-02); identities follow the
+        # reviewed Vals Index rows for the same models.
         "Gemini 4 Carbon": ModelIdentity(
             "Gemini 4 Carbon",
             source_url="https://deepmind.google/blog/gemini-4-carbon-our-next-frontier-model/",
         ),
+        "GPT 6.1 Sol": ModelIdentity(
+            "GPT-6.1 Sol",
+            source_url="https://openai.com/index/introducing-gpt-6-1-sol/",
+        ),
+        "Claude Sonnet 5.5": ModelIdentity(
+            "Claude Sonnet 5.5",
+            source_url="https://www.anthropic.com/claude-sonnet-5-5",
+        ),
+        "Gemini 4 Argon": ModelIdentity(
+            "Gemini 4 Argon",
+            source_url="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/",
+        ),
+        "Muse Wonder Full": ModelIdentity(
+            "Muse Wonder Full", source_url="https://research.meta.ai/blog/muse-wonder"
+        ),
+        "Kimi K3.1 Pro": ModelIdentity(
+            "Kimi K3.1 Pro",
+            source_url="https://www.kimi.com/blog/kimi-k3-1-pro",
+            is_open=True,
+        ),
+        "Muse Wonder 1.0": ModelIdentity(
+            "Muse Wonder", source_url="https://research.meta.ai/blog/muse-wonder"
+        ),
         "Grok 4.7": ModelIdentity("Grok 4.7", source_url="https://x.ai/news/grok-4-7"),
+        "DeepSeek V4.1 Flash 1017": ModelIdentity(
+            "DeepSeek-V4.1-Flash-1017", arxiv_id="2609.19969", is_open=True
+        ),
+        "Beam 1.0": ModelIdentity(
+            "Beam 1.0",
+            source_url="https://reflection.ai/blog/introducing-beam",
+            is_open=True,
+        ),
+        "Mistral Large 4": ModelIdentity(
+            "Mistral Large 4",
+            source_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/assets/technical_report.pdf",
+            is_open=True,
+            hf_model_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B",
+        ),
+    },
+    "cwe-bench-v2": {
+        "Claude Opus 5.5": ModelIdentity(
+            "Claude Opus 5.5", source_url="https://www.anthropic.com/claude-opus-5-5"
+        ),
+        "Muse Wonder": ModelIdentity(
+            "Muse Wonder", source_url="https://research.meta.ai/blog/muse-wonder"
+        ),
         "Gemini 4 Argon": ModelIdentity(
             "Gemini 4 Argon",
             source_url="https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/",
@@ -643,34 +688,31 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         "GPT-6 Astra": ModelIdentity(
             "GPT-6 Astra", source_url="https://openai.com/index/gpt-6-astra/"
         ),
-        "Claude Opus 5.5": ModelIdentity(
-            "Claude Opus 5.5", source_url="https://www.anthropic.com/claude-opus-5-5"
+        "DeepSeek-V4.1-Flash (1017)": ModelIdentity(
+            "DeepSeek-V4.1-Flash-1017", arxiv_id="2609.19969", is_open=True
         ),
-        "Claude Fable 5.1": ModelIdentity(
-            "Claude Fable 5.1",
-            source_url="https://www.anthropic.com/claude-fable-and-mythos-5-1",
-        ),
-        "Grok 4.6": ModelIdentity("Grok 4.6", source_url="https://x.ai/news/grok-4-6"),
-        "DeepSeek-V4.1-Flash": ModelIdentity(
-            "DeepSeek-V4.1-Flash", arxiv_id="2609.19969", is_open=True
-        ),
-        "Muse Spark 1.3": ModelIdentity(
-            "Muse Spark 1.3",
-            source_url="https://research.meta.ai/blog/introducing-muse-spark-1-3",
-        ),
+        "Grok 4.7": ModelIdentity("Grok 4.7", source_url="https://x.ai/news/grok-4-7"),
         "Hy4 Preview": ModelIdentity(
             "Hy4 Preview",
             source_url="https://github.com/Tencent-Hunyuan/Hy4-preview/blob/1296fab2674cb5a645ccfe53e9a8dc225dbe69f2/README.md",
             is_open=True,
         ),
-        "GPT-6 Sol": ModelIdentity(
-            "GPT-6 Sol",
-            source_url="https://openai.com/index/introducing-gpt-6-sol-and-luna/",
-        ),
-        "Inkling": ModelIdentity(
-            "Inkling",
-            source_url="https://thinkingmachines.ai/news/introducing-inkling/",
+        "Mistral Large 4": ModelIdentity(
+            "Mistral Large 4",
+            source_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/assets/technical_report.pdf",
             is_open=True,
+            hf_model_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B",
+        ),
+        "Qwen3.8-Max (0902)": ModelIdentity(
+            "Qwen3.8-Max", source_url="https://qwen.ai/blog?id=qwen3.8", is_open=True
+        ),
+        "Kimi K3.1 Pro": ModelIdentity(
+            "Kimi K3.1 Pro",
+            source_url="https://www.kimi.com/blog/kimi-k3-1-pro",
+            is_open=True,
+        ),
+        "GLM-5.3": ModelIdentity(
+            "GLM-5.3", source_url="https://z.ai/blog/glm-5.3", is_open=True
         ),
     },
     "exploitgym": {

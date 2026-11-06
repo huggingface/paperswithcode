@@ -1493,9 +1493,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                    count(*) AS matched_evaluations
             FROM evaluations e
             JOIN datasets d ON d.id = e.dataset_id
-            WHERE d.slug = 'cwe-bench-v1'
+            WHERE d.slug = 'cwe-bench-v2'
               AND e.methodology LIKE
-                  'Managed by the Papers with Code Collinear AI CWE-bench live sync.%'
+                  'Managed by the Papers with Code Collinear AI CWE-bench v2 live sync.%'
         """,
         workflow_file="cron-sync-cwe-bench.yml",
         workflow_jobs=("run",),

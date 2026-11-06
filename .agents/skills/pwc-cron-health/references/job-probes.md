@@ -151,12 +151,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 ## `sync_riemann_bench`
 
-- **Contract:** `riemann-bench` on task `math`; Pass@1 0–1 from the visible percentage; the "Riemann-bench Leaderboard" block at https://surgehq.ai/benchmarks/riemann-bench (Chartography layout, empty `data-score`); typically 15–400 rows (44 on 2026-10-29).
+- **Contract:** `riemann-bench` on task `math`; Pass@1 0–1 from the visible percentage; the "Riemann-bench Leaderboard" block at https://surgehq.ai/benchmarks/riemann-bench (Chartography layout, empty `data-score`); typically 15–400 rows (44 on 2026-10-29; 21 since the v1.1 answer-key re-run on 2026-11-02, after which the 32 v1.0-only rows were deleted).
 - **Proof:** Diff the upstream rows against managed rows; confirm `sync_riemann_bench_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
 
 ## `sync_cwe_bench`
 
-- **Contract:** `cwe-bench-v1` on task `cybersecurity`; Pass@1 0–1 (programmatic verifier), harness from "run in …"; the `CWE-bench v1 leaderboard` JSON-LD ItemList on https://cwe-bench.com/; typically 5–200 items (12 on 2026-10-29).
+- **Contract:** `cwe-bench-v2` on task `cybersecurity`; Pass@1 over all 250 tasks (programmatic verifier), harness from "run in …"; the `CWE-bench v2 leaderboard` JSON-LD ItemList on https://cwe-bench.com/; typically 5–200 items (11 on 2026-11-06). Since 2026-11-02 `cwe-bench-v1` is a frozen snapshot (archive at https://cwe-bench.com/v1) and is not synced.
 - **Proof:** Diff the upstream rows against managed rows; confirm `sync_cwe_bench_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
 
 ## `sync_exploitgym`
