@@ -1,4 +1,4 @@
-"""Free-text research topics judged by Jev, one per user, shared by normalized text.
+"""Free-text research topics judged by Jev, several per user, shared by normalized text.
 
 A topic's verdicts are raw Jev scores per paper. The feed shows papers scoring
 at least ``THRESHOLD`` (calibrated on 299 hand-labelled topic/paper pairs; 95%
@@ -33,8 +33,8 @@ from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.models.database.research import (
-    ResearchSubscription,
     ResearchTopic,
+    ResearchTopicFollow,
     ResearchTopicPreview,
     ResearchTopicVerdict,
 )
@@ -67,6 +67,7 @@ PREVIEW_DEPTH = 30
 LABEL_MIN_LENGTH = 60
 LABEL_MODEL = "gpt-6-luna"
 LABEL_TIMEOUT = 10
+MAX_TOPICS = 10
 
 LABEL_PROMPT = (
     "A user described the research they want to follow. Name the topic in 2 to 6 "
@@ -183,11 +184,7 @@ def cards(db: Session, paper_ids: list[int]) -> dict[int, tuple[str, str]]:
 def followed_topics(db: Session) -> dict[int, str]:
     rows = db.execute(
         select(ResearchTopic.id, ResearchTopic.text).where(
-            ResearchTopic.id.in_(
-                select(ResearchSubscription.topic_id).where(
-                    ResearchSubscription.topic_id.is_not(None)
-                )
-            )
+            ResearchTopic.id.in_(select(ResearchTopicFollow.topic_id))
         )
     )
     return dict(rows.all())
@@ -368,11 +365,7 @@ def claim_backfill(db: Session, now: datetime) -> ResearchTopic | None:
                 (ResearchTopic.backfill_status == "running")
                 & (ResearchTopic.backfill_claimed_at < now - STALE_CLAIM)
             ),
-            ResearchTopic.id.in_(
-                select(ResearchSubscription.topic_id).where(
-                    ResearchSubscription.topic_id.is_not(None)
-                )
-            ),
+            ResearchTopic.id.in_(select(ResearchTopicFollow.topic_id)),
         )
         .order_by(ResearchTopic.id)
         .limit(1)
@@ -524,37 +517,62 @@ def suggestions(db: Session, value: str) -> list[TopicSuggestion]:
     return found
 
 
-def topic_view(db: Session, subject: str) -> TopicView | None:
-    sub = db.get(ResearchSubscription, subject)
-    topic = sub and sub.topic_id and db.get(ResearchTopic, sub.topic_id)
-    if not topic:
-        return None
-    return TopicView(
-        text=topic.text,
-        label=topic.label,
-        set_at=sub.topic_set_at,
-        status=topic.backfill_status,
-        judged=topic.backfill_done,
-        total=topic.backfill_total,
-        suggestions=suggestions(db, topic.text),
+def topic_views(db: Session, subject: str) -> list[TopicView]:
+    """The account's topics, oldest first."""
+    rows = db.execute(
+        select(ResearchTopic, ResearchTopicFollow.created_at)
+        .join(ResearchTopicFollow, ResearchTopicFollow.topic_id == ResearchTopic.id)
+        .where(ResearchTopicFollow.hf_subject == subject)
+        .order_by(ResearchTopicFollow.created_at, ResearchTopic.id)
+    ).all()
+    return [
+        TopicView(
+            id=topic.id,
+            text=topic.text,
+            label=topic.label,
+            set_at=set_at,
+            status=topic.backfill_status,
+            judged=topic.backfill_done,
+            total=topic.backfill_total,
+            suggestions=suggestions(db, topic.text),
+        )
+        for topic, set_at in rows
+    ]
+
+
+def topic_view(db: Session, subject: str, topic_id: int) -> TopicView | None:
+    return next((t for t in topic_views(db, subject) if t.id == topic_id), None)
+
+
+def _lock(db: Session, subject: str) -> None:
+    """Serialize an account's topic changes, including the bounded topic count."""
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 915))"),
+        {"subject": subject},
     )
 
 
-def set_topic(db: Session, subject: str, value: str | None, now: datetime) -> None:
-    """Point the account at the shared topic row for this text, creating it if new."""
-    from backend.services.research_follow_service import subscription
+def _follow(db: Session, subject: str, topic_id: int) -> ResearchTopicFollow | None:
+    return db.get(ResearchTopicFollow, (subject, topic_id))
 
-    subscription(db, subject)
-    sub = db.scalar(
-        select(ResearchSubscription)
-        .where(ResearchSubscription.hf_subject == subject)
-        .with_for_update()
-    )
-    if value is None:
-        sub.topic_id = None
-        sub.topic_set_at = None
-        db.commit()
-        return
+
+def follow_topic(
+    db: Session,
+    subject: str,
+    value: str,
+    now: datetime,
+    replace: int | None = None,
+) -> int:
+    """Follow the shared topic row for this text, creating it if new.
+
+    With ``replace``, the account's topic with that id gives way to the new text.
+    Returns the followed topic's id. Raises ``LookupError`` when ``replace`` is
+    not followed and ``OverflowError`` at ``MAX_TOPICS``.
+    """
+    _lock(db, subject)
+    old = _follow(db, subject, replace) if replace is not None else None
+    if replace is not None and old is None:
+        raise LookupError(replace)
     normalized = normalize(value)
     db.execute(
         insert(ResearchTopic)
@@ -568,9 +586,19 @@ def set_topic(db: Session, subject: str, value: str | None, now: datetime) -> No
     if topic.backfill_status == "failed":
         topic.backfill_status = "pending"
         topic.backfill_attempts = 0
-    if sub.topic_id != topic.id:
-        sub.topic_id = topic.id
-        sub.topic_set_at = now
+    if old is not None and old.topic_id != topic.id:
+        db.delete(old)
+        db.flush()
+    if _follow(db, subject, topic.id) is None:
+        count = db.scalar(
+            select(func.count()).where(ResearchTopicFollow.hf_subject == subject)
+        )
+        if count >= MAX_TOPICS:
+            db.rollback()
+            raise OverflowError(MAX_TOPICS)
+        db.add(
+            ResearchTopicFollow(hf_subject=subject, topic_id=topic.id, created_at=now)
+        )
     db.commit()
     # Saving the topic again retries a label or preview that failed.
     if topic.label is None:
@@ -583,3 +611,16 @@ def set_topic(db: Session, subject: str, value: str | None, now: datetime) -> No
     )
     if topic.backfill_status != "done" and has_preview is None:
         save_preview(db, topic, now)
+    return topic.id
+
+
+def unfollow_topic(db: Session, subject: str, topic_id: int | None = None) -> None:
+    """Stop following one topic, or every topic without ``topic_id``."""
+    _lock(db, subject)
+    query = db.query(ResearchTopicFollow).filter(
+        ResearchTopicFollow.hf_subject == subject
+    )
+    if topic_id is not None:
+        query = query.filter(ResearchTopicFollow.topic_id == topic_id)
+    query.delete(synchronize_session=False)
+    db.commit()

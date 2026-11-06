@@ -212,6 +212,14 @@
   font-size: 12px;
 }
 .sidebar-follow-edit:hover { color: var(--ink); }
+.sidebar-follow-topics .sidebar-follow-topic { align-self: stretch; }
+.sidebar-follow-add {
+  padding: 4px 0;
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 13px;
+}
+.sidebar-follow-add:hover { text-decoration: underline; text-underline-offset: 2px; }
 .sidebar-follow-manage {
   display: inline-block;
   margin-top: 8px;
@@ -224,6 +232,7 @@
 .research-topic { margin: 4px 0 20px; }
 .research-topic .settings-row-desc { margin: 4px 0 10px; }
 .research-topic-form { display: flex; flex-direction: column; gap: 8px; }
+.research-topic-item + .research-topic-item { margin-top: 14px; }
 .research-topic-input {
   width: 100%;
   padding: 10px 12px;

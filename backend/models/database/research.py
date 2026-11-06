@@ -37,10 +37,20 @@ class ResearchSubscription(Base):
     )
     opted_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     unsubscribe_token: Mapped[str] = mapped_column(String(64), unique=True)
-    topic_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("research_topics.id")
+    # topic_id/topic_set_at columns are unmapped: research_topic_follows holds topics.
+
+
+class ResearchTopicFollow(Base):
+    """A free-text topic an account follows; an account may follow several."""
+
+    __tablename__ = "research_topic_follows"
+    hf_subject: Mapped[str] = mapped_column(String(255), primary_key=True)
+    topic_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("research_topics.id"), primary_key=True
     )
-    topic_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class ResearchTopic(Base):

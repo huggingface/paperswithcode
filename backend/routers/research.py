@@ -70,11 +70,77 @@ def unfollow(
     service.set_follow(db, user["hf_subject"], kind, entity_id, False)
 
 
+def _topic_text(body: TopicUpdate) -> str:
+    text = research_topic_service.display_text(body.text)
+    if len(research_topic_service.normalize(text)) < 3:
+        raise HTTPException(422, "Describe the topic in a few words")
+    return text
+
+
+def _save_topic(
+    db: Session, request: Request, subject: str, body: TopicUpdate, replace: int | None
+) -> TopicView:
+    now = datetime.now(timezone.utc)
+    try:
+        topic_id = research_topic_service.follow_topic(
+            db, subject, _topic_text(body), now, replace=replace
+        )
+    except LookupError as exc:
+        raise HTTPException(404, "Topic not found") from exc
+    except OverflowError as exc:
+        raise HTTPException(
+            409, f"You can follow up to {research_topic_service.MAX_TOPICS} topics"
+        ) from exc
+    service.default_email_on(db, subject, verified_email(request), now)
+    return research_topic_service.topic_view(db, subject, topic_id)
+
+
+@router.get("/me/topics", response_model=list[TopicView])
+def topics(
+    user: dict = Depends(require_user), db: Session = Depends(get_database_session)
+):
+    return research_topic_service.topic_views(db, user["hf_subject"])
+
+
+@router.post("/me/topics", response_model=TopicView, status_code=201)
+def add_topic(
+    body: TopicUpdate,
+    request: Request,
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+):
+    """Follow one more topic; following one already followed returns it."""
+    return _save_topic(db, request, user["hf_subject"], body, None)
+
+
+@router.put("/me/topics/{topic_id}", response_model=TopicView)
+def update_topic(
+    topic_id: int,
+    body: TopicUpdate,
+    request: Request,
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+):
+    """Replace a followed topic's text; saving the same text retries a failed backfill."""
+    return _save_topic(db, request, user["hf_subject"], body, topic_id)
+
+
+@router.delete("/me/topics/{topic_id}", status_code=204)
+def remove_topic(
+    topic_id: int,
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+):
+    research_topic_service.unfollow_topic(db, user["hf_subject"], topic_id)
+
+
+# Single-topic endpoints from before accounts could follow several: they read
+# and replace the oldest topic, and DELETE removes every topic.
 @router.get("/me/topic", response_model=TopicView | None)
 def topic(
     user: dict = Depends(require_user), db: Session = Depends(get_database_session)
 ):
-    return research_topic_service.topic_view(db, user["hf_subject"])
+    return next(iter(research_topic_service.topic_views(db, user["hf_subject"])), None)
 
 
 @router.put("/me/topic", response_model=TopicView)
@@ -84,22 +150,17 @@ def set_topic(
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
-    text = research_topic_service.display_text(body.text)
-    if len(research_topic_service.normalize(text)) < 3:
-        raise HTTPException(422, "Describe the topic in a few words")
-    now = datetime.now(timezone.utc)
-    research_topic_service.set_topic(db, user["hf_subject"], text, now)
-    service.default_email_on(db, user["hf_subject"], verified_email(request), now)
-    return research_topic_service.topic_view(db, user["hf_subject"])
+    oldest = next(
+        iter(research_topic_service.topic_views(db, user["hf_subject"])), None
+    )
+    return _save_topic(db, request, user["hf_subject"], body, oldest and oldest.id)
 
 
 @router.delete("/me/topic", status_code=204)
 def clear_topic(
     user: dict = Depends(require_user), db: Session = Depends(get_database_session)
 ):
-    research_topic_service.set_topic(
-        db, user["hf_subject"], None, datetime.now(timezone.utc)
-    )
+    research_topic_service.unfollow_topic(db, user["hf_subject"])
 
 
 @router.get("/me/following", response_model=list[ResearchFeedEntry])
@@ -118,7 +179,8 @@ def following(
     has_hf_artifacts: bool = Query(
         False, description="Only papers with Hugging Face artifacts"
     ),
-    topic_only: bool = Query(False, description="Only papers matching the topic"),
+    topic_only: bool = Query(False, description="Only papers matching a topic"),
+    topic_id: int | None = Query(None, description="Only papers matching this topic"),
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
@@ -137,6 +199,7 @@ def following(
         has_code=has_code,
         has_hf_artifacts=has_hf_artifacts,
         topic_only=topic_only,
+        topic_id=topic_id,
     )
 
 

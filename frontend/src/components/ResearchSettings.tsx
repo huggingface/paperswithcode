@@ -95,8 +95,8 @@ export default function ResearchSettings() {
         {user && <Link className="research-feed-link" to="/following">Open Following feed <ArrowRight aria-hidden="true" /></Link>}
       </div>
       <p className="settings-row-desc research-section-intro">
-        New papers and benchmark results from your topic and what you follow appear in your
-        Following feed. Your topic and follows are private.
+        New papers and benchmark results from your topics and what you follow appear in your
+        Following feed. Your topics and follows are private.
       </p>
       {!user ? <div className="settings-note">
         <span>Sign in to follow research and build your personal feed.</span>

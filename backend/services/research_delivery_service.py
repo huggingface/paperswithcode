@@ -86,7 +86,7 @@ def _period(start: datetime | None, end: datetime | None) -> str:
 
 
 def digest_sections(entries, rotation: int | None = None) -> tuple[list, list]:
-    """New papers on the account's topic first, then entity follows, 20 at most."""
+    """New papers on the account's topics first, then entity follows, 20 at most."""
     on_topic = [e for e in entries if any(i.startswith("topic:") for i in e.interests)]
     topic_entries = diverse(on_topic, 10)
     seen = {e.paper_key for e in topic_entries}
@@ -107,7 +107,7 @@ def render_digest(
 ) -> dict:
     """Email-safe digest: table layout and inline styles only; all catalog text escaped.
 
-    ``topic_entries`` lead under "New on your topic"; ``entries`` follow under
+    ``topic_entries`` lead under "New on your topics"; ``entries`` follow under
     "From what you follow" when both are present.
     """
     esc = html.escape
@@ -121,7 +121,7 @@ def render_digest(
     lines = ["Papers with Code · Weekly research digest", intro, ""]
     rows = []
     sections = [
-        ("New on your topic", list(topic_entries)),
+        ("New on your topics", list(topic_entries)),
         ("From what you follow", list(entries)),
     ]
     labelled = all(section for _, section in sections)
