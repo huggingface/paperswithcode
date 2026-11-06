@@ -669,7 +669,7 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
         "Mistral Large 4": ModelIdentity(
             "Mistral Large 4",
-            source_url="https://mistral.ai/news/mistral-large-4/",
+            source_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/assets/technical_report.pdf",
             is_open=True,
             hf_model_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B",
         ),
@@ -699,7 +699,7 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
         "Mistral Large 4": ModelIdentity(
             "Mistral Large 4",
-            source_url="https://mistral.ai/news/mistral-large-4/",
+            source_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/assets/technical_report.pdf",
             is_open=True,
             hf_model_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B",
         ),
