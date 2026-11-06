@@ -368,6 +368,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `visual-grounding` — Visual Grounding
 - `visual-place-recognition` — Visual Place Recognition
 - `visual-place-recognition-re-ranking` — Visual Place Recognition with Re-ranking
+- `visual-slam` — Visual SLAM
 - `visual-speech-recognition` — Visual Speech Recognition
 - `voice-activity-detection` — Voice Activity Detection
 - `voice-cloning` — Voice cloning
