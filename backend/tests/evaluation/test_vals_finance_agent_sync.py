@@ -237,13 +237,33 @@ def test_parser_ignores_relabelled_trailing_columns():
     assert parse_vals_finance_agent(relabelled) == parse_vals_finance_agent(HTML)
 
 
+def test_parser_picks_leaderboard_next_to_sample_answer_tables():
+    # Since 2026-11-02 the page also renders a sample answer whose Markdown
+    # contains a second table; the leaderboard must still be chosen by header.
+    current = (
+        Path(__file__).parent / "fixtures" / "vals_finance_agent_v2_2026-11-06.html"
+    ).read_text()
+    assert current.count("<table") == 2
+    entries = parse_vals_finance_agent(current)
+    assert len(entries) == 81
+    assert (entries[0].label, entries[0].accuracy) == (
+        "Gemini 4 Argon",
+        Decimal("65.40"),
+    )
+    assert entries[-1].label == "Command A+"
+
+
 @pytest.mark.parametrize(
     ("old", "new", "message"),
     [
-        ("<th", "<td", "header changed"),
+        ("<th", "<td", "0 leaderboard tables"),
         ("65.40%", "65.40", "not a percentage"),
         ("65.40%", "165.40%", "outside 0-100"),
-        ("</table>", "</table><table></table>", "2 tables"),
+        (
+            "</main>",
+            HTML[HTML.index("<table") : HTML.index("</table>") + 8] + "</main>",
+            "2 leaderboard tables",
+        ),
     ],
 )
 def test_parser_fails_loudly_on_layout_changes(old, new, message):

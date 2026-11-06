@@ -117,6 +117,50 @@ def test_fetch_vending_bench_2_follows_imports_to_the_data_chunk():
     assert len(boards.fetch_vending_bench_2(client)) == 73
 
 
+def test_parse_vending_bench_2_reads_the_json_parse_chunk():
+    # Since 2026-11-02 the run data is a JSON.parse string with quoted keys,
+    # next to other runs (arena matches) that must be ignored.
+    chunk = _fixture("vending_bench_2_chunk_2026-11-06.js")
+    assert 'runs:JSON.parse(`{"vb2":{' in chunk
+    entries = _by_name(boards.parse_vending_bench_2(chunk))
+    assert len(entries) == 73
+    assert entries["Claude Fable 5 - High"].value == 5680.26
+    assert entries["Claude Fable 5 - High"].detail == (
+        "$5,680.26 mean final balance over 5 runs"
+    )
+
+
+def test_fetch_vending_bench_2_resolves_the_route_node_through_the_app_entry():
+    # The page preloads only layout nodes; node 26 is named by node_ids and
+    # the app entry's dynamic-import table.
+    pages = {
+        boards.VENDING_BENCH_2_URL: (
+            '<link href="../_app/immutable/entry/app.xyz.js">'
+            '<link href="../_app/immutable/nodes/0.abc.js">'
+            "<script>kit.start(app, element, {node_ids: [0, 3, 26], data: []});"
+            "</script>"
+        ),
+        "https://andonlabs.com/_app/immutable/entry/app.xyz.js": (
+            '["../nodes/2.aaa.js","../nodes/26.CKje-A28.js"],'
+            "()=>import(`../nodes/26.CKje-A28.js`),()=>import(`../nodes/3.q.js`)"
+        ),
+        "https://andonlabs.com/_app/immutable/nodes/0.abc.js": "export{};",
+        "https://andonlabs.com/_app/immutable/nodes/3.q.js": "export{};",
+        "https://andonlabs.com/_app/immutable/nodes/26.CKje-A28.js": (
+            'import{t as z}from"../chunks/3yXS6ZzI.js";let e=z.runs.vb2;'
+        ),
+        "https://andonlabs.com/_app/immutable/chunks/3yXS6ZzI.js": _fixture(
+            "vending_bench_2_chunk_2026-11-06.js"
+        ),
+    }
+
+    def handler(request):
+        return httpx.Response(200, text=pages[str(request.url)])
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert len(boards.fetch_vending_bench_2(client)) == 73
+
+
 def test_parse_blueprint_bench_2_skips_human_and_floor_rows():
     entries = _by_name(
         boards.parse_blueprint_bench_2(_fixture("blueprint_bench_2.html"))

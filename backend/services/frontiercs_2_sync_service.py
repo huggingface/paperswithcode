@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -26,6 +25,7 @@ from backend.services.leaderboard_model_matching_service import (
     LeaderboardModelMatcher,
 )
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
+from backend.services.live_leaderboard_sync import js_literal
 
 FRONTIERCS_2_URL = "https://frontier-cs.org/#leaderboard"
 # The leaderboard page renders client-side from constants in this bundle.
@@ -183,41 +183,13 @@ class FrontierCSSyncStats:
         return self.__dict__.copy()
 
 
-_BARE_KEY = re.compile(r"([{,])\s*([A-Za-z_$][\w$]*)\s*:")
-
-
 def _literal(source: str, name: str) -> Any:
     """Decode the JS object/array literal assigned to a top-level constant."""
     matches = list(re.finditer(rf"(?<![\w.$]){name}=(?=[\[{{])", source))
     if len(matches) != 1:
         raise ValueError(f"FrontierCS data has {len(matches)} {name} literals")
-    start = matches[0].end()
-    depth = 0
-    in_string = escaped = False
-    for index in range(start, len(source)):
-        char = source[index]
-        if in_string:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            else:
-                in_string = char != '"'
-        elif char == '"':
-            in_string = True
-        elif char in "[{":
-            depth += 1
-        elif char in "]}":
-            depth -= 1
-            if depth == 0:
-                literal = source[start : index + 1]
-                break
-    else:
-        raise ValueError(f"FrontierCS {name} literal is unterminated")
-    try:
-        return json.loads(_BARE_KEY.sub(r'\1"\2":', literal))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"FrontierCS {name} literal is not plain data") from exc
+    # js_literal also restores minified fractions such as ".2" (2026-11-02).
+    return js_literal(source, matches[0].end(), f"FrontierCS {name}")
 
 
 def _number(value: Any, what: str) -> float:

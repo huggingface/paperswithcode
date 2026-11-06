@@ -152,6 +152,21 @@ def test_parse_and_fetch_the_leaderboard_constants():
     assert fetch_frontiercs_2(client) == leaderboard
 
 
+def test_parser_reads_minified_fractions_without_a_leading_zero():
+    # Since 2026-11-02 the minified data writes 0.2 as ".2" (step's FCI low).
+    current = (
+        Path(__file__).parent / "fixtures" / "frontiercs_2_data_2026-11-06.js"
+    ).read_text()
+    assert "step:[12.1,.2,24.5,48]" in current
+    leaderboard = parse_frontiercs_2(current)
+    assert leaderboard.updated == date(2026, 11, 2)
+    assert len(leaderboard.entries) == 18
+    by_id = {entry.upstream_id: entry for entry in leaderboard.entries}
+    assert (by_id["step"].fci, by_id["step"].fci_low) == (12.1, 0.2)
+    assert by_id["minimax"].fci_low == -8.1
+    assert by_id["carbon"].label == "Gemini 4 Carbon (Antigravity)"
+
+
 @pytest.mark.parametrize(
     ("old", "new", "message"),
     [
