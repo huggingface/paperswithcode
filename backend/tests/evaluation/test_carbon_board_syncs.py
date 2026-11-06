@@ -171,21 +171,29 @@ def test_parse_blueprint_bench_2_skips_human_and_floor_rows():
 
 
 def test_parse_riemann_bench_reads_visible_percentages():
+    # v1.1 (2026-11-02): answer keys changed for four problems and only the
+    # 21 current models were re-run.
     entries = _by_name(boards.parse_riemann_bench(_fixture("riemann_bench.html")))
-    assert len(entries) == 44
-    assert entries["GPT 5.6 Sol"].value == pytest.approx(74.4)
+    assert len(entries) == 21
+    assert entries["GPT 5.6 Sol"].value == pytest.approx(83.2)
     # "Hy" + "Hy4 Preview" names the model once.
     assert "Hy4 Preview" in entries
+    board = boards.BOARD_SYNCS["sync_riemann_bench"].board
+    assert "v1.1 answer keys" in board.protocol
+    reviewed = [name for name in entries if name in board.identities]
+    assert len(reviewed) == 21 >= board.min_selected
 
 
-def test_parse_cwe_bench_reads_the_json_ld_item_list():
+def test_parse_cwe_bench_reads_the_v2_json_ld_item_list():
     entries = _by_name(boards.parse_cwe_bench(_fixture("cwe_bench.html")))
-    assert len(entries) == 12
-    assert (entries["Gemini 4 Carbon"].value, entries["Gemini 4 Carbon"].harness) == (
-        71.0,
-        "Antigravity",
-    )
-    assert "pass@4 not reported" in entries["Inkling"].detail
+    assert len(entries) == 11
+    opus = entries["Claude Opus 5.5"]
+    assert (opus.value, opus.harness) == (67.1, "Claude Code")
+    assert opus.detail == "pass@1 67.1% over all 250 tasks (pass@4 79.2%)"
+    board = boards.BOARD_SYNCS["sync_cwe_bench"].board
+    # v2 has its own board; the v1 board stays a frozen snapshot.
+    assert board.dataset_slug == "cwe-bench-v2"
+    assert set(entries) == set(board.identities)
 
 
 def test_parse_exploitgym_keeps_only_six_hour_full_set_runs():
@@ -310,8 +318,8 @@ def test_parse_patcheval_verified_reads_the_readme_results_table():
         (
             boards.parse_cwe_bench,
             "cwe_bench.html",
-            "Programmatic pass@1 71%",
-            "pass@1 71%",
+            "pass@1 67.1%, pass@4 79.2% over 250 tasks",
+            "pass@1 67.1%, pass@4 79.2% over 100 tasks",
             "description changed",
         ),
         (
@@ -619,7 +627,7 @@ def test_riemann_fetch_sends_the_surge_browser_user_agent():
         return httpx.Response(200, text=_fixture("riemann_bench.html"))
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    assert len(boards.BOARD_SYNCS["sync_riemann_bench"].fetch(client)) == 44
+    assert len(boards.BOARD_SYNCS["sync_riemann_bench"].fetch(client)) == 21
     assert seen["agent"].startswith("Mozilla/5.0 (X11; Linux x86_64)")
 
 
