@@ -399,15 +399,17 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   // The pop-up edits one topic (its id) or adds one (null); undefined while closed.
   const [editingTopic, setEditingTopic] = useState<number | null | undefined>(undefined);
   const canAddTopic = (topics.data?.length ?? 0) < TOPIC_LIMIT;
-  // Refresh the feed once a new topic's backfill finishes.
+  // Refresh the feed each time a topic's backfill finishes, even while others still run.
   const queryClient = useQueryClient();
-  const wasBuilding = useRef(false);
+  const buildingIds = building.map(topic => topic.id).join(",");
+  const wasBuilding = useRef<string[]>([]);
   useEffect(() => {
-    if (wasBuilding.current && !topicBuilding) {
+    const now = buildingIds ? buildingIds.split(",") : [];
+    if (wasBuilding.current.some(id => !now.includes(id))) {
       void queryClient.invalidateQueries({ queryKey: researchQueryKeys.feed(user?.hf_subject) });
     }
-    wasBuilding.current = topicBuilding;
-  }, [topicBuilding, queryClient, user?.hf_subject]);
+    wasBuilding.current = now;
+  }, [buildingIds, queryClient, user?.hf_subject]);
   const noFollows = following && !!user && follows.data?.length === 0 && topics.isSuccess && topics.data.length === 0;
   const showIntro = (following && !auth?.isLoading && !user) || noFollows;
   const canBuildFeed = !!user || !isAuthDisabled();

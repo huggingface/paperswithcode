@@ -1,7 +1,9 @@
--- Run as the database owner. Additive: an account may follow several free-text
--- topics. Copies each subscription's single topic_id/topic_set_at; the old
--- columns stay until the release that stops reading them is live everywhere.
--- Re-runnable: run it again after the deploy to copy topics set in between.
+-- Run as the database owner, once, before deploying the code that reads the
+-- table. Additive: an account may follow several free-text topics. Copies each
+-- subscription's single topic_id/topic_set_at for accounts that follow no topic
+-- in the new table yet, so a re-run never restores a topic replaced there. The
+-- old columns stay until the release that stops reading them is live; after the
+-- deploy, reconcile by hand any topic_set_at newer than this migration's run.
 BEGIN;
 CREATE TABLE IF NOT EXISTS public.research_topic_follows (
  hf_subject varchar(255) NOT NULL,
@@ -14,7 +16,8 @@ CREATE INDEX IF NOT EXISTS research_topic_follows_topic
 ALTER TABLE public.research_topic_follows OWNER TO paperswithcode_user;
 INSERT INTO public.research_topic_follows(hf_subject, topic_id, created_at)
  SELECT hf_subject, topic_id, COALESCE(topic_set_at, clock_timestamp())
- FROM public.research_subscriptions WHERE topic_id IS NOT NULL
+ FROM public.research_subscriptions s WHERE topic_id IS NOT NULL
+ AND NOT EXISTS (SELECT 1 FROM public.research_topic_follows f WHERE f.hf_subject = s.hf_subject)
  ON CONFLICT DO NOTHING;
 DO $$
 BEGIN
@@ -26,7 +29,8 @@ BEGIN
    REVOKE ALL ON public.research_topic_follows FROM pwc_staging;
    INSERT INTO staging.research_topic_follows(hf_subject, topic_id, created_at)
     SELECT hf_subject, topic_id, COALESCE(topic_set_at, clock_timestamp())
-    FROM staging.research_subscriptions WHERE topic_id IS NOT NULL
+    FROM staging.research_subscriptions s WHERE topic_id IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM staging.research_topic_follows f WHERE f.hf_subject = s.hf_subject)
     ON CONFLICT DO NOTHING;
  END IF;
 END $$;
