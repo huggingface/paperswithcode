@@ -18,6 +18,7 @@ from backend.services.chat_synthetic_service import SyntheticChatResult
 
 
 NOW = datetime(2026, 8, 31, 12, tzinfo=UTC)
+REAL_PAUSE_REASON = chat_synthetic_service.synthetic_mutation_pause_reason
 
 
 @pytest.fixture(autouse=True)
@@ -160,6 +161,46 @@ def test_synthetic_probe_enforces_manual_mode_inside_mutating_service(monkeypatc
     assert transport.calls == []
 
 
+@pytest.mark.parametrize(
+    ("manual_mode", "chat_operator_enabled", "expected"),
+    [
+        (False, False, None),
+        (False, True, None),
+        (True, False, "manual_mode"),
+    ],
+)
+def test_synthetic_pause_ignores_chat_operator_enablement(
+    monkeypatch, manual_mode, chat_operator_enabled, expected
+):
+    from contextlib import nullcontext
+
+    from backend.services.autonomous_operations_repository import (
+        ControlState,
+        Operator,
+    )
+
+    control = ControlState(
+        manual_mode=manual_mode,
+        enabled={
+            operator: operator is not Operator.CHAT_RELIABILITY or chat_operator_enabled
+            for operator in Operator
+        },
+        revision=1,
+    )
+    monkeypatch.setattr(
+        chat_synthetic_service,
+        "db_manager",
+        SimpleNamespace(session_local=lambda: nullcontext(None)),
+    )
+    monkeypatch.setattr(
+        chat_synthetic_service.AutonomousOperationsRepository,
+        "get_control_state",
+        lambda _self, _db: control,
+    )
+
+    assert REAL_PAUSE_REASON() == expected
+
+
 def test_monitor_runs_synthetic_every_four_hours_and_after_release(monkeypatch):
     state = monitor.empty_state()
     calls = []
@@ -282,6 +323,7 @@ def test_separate_synthetic_job_runs_release_trigger_and_persists_before_deliver
 
     monkeypatch.setattr(job, "get_settings", lambda: settings)
     monkeypatch.setattr(job, "synthetic_mutation_pause_reason", lambda: None)
+    monkeypatch.setattr(job, "synthetic_credentials_configured", lambda: True)
     monkeypatch.setattr(job, "current_provider_runtime_revision", lambda _env: None)
     monkeypatch.setattr(job, "load_state", lambda _path: state)
     monkeypatch.setattr(job, "collect_synthetic_events", collect)
@@ -369,3 +411,46 @@ def test_separate_synthetic_job_pauses_paid_work_in_manual_mode(
         }
     ]
     assert json.loads(capsys.readouterr().out)["status"] == "paused"
+
+
+def test_synthetic_job_pauses_without_monitor_credentials(
+    monkeypatch, tmp_path, capsys
+):
+    job = importlib.import_module("backend.scripts.run_chat_synthetic_probe")
+    settings = Settings(
+        environment="production",
+        chat_enabled=True,
+        chat_operational_alerts_enabled=True,
+        cron_log_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(job, "get_settings", lambda: settings)
+    monkeypatch.setattr(job, "synthetic_mutation_pause_reason", lambda: None)
+    monkeypatch.delenv("PWC_CHAT_SYNTHETIC_SESSION_COOKIE", raising=False)
+    monkeypatch.delenv("PWC_CHAT_SYNTHETIC_EXPECTED_USERNAME", raising=False)
+    state = monitor.empty_state()
+    monkeypatch.setattr(job, "load_state", lambda _path: state)
+    monkeypatch.setattr(
+        job,
+        "collect_synthetic_events",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("unconfigured probe must not run or page")
+        ),
+    )
+
+    async def deliver(_active_state, _settings):
+        return 0
+
+    monkeypatch.setattr(job, "deliver_pending", deliver)
+    monkeypatch.setattr(job, "write_state", lambda _path, _payload: None)
+    health = []
+    monkeypatch.setattr(
+        job,
+        "write_health_record",
+        lambda _directory, payload, **_kwargs: health.append(payload),
+    )
+    monkeypatch.setattr(sys, "argv", ["run_chat_synthetic_probe"])
+
+    assert job.main() == 0
+    assert health[-1]["status"] == "paused"
+    assert health[-1]["reason_code"] == "credential_unavailable"
+    assert state["events"] == []

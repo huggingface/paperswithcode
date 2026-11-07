@@ -103,8 +103,11 @@ The paid lifecycle is bounded below the launcher timeout and cleanup has its own
 deadline, so the minute-level journal monitor never owns or interrupts a paid
 turn. The synthetic prompt is fixed in source. Its durable state contains only step
 states and stable incident signatures, never the session identifier, response,
-credential, prompt, or trace identifier. Manual mode does not disable either
-monitor.
+credential, prompt, or trace identifier. Both monitors keep running in manual
+mode, but the paid synthetic chat pauses (`operator_disabled` is no longer a
+pause reason: the probe is monitoring, so it does not wait for the chat
+reliability operator's acceptance gates). Without the credential overlay the
+job pauses with `credential_unavailable` and does not page.
 
 Incident trace-content access is exceptional. It requires a degraded aggregate
 finding, a named operator and run, a trace ID inside a bounded incident window,

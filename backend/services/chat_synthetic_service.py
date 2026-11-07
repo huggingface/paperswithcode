@@ -18,7 +18,6 @@ from backend.config import get_settings
 from backend.database.connection import db_manager
 from backend.services.autonomous_operations_repository import (
     AutonomousOperationsRepository,
-    Operator,
 )
 from backend.services.autonomous_cron_probe import FindingState
 
@@ -26,7 +25,11 @@ SYNTHETIC_PROMPT = "Reply with the single word healthy."
 
 
 def synthetic_mutation_pause_reason() -> str | None:
-    """Enforce autonomous controls at the paid mutation capability boundary."""
+    """Enforce global manual mode at the paid mutation capability boundary.
+
+    The probe is monitoring, not autonomous repair, so it does not wait for the
+    chat reliability operator to pass its acceptance gates.
+    """
 
     try:
         with db_manager.session_local() as db:
@@ -35,9 +38,16 @@ def synthetic_mutation_pause_reason() -> str | None:
         return "control_state_unavailable"
     if control.manual_mode:
         return "manual_mode"
-    if not control.enabled[Operator.CHAT_RELIABILITY]:
-        return "operator_disabled"
     return None
+
+
+def synthetic_credentials_configured() -> bool:
+    """Report whether the dedicated monitor account is configured."""
+
+    return bool(
+        os.environ.get("PWC_CHAT_SYNTHETIC_SESSION_COOKIE")
+        and os.environ.get("PWC_CHAT_SYNTHETIC_EXPECTED_USERNAME")
+    )
 
 
 class SyntheticChatTransport(Protocol):
