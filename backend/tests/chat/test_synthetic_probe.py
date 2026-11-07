@@ -18,6 +18,7 @@ from backend.services.chat_synthetic_service import SyntheticChatResult
 
 
 NOW = datetime(2026, 8, 31, 12, tzinfo=UTC)
+REAL_PAUSE_REASON = chat_synthetic_service.synthetic_mutation_pause_reason
 
 
 @pytest.fixture(autouse=True)
@@ -158,6 +159,46 @@ def test_synthetic_probe_enforces_manual_mode_inside_mutating_service(monkeypatc
     assert result.state == FindingState.UNKNOWN
     assert result.incident_signature == "chat:synthetic:manual_mode"
     assert transport.calls == []
+
+
+@pytest.mark.parametrize(
+    ("manual_mode", "chat_operator_enabled", "expected"),
+    [
+        (False, False, None),
+        (False, True, None),
+        (True, False, "manual_mode"),
+    ],
+)
+def test_synthetic_pause_ignores_chat_operator_enablement(
+    monkeypatch, manual_mode, chat_operator_enabled, expected
+):
+    from contextlib import nullcontext
+
+    from backend.services.autonomous_operations_repository import (
+        ControlState,
+        Operator,
+    )
+
+    control = ControlState(
+        manual_mode=manual_mode,
+        enabled={
+            operator: operator is not Operator.CHAT_RELIABILITY or chat_operator_enabled
+            for operator in Operator
+        },
+        revision=1,
+    )
+    monkeypatch.setattr(
+        chat_synthetic_service,
+        "db_manager",
+        SimpleNamespace(session_local=lambda: nullcontext(None)),
+    )
+    monkeypatch.setattr(
+        chat_synthetic_service.AutonomousOperationsRepository,
+        "get_control_state",
+        lambda _self, _db: control,
+    )
+
+    assert REAL_PAUSE_REASON() == expected
 
 
 def test_monitor_runs_synthetic_every_four_hours_and_after_release(monkeypatch):
