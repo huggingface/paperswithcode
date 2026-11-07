@@ -99,14 +99,19 @@ export function useChatSessionActions({
       }
     }
     await chatApi.removeSession(id);
-    if (id === routeSessionId) onSelectedDeleted();
   };
 
   const deleteMutation = useMutation({
     mutationFn: async ({ ids, activeId }: { ids: string[]; activeId: string | undefined }) => {
+      // Leave the open chat only after the whole batch, so the sidebar stays put meanwhile.
+      let deletedOpenChat = false;
       try {
-        for (const id of ids) await deleteSession(id, id === activeId);
+        for (const id of ids) {
+          await deleteSession(id, id === activeId);
+          if (id === routeSessionId) deletedOpenChat = true;
+        }
       } finally {
+        if (deletedOpenChat) onSelectedDeleted();
         await refreshSessions();
       }
     },

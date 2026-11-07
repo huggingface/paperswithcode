@@ -144,6 +144,7 @@
 .chat-sessions-bulk-delete { color: var(--negative-text); }
 .chat-sessions-bulk-delete:hover,
 .chat-sessions-bulk-cancel:hover { background: var(--hairline); }
+.chat-sessions-bulk button:disabled { opacity: 0.5; cursor: default; }
 .chat-session-title {
   flex: 1;
   min-width: 0;

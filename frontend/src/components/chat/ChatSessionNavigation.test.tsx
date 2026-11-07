@@ -203,6 +203,22 @@ describe("ChatSessionNavigation bulk selection", () => {
     expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
   });
 
+  it("disables the toolbar while a bulk delete is running", async () => {
+    let finish: (deleted: boolean) => void = () => undefined;
+    const onDeleteMany = vi.fn(() => new Promise<boolean>((resolve) => { finish = resolve; }));
+    render(<ChatSessionNavigation {...props} sessions={sessions} onDeleteMany={onDeleteMany} />);
+
+    fireEvent.click(row("Chat a"), { shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Delete$/ }));
+    const pending = await screen.findByRole("button", { name: /Deleting/ });
+    expect(pending).toBeDisabled();
+    fireEvent.click(pending);
+    expect(onDeleteMany).toHaveBeenCalledTimes(1);
+
+    finish(true);
+    await vi.waitFor(() => expect(screen.queryByRole("toolbar")).not.toBeInTheDocument());
+  });
+
   it("navigates on a plain click when nothing is selected", () => {
     const onNavigate = vi.fn();
     render(<ChatSessionNavigation {...props} sessions={sessions} onNavigate={onNavigate} />);

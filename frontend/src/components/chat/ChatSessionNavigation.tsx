@@ -61,6 +61,7 @@ export function ChatSessionNavigation({
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
   const selectedSessionIds = sessions.filter((session) => selectedIds.has(session.id)).map((session) => session.id);
   const selecting = selectedSessionIds.length > 0;
+  const [deleting, setDeleting] = useState(false);
   const recentSessions = [...sessions].sort(
     (a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at),
   );
@@ -100,8 +101,13 @@ export function ChatSessionNavigation({
     return next;
   });
   const deleteSelected = async () => {
-    if (!canNavigateAwayFromArtifact()) return;
-    if (await onDeleteMany(selectedSessionIds)) setSelectedIds(new Set());
+    if (deleting || !canNavigateAwayFromArtifact()) return;
+    setDeleting(true);
+    try {
+      if (await onDeleteMany(selectedSessionIds)) setSelectedIds(new Set());
+    } finally {
+      setDeleting(false);
+    }
   };
   const beginRename = (session: ChatSession) => {
     setEditingId(session.id);
@@ -145,8 +151,8 @@ export function ChatSessionNavigation({
       </div>
       {selecting && <div className="chat-sessions-bulk" role="toolbar" aria-label="Selected chats">
         <span className="chat-sessions-bulk-count">{selectedSessionIds.length} selected</span>
-        <button type="button" className="chat-sessions-bulk-delete" onClick={() => void deleteSelected()}><TrashIcon /> Delete</button>
-        <button type="button" className="chat-sessions-bulk-cancel" onClick={() => setSelectedIds(new Set())}>Cancel</button>
+        <button type="button" className="chat-sessions-bulk-delete" disabled={deleting} onClick={() => void deleteSelected()}><TrashIcon /> {deleting ? "Deleting…" : "Delete"}</button>
+        <button type="button" className="chat-sessions-bulk-cancel" disabled={deleting} onClick={() => setSelectedIds(new Set())}>Cancel</button>
       </div>}
       <nav className="chat-sessions" aria-label="Chat history">
         {loading && <div className="chat-sessions-empty">Loading chats…</div>}
