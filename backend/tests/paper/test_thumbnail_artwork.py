@@ -56,6 +56,21 @@ def test_find_page_artwork_urls_ignores_pages_without_images():
     )
 
 
+def test_find_page_artwork_urls_skips_site_logos_and_journal_covers():
+    html = """
+      <meta property="og:image" content="/static/browse/0.3.4/images/arxiv-logo-fb.png">
+      <meta name="twitter:image"
+        content="https://media.springernature.com/full/springer-static/cover-hires/journal/11263">
+      <meta name="twitter:image:src"
+        content="https://media.springernature.com/w153/springer-static/cover/book/978-3.jpg">
+      <meta name="twitter:image:src" content="https://cdn.example.com/Fig1_HTML.png">
+    """
+
+    assert find_page_artwork_urls(html, PAGE_URL) == [
+        "https://cdn.example.com/Fig1_HTML.png"
+    ]
+
+
 @pytest.mark.parametrize(
     "content",
     [
