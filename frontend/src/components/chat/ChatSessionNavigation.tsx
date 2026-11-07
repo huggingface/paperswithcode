@@ -113,7 +113,9 @@ export function ChatSessionNavigation({
     const from = anchor && selectedIds.has(anchor) ? orderedSessionIds.indexOf(anchor) : -1;
     const to = orderedSessionIds.indexOf(sessionId);
     if (from < 0 || to < 0) {
-      toggleSelected(sessionId);
+      // No range to extend: select this chat and start the next range here.
+      selectionAnchor.current = sessionId;
+      setSelectedIds((previous) => new Set([...previous, sessionId]));
       return;
     }
     const range = orderedSessionIds.slice(Math.min(from, to), Math.max(from, to) + 1);

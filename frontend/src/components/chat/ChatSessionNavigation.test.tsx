@@ -237,6 +237,19 @@ describe("ChatSessionNavigation bulk selection", () => {
     expect(screen.getByText("4 selected")).toBeInTheDocument();
   });
 
+  it("keeps a chat selected when Shift-clicked without a range anchor", () => {
+    render(<ChatSessionNavigation {...props} sessions={sessions} />);
+
+    fireEvent.click(row("Chat a"), { shiftKey: true });
+    fireEvent.click(row("Chat b"), { shiftKey: true });
+    fireEvent.click(row("Chat a"));
+    fireEvent.click(row("Chat b"), { shiftKey: true });
+    expect(row("Chat b")).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(row("Chat c"), { shiftKey: true });
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+  });
+
   it("navigates on a plain click when nothing is selected", () => {
     const onNavigate = vi.fn();
     render(<ChatSessionNavigation {...props} sessions={sessions} onNavigate={onNavigate} />);
