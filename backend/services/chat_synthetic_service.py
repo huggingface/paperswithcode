@@ -41,6 +41,15 @@ def synthetic_mutation_pause_reason() -> str | None:
     return None
 
 
+def synthetic_credentials_configured() -> bool:
+    """Report whether the dedicated monitor account is configured."""
+
+    return bool(
+        os.environ.get("PWC_CHAT_SYNTHETIC_SESSION_COOKIE")
+        and os.environ.get("PWC_CHAT_SYNTHETIC_EXPECTED_USERNAME")
+    )
+
+
 class SyntheticChatTransport(Protocol):
     async def verify_login(self) -> bool: ...
     async def create_session(self) -> str: ...

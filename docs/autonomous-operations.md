@@ -107,7 +107,7 @@ credential, prompt, or trace identifier. Both monitors keep running in manual
 mode, but the paid synthetic chat pauses (`operator_disabled` is no longer a
 pause reason: the probe is monitoring, so it does not wait for the chat
 reliability operator's acceptance gates). Without the credential overlay the
-probe reports `credential_unavailable`.
+job pauses with `credential_unavailable` and does not page.
 
 Incident trace-content access is exceptional. It requires a degraded aggregate
 finding, a named operator and run, a trace ID inside a bounded incident window,
