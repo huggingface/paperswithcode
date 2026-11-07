@@ -87,20 +87,33 @@ export function useChatSessionActions({
     onError: (error) => onError(errorText(error, "Rename failed")),
   });
 
-  const deleteMutation = useMutation({
-    mutationFn: async ({ id, active }: { id: string; active: boolean }) => {
-      if (active) {
-        const deadline = Date.now() + DELETE_STOP_TIMEOUT_MS;
-        for (;;) {
-          const detail = await chatApi.getSession(id);
-          if (!detail.is_busy) break;
-          if (Date.now() >= deadline) throw new Error("Generation is still stopping. The chat was not deleted.");
-          await new Promise((resolve) => window.setTimeout(resolve, DELETE_STOP_POLL_MS));
-        }
+  /** Delete one chat, first waiting for a stopped generation to settle. */
+  const deleteSession = async (id: string, active: boolean) => {
+    if (active) {
+      const deadline = Date.now() + DELETE_STOP_TIMEOUT_MS;
+      for (;;) {
+        const detail = await chatApi.getSession(id);
+        if (!detail.is_busy) break;
+        if (Date.now() >= deadline) throw new Error("Generation is still stopping. The chat was not deleted.");
+        await new Promise((resolve) => window.setTimeout(resolve, DELETE_STOP_POLL_MS));
       }
-      await chatApi.removeSession(id);
-      if (id === routeSessionId) onSelectedDeleted();
-      await refreshSessions();
+    }
+    await chatApi.removeSession(id);
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: async ({ ids, activeId }: { ids: string[]; activeId: string | undefined }) => {
+      // Leave the open chat only after the whole batch, so the sidebar stays put meanwhile.
+      let deletedOpenChat = false;
+      try {
+        for (const id of ids) {
+          await deleteSession(id, id === activeId);
+          if (id === routeSessionId) deletedOpenChat = true;
+        }
+      } finally {
+        if (deletedOpenChat) onSelectedDeleted();
+        await refreshSessions();
+      }
     },
     onError: (error) => onError(errorText(error, "Delete failed")),
   });
@@ -124,11 +137,18 @@ export function useChatSessionActions({
     () => false,
   );
 
+  /** Confirm, then delete `ids`; resolves true once every chat is deleted. */
+  const removeMany = async (ids: string[]) => {
+    if (ids.length === 0) return false;
+    const activeId = ids.find(isActive);
+    const target = ids.length === 1 ? "this chat" : `these ${ids.length} chats`;
+    if (!window.confirm(`${activeId ? "Stop and delete" : "Delete"} ${target}? This cannot be undone.`)) return false;
+    if (activeId) stopActive();
+    return deleteMutation.mutateAsync({ ids, activeId }).then(() => true, () => false);
+  };
+
   const remove = async (id: string) => {
-    const active = isActive(id);
-    if (!window.confirm(active ? "Stop and delete this chat? This cannot be undone." : "Delete this chat? This cannot be undone.")) return;
-    if (active) stopActive();
-    await deleteMutation.mutateAsync({ id, active }).catch(() => undefined);
+    await removeMany([id]);
   };
 
   const changeModel = async (model: string) => {
@@ -141,5 +161,5 @@ export function useChatSessionActions({
     );
   };
 
-  return { rename, remove, changeModel };
+  return { rename, remove, removeMany, changeModel };
 }

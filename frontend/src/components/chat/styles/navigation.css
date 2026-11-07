@@ -110,6 +110,41 @@
 }
 .chat-session:hover { background: var(--hairline); color: var(--ink); }
 .chat-session-active { background: var(--hairline); color: var(--ink); font-weight: 500; }
+.chat-session-selected,
+.chat-session-selected:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--ink);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.chat-sessions-bulk {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.chat-sessions-bulk-count {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+.chat-sessions-bulk-delete,
+.chat-sessions-bulk-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  color: var(--ink-soft);
+}
+.chat-sessions-bulk-delete { color: var(--negative-text); }
+.chat-sessions-bulk-delete:hover,
+.chat-sessions-bulk-cancel:hover { background: var(--hairline); }
+.chat-sessions-bulk button:disabled { opacity: 0.5; cursor: default; }
 .chat-session-title {
   flex: 1;
   min-width: 0;
