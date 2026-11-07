@@ -18,6 +18,7 @@ const props = {
   onNavigate: vi.fn(),
   onRename: vi.fn(async () => true),
   onDelete: vi.fn(),
+  onDeleteMany: vi.fn(async () => true),
 };
 
 describe("ChatSessionNavigation resizing", () => {
@@ -157,5 +158,56 @@ describe("ChatSessionNavigation backdrop", () => {
     const { container } = render(<ChatSessionNavigation {...props} open={false} />);
 
     expect(container.querySelector(".chat-sidebar-backdrop")).toBeNull();
+  });
+});
+
+describe("ChatSessionNavigation bulk selection", () => {
+  const sessions = ["a", "b", "c"].map((id, index) => ({
+    id,
+    title: `Chat ${id}`,
+    selected_model: "luna",
+    created_at: "2026-11-01T00:00:00Z",
+    updated_at: `2026-11-0${3 - index}T00:00:00Z`,
+    message_count: 2,
+  })) as ChatSession[];
+  const row = (title: string) => screen.getByText(title).closest(".chat-session") as HTMLElement;
+
+  it("selects chats with Shift-click and deletes them together", async () => {
+    const onNavigate = vi.fn();
+    const onDeleteMany = vi.fn(async () => true);
+    render(<ChatSessionNavigation {...props} sessions={sessions} onNavigate={onNavigate} onDeleteMany={onDeleteMany} />);
+
+    fireEvent.click(row("Chat a"), { shiftKey: true });
+    fireEvent.click(row("Chat c"));
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(screen.getByText("2 selected")).toBeInTheDocument();
+    expect(row("Chat a")).toHaveAttribute("aria-pressed", "true");
+    expect(row("Chat b")).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete$/ }));
+    expect(onDeleteMany).toHaveBeenCalledWith(["a", "c"]);
+    expect(await screen.findByText("Chat b")).toBeInTheDocument();
+    await vi.waitFor(() => expect(screen.queryByRole("toolbar")).not.toBeInTheDocument());
+  });
+
+  it("keeps the selection when deletion is cancelled and clears it on Escape", async () => {
+    const onDeleteMany = vi.fn(async () => false);
+    render(<ChatSessionNavigation {...props} sessions={sessions} onDeleteMany={onDeleteMany} />);
+
+    fireEvent.keyDown(row("Chat b"), { key: "Enter", shiftKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Delete$/ }));
+    await vi.waitFor(() => expect(onDeleteMany).toHaveBeenCalledWith(["b"]));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("toolbar")).not.toBeInTheDocument();
+  });
+
+  it("navigates on a plain click when nothing is selected", () => {
+    const onNavigate = vi.fn();
+    render(<ChatSessionNavigation {...props} sessions={sessions} onNavigate={onNavigate} />);
+
+    fireEvent.click(row("Chat b"));
+    expect(onNavigate).toHaveBeenCalledWith("b");
   });
 });

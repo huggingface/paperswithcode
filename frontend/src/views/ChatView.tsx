@@ -395,6 +395,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
         }}
         onRename={sessionActions.rename}
         onDelete={(sessionId) => void sessionActions.remove(sessionId)}
+        onDeleteMany={sessionActions.removeMany}
       />}
 
       <GeneralArtifactWorkspace enabled={mode === "general"}>

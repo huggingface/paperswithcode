@@ -34,6 +34,8 @@ interface ChatSessionNavigationProps {
   onNavigate: (sessionId: string) => void;
   onRename: (sessionId: string, title: string) => Promise<boolean>;
   onDelete: (sessionId: string) => void;
+  /** Delete several chats; resolves true when all of them were deleted. */
+  onDeleteMany: (sessionIds: string[]) => Promise<boolean>;
 }
 
 export function ChatSessionNavigation({
@@ -47,6 +49,7 @@ export function ChatSessionNavigation({
   onNavigate,
   onRename,
   onDelete,
+  onDeleteMany,
 }: ChatSessionNavigationProps) {
   const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth);
   const dragStart = useRef<{ x: number; width: number } | null>(null);
@@ -55,6 +58,9 @@ export function ChatSessionNavigation({
   const [editingTitle, setEditingTitle] = useState("");
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const [showAllSessions, setShowAllSessions] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+  const selectedSessionIds = sessions.filter((session) => selectedIds.has(session.id)).map((session) => session.id);
+  const selecting = selectedSessionIds.length > 0;
   const recentSessions = [...sessions].sort(
     (a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at),
   );
@@ -78,6 +84,25 @@ export function ChatSessionNavigation({
     };
   }, [menu]);
 
+  useEffect(() => {
+    if (!selecting) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedIds(new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selecting]);
+
+  const toggleSelected = (sessionId: string) => setSelectedIds((previous) => {
+    const next = new Set(previous);
+    if (next.has(sessionId)) next.delete(sessionId);
+    else next.add(sessionId);
+    return next;
+  });
+  const deleteSelected = async () => {
+    if (!canNavigateAwayFromArtifact()) return;
+    if (await onDeleteMany(selectedSessionIds)) setSelectedIds(new Set());
+  };
   const beginRename = (session: ChatSession) => {
     setEditingId(session.id);
     setEditingTitle(session.title);
@@ -118,6 +143,11 @@ export function ChatSessionNavigation({
         <button type="button" className="chat-new-chat" onClick={() => { if (canNavigateAwayFromArtifact()) onNew(); }}><PlusIcon /> New chat</button>
         <button type="button" className="icon-btn" onClick={onClose} title="Collapse sidebar"><PanelIcon /></button>
       </div>
+      {selecting && <div className="chat-sessions-bulk" role="toolbar" aria-label="Selected chats">
+        <span className="chat-sessions-bulk-count">{selectedSessionIds.length} selected</span>
+        <button type="button" className="chat-sessions-bulk-delete" onClick={() => void deleteSelected()}><TrashIcon /> Delete</button>
+        <button type="button" className="chat-sessions-bulk-cancel" onClick={() => setSelectedIds(new Set())}>Cancel</button>
+      </div>}
       <nav className="chat-sessions" aria-label="Chat history">
         {loading && <div className="chat-sessions-empty">Loading chats…</div>}
         {!loading && error && <div className="chat-sessions-empty">{error}</div>}
@@ -128,12 +158,20 @@ export function ChatSessionNavigation({
           <div className="chat-session-group-label">{group.label}</div>
           {group.items.map((session) => <div
             key={session.id}
-            className={`chat-session${session.id === activeSessionId ? " chat-session-active" : ""}`}
+            className={`chat-session${session.id === activeSessionId ? " chat-session-active" : ""}${selectedIds.has(session.id) ? " chat-session-selected" : ""}`}
             role="button"
             tabIndex={0}
-            onClick={() => { if (canNavigateAwayFromArtifact()) onNavigate(session.id); }}
+            aria-pressed={selecting ? selectedIds.has(session.id) : undefined}
+            title={selecting ? undefined : "Shift-click to select several chats"}
+            // Keep Shift-click from extending the page's text selection.
+            onMouseDown={(event) => { if (event.shiftKey) event.preventDefault(); }}
+            onClick={(event) => {
+              if (event.shiftKey || selecting) toggleSelected(session.id);
+              else if (canNavigateAwayFromArtifact()) onNavigate(session.id);
+            }}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && canNavigateAwayFromArtifact()) onNavigate(session.id);
+              if (event.key === "Enter" && (event.shiftKey || selecting)) toggleSelected(session.id);
+              else if (event.key === "Enter" && canNavigateAwayFromArtifact()) onNavigate(session.id);
               if (event.key === "F2") beginRename(session);
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                 event.preventDefault();
@@ -236,6 +274,10 @@ export function ChatSessionNavigation({
           if (session) beginRename(session);
           setMenu(null);
         }}>Rename chat</button>
+        <button type="button" role="menuitem" onClick={() => {
+          toggleSelected(menu.id);
+          setMenu(null);
+        }}>{selectedIds.has(menu.id) ? "Deselect chat" : "Select chat"}</button>
       </div>}
     </aside>
     </>
