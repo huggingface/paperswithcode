@@ -94,12 +94,31 @@ export function ChatSessionNavigation({
     return () => window.removeEventListener("keydown", onKey);
   }, [selecting]);
 
-  const toggleSelected = (sessionId: string) => setSelectedIds((previous) => {
-    const next = new Set(previous);
-    if (next.has(sessionId)) next.delete(sessionId);
-    else next.add(sessionId);
-    return next;
-  });
+  const sessionGroups = groupSessions(visibleSessions);
+  const orderedSessionIds = sessionGroups.flatMap((group) => group.items.map((session) => session.id));
+  /** The chat a Shift-click range starts from: the last one toggled on its own. */
+  const selectionAnchor = useRef<string | null>(null);
+  const toggleSelected = (sessionId: string) => {
+    selectionAnchor.current = sessionId;
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+  /** Shift-click: add every listed chat between the anchor and `sessionId`. */
+  const selectRange = (sessionId: string) => {
+    const anchor = selectionAnchor.current;
+    const from = anchor && selectedIds.has(anchor) ? orderedSessionIds.indexOf(anchor) : -1;
+    const to = orderedSessionIds.indexOf(sessionId);
+    if (from < 0 || to < 0) {
+      toggleSelected(sessionId);
+      return;
+    }
+    const range = orderedSessionIds.slice(Math.min(from, to), Math.max(from, to) + 1);
+    setSelectedIds((previous) => new Set([...previous, ...range]));
+  };
   const deleteSelected = async () => {
     if (deleting || !canNavigateAwayFromArtifact()) return;
     setDeleting(true);
@@ -160,7 +179,7 @@ export function ChatSessionNavigation({
         {!loading && !error && sessions.length === 0 && (
           <div className="chat-sessions-empty">Conversations you start will show up here.</div>
         )}
-        {groupSessions(visibleSessions).map((group) => <div className="chat-session-group" key={group.label}>
+        {sessionGroups.map((group) => <div className="chat-session-group" key={group.label}>
           <div className="chat-session-group-label">{group.label}</div>
           {group.items.map((session) => <div
             key={session.id}
@@ -168,15 +187,17 @@ export function ChatSessionNavigation({
             role="button"
             tabIndex={0}
             aria-pressed={selecting ? selectedIds.has(session.id) : undefined}
-            title={selecting ? undefined : "Shift-click to select several chats"}
+            title={selecting ? "Shift-click to select every chat up to here" : "Shift-click to select several chats"}
             // Keep Shift-click from extending the page's text selection.
             onMouseDown={(event) => { if (event.shiftKey) event.preventDefault(); }}
             onClick={(event) => {
-              if (event.shiftKey || selecting) toggleSelected(session.id);
+              if (event.shiftKey) selectRange(session.id);
+              else if (selecting) toggleSelected(session.id);
               else if (canNavigateAwayFromArtifact()) onNavigate(session.id);
             }}
             onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.shiftKey || selecting)) toggleSelected(session.id);
+              if (event.key === "Enter" && event.shiftKey) selectRange(session.id);
+              else if (event.key === "Enter" && selecting) toggleSelected(session.id);
               else if (event.key === "Enter" && canNavigateAwayFromArtifact()) onNavigate(session.id);
               if (event.key === "F2") beginRename(session);
               if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
