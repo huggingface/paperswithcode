@@ -22,7 +22,10 @@ from backend.scripts.monitor_chat_operational_alerts import (
     write_state,
 )
 from backend.services.chat_reliability_service import release_probe_triggers
-from backend.services.chat_synthetic_service import synthetic_mutation_pause_reason
+from backend.services.chat_synthetic_service import (
+    synthetic_credentials_configured,
+    synthetic_mutation_pause_reason,
+)
 
 HEALTH_RECORD = "chat-synthetic-probe-health.json"
 CRITICAL_ALERT_FORCE_COOLDOWN = timedelta(hours=4)
@@ -82,6 +85,9 @@ def main() -> int:
         "chat-synthetic-probe-state.json"
     )
     pause_reason = synthetic_mutation_pause_reason()
+    if pause_reason is None and not synthetic_credentials_configured():
+        # An unconfigured monitor account is not a chat outage, so do not page.
+        pause_reason = "credential_unavailable"
     if pause_reason is not None:
         state = load_state(state_path)
         delivered = asyncio.run(deliver_pending(state, settings))
