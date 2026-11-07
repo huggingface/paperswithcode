@@ -8,6 +8,7 @@ so a page without a PDF still gets a recognizable thumbnail instead of a
 white title card.
 """
 
+import re
 from io import BytesIO
 from urllib.parse import urljoin, urlsplit
 
@@ -27,6 +28,10 @@ MAX_ARTWORK_ASPECT = 2.6
 MIN_ARTWORK_ASPECT = 1 / 3
 MAX_ARTWORK_PIXELS = 40_000_000
 TRANSPARENT_BACKGROUND = (248, 247, 251)
+
+# Site-wide images that say nothing about the paper: publisher/site logos
+# (arXiv's `arxiv-logo-fb.png`) and Springer journal or book covers.
+GENERIC_ARTWORK_PATH = re.compile(r"logo|/cover(?:-hires)?/(?:journal|book)/", re.I)
 
 ARTWORK_META_KEYS = (
     "og:image:secure_url",
@@ -51,7 +56,12 @@ def find_page_artwork_urls(html: str, page_url: str) -> list[str]:
     for key in ARTWORK_META_KEYS:
         for content in found[key]:
             url = urljoin(page_url, content)
-            if urlsplit(url).scheme in {"http", "https"} and url not in urls:
+            parsed = urlsplit(url)
+            if (
+                parsed.scheme in {"http", "https"}
+                and not GENERIC_ARTWORK_PATH.search(parsed.path)
+                and url not in urls
+            ):
                 urls.append(url)
     return urls
 
