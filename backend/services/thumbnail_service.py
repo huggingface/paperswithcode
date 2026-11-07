@@ -27,6 +27,11 @@ from backend.services.safe_outbound_http_service import (
     SafeOutboundHttpError,
     fetch_public_resource,
 )
+from backend.services.thumbnail_artwork import (
+    compose_artwork_thumbnail,
+    find_page_artwork_urls,
+    load_artwork_image,
+)
 from backend.utils.biorxiv import (
     BioRxivMetadata,
     download_biorxiv_pdf_bytes,
@@ -95,6 +100,23 @@ EXTERNAL_PDF_CONTENT_TYPES = frozenset(
 )
 PERMANENT_EXTERNAL_PDF_SAFE_STATUSES = frozenset({403, 409, 413, 415, 422})
 PERMANENT_EXTERNAL_PDF_ORIGIN_STATUSES = frozenset({403, 404, 410})
+EXTERNAL_PAGE_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml"})
+# Some object stores label images as generic binary; Pillow decides.
+EXTERNAL_ARTWORK_CONTENT_TYPES = frozenset(
+    {
+        "image/gif",
+        "image/jpeg",
+        "image/jpg",
+        "image/png",
+        "image/webp",
+        "application/octet-stream",
+        "binary/octet-stream",
+    }
+)
+EXTERNAL_PAGE_MAX_BYTES = 5 * 1024 * 1024
+EXTERNAL_ARTWORK_MAX_BYTES = 15 * 1024 * 1024
+EXTERNAL_ARTWORK_TIMEOUT_SECONDS = 20.0
+MAX_EXTERNAL_ARTWORK_CANDIDATES = 3
 # Paper cards render thumbnails in a 160×220 box, but PDF pages have their own
 # MediaBox/CropBox aspect ratio. Keep the page ratio in the JPEG and let the
 # frontend containment frame handle the small per-page difference.
@@ -688,6 +710,56 @@ class ThumbnailService:
             return None
         return result.body
 
+    def _is_transient_fetch_error(self, exc: SafeOutboundHttpError) -> bool:
+        """Origin 5xx/429, timeouts, and connection failures may succeed later."""
+        if exc.status_code != 502:
+            return False
+        origin = exc.origin_status_code
+        return origin is None or origin == 429 or origin >= 500
+
+    async def _fetch_external_artwork(self, source_url: str) -> Image.Image | None:
+        """
+        Return the source page's social preview image, if it has a usable one.
+
+        Permanent failures (bot walls, 404s, non-HTML sources, unusable
+        images) return None so the caller can draw a title card; transient
+        ones raise so the paper is retried instead of caching a title card.
+        """
+        try:
+            page = await fetch_public_resource(
+                source_url,
+                allowed_content_types=EXTERNAL_PAGE_CONTENT_TYPES,
+                max_bytes=EXTERNAL_PAGE_MAX_BYTES,
+                timeout_seconds=EXTERNAL_ARTWORK_TIMEOUT_SECONDS,
+            )
+        except SafeOutboundHttpError as exc:
+            if self._is_transient_fetch_error(exc):
+                raise ThumbnailGenerationError(
+                    "External source page is temporarily unavailable"
+                ) from exc
+            return None
+
+        html = page.body.decode("utf-8", errors="replace")
+        candidates = find_page_artwork_urls(html, page.url)
+        for artwork_url in candidates[:MAX_EXTERNAL_ARTWORK_CANDIDATES]:
+            try:
+                artwork = await fetch_public_resource(
+                    artwork_url,
+                    allowed_content_types=EXTERNAL_ARTWORK_CONTENT_TYPES,
+                    max_bytes=EXTERNAL_ARTWORK_MAX_BYTES,
+                    timeout_seconds=EXTERNAL_ARTWORK_TIMEOUT_SECONDS,
+                )
+            except SafeOutboundHttpError as exc:
+                if self._is_transient_fetch_error(exc):
+                    raise ThumbnailGenerationError(
+                        "External source artwork is temporarily unavailable"
+                    ) from exc
+                continue
+            image = load_artwork_image(artwork.body)
+            if image is not None:
+                return image
+        return None
+
     def _read_archived_external_pdf(self, paper_id: int | str) -> Optional[bytes]:
         """
         Read the PDF archived at ingestion or by the OCR worker, if any.
@@ -892,7 +964,8 @@ class ThumbnailService:
         paper's conference PDF) is tried before `source_url`, which is often
         an HTML landing page, and the archived copy is used when neither
         serves a PDF. bioRxiv and medRxiv records can fall back to a
-        metadata card when their PDF is unavailable.
+        metadata card when their PDF is unavailable. Other pages use their
+        social preview artwork, and a title card only when they have none.
         """
         filename = self.get_external_filename(paper_id)
         if not force:
@@ -938,7 +1011,11 @@ class ThumbnailService:
                 )
             thumbnail = self._render_biorxiv_metadata_thumbnail(metadata, server)
         else:
-            thumbnail = self._render_external_metadata_thumbnail(title, source_url)
+            artwork = await self._fetch_external_artwork(source_url)
+            if artwork is not None:
+                thumbnail = compose_artwork_thumbnail(artwork)
+            else:
+                thumbnail = self._render_external_metadata_thumbnail(title, source_url)
 
         self._save_thumbnail(thumbnail, cache_path)
         self._upload_to_bucket(cache_path, filename)
