@@ -110,8 +110,9 @@ An evaluation is eligible only when all gates pass:
    `https://arxiv.org/abs/<arxiv_id>` and ensure the resulting row is not marked
    external.
 7. The evaluated model is finished. Skip results from a model that the source
-   marks as still training, under revision, or a preview or interim
-   checkpoint, as `add-evals` describes.
+   explicitly marks as still training, under revision, or an intermediate
+   training step, as `add-evals` describes. A "Preview" or "Beta" release
+   name alone does not make a released model unfinished.
 
 Set a Hugging Face model URL only when the exact evaluated model has an official
 model repository. Set open/closed status from evidence, not from the presence of

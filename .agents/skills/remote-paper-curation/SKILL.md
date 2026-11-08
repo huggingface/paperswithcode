@@ -281,14 +281,17 @@ item and report the benchmark as a `not_applicable` outcome with `task_id`,
 sync. Other models and other leaderboards follow the normal rules.
 
 Never submit results for an unfinished checkpoint. When the source marks the
-evaluated model as still training, under revision, a preview or interim
-checkpoint, or an intermediate training step (check page headers and footers,
-title notes, and model card status; the Avalon-M1 report stamps every page
-"Model still training, under revision"), submit no `evaluations` and no
+evaluated model as still training, under revision, or an intermediate
+training step (check page headers and footers, title notes, and model card
+status; the Avalon-M1 report stamps every page "Model still training, under
+revision"), submit no `evaluations` and no
 `benchmark_gaps` for that model. Report each of its benchmarks as
 `not_paper_native`, with a `detail` that quotes the source's marking. Results
 for a paper's final model stay eligible even if the paper also analyzes
-earlier checkpoints.
+earlier checkpoints. A release name such as "Preview", "Beta", or
+"Experimental" is not such a mark: a publicly released model with that label
+(for example Ripple-65B Preview, an Apache-2.0 open-weight release) is
+finished, and its results are eligible.
 
 For `add-evals`, when a paper-native result is blocked by missing catalog configuration, include
 one structured `benchmark_gaps` entry conforming to
