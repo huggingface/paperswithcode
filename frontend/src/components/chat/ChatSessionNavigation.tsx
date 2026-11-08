@@ -249,10 +249,12 @@ export function ChatSessionNavigation({
             <button
               type="button"
               className="chat-session-delete"
-              aria-label="Delete conversation"
+              aria-label={selectedIds.has(session.id) ? "Delete selected conversations" : "Delete conversation"}
               onClick={(event) => {
                 event.stopPropagation();
-                if (canNavigateAwayFromArtifact()) onDelete(session.id);
+                // On a selected chat, the trash acts on the whole selection.
+                if (selectedIds.has(session.id)) void deleteSelected();
+                else if (canNavigateAwayFromArtifact()) onDelete(session.id);
               }}
             ><TrashIcon /></button>
           </div>)}
