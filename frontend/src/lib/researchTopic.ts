@@ -46,6 +46,62 @@ export function useSetFollow<Change extends FollowChange = FollowChange>(
   });
 }
 
+/** A topic's display name: its label, else its text, with the first letter capitalized. */
+export function topicTitle(topic: { text: string; label: string | null }): string {
+  const name = topic.label ?? topic.text;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/** The shareable topic page, e.g. /topics/23-ocr-releases; only the id is read back. */
+export function topicPath(topic: { id: number; text: string; label: string | null }): string {
+  const slug = topicTitle(topic).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+  return slug ? `/topics/${topic.id}-${slug}` : `/topics/${topic.id}`;
+}
+
+/** Whether a description lists several areas, which match better as separate topics. */
+export function looksLikeTopicList(text: string): boolean {
+  return text.split(/[,;\n]|\s-\s|^\s*-\s/m).filter(part => part.trim().length >= 3).length >= 4;
+}
+
+/** Follows another account's topic by id and refreshes what depends on it. */
+export function useFollowTopic() {
+  const user = useOptionalAuth()?.user;
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => researchApi.followTopic(id),
+    onSuccess: async () => {
+      clearPendingTopicFollow();
+      await refreshTopics(client, user?.hf_subject);
+    },
+  });
+}
+
+/** Makes a topic the account created public or private. */
+export function useSetTopicPublic() {
+  const user = useOptionalAuth()?.user;
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, isPublic }: { id: number; isPublic: boolean }) => researchApi.setTopicPublic(id, isPublic),
+    onSuccess: () => client.invalidateQueries({ queryKey: researchQueryKeys.topics(user?.hf_subject) }),
+  });
+}
+
+// A guest's Follow on a topic page waits here while they sign in.
+const PENDING_TOPIC_FOLLOW_KEY = 'pwc:pending-topic-follow';
+
+export function stashPendingTopicFollow(id: number) {
+  sessionStorage.setItem(PENDING_TOPIC_FOLLOW_KEY, String(id));
+}
+
+export function readPendingTopicFollow(): number | null {
+  const value = Number(sessionStorage.getItem(PENDING_TOPIC_FOLLOW_KEY));
+  return Number.isInteger(value) && value > 0 ? value : null;
+}
+
+export function clearPendingTopicFollow() {
+  sessionStorage.removeItem(PENDING_TOPIC_FOLLOW_KEY);
+}
+
 export const isTopicBuilding = (topic: ResearchTopic) => topic.status === 'pending' || topic.status === 'running';
 
 /** The signed-in account's topics, oldest first; polled every `pollMs` while one is still being matched. */
@@ -68,6 +124,8 @@ export interface TopicSave {
 /** Refreshes the topics and what depends on them; resolves once the topics have reloaded. */
 function refreshTopics(client: QueryClient, subject: string | undefined) {
   void invalidateResearch(client, subject, { follows: false });
+  // Topic pages show whether you follow them and their follower count.
+  void client.invalidateQueries({ queryKey: researchQueryKeys.publicTopics });
   return client.invalidateQueries({ queryKey: researchQueryKeys.topics(subject) });
 }
 

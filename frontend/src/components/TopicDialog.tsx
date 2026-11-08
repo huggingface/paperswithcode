@@ -150,7 +150,7 @@ function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: 
       </label></h3>
       <p className="topic-dialog-hint">
         {atLimit ? `You follow ${TOPIC_LIMIT} topics, the most allowed. Remove one below to add another.`
-          : 'A model reads every new paper and adds the ones that match to your Following feed.'}
+          : 'A model reads every new paper and adds the ones that match to your Following feed. New topics are public and show your Hugging Face username; make one private in Settings.'}
       </p>
       <textarea id="topic-dialog-input" className="research-topic-input" rows={4} maxLength={TOPIC_MAX_LENGTH}
         aria-label="Research topic"

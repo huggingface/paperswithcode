@@ -1,6 +1,7 @@
 # Research follows and weekly email
 
-Follows are private and keyed by the immutable Hugging Face OAuth subject.
+Entity follows are private and keyed by the immutable Hugging Face OAuth subject;
+free-text topics can be public (see below).
 The Following tab sits beside Trending, Newest, and Most cited, using the same
 paper cards and thumbnails. Its bookmarkable feed lives at `/following`; `/settings` manages interests and
 explicit weekly-email opt-in. OAuth email access uses the existing
@@ -91,6 +92,39 @@ Code: `backend/services/research_follow_service.py` (follows and feed),
 `backend/services/research_delivery_service.py` (digest selection, outbox,
 Resend), and `backend/routers/research.py` (API and
 `POST /api/v1/research/resend-webhook`).
+
+## Public topics
+
+A topic's creator (`research_topics.created_by_hf_subject`, the first account
+to follow its text) decides whether it is public (`is_public`, default true for
+new topics; topics that existed before public topics shipped start private).
+Following a topic means following that exact text: when the creator edits
+theirs, they move to another row and followers stay on the old one, which
+keeps its creator. A creator-less topic goes to its next follower.
+
+- `GET /research/topics/{id}` returns the page header: text, label, creator
+  username and avatar (`https://huggingface.co/api/users/<name>/avatar?redirect=true`),
+  follower count, and up to eight avatars of followers whose
+  `research_subscriptions.show_as_follower` is on (default on for new
+  accounts, off for accounts that existed before the change). Private topics
+  return 404 unless the viewer created or follows them.
+- `GET /research/topics/{id}/papers?order=trending|newest` lists the topic's
+  matches (verdicts at the threshold, or the embedding preview while the
+  backfill runs) across all time.
+- `POST /me/topics/{id}/follow` follows a topic by id within the ten-topic
+  limit; `PATCH /me/topics/{id}` with `{"is_public": …}` is creator-only;
+  `PUT /me/topic-follower-visibility` sets the avatar switch.
+- `GET /research/topics/featured` feeds the homepage bubbles: public, not
+  hidden, backfill done, at least five matched papers published in the last
+  30 days, ordered by followers then recent matches, top eight, cached ten
+  minutes.
+
+The SPA page is `/topics/<id>-<slug>` (only the id is read). It is `noindex`
+until a public topic has three followers, and whenever an admin hides it.
+"Duplicate and edit" saves the edited text as the viewer's own topic.
+Moderation hides a topic from the bubbles and search engines without touching
+its followers:
+`uv run --env-file backend/keys.env python -m backend.scripts.moderate_research_topics list|hide <id>|unhide <id>`.
 
 ## Operations
 

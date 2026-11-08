@@ -56,6 +56,12 @@ export const adminQueryKeys = {
 export const researchQueryKeys = {
   follows: (subject: string | undefined) => ["research-follows", subject] as const,
   topics: (subject: string | undefined) => ["research-topics", subject] as const,
+  publicTopics: ["research-public-topic"] as const,
+  publicTopic: (id: number, subject: string | undefined) => ["research-public-topic", id, subject] as const,
+  // The topic id leads the key: paper feeds keep placeholder data only within one key[0],
+  // so another topic never shows this one's papers while loading.
+  topicPapers: (id: number, order: string, subject: string | undefined) => [`research-topic-papers-${id}`, order, subject] as const,
+  featuredTopics: ["research-featured-topics"] as const,
   email: (subject: string | undefined) => ["research-email", subject] as const,
   feed: (subject: string | undefined) => [...paperQueryKeys.feeds.following, subject] as const,
 } as const;

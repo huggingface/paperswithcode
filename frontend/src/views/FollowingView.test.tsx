@@ -43,10 +43,11 @@ beforeEach(() => {
     title: paper.title, url: '/paper/2610.12345', summary: 'Short summary.', published: paper.published,
     reasons: ['Task'], scores: [] }]);
   vi.spyOn(researchApi, 'topics').mockResolvedValue([]);
+  vi.spyOn(researchApi, 'featuredTopics').mockResolvedValue([]);
 });
 const EDIT = 'Edit topic real-time video generation';
 const topic = { id: 1, text: 'real-time video generation', label: null, set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
-  judged: 10, total: 10, suggestions: [] };
+  judged: 10, total: 10, suggestions: [], is_public: true, is_creator: true };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); sessionStorage.clear(); login.hfLoginUrl.mockClear(); });
 it('renders following in the existing tab row with standard paper cards and thumbnails', async () => {
   const { container } = renderFeed();
@@ -452,4 +453,13 @@ it('has no separate trending (X) tab: X likes are part of the trending score', a
   renderFeed('/');
   expect(await screen.findByRole('button', { name: 'trending' })).toHaveClass('active');
   expect(screen.queryByRole('button', { name: 'trending (X)' })).not.toBeInTheDocument();
+});
+
+it('shows popular public topics with their creators under the feed tabs', async () => {
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue([{ id: 23, text: 'OCR releases', label: null, followers: 5,
+    creator: { username: 'nielsr', avatar_url: 'https://huggingface.co/api/users/nielsr/avatar?redirect=true' } }]);
+  renderFeed('/');
+  const bubble = await screen.findByRole('link', { name: /OCR releases/ });
+  expect(bubble).toHaveAttribute('href', '/topics/23-ocr-releases');
+  expect(bubble).toHaveTextContent('@nielsr');
 });

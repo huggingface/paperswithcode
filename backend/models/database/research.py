@@ -37,6 +37,10 @@ class ResearchSubscription(Base):
     )
     opted_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     unsubscribe_token: Mapped[str] = mapped_column(String(64), unique=True)
+    # Whether the account's avatar may appear on public topics it follows.
+    show_as_follower: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
     # topic_id/topic_set_at columns are unmapped: research_topic_follows holds topics.
 
 
@@ -62,6 +66,13 @@ class ResearchTopic(Base):
     normalized: Mapped[str] = mapped_column(String(300), unique=True)
     # A few-word LLM summary of a long description, shown where space is short.
     label: Mapped[str | None] = mapped_column(String(80))
+    # The first account to follow the text; only it may change ``is_public``.
+    created_by_hf_subject: Mapped[str | None] = mapped_column(String(255))
+    is_public: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
+    # Set by an admin: off the homepage and out of search engines, still followable.
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     backfill_status: Mapped[str] = mapped_column(
         String(20), default="pending", server_default="pending"
     )

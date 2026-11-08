@@ -57,6 +57,54 @@ class TopicView(BaseModel):
     judged: int
     total: int | None
     suggestions: list[TopicSuggestion] = Field(default_factory=list)
+    # Public topics are listed with their creator's HF username; only the
+    # creator may change it.
+    is_public: bool = True
+    is_creator: bool = False
+
+
+class TopicVisibilityUpdate(BaseModel):
+    is_public: bool
+
+
+class TopicPerson(BaseModel):
+    """A Hugging Face account shown on a public topic."""
+
+    username: str
+    avatar_url: str
+
+
+class PublicTopicView(BaseModel):
+    """A topic's page header: what it matches, who made it, who follows it."""
+
+    id: int
+    text: str
+    # Few-word summary of a long description; null for short ones.
+    label: str | None = None
+    status: Literal["pending", "running", "done", "failed"]
+    creator: TopicPerson | None
+    is_public: bool
+    # Hidden topics stay followable but leave the homepage and search engines.
+    indexable: bool
+    followers: int
+    # Followers who show their avatar, creator excluded, at most eight.
+    follower_avatars: list[TopicPerson] = Field(default_factory=list)
+    following: bool = False
+    is_creator: bool = False
+
+
+class TopicBubble(BaseModel):
+    """A popular public topic offered on the homepage."""
+
+    id: int
+    text: str
+    label: str | None = None
+    creator: TopicPerson | None
+    followers: int
+
+
+class FollowerVisibilityUpdate(BaseModel):
+    show_as_follower: bool
 
 
 class SubscriptionUpdate(BaseModel):
@@ -68,6 +116,8 @@ class SubscriptionView(BaseModel):
     email: str | None
     suppressed: bool
     delivery_ready: bool
+    # Whether the account's avatar may appear on public topics it follows.
+    show_as_follower: bool = True
 
 
 class ResearchEntry(BaseModel):

@@ -42,6 +42,7 @@ RESERVED_PROFILE_SLUGS = frozenset(
         "submissions",
         "task",
         "tasks",
+        "topics",
         "trends",
     }
 )

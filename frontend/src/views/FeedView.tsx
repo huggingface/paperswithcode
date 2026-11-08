@@ -1,5 +1,6 @@
 import FollowingIntro from "@/components/FollowingIntro";
 import TopicDialog from "@/components/TopicDialog";
+import TopicBubbles from "@/components/TopicBubbles";
 import { isAuthDisabled } from "@/lib/apiUrl";
 import { clearPendingTopic, isTopicBuilding, readPendingFollows, readPendingTopic, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
@@ -602,6 +603,8 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 onChange={(value) => setSearchParams(withHomepagePaperDateRange(searchParams, value))}
               />
             </div>
+
+            <TopicBubbles />
 
             {error && (
               <Alert variant="destructive" className="mb-4">
