@@ -226,6 +226,8 @@ def public_topic_papers(
     order: Literal["trending", "newest"] = Query("trending"),
     offset: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    start_date: date | None = Query(None, description="Earliest publication date"),
+    end_date: date | None = Query(None, description="Latest publication date"),
     db: Session = Depends(get_database_session),
 ):
     response.headers["Cache-Control"] = "private, no-store"
@@ -237,6 +239,8 @@ def public_topic_papers(
             order=order,
             offset=offset,
             limit=limit,
+            start_date=start_date,
+            end_date=end_date,
         )
     except LookupError as exc:
         raise HTTPException(404, "Topic not found") from exc

@@ -1,22 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Check, Copy, Link2, Lock, Plus } from 'lucide-react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Check, Link2, Lock, Plus } from 'lucide-react';
 import { PaperFeedList, type PaperFeedCard } from '@/components/PaperFeed';
-import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
+import { PaperDateFilter } from '@/components/PaperDateFilter';
+import { Skeleton } from '@/components/ui/skeleton';
 import { usePaperFeedQuery } from '@/hooks/usePapers';
-import { researchApi, TOPIC_MAX_LENGTH, TOPIC_PAPERS_PAGE_SIZE, type PublicTopic, type TopicPaperOrder, type TopicPerson } from '@/lib/api/research';
+import { researchApi, TOPIC_PAPERS_PAGE_SIZE, type PublicTopic, type TopicPaperOrder, type TopicPerson } from '@/lib/api/research';
+import { readPaperDateRange, withPaperDateRange } from '@/lib/paperDateRange';
 import { researchQueryKeys } from '@/lib/api/queryKeys';
 import { hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
 import { ApiError } from '@/lib/apiTransport';
 import {
-  readPendingTopicFollow, stashPendingTopic, stashPendingTopicFollow, topicPath, topicTitle,
-  useFollowTopic, useRemoveTopics, useSaveTopic,
+  readPendingTopicFollow, stashPendingTopicFollow, topicPath, topicTitle, useFollowTopic, useRemoveTopics,
 } from '@/lib/researchTopic';
 import { transformPaperForCard } from '@/lib/transform';
-
-const BANNER_TILES = 8;
 
 /** A public free-text topic: who made it, who follows it, and the papers a model matched to it. */
 export default function TopicView() {
@@ -24,7 +23,16 @@ export default function TopicView() {
   const topicId = Number.parseInt(topicParam, 10);
   const user = useOptionalAuth()?.user;
   const subject = user?.hf_subject;
-  const [order, setOrder] = useState<TopicPaperOrder>('trending');
+  // Sort and date range live in the URL like the homepage feed; a topic shows all time by default.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const order: TopicPaperOrder = searchParams.get('order') === 'newest' ? 'newest' : 'trending';
+  const dateRange = readPaperDateRange(searchParams);
+  const showOrder = (value: TopicPaperOrder) => {
+    const next = new URLSearchParams(searchParams);
+    if (value === 'newest') next.set('order', value);
+    else next.delete('order');
+    setSearchParams(next);
+  };
   const topic = useQuery({
     queryKey: researchQueryKeys.publicTopic(topicId, subject),
     queryFn: () => researchApi.publicTopic(topicId),
@@ -32,9 +40,9 @@ export default function TopicView() {
     retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2,
   });
   const papers = usePaperFeedQuery(
-    researchQueryKeys.topicPapers(topicId, order, subject),
+    researchQueryKeys.topicPapers(topicId, order, dateRange, subject),
     async (offset) => {
-      const results = await researchApi.topicPapers(topicId, order, offset);
+      const results = await researchApi.topicPapers(topicId, order, offset, dateRange);
       return { results, next_page: results.length === TOPIC_PAPERS_PAGE_SIZE ? offset + TOPIC_PAPERS_PAGE_SIZE : null };
     },
     { enabled: topic.isSuccess, initialPage: 0 },
@@ -43,56 +51,82 @@ export default function TopicView() {
     () => papers.data?.pages.flatMap(page => page.results.map(transformPaperForCard)) ?? [],
     [papers.data],
   );
-  const thumbnails = useMemo(
-    () => (papers.data?.pages[0]?.results ?? []).map(p => p.thumbnail_url).filter((url): url is string => !!url).slice(0, BANNER_TILES),
-    [papers.data],
-  );
   useTopicHead(topic.data);
 
   if (topic.error || !(topicId > 0)) {
     return <div className="page topic-page">
-      <h1 className="topic-title">Topic not found</h1>
+      <h1 className="feed-title">Topic not found</h1>
       <p className="topic-description">This topic does not exist or its creator made it private.</p>
       <p><Link to="/">Back to trending research</Link></p>
     </div>;
   }
-  if (!topic.data) return <div className="page topic-page"><div className="topic-banner is-loading" /></div>;
+  if (!topic.data) return <div className="page topic-page" aria-busy="true">
+    <div className="feed-header"><div>
+      <Skeleton className="h-3 w-16 mb-3" />
+      <Skeleton className="h-10 w-80 max-w-full" />
+    </div></div>
+    <div className="layout-with-sidebar">
+      <aside className="sidebar topic-sidebar">
+        <Skeleton className="h-8 w-40 mb-6" />
+        <Skeleton className="h-9 w-full" />
+      </aside>
+      <div className="feed-main">
+        <PaperFeedList query={papers} isLoading cards={[]} skeleton="card" empty={null} />
+      </div>
+    </div>
+  </div>;
   const data = topic.data;
   const title = topicTitle(data);
   return <div className="page topic-page">
-    <div className="topic-banner" aria-hidden="true">
-      {thumbnails.map(url => <img key={url} src={url} alt="" loading="lazy" />)}
+    <div className="feed-header">
+      <div>
+        <span className="topic-kicker">Topic</span>
+        <h1 className="feed-title">{title}</h1>
+        {data.text.toLowerCase() !== title.toLowerCase() && <p className="topic-description">{data.text}</p>}
+      </div>
     </div>
-    <h1 className="topic-title">{title}</h1>
-    {data.text !== title && <p className="topic-description">{data.text}</p>}
-    {!data.is_public && <p className="topic-private"><Lock aria-hidden="true" />Private: only you and existing followers can open this page.</p>}
-    {data.creator && <div className="topic-creator">
-      <Avatar person={data.creator} size={36} />
-      <span>Created by <a href={`https://huggingface.co/${data.creator.username}`} target="_blank" rel="noreferrer">@{data.creator.username}</a></span>
-    </div>}
-    <div className="topic-followers">
-      {data.follower_avatars.length > 0 && <span className="topic-follower-avatars">
-        {data.follower_avatars.map(p => <Avatar key={p.username} person={p} size={26} />)}
-      </span>}
-      <span>{data.followers === 1 ? '1 person follows this topic' : `${data.followers.toLocaleString()} people follow this topic`}</span>
+    <div className="layout-with-sidebar">
+      <aside className="sidebar topic-sidebar">
+        {!data.is_public && <p className="topic-private"><Lock aria-hidden="true" />Private: only you and existing followers can open this page.</p>}
+        {data.creator && <div className="sidebar-section">
+          <div className="sidebar-label">Created by</div>
+          <a className="topic-creator" href={`https://huggingface.co/${data.creator.username}`} target="_blank" rel="noreferrer">
+            <Avatar person={data.creator} size={32} /><span className="topic-creator-name">@{data.creator.username}</span>
+          </a>
+        </div>}
+        <div className="sidebar-section">
+          <div className="sidebar-label">Followers</div>
+          <div className="topic-followers">
+            {data.follower_avatars.length > 0 && <span className="topic-follower-avatars">
+              {data.follower_avatars.map(p => <Avatar key={p.username} person={p} size={26} />)}
+            </span>}
+            <span>{data.followers === 1 ? '1 person follows this topic' : `${data.followers.toLocaleString()} people follow this topic`}</span>
+          </div>
+        </div>
+        <div className="sidebar-section topic-actions">
+          <FollowTopicButton topic={data} />
+          <ShareButton path={topicPath(data)} />
+        </div>
+      </aside>
+      <div className="feed-main">
+        <div className="sort-bar home-feed-sort-bar">
+          <div className="paper-feed-toolbar-controls">
+            <div className="sort-options">
+              {(['trending', 'newest'] as const).map(value => <button key={value} type="button"
+                className={`sort-btn ${order === value ? 'active' : ''}`} onClick={() => showOrder(value)}>{value}</button>)}
+            </div>
+          </div>
+          <PaperDateFilter startDate={dateRange.startDate} endDate={dateRange.endDate}
+            onChange={value => setSearchParams(withPaperDateRange(searchParams, value))} />
+        </div>
+        {(data.status === 'pending' || data.status === 'running') && <p className="following-topic-note" role="status">
+          Showing the closest papers now. A model is reading papers to refine these matches, which takes a few minutes.
+        </p>}
+        <PaperFeedList query={papers} cards={cards} skeleton="card" rootMargin="400px"
+          empty={papers.error ? 'Could not load papers for this topic.'
+            : dateRange.startDate || dateRange.endDate ? 'No papers about this topic in this window.' : 'No papers match this topic yet.'} />
+      </div>
     </div>
-    <div className="topic-actions">
-      <FollowTopicButton topic={data} />
-      <ShareButton path={topicPath(data)} />
-      <DuplicateTopicButton text={data.text} />
-      <label className="topic-order">
-        <span className="sr-only">Sort papers</span>
-        <select value={order} onChange={event => setOrder(event.target.value as TopicPaperOrder)}>
-          <option value="trending">Trending</option>
-          <option value="newest">Newest</option>
-        </select>
-      </label>
-    </div>
-    {(data.status === 'pending' || data.status === 'running') && <p className="following-topic-note" role="status">
-      Showing the closest papers now. A model is reading papers to refine these matches, which takes a few minutes.
-    </p>}
-    <PaperFeedList query={papers} cards={cards} skeleton="card" rootMargin="400px"
-      empty={papers.error ? 'Could not load papers for this topic.' : 'No papers match this topic yet.'} />
   </div>;
 }
 
@@ -170,54 +204,4 @@ function ShareButton({ path }: { path: string }) {
   }}>
     <Link2 aria-hidden="true" />{copied ? 'Link copied' : 'Share'}
   </button>;
-}
-
-/** Starts a new topic of your own from this one's text. */
-function DuplicateTopicButton({ text }: { text: string }) {
-  const auth = useOptionalAuth();
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(text);
-  const save = useSaveTopic();
-  if (!auth || (!auth.user && isAuthDisabled())) return null;
-  const trimmed = draft.trim().replace(/\s+/g, ' ');
-  const submit = () => {
-    if (trimmed.length < 3 || save.isPending) return;
-    if (!auth.user) {
-      // /following saves a stashed topic once the guest is signed in.
-      stashPendingTopic(trimmed);
-      window.location.assign(hfLoginUrl('/following'));
-      return;
-    }
-    save.mutate({ text: trimmed }, {
-      onSuccess: saved => {
-        setOpen(false);
-        navigate(topicPath(saved));
-      },
-    });
-  };
-  return <>
-    <button type="button" className="topic-secondary-btn" onClick={() => { setDraft(text); setOpen(true); }}>
-      <Copy aria-hidden="true" />Duplicate and edit
-    </button>
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="topic-duplicate-dialog" aria-describedby={undefined}>
-        <DialogTitle>Make this topic your own</DialogTitle>
-        <form onSubmit={event => { event.preventDefault(); submit(); }}>
-          <textarea className="research-topic-input" rows={3} maxLength={TOPIC_MAX_LENGTH} value={draft}
-            aria-label="Your topic" onChange={event => setDraft(event.target.value)} />
-          <p className="settings-row-desc">
-            Saving creates a topic you own and follow. New topics are public, listed with your Hugging Face
-            username; you can make it private in Settings.
-          </p>
-          {save.error && <p className="settings-token-error" role="alert">
-            {save.error instanceof ApiError && save.error.status === 409 ? 'You follow the maximum number of topics. Remove one in Settings first.' : 'Could not save your topic. Please try again.'}
-          </p>}
-          <div className="research-topic-actions">
-            <button type="submit" className="research-topic-save" disabled={trimmed.length < 3 || save.isPending}>Follow topic</button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
-  </>;
 }

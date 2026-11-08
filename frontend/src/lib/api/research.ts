@@ -132,8 +132,10 @@ export const researchApi = {
     method: 'PUT', body: JSON.stringify({ show_as_follower: show }),
   }),
   publicTopic: (id: number) => apiRequest<PublicTopic>(`/research/topics/${id}`),
-  topicPapers: (id: number, order: TopicPaperOrder, offset = 0) => {
+  topicPapers: (id: number, order: TopicPaperOrder, offset = 0, range: { startDate?: string; endDate?: string } = {}) => {
     const params = new URLSearchParams({ order, offset: String(offset), limit: String(TOPIC_PAPERS_PAGE_SIZE) });
+    if (range.startDate) params.set('start_date', range.startDate);
+    if (range.endDate) params.set('end_date', range.endDate);
     return apiRequest<Paper[]>(`/research/topics/${id}/papers?${params}`);
   },
   featuredTopics: () => apiRequest<TopicBubble[]>('/research/topics/featured'),

@@ -147,8 +147,13 @@ def topic_papers(
     order: Literal["trending", "newest"],
     offset: int,
     limit: int,
+    start_date: date | None = None,
+    end_date: date | None = None,
 ) -> list[Paper]:
-    """Papers matching a visible topic, ranked like the home feed or newest first."""
+    """Papers matching a visible topic, ranked like the home feed or newest first.
+
+    ``start_date``/``end_date`` bound the publication date, inclusive.
+    """
     from backend.services.paper_service import PaperService
 
     visible_topic(db, topic_id, viewer)
@@ -160,6 +165,10 @@ def topic_papers(
     )
     service = PaperService(db)
     query = db.query(DBPaper).filter(DBPaper.id.in_(select(matched.c.id)))
+    if start_date is not None:
+        query = query.filter(DBPaper.date_published >= start_date)
+    if end_date is not None:
+        query = query.filter(DBPaper.date_published <= end_date)
     if order == "newest":
         query = query.order_by(desc(DBPaper.date_published), desc(DBPaper.id))
     else:

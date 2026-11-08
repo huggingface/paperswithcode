@@ -108,9 +108,9 @@ keeps its creator. A creator-less topic goes to its next follower.
   `research_subscriptions.show_as_follower` is on (default on for new
   accounts, off for accounts that existed before the change). Private topics
   return 404 unless the viewer created or follows them.
-- `GET /research/topics/{id}/papers?order=trending|newest` lists the topic's
+- `GET /research/topics/{id}/papers?order=trending|newest&start_date=&end_date=` lists the topic's
   matches (verdicts at the threshold, or the embedding preview while the
-  backfill runs) across all time.
+  backfill runs), all time unless `start_date`/`end_date` bound it.
 - `POST /me/topics/{id}/follow` follows a topic by id within the ten-topic
   limit; `PATCH /me/topics/{id}` with `{"is_public": …}` is creator-only;
   `PUT /me/topic-follower-visibility` sets the avatar switch.
@@ -121,7 +121,6 @@ keeps its creator. A creator-less topic goes to its next follower.
 
 The SPA page is `/topics/<id>-<slug>` (only the id is read). It is `noindex`
 until a public topic has three followers, and whenever an admin hides it.
-"Duplicate and edit" saves the edited text as the viewer's own topic.
 Moderation hides a topic from the bubbles and search engines without touching
 its followers:
 `uv run --env-file backend/keys.env python -m backend.scripts.moderate_research_topics list|hide <id>|unhide <id>`.
