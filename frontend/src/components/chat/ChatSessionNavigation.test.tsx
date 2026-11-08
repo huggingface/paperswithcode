@@ -237,6 +237,20 @@ describe("ChatSessionNavigation bulk selection", () => {
     expect(screen.getByText("4 selected")).toBeInTheDocument();
   });
 
+  it("starts the first Shift-click range at the open chat", () => {
+    const fourSessions = [...sessions, { ...sessions[2], id: "d", title: "Chat d", updated_at: "2026-10-31T00:00:00Z" }];
+    render(<ChatSessionNavigation {...props} sessions={fourSessions} activeSessionId="d" />);
+
+    fireEvent.click(row("Chat b"), { shiftKey: true });
+    expect(screen.getByText("3 selected")).toBeInTheDocument();
+    expect(row("Chat a")).toHaveAttribute("aria-pressed", "false");
+    ["Chat b", "Chat c", "Chat d"].forEach((title) => expect(row(title)).toHaveAttribute("aria-pressed", "true"));
+
+    // The open chat stays the anchor for the next Shift-click.
+    fireEvent.click(row("Chat a"), { shiftKey: true });
+    expect(screen.getByText("4 selected")).toBeInTheDocument();
+  });
+
   it("keeps a chat selected when Shift-clicked without a range anchor", () => {
     render(<ChatSessionNavigation {...props} sessions={sessions} />);
 
