@@ -2,9 +2,9 @@
 
 A topic's creator decides whether it is public. Public topics show the
 creator's Hugging Face username, a follower count and the avatars of followers
-who allow it. Homepage bubbles rank eligible public topics by followers. An
-admin can hide a topic, which removes it from the bubbles and search engines
-without touching anyone's follow.
+who allow it, the creator included. Homepage bubbles rank eligible public topics
+by followers. An admin can hide a topic, which removes it from the bubbles and
+search engines without touching anyone's follow.
 """
 
 from __future__ import annotations
@@ -30,7 +30,8 @@ BUBBLE_LIMIT = 8
 BUBBLE_MIN_RECENT_PAPERS = 5
 RECENT_DAYS = 30
 INDEX_MIN_FOLLOWERS = 3
-AVATAR_LIMIT = 8
+# Enough faces to fill the topic sidebar's follower grid; the rest show as "+N".
+AVATAR_LIMIT = 100
 
 # Verdicts at the threshold, plus the embedding preview until the backfill is
 # done, mapped to each paper's latest version (as the following feed does).
@@ -110,14 +111,14 @@ def topic_view(db: Session, topic_id: int, viewer: str | None) -> PublicTopicVie
             ResearchTopicFollow,
             ResearchTopicFollow.hf_subject == UserProfile.hf_subject,
         )
-        .join(
+        # Accounts that never changed the setting have no row and show by default.
+        .outerjoin(
             ResearchSubscription,
             ResearchSubscription.hf_subject == UserProfile.hf_subject,
         )
         .where(
             ResearchTopicFollow.topic_id == topic_id,
-            ResearchSubscription.show_as_follower,
-            UserProfile.hf_subject != func.coalesce(topic.created_by_hf_subject, ""),
+            func.coalesce(ResearchSubscription.show_as_follower, True),
         )
         .order_by(ResearchTopicFollow.created_at)
         .limit(AVATAR_LIMIT)

@@ -148,7 +148,7 @@ def test_topic_view_shows_creator_followers_and_visible_avatars(db, now):
     assert view.creator.username == "alice"
     assert view.creator.avatar_url.endswith("/api/users/alice/avatar?redirect=true")
     assert view.followers == 4
-    assert [p.username for p in view.follower_avatars] == ["bob", "dave"]
+    assert [p.username for p in view.follower_avatars] == ["alice", "bob", "dave"]
     assert view.indexable
     assert not view.following
     public.set_hidden(db, topic_id, True, now)
