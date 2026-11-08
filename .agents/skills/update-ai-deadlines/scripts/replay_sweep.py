@@ -19,12 +19,15 @@ import argparse
 import json
 
 from huggingface_hub import HfApi
+from pydantic import ValidationError
 
 from backend.config import get_settings
 from backend.database.connection import db_manager
 from backend.models.database import ConferenceDeadlineSweep
 from backend.services import conference_deadline_agent as agent
+from backend.services.catalog_errors import CatalogError
 from backend.services.conference_deadline_service import (
+    DeadlineValidationError,
     SeriesChangeSet,
     apply_series_change_set,
 )
@@ -37,7 +40,11 @@ def main() -> int:
     parser.add_argument("--series", help="comma-separated series; default all")
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    wanted = set(args.series.split(",")) if args.series else None
+    wanted = (
+        {s.strip() for s in args.series.split(",") if s.strip()}
+        if args.series
+        else None
+    )
 
     credentials = job_credentials(get_settings())
     api = HfApi(token=credentials.token)
@@ -48,19 +55,28 @@ def main() -> int:
         lines = api.fetch_job_logs(
             job_id=sweep.hf_job_id, namespace=credentials.namespace
         )
+        failed: list[str] = []
         for result in agent.decode_result_lines(list(lines)):
             series = result.get("series")
             if result.get("status") != "proposed":
                 continue
             if wanted is not None and series not in wanted:
                 continue
-            plans = apply_series_change_set(
-                db,
-                series,
-                SeriesChangeSet.model_validate(result["change_set"]),
-                dry_run=not args.apply,
-                request_id=f"conference-deadline-sweep:{sweep.id}:{series}:replay",
-            )
+            # Like a normal collection: one invalid proposal is reported and
+            # skipped, the other series are still re-planned.
+            try:
+                plans = apply_series_change_set(
+                    db,
+                    series,
+                    SeriesChangeSet.model_validate(result["change_set"]),
+                    dry_run=not args.apply,
+                    request_id=f"conference-deadline-sweep:{sweep.id}:{series}:replay",
+                )
+            except (ValidationError, DeadlineValidationError, CatalogError) as exc:
+                db.rollback()
+                failed.append(series)
+                print(json.dumps({"series": series, "error": str(exc)[:1000]}))
+                continue
             for plan in plans:
                 print(
                     json.dumps(
@@ -76,6 +92,9 @@ def main() -> int:
                     )
                 )
     print("applied" if args.apply else "dry run: nothing written (pass --apply)")
+    if failed:
+        print(f"invalid proposals skipped: {', '.join(failed)}")
+        return 1
     return 0
 
 
