@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Plus } from 'lucide-react';
@@ -83,7 +83,15 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
   const retry = editing?.status === 'failed' && trimmed === saved;
   const atLimit = !editing && (topics.data?.length ?? 0) - pendingRemovals.length >= TOPIC_LIMIT;
   const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry) && !atLimit;
-  const saving = saveTopic.isPending || removeTopics.isPending || saveFollows.isPending;
+  // Set while a saved pop-up waits for fresh follows before opening afterSavePath; it stays disabled meanwhile.
+  const [finishing, setFinishing] = useState(false);
+  // Closing the pop-up unmounts the form, which cancels a pending navigation.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const saving = saveTopic.isPending || removeTopics.isPending || saveFollows.isPending || finishing;
   const isFollowed = (kind: FollowKind, id: string) =>
     follows.data?.some(follow => follow.kind === kind && String(follow.entity_id) === id) ?? false;
   const isSelected = (kind: FollowKind, id: string) =>
@@ -115,10 +123,12 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
       if (afterSavePath) {
         // Let the destination see the saved follows and topics, or it would greet an "empty" account
         // with the intro and reopen this pop-up.
+        setFinishing(true);
         await Promise.all([
           client.refetchQueries({ queryKey: researchQueryKeys.follows(user.hf_subject) }),
           client.refetchQueries({ queryKey: researchQueryKeys.topics(user.hf_subject) }),
         ]);
+        if (!mounted.current) return;
         onDone();
         navigate(afterSavePath);
         return;

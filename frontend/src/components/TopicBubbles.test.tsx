@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -101,5 +101,23 @@ describe("TopicDialog afterSavePath", () => {
     await userEvent.click(screen.getByRole("button", { name: "Follow" }));
     expect(await screen.findByText("Following feed")).toBeInTheDocument();
     expect(firstSeen[0]).toBe(1);
+  });
+
+  it("stays disabled while it waits, and closing it cancels the move to the Following feed", async () => {
+    vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: [{ id: 5, name: "Robotics", slug: "robotics" }] } as never);
+    vi.spyOn(researchApi, "setFollow").mockImplementation(async () => {
+      vi.mocked(researchApi.follows).mockImplementation(() => new Promise(resolve => setTimeout(() => resolve([]), 80)));
+    });
+    function Host() {
+      const [open, setOpen] = useState(true);
+      return <TopicDialog open={open} afterSavePath="/following" onOpenChange={setOpen} />;
+    }
+    renderWithProviders(<Host />);
+    await userEvent.click(await screen.findByRole("button", { name: /Robotics/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Follow" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled());
+    await userEvent.keyboard("{Escape}");
+    await new Promise(resolve => setTimeout(resolve, 150));
+    expect(screen.queryByText("Following feed")).not.toBeInTheDocument();
   });
 });
