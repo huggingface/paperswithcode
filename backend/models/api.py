@@ -201,11 +201,16 @@ from backend.models.trends import (
 )
 from backend.models.research import (
     FollowView as FollowView,
+    FollowerVisibilityUpdate as FollowerVisibilityUpdate,
+    PublicTopicView as PublicTopicView,
     ResearchEntry as ResearchEntry,
     ResearchFeedEntry as ResearchFeedEntry,
     SubscriptionUpdate as SubscriptionUpdate,
     SubscriptionView as SubscriptionView,
+    TopicBubble as TopicBubble,
+    TopicPerson as TopicPerson,
     TopicSuggestion as TopicSuggestion,
     TopicUpdate as TopicUpdate,
     TopicView as TopicView,
+    TopicVisibilityUpdate as TopicVisibilityUpdate,
 )

@@ -535,6 +535,8 @@ def topic_views(db: Session, subject: str) -> list[TopicView]:
             judged=topic.backfill_done,
             total=topic.backfill_total,
             suggestions=suggestions(db, topic.text),
+            is_public=topic.is_public,
+            is_creator=topic.created_by_hf_subject == subject,
         )
         for topic, set_at in rows
     ]
@@ -554,6 +556,26 @@ def _lock(db: Session, subject: str) -> None:
 
 def _follow(db: Session, subject: str, topic_id: int) -> ResearchTopicFollow | None:
     return db.get(ResearchTopicFollow, (subject, topic_id))
+
+
+def _add_follow(db: Session, subject: str, topic: ResearchTopic, now: datetime) -> None:
+    """Follow ``topic`` unless already followed; raises ``OverflowError`` at the cap."""
+    # A topic that exhausted its retries gets a fresh start from a new follower.
+    if topic.backfill_status == "failed":
+        topic.backfill_status = "pending"
+        topic.backfill_attempts = 0
+    # Topics from before creators were recorded go to their next follower.
+    if topic.created_by_hf_subject is None:
+        topic.created_by_hf_subject = subject
+    if _follow(db, subject, topic.id) is not None:
+        return
+    count = db.scalar(
+        select(func.count()).where(ResearchTopicFollow.hf_subject == subject)
+    )
+    if count >= MAX_TOPICS:
+        db.rollback()
+        raise OverflowError(MAX_TOPICS)
+    db.add(ResearchTopicFollow(hf_subject=subject, topic_id=topic.id, created_at=now))
 
 
 def follow_topic(
@@ -576,29 +598,20 @@ def follow_topic(
     normalized = normalize(value)
     db.execute(
         insert(ResearchTopic)
-        .values(text=display_text(value), normalized=normalized)
+        .values(
+            text=display_text(value),
+            normalized=normalized,
+            created_by_hf_subject=subject,
+        )
         .on_conflict_do_nothing(index_elements=["normalized"])
     )
     topic = db.scalar(
         select(ResearchTopic).where(ResearchTopic.normalized == normalized)
     )
-    # A topic that exhausted its retries gets a fresh start from a new follower.
-    if topic.backfill_status == "failed":
-        topic.backfill_status = "pending"
-        topic.backfill_attempts = 0
     if old is not None and old.topic_id != topic.id:
         db.delete(old)
         db.flush()
-    if _follow(db, subject, topic.id) is None:
-        count = db.scalar(
-            select(func.count()).where(ResearchTopicFollow.hf_subject == subject)
-        )
-        if count >= MAX_TOPICS:
-            db.rollback()
-            raise OverflowError(MAX_TOPICS)
-        db.add(
-            ResearchTopicFollow(hf_subject=subject, topic_id=topic.id, created_at=now)
-        )
+    _add_follow(db, subject, topic, now)
     db.commit()
     # Saving the topic again retries a label or preview that failed.
     if topic.label is None:
@@ -612,6 +625,35 @@ def follow_topic(
     if topic.backfill_status != "done" and has_preview is None:
         save_preview(db, topic, now)
     return topic.id
+
+
+def follow_existing_topic(
+    db: Session, subject: str, topic_id: int, now: datetime
+) -> None:
+    """Follow another account's topic by id.
+
+    Raises ``LookupError`` for a missing topic or a private one the account
+    did not create and does not follow, and ``OverflowError`` at ``MAX_TOPICS``.
+    """
+    _lock(db, subject)
+    topic = db.get(ResearchTopic, topic_id)
+    if topic is None or not (
+        topic.is_public
+        or topic.created_by_hf_subject == subject
+        or _follow(db, subject, topic_id) is not None
+    ):
+        raise LookupError(topic_id)
+    _add_follow(db, subject, topic, now)
+    db.commit()
+
+
+def set_public(db: Session, subject: str, topic_id: int, is_public: bool) -> None:
+    """Change a topic's visibility; raises ``LookupError`` unless ``subject`` created it."""
+    topic = db.get(ResearchTopic, topic_id, with_for_update=True)
+    if topic is None or topic.created_by_hf_subject != subject:
+        raise LookupError(topic_id)
+    topic.is_public = is_public
+    db.commit()
 
 
 def unfollow_topic(db: Session, subject: str, topic_id: int | None = None) -> None:

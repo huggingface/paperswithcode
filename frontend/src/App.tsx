@@ -50,6 +50,7 @@ if (!useHashRouter && typeof window !== "undefined") {
 // for visitors landing on a single route.
 const AuthorizePaperEditView = React.lazy(() => import("@/views/AuthorizePaperEditView"));
 const FollowingView = React.lazy(() => import("@/views/FollowingView"));
+const TopicView = React.lazy(() => import("@/views/TopicView"));
 const FeedView = React.lazy(() => import("@/views/FeedView"));
 const ChatView = React.lazy(() => import("@/views/ChatView"));
 const SharedChatView = React.lazy(() => import("@/views/SharedChatView"));
@@ -285,6 +286,7 @@ const Shell: React.FC = () => {
       <Route element={<SiteLayout />}>
         <Route path="/" element={<FeedView />} />
         <Route path="/following" element={<FollowingView />} />
+        <Route path="/topics/:topicParam" element={<TopicView />} />
         {/* The trending (X) tab merged into the homepage feed. */}
         <Route path="/x-trending" element={<Navigate to="/" replace />} />
         {/* Keep new and persisted chats on the same route instance. A new

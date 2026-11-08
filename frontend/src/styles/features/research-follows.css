@@ -339,3 +339,207 @@
   background: var(--accent-soft);
   font-size: 13px;
 }
+
+/* Homepage topic bubbles */
+.topic-bubbles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 18px;
+}
+.topic-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 5px 12px 5px 6px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.2;
+  text-decoration: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+.topic-bubble:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.topic-bubble img {
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.topic-bubble-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.topic-bubble-creator {
+  flex: none;
+  color: var(--ink-faint);
+}
+
+/* Public topic page */
+.topic-page {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.topic-banner {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 8px;
+  height: 160px;
+  margin-bottom: 20px;
+  padding: 12px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--accent-soft);
+}
+.topic-banner.is-loading {
+  opacity: 0.6;
+}
+.topic-banner img {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+  object-fit: cover;
+  object-position: top;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.12);
+  transform: rotate(-4deg);
+}
+.topic-title {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 32px;
+  line-height: 1.15;
+}
+.topic-description {
+  margin: 0 0 14px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1.5;
+}
+.topic-private {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+.topic-private svg {
+  width: 14px;
+  height: 14px;
+}
+.topic-creator,
+.topic-followers {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 10px;
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+.topic-creator a {
+  color: var(--ink);
+  font-weight: 600;
+}
+.topic-avatar {
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--hairline);
+}
+.topic-follower-avatars {
+  display: inline-flex;
+}
+.topic-follower-avatars .topic-avatar {
+  border: 2px solid var(--bg);
+}
+.topic-follower-avatars .topic-avatar + .topic-avatar {
+  margin-left: -8px;
+}
+.topic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--hairline);
+}
+.topic-secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.topic-secondary-btn svg {
+  width: 15px;
+  height: 15px;
+}
+.topic-secondary-btn:hover {
+  border-color: var(--accent);
+}
+.topic-order {
+  margin-left: auto;
+}
+.topic-order select {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--hairline-strong);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+}
+.topic-duplicate-dialog form {
+  display: grid;
+  gap: 10px;
+}
+.research-topic-sharing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+.research-topic-sharing label {
+  margin-left: 6px;
+  color: var(--ink);
+  font-weight: 600;
+}
+.research-topic-sharing-note {
+  color: var(--ink-faint);
+}
+@media (max-width: 640px) {
+  .topic-banner {
+    grid-template-columns: repeat(4, 1fr);
+    height: 120px;
+  }
+  .topic-banner img:nth-child(n + 5) {
+    display: none;
+  }
+  .topic-title {
+    font-size: 26px;
+  }
+  .topic-order {
+    margin-left: 0;
+  }
+}

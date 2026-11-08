@@ -38,7 +38,41 @@ export interface ResearchTopic {
   judged: number;
   total: number | null;
   suggestions: ResearchTopicSuggestion[];
+  /** Public topics are listed with their creator's HF username; only the creator may change it. */
+  is_public: boolean;
+  is_creator: boolean;
 }
+/** A Hugging Face account shown on a public topic. */
+export interface TopicPerson {
+  username: string;
+  avatar_url: string;
+}
+/** A topic page header: what it matches, who made it, who follows it. */
+export interface PublicTopic {
+  id: number;
+  text: string;
+  label: string | null;
+  status: ResearchTopic['status'];
+  creator: TopicPerson | null;
+  is_public: boolean;
+  /** False while the topic has few followers or an admin hid it. */
+  indexable: boolean;
+  followers: number;
+  /** Followers who show their avatar, creator excluded, at most eight. */
+  follower_avatars: TopicPerson[];
+  following: boolean;
+  is_creator: boolean;
+}
+/** A popular public topic offered on the homepage. */
+export interface TopicBubble {
+  id: number;
+  text: string;
+  label: string | null;
+  creator: TopicPerson | null;
+  followers: number;
+}
+export type TopicPaperOrder = 'trending' | 'newest';
+export const TOPIC_PAPERS_PAGE_SIZE = 20;
 export const TOPIC_MAX_LENGTH = 300;
 /** How many topics an account may follow. */
 export const TOPIC_LIMIT = 10;
@@ -47,6 +81,8 @@ export interface ResearchEmail {
   email: string | null;
   suppressed: boolean;
   delivery_ready: boolean;
+  /** Whether the account's avatar may appear on public topics it follows. */
+  show_as_follower: boolean;
 }
 export interface ResearchEntry {
   paper: Paper;
@@ -88,6 +124,19 @@ export const researchApi = {
     method: 'PUT', body: JSON.stringify({ text }),
   }),
   removeTopic: (id: number) => apiRequest<void>(`/me/topics/${id}`, { method: 'DELETE' }),
+  followTopic: (id: number) => apiRequest<ResearchTopic>(`/me/topics/${id}/follow`, { method: 'POST' }),
+  setTopicPublic: (id: number, isPublic: boolean) => apiRequest<ResearchTopic>(`/me/topics/${id}`, {
+    method: 'PATCH', body: JSON.stringify({ is_public: isPublic }),
+  }),
+  setShowAsFollower: (show: boolean) => apiRequest<void>('/me/topic-follower-visibility', {
+    method: 'PUT', body: JSON.stringify({ show_as_follower: show }),
+  }),
+  publicTopic: (id: number) => apiRequest<PublicTopic>(`/research/topics/${id}`),
+  topicPapers: (id: number, order: TopicPaperOrder, offset = 0) => {
+    const params = new URLSearchParams({ order, offset: String(offset), limit: String(TOPIC_PAPERS_PAGE_SIZE) });
+    return apiRequest<Paper[]>(`/research/topics/${id}/papers?${params}`);
+  },
+  featuredTopics: () => apiRequest<TopicBubble[]>('/research/topics/featured'),
   email: () => apiRequest<ResearchEmail>('/me/research-email'),
   setEmail: (enabled: boolean) => apiRequest<ResearchEmail>('/me/research-email', {
     method: 'PUT', body: JSON.stringify({ enabled }),

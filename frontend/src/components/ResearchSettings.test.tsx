@@ -16,10 +16,10 @@ beforeEach(() => { vi.spyOn(researchApi, 'topics').mockResolvedValue([]); });
 afterEach(() => vi.restoreAllMocks());
 describe('research topics', () => {
   const saved = { id: 1, text: 'real-time video generation', label: null, set_at: '2026-10-28T10:00:00Z', status: 'pending' as const,
-    judged: 0, total: null, suggestions: [] };
+    judged: 0, total: null, suggestions: [], is_public: true, is_creator: true };
   beforeEach(() => {
     vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
-    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true });
+    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true, show_as_follower: true });
   });
   it('adds a trimmed topic, reports backfill progress, and offers another', async () => {
     const add = vi.spyOn(researchApi, 'addTopic').mockImplementation(async () => {
@@ -63,6 +63,37 @@ describe('research topics', () => {
     expect(await screen.findAllByRole('textbox', { name: 'Research topic' })).toHaveLength(TOPIC_LIMIT);
     expect(screen.queryByRole('textbox', { name: 'New research topic' })).not.toBeInTheDocument();
   });
+  it('lets the creator make a topic private and links its page', async () => {
+    vi.mocked(researchApi.topics).mockResolvedValue([{ ...saved, status: 'done' }]);
+    const visibility = vi.spyOn(researchApi, 'setTopicPublic').mockResolvedValue({ ...saved, is_public: false });
+    render(<ResearchSettings />, { wrapper });
+    expect(await screen.findByRole('link', { name: 'Topic page' })).toHaveAttribute('href', '/topics/1-real-time-video-generation');
+    fireEvent.click(screen.getByRole('switch', { name: 'Public' }));
+    await waitFor(() => expect(visibility).toHaveBeenCalledWith(1, false));
+  });
+  it('shows no visibility switch on a topic someone else created', async () => {
+    vi.mocked(researchApi.topics).mockResolvedValue([{ ...saved, is_creator: false }]);
+    render(<ResearchSettings />, { wrapper });
+    expect(await screen.findByText('Created by another account.')).toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: 'Public' })).not.toBeInTheDocument();
+  });
+  it('suggests splitting a list of areas into separate topics', async () => {
+    render(<ResearchSettings />, { wrapper });
+    const input = await screen.findByRole('textbox', { name: 'New research topic' });
+    fireEvent.change(input, { target: { value: 'flow matching, diffusion, medical AI, AutoML' } });
+    expect(screen.getByText(/Add each one as its own topic/)).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'multimodal representation learning, tensor decomposition' } });
+    expect(screen.queryByText(/Add each one as its own topic/)).not.toBeInTheDocument();
+  });
+  it('turns the follower avatar off', async () => {
+    const save = vi.spyOn(researchApi, 'setShowAsFollower').mockResolvedValue();
+    render(<ResearchSettings />, { wrapper });
+    const toggle = await screen.findByRole('switch', { name: /Show my avatar/ });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+    await waitFor(() => expect(save).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(toggle).not.toBeChecked());
+  });
   it('lets a failed topic be saved again unchanged to retry', async () => {
     vi.mocked(researchApi.topics).mockResolvedValue([{ ...saved, status: 'failed' }]);
     const update = vi.spyOn(researchApi, 'updateTopic').mockResolvedValue(saved);
@@ -74,24 +105,24 @@ describe('research topics', () => {
 describe('research follows', () => {
   it('shows the verified destination, disabled-delivery status, and explicit opt-in', async () => {
     vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
-    const preferences = { enabled: false, email: 'alice@example.com', suppressed: false, delivery_ready: false };
+    const preferences = { enabled: false, email: 'alice@example.com', suppressed: false, delivery_ready: false, show_as_follower: true };
     vi.spyOn(researchApi, 'email').mockResolvedValue(preferences);
     const save = vi.spyOn(researchApi, 'setEmail').mockResolvedValue({ ...preferences, enabled: true });
     render(<ResearchSettings />, { wrapper });
     expect(await screen.findByText('alice@example.com')).toBeInTheDocument();
     expect(screen.getByText(/Weekly emails have not launched yet/)).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('switch'));
+    fireEvent.click(screen.getByRole('switch', { name: /weekly digest/i }));
     await waitFor(() => expect(save).toHaveBeenCalledWith(true, expect.anything()));
   });
   it('groups follows by kind and lets an unfollow be undone in place before refetching', async () => {
     const follow = { kind: 'method' as const, entity_id: 7, name: 'Mixture of Experts', url: '/methods/moe', created_at: '2026-10-03T10:00:00Z' };
     const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([follow]);
-    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true });
+    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true, show_as_follower: true });
     const change = vi.spyOn(researchApi, 'setFollow').mockResolvedValue();
     render(<ResearchSettings />, { wrapper });
     expect(await screen.findByRole('heading', { name: 'Methods' })).toBeInTheDocument();
-    expect(screen.getByRole('switch')).toBeDisabled();
+    expect(screen.getByRole('switch', { name: /weekly digest/i })).toBeDisabled();
     // Refetches never settle, so every state change must come from the mutation itself.
     list.mockReturnValue(new Promise(() => {}));
     fireEvent.click(screen.getByRole('button', { name: 'Unfollow Mixture of Experts' }));
@@ -105,7 +136,7 @@ describe('research follows', () => {
   it('refreshes the weekly email after a follow from Settings, since following turns it on', async () => {
     const follow = { kind: 'task' as const, entity_id: 1, name: 'Alpha', url: '/tasks/alpha', created_at: '2026-10-01T10:00:00Z' };
     const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([follow]);
-    const email = vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: 'a@b.c', suppressed: false, delivery_ready: true });
+    const email = vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: 'a@b.c', suppressed: false, delivery_ready: true, show_as_follower: true });
     vi.spyOn(researchApi, 'setFollow').mockResolvedValue();
     render(<ResearchSettings />, { wrapper });
     const unfollow = await screen.findByRole('button', { name: 'Unfollow Alpha' });
@@ -113,15 +144,15 @@ describe('research follows', () => {
     fireEvent.click(unfollow);
     const followAgain = await screen.findByRole('button', { name: 'Follow Alpha' });
     await waitFor(() => expect(followAgain).toBeEnabled());
-    email.mockResolvedValue({ enabled: true, email: 'a@b.c', suppressed: false, delivery_ready: true });
+    email.mockResolvedValue({ enabled: true, email: 'a@b.c', suppressed: false, delivery_ready: true, show_as_follower: true });
     fireEvent.click(followAgain);
-    await waitFor(() => expect(screen.getByRole('switch')).toBeChecked());
+    await waitFor(() => expect(screen.getByRole('switch', { name: /weekly digest/i })).toBeChecked());
   });
   it('blocks overlapping unfollows so an interest is listed once', async () => {
     const a = { kind: 'task' as const, entity_id: 1, name: 'Alpha', url: '/tasks/alpha', created_at: '2026-10-01T10:00:00Z' };
     const b = { kind: 'task' as const, entity_id: 2, name: 'Beta', url: '/tasks/beta', created_at: '2026-10-01T10:00:00Z' };
     const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([a, b]);
-    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true });
+    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true, show_as_follower: true });
     let finish = () => {};
     const change = vi.spyOn(researchApi, 'setFollow').mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
     render(<ResearchSettings />, { wrapper });

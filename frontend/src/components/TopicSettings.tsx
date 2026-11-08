@@ -3,7 +3,8 @@ import { Link, useLocation } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type ResearchTopic } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
-import { useRemoveTopics, useResearchTopics, useSaveTopic } from '@/lib/researchTopic';
+import { looksLikeTopicList, topicPath, useRemoveTopics, useResearchTopics, useSaveTopic, useSetTopicPublic } from '@/lib/researchTopic';
+import { Switch } from './ui/switch';
 
 const KIND_NAMES: Record<FollowKind, string> = {
   task: 'task', method: 'method', benchmark: 'benchmark', author: 'author', organization: 'organization',
@@ -37,7 +38,8 @@ export default function TopicSettings() {
       Describe the research you want to follow in your own words, for example
       {' '}<em>real-time video generation</em> or <em>speculative decoding for LLM inference</em>.
       A model reads every new paper and adds the ones that match to your Following feed.
-      You can follow up to {TOPIC_LIMIT} topics.
+      You can follow up to {TOPIC_LIMIT} topics. New topics are public: anyone can open and follow them, and
+      they show your Hugging Face username.
     </p>
     {topics.isLoading ? <p className="settings-billing-loading">Loading your topics…</p>
       : topics.error ? <p className="settings-token-error" role="alert">Could not load your topics.</p>
@@ -87,7 +89,11 @@ function TopicEditor({ topic }: { topic?: ResearchTopic }) {
         </button>
       </div>
     </form>
+    {!topic && looksLikeTopicList(value) && <p className="research-topic-suggestion">
+      Tip: this lists several areas. Add each one as its own topic for better matches.
+    </p>}
     {topic && <p className="research-email-status" role="status">{topicStatus(topic)}</p>}
+    {topic && <TopicSharing topic={topic} />}
     {topic?.suggestions.map(s => <p key={`${s.kind}:${s.entity_id}`} className="research-topic-suggestion">
       <Link to={s.url}>{s.name}</Link> is a {KIND_NAMES[s.kind]} in the catalog. Following it as well adds
       every paper tagged with it.
@@ -95,5 +101,25 @@ function TopicEditor({ topic }: { topic?: ResearchTopic }) {
     {(save.error || remove.error) && <p className="settings-token-error" role="alert">
       Could not save your topic. Please try again.
     </p>}
+  </div>;
+}
+
+/** The topic page link, and for its creator the public/private switch. */
+function TopicSharing({ topic }: { topic: ResearchTopic }) {
+  const visibility = useSetTopicPublic();
+  const switchId = `topic-public-${topic.id}`;
+  return <div className="research-topic-sharing">
+    <Link to={topicPath(topic)}>Topic page</Link>
+    {topic.is_creator ? <>
+      <label htmlFor={switchId}>Public</label>
+      <Switch id={switchId} checked={topic.is_public} disabled={visibility.isPending}
+        onCheckedChange={isPublic => visibility.mutate({ id: topic.id, isPublic })} />
+      <span className="research-topic-sharing-note">
+        {topic.is_public ? 'Anyone can open and follow it; it shows your username.' : 'Only you and existing followers can open it.'}
+      </span>
+    </> : <span className="research-topic-sharing-note">
+      {topic.is_public ? 'Created by another account.' : 'Private topic created by another account.'}
+    </span>}
+    {visibility.error && <span className="settings-token-error" role="alert">Could not change this topic. Please try again.</span>}
   </div>;
 }

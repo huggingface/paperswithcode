@@ -83,6 +83,13 @@ export default function ResearchSettings() {
   const emailKey = researchQueryKeys.email(user?.hf_subject);
   const email = useQuery({ queryKey: emailKey, queryFn: researchApi.email, enabled: !!user });
   const update = useMutation({ mutationFn: researchApi.setEmail, onSuccess: data => client.setQueryData(emailKey, data) });
+  const showAsFollower = useMutation({
+    mutationFn: async (show: boolean) => {
+      await researchApi.setShowAsFollower(show);
+      return show;
+    },
+    onSuccess: show => client.setQueryData<typeof email.data>(emailKey, current => current && { ...current, show_as_follower: show }),
+  });
   const count = follows.data?.length ?? 0;
   const prefs = email.data;
   const canOptIn = !!prefs?.email && !prefs.suppressed;
@@ -96,7 +103,7 @@ export default function ResearchSettings() {
       </div>
       <p className="settings-row-desc research-section-intro">
         New papers and benchmark results from your topics and what you follow appear in your
-        Following feed. Your topics and follows are private.
+        Following feed. Your follows of tasks, methods, benchmarks, authors, and organizations are private.
       </p>
       {!user ? <div className="settings-note">
         <span>Sign in to follow research and build your personal feed.</span>
@@ -104,6 +111,17 @@ export default function ResearchSettings() {
       </div> : follows.isLoading ? <p className="settings-billing-loading">Loading follows…</p>
         : follows.error ? <p className="settings-token-error" role="alert">Could not load your follows.</p>
         : <><TopicSettings /><FollowList follows={follows.data ?? []} /></>}
+      {user && prefs && <div className="settings-row">
+        <label className="settings-row-text" htmlFor="research-show-as-follower">
+          <span className="settings-row-label">Show my avatar on topics I follow</span>
+          <span className="settings-row-desc">
+            Public topic pages show the avatars of some followers. Turn this off to be counted without your avatar.
+          </span>
+        </label>
+        <Switch id="research-show-as-follower" checked={prefs.show_as_follower} disabled={showAsFollower.isPending}
+          onCheckedChange={show => showAsFollower.mutate(show)} />
+      </div>}
+      {showAsFollower.error && <p className="settings-token-error" role="alert">Could not save your preference. Please try again.</p>}
     </section>
 
     {user && <section className="settings-section" aria-labelledby="research-email-heading">
