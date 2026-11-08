@@ -1,4 +1,4 @@
-import { fireEvent, render as renderElement, screen } from "@testing-library/react";
+import { fireEvent, render as renderElement, screen, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -262,6 +262,17 @@ describe("ChatSessionNavigation bulk selection", () => {
 
     fireEvent.click(row("Chat c"), { shiftKey: true });
     expect(screen.getByText("2 selected")).toBeInTheDocument();
+  });
+
+  it("deletes the whole selection from a selected chat's trash button", async () => {
+    const onDelete = vi.fn();
+    const onDeleteMany = vi.fn(async () => true);
+    render(<ChatSessionNavigation {...props} sessions={sessions} activeSessionId="a" onDelete={onDelete} onDeleteMany={onDeleteMany} />);
+
+    fireEvent.click(row("Chat c"), { shiftKey: true });
+    fireEvent.click(within(row("Chat a")).getByRole("button", { name: "Delete selected conversations" }));
+    await vi.waitFor(() => expect(onDeleteMany).toHaveBeenCalledWith(["a", "b", "c"]));
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it("navigates on a plain click when nothing is selected", () => {
