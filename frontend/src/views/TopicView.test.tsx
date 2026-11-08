@@ -74,6 +74,17 @@ describe('TopicView', () => {
     expect(await screen.findByRole('heading', { name: 'Topic not found' })).toBeInTheDocument();
   });
 
+  it('shows the last month by default and all time on request', async () => {
+    vi.spyOn(researchApi, 'publicTopic').mockResolvedValue(topic);
+    const papers = vi.mocked(researchApi.topicPapers);
+    renderAt('/topics/23');
+    await screen.findByRole('heading', { name: 'OCR releases' });
+    await waitFor(() => expect(papers).toHaveBeenCalledWith(23, 'trending', 0, expect.objectContaining({ startDate: expect.any(String), endDate: expect.any(String) })));
+    expect(screen.getByRole('button', { name: 'Last Month' })).toHaveClass('active');
+    fireEvent.click(screen.getByRole('button', { name: 'All Time' }));
+    await waitFor(() => expect(papers).toHaveBeenLastCalledWith(23, 'trending', 0, { startDate: undefined, endDate: undefined }));
+  });
+
   it('filters by the homepage date range and sorts newest first through the URL', async () => {
     vi.spyOn(researchApi, 'publicTopic').mockResolvedValue(topic);
     const papers = vi.mocked(researchApi.topicPapers);

@@ -110,7 +110,7 @@ keeps its creator. A creator-less topic goes to its next follower.
   return 404 unless the viewer created or follows them.
 - `GET /research/topics/{id}/papers?order=trending|newest&start_date=&end_date=` lists the topic's
   matches (verdicts at the threshold, or the embedding preview while the
-  backfill runs), all time unless `start_date`/`end_date` bound it.
+  backfill runs), all time unless `start_date`/`end_date` bound it; the topic page asks for the last month by default, like the homepage date filter.
 - `POST /me/topics/{id}/follow` follows a topic by id within the ten-topic
   limit; `PATCH /me/topics/{id}` with `{"is_public": …}` is creator-only;
   `PUT /me/topic-follower-visibility` sets the avatar switch.
