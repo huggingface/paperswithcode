@@ -34,6 +34,7 @@ from backend.models.research import (
 from backend.models.database.research import ResearchTopic, ResearchTopicFollow
 from backend.services.organization_service import OrganizationService
 from backend.services.research_topic_service import THRESHOLD as TOPIC_THRESHOLD
+from backend.services.research_topic_service import capitalized
 from backend.utils.author_photos import author_image_url
 
 ENTITIES = {
@@ -157,7 +158,7 @@ def interests(db: Session, subject: str) -> dict[tuple[str, int], Interest]:
         .join(ResearchTopicFollow, ResearchTopicFollow.topic_id == ResearchTopic.id)
         .where(ResearchTopicFollow.hf_subject == subject)
     ):
-        name = topic.label or topic.text
+        name = capitalized(topic.label or topic.text)
         short = name if len(name) <= 80 else name[:79].rstrip() + "…"
         found["topic", topic.id] = Interest("topic", topic.id, f"\u201c{short}\u201d")
     return found

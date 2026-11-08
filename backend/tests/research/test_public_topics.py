@@ -262,3 +262,38 @@ def test_public_topic_api(db, monkeypatch, now):
     assert client.get(f"/research/topics/{topic_id}").status_code == 404
     assert client.post(f"/me/topics/{topic_id}/follow").status_code == 404
     assert client.get("/research/topics/0").status_code == 404
+
+
+def test_accounts_reorder_topics_and_edits_keep_their_place(db, now):
+    a = topics.follow_topic(db, "alice", "speech synthesis", now)
+    b = topics.follow_topic(db, "alice", "robot learning", now + timedelta(seconds=1))
+    c = topics.follow_topic(db, "alice", "world models", now + timedelta(seconds=2))
+    ids = lambda: [t.id for t in topics.topic_views(db, "alice")]  # noqa: E731
+    assert ids() == [a, b, c]
+    topics.reorder_topics(db, "alice", [c, a, b])
+    assert ids() == [c, a, b]
+    # Editing a topic keeps its slot; a new topic goes last.
+    d = topics.follow_topic(db, "alice", "agent memory", now, replace=a)
+    e = topics.follow_topic(db, "alice", "ocr releases", now + timedelta(seconds=3))
+    assert ids() == [c, d, b, e]
+    for bad in ([c, d, b], [c, d, b, e, e], [c, d, b, e, 0]):
+        with pytest.raises(ValueError):
+            topics.reorder_topics(db, "alice", bad)
+    assert ids() == [c, d, b, e]
+
+
+def test_reorder_api_and_capitalized_reasons(db, monkeypatch, now):
+    app = FastAPI()
+    app.include_router(research.router)
+    app.dependency_overrides[get_database_session] = lambda: db
+    app.dependency_overrides[require_user] = lambda: {"hf_subject": "alice"}
+    monkeypatch.setattr(research, "decode_request_session", lambda request: {})
+    client = TestClient(app)
+    a = topics.follow_topic(db, "alice", "agent swarms", now)
+    b = topics.follow_topic(db, "alice", "ocr releases", now + timedelta(seconds=1))
+    reordered = client.put("/me/topics/order", json={"topic_ids": [b, a]})
+    assert reordered.status_code == 200
+    assert [t["id"] for t in reordered.json()] == [b, a]
+    assert client.put("/me/topics/order", json={"topic_ids": [b]}).status_code == 409
+    reasons = {i.name for i in follows.interests(db, "alice").values()}
+    assert reasons == {"\u201cAgent swarms\u201d", "\u201cOcr releases\u201d"}

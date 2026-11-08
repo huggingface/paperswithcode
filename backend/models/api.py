@@ -208,6 +208,7 @@ from backend.models.research import (
     SubscriptionUpdate as SubscriptionUpdate,
     SubscriptionView as SubscriptionView,
     TopicBubble as TopicBubble,
+    TopicOrderUpdate as TopicOrderUpdate,
     TopicPerson as TopicPerson,
     TopicSuggestion as TopicSuggestion,
     TopicUpdate as TopicUpdate,

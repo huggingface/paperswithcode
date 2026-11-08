@@ -10,7 +10,7 @@ import { useAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
 import { TEN_MINUTES } from '@/lib/api/queryKeys';
 import {
-  stashPendingFollows, stashPendingTopic, useRemoveTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic,
+  stashPendingFollows, stashPendingTopic, topicTitle, useRemoveTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic,
   type FollowPick,
 } from '@/lib/researchTopic';
 
@@ -173,7 +173,7 @@ function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: 
             title={topic.text}
             onClick={() => setRemovals(current => on ? [...current, topic.id] : current.filter(id => id !== topic.id))}>
             {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}
-            {topic.label ?? topic.text}
+            {topicTitle(topic)}
           </button>;
         })}
       </div>

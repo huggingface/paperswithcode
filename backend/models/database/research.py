@@ -55,6 +55,8 @@ class ResearchTopicFollow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    # The account's own order; NULL until it reorders, then sorted by follow time.
+    position: Mapped[int | None] = mapped_column(Integer)
 
 
 class ResearchTopic(Base):

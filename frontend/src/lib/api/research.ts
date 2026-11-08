@@ -124,6 +124,9 @@ export const researchApi = {
     method: 'PUT', body: JSON.stringify({ text }),
   }),
   removeTopic: (id: number) => apiRequest<void>(`/me/topics/${id}`, { method: 'DELETE' }),
+  reorderTopics: (ids: number[]) => apiRequest<ResearchTopic[]>('/me/topics/order', {
+    method: 'PUT', body: JSON.stringify({ topic_ids: ids }),
+  }),
   followTopic: (id: number) => apiRequest<ResearchTopic>(`/me/topics/${id}/follow`, { method: 'POST' }),
   setTopicPublic: (id: number, isPublic: boolean) => apiRequest<ResearchTopic>(`/me/topics/${id}`, {
     method: 'PATCH', body: JSON.stringify({ is_public: isPublic }),

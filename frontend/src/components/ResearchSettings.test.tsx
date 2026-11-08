@@ -94,6 +94,16 @@ describe('research topics', () => {
     await waitFor(() => expect(save).toHaveBeenCalledWith(false));
     await waitFor(() => expect(toggle).not.toBeChecked());
   });
+  it('reorders topics with the drag handle keys', async () => {
+    const second = { ...saved, id: 2, text: 'speculative decoding' };
+    vi.mocked(researchApi.topics).mockResolvedValue([saved, second]);
+    const reorder = vi.spyOn(researchApi, 'reorderTopics').mockResolvedValue([second, saved]);
+    render(<ResearchSettings />, { wrapper });
+    fireEvent.keyDown(await screen.findByRole('button', { name: /^Reorder Speculative decoding/ }), { key: 'ArrowUp' });
+    await waitFor(() => expect(reorder).toHaveBeenCalledWith([2, 1]));
+    await waitFor(() => expect(screen.getAllByRole('textbox', { name: 'Research topic' }).map(box => (box as HTMLTextAreaElement).value))
+      .toEqual(['speculative decoding', 'real-time video generation']));
+  });
   it('lets a failed topic be saved again unchanged to retry', async () => {
     vi.mocked(researchApi.topics).mockResolvedValue([{ ...saved, status: 'failed' }]);
     const update = vi.spyOn(researchApi, 'updateTopic').mockResolvedValue(saved);
