@@ -46,7 +46,8 @@ describe('TopicView', () => {
     expect(view).toHaveBeenCalledWith(23);
     expect(screen.getByRole('link', { name: '@nielsr' })).toHaveAttribute('href', 'https://huggingface.co/nielsr');
     expect(screen.getByText('3 people follow this topic')).toBeInTheDocument();
-    expect(screen.getByTitle('@alice')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '@alice' })).toHaveAttribute('href', 'https://huggingface.co/alice');
+    expect(screen.getByText('+2')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
     await waitFor(() => expect(follow).toHaveBeenCalledWith(23));
     expect(await screen.findByText('4 people follow this topic')).toBeInTheDocument();

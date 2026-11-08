@@ -97,10 +97,8 @@ export default function TopicView() {
         <div className="sidebar-section">
           <div className="sidebar-label">Followers</div>
           <div className="topic-followers">
-            {data.follower_avatars.length > 0 && <span className="topic-follower-avatars">
-              {data.follower_avatars.map(p => <Avatar key={p.username} person={p} size={26} />)}
-            </span>}
             <span>{data.followers === 1 ? '1 person follows this topic' : `${data.followers.toLocaleString()} people follow this topic`}</span>
+            {data.follower_avatars.length > 0 && <FollowerGrid people={data.follower_avatars} total={data.followers} />}
           </div>
         </div>
         <div className="sidebar-section topic-actions">
@@ -128,6 +126,19 @@ export default function TopicView() {
       </div>
     </div>
   </div>;
+}
+
+/** Follower faces linking to their Hugging Face profiles, then "+N" for the hidden and the overflow. */
+function FollowerGrid({ people, total }: { people: TopicPerson[]; total: number }) {
+  const rest = total - people.length;
+  return <ul className="topic-follower-grid" aria-label="Followers">
+    {people.map(p => <li key={p.username}>
+      <a href={`https://huggingface.co/${p.username}`} target="_blank" rel="noreferrer" aria-label={`@${p.username}`}>
+        <Avatar person={p} size={36} />
+      </a>
+    </li>)}
+    {rest > 0 && <li className="topic-follower-more" aria-label={`${rest.toLocaleString()} more`}>+{rest.toLocaleString()}</li>}
+  </ul>;
 }
 
 function Avatar({ person, size }: { person: TopicPerson; size: number }) {
