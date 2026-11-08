@@ -855,8 +855,12 @@ def plan_edition_change(
         "country": change.country or None,
     }
     if existing is None:
-        if not change.deadlines:
-            plan.rejections.append("a new edition needs at least one deadline")
+        # Official conference dates alone are enough: the edition is listed
+        # on /ai-deadlines as "deadlines TBA" until a later sweep adds them.
+        if not change.deadlines and change.start_date is None:
+            plan.rejections.append(
+                "a new edition needs a deadline or official conference dates"
+            )
             return plan
         plan.new_edition = {
             "name": f"{series.title} {change.year}",

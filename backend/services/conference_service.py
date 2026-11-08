@@ -33,6 +33,7 @@ from backend.utils.entity_images import load_entity_image
 from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.slug_utils import slugify
 from backend.services.catalog_errors import CatalogConflictError, CatalogValidationError
+from backend.services.conference_deadline_service import series_of
 from backend.services.catalog_errors import (
     CatalogNotFoundError,
     CatalogPersistenceError,
@@ -169,10 +170,34 @@ class ConferenceService:
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve conferences: {str(e)}")
 
-    def get_conference_deadlines(self) -> ConferenceDeadlines:
-        """Return every conference that has at least one deadline.
+    def _upcoming_tba_editions(
+        self, *, tracked_series: set[str], exclude_ids
+    ) -> list[DBConference]:
+        """Announced editions of tracked series whose deadlines are not out yet.
 
-        Each conference carries its full deadline list plus the metadata
+        Only editions with official conference dates that have not ended count,
+        so old conference pages without deadlines stay off /ai-deadlines.
+        """
+        candidates = (
+            self.db.query(DBConference)
+            .filter(DBConference.start_date.isnot(None))
+            .filter(
+                func.coalesce(DBConference.end_date, DBConference.start_date)
+                >= date.today()
+            )
+            .filter(DBConference.id.notin_(exclude_ids))
+            .order_by(DBConference.start_date, DBConference.slug)
+            .all()
+        )
+        return [c for c in candidates if series_of(c.slug) in tracked_series]
+
+    def get_conference_deadlines(self) -> ConferenceDeadlines:
+        """Return every conference with deadlines, plus announced TBA editions.
+
+        A TBA edition belongs to a series that already has deadlines on the
+        page and has official dates but no deadlines yet; it comes last with an
+        empty deadline list. Each conference carries its full deadline list
+        plus the metadata
         (tier, tags, country, city, venue, dates) needed by the
         /ai-deadlines page. Filtering/sorting is done client-side.
         """
@@ -197,6 +222,10 @@ class ConferenceService:
                 .filter(DBConference.id.in_(deadlines_by_conf.keys()))
                 .all()
             )
+            tba_editions = self._upcoming_tba_editions(
+                tracked_series={series_of(c.slug) for c in conferences} - {None},
+                exclude_ids=deadlines_by_conf.keys(),
+            )
 
             results = [
                 self._conference_to_api(
@@ -209,6 +238,10 @@ class ConferenceService:
             # Order conferences by their earliest deadline so the default
             # (chronological) listing is stable before client-side sorting.
             results.sort(key=lambda c: min(d.deadline_at for d in c.deadlines))
+            results.extend(
+                self._conference_to_api(conf, paper_count=0, deadlines=[])
+                for conf in tba_editions
+            )
             return ConferenceDeadlines(count=len(results), results=results)
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve conference deadlines: {str(e)}")

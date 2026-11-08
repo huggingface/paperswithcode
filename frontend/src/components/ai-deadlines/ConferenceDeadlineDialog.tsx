@@ -215,7 +215,7 @@ const ConferenceDeadlineDialog: React.FC<{
                 <span style={monoLabel}>Important deadlines</span>
                 {deadlines.length === 0 ? (
                   <span style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink-faint)" }}>
-                    No deadlines listed
+                    Deadlines not announced yet
                   </span>
                 ) : (
                   deadlines.map((d, i) => {
