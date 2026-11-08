@@ -378,6 +378,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.topic-bubble-add {
+  padding-left: 10px;
+  color: var(--accent);
+  cursor: pointer;
+}
 .topic-bubble-creator {
   flex: none;
   color: var(--ink-faint);

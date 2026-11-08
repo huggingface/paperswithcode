@@ -1,6 +1,6 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Plus } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { catalogApi } from '@/lib/api/catalog';
@@ -8,7 +8,7 @@ import { hfLoginUrl } from '@/lib/apiUrl';
 import { researchApi, TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
-import { TEN_MINUTES } from '@/lib/api/queryKeys';
+import { researchQueryKeys, TEN_MINUTES } from '@/lib/api/queryKeys';
 import {
   stashPendingFollows, stashPendingTopic, topicTitle, useRemoveTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic,
   type FollowPick,
@@ -20,22 +20,30 @@ const SUGGESTIONS_PER_GROUP = 16;
 
 /** Builds the Following feed in a pop-up, so /following shows no input field next to the chat box:
  * a free-text topic (the one with `topicId`, or a new one) plus the other followed topics, trending tasks and methods,
- * popular authors, and organizations to follow. Guests sign in on submit, and /following saves what they picked when they return. */
-export default function TopicDialog({ open, topicId = null, onOpenChange }: {
+ * popular authors, and organizations to follow. Guests sign in on submit, and /following saves what they picked when they return.
+ * Opened elsewhere, `afterSavePath` (/following) is where a save leads and where guests return after signing in. */
+export default function TopicDialog({ open, topicId = null, afterSavePath, onOpenChange }: {
   open: boolean;
   topicId?: number | null;
+  afterSavePath?: string;
   onOpenChange: (open: boolean) => void;
 }) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="topic-dialog" aria-describedby={undefined}>
-      <TopicDialogForm key={topicId ?? 'new'} topicId={topicId} onDone={() => onOpenChange(false)} />
+      <TopicDialogForm key={topicId ?? 'new'} topicId={topicId} afterSavePath={afterSavePath} onDone={() => onOpenChange(false)} />
     </DialogContent>
   </Dialog>;
 }
 
-function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: () => void }) {
+function TopicDialogForm({ topicId, afterSavePath, onDone }: {
+  topicId: number | null;
+  afterSavePath?: string;
+  onDone: () => void;
+}) {
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
+  const client = useQueryClient();
   const topics = useResearchTopics();
   const follows = useResearchFollows();
   const tasks = useQuery({
@@ -75,7 +83,15 @@ function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: 
   const retry = editing?.status === 'failed' && trimmed === saved;
   const atLimit = !editing && (topics.data?.length ?? 0) - pendingRemovals.length >= TOPIC_LIMIT;
   const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry) && !atLimit;
-  const saving = saveTopic.isPending || removeTopics.isPending || saveFollows.isPending;
+  // Set while a saved pop-up waits for fresh follows before opening afterSavePath; it stays disabled meanwhile.
+  const [finishing, setFinishing] = useState(false);
+  // Closing the pop-up unmounts the form, which cancels a pending navigation.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const saving = saveTopic.isPending || removeTopics.isPending || saveFollows.isPending || finishing;
   const isFollowed = (kind: FollowKind, id: string) =>
     follows.data?.some(follow => follow.kind === kind && String(follow.entity_id) === id) ?? false;
   const isSelected = (kind: FollowKind, id: string) =>
@@ -91,7 +107,7 @@ function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: 
     if (!user) {
       if (topicSavable) stashPendingTopic(trimmed);
       if (changes.length) stashPendingFollows(changes);
-      window.location.href = hfLoginUrl(`${location.pathname}${location.search}`);
+      window.location.href = hfLoginUrl(afterSavePath ?? `${location.pathname}${location.search}`);
       return;
     }
     // Save the follows, removals, and the topic independently, so one failing still saves the others.
@@ -102,8 +118,22 @@ function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: 
       removed,
       ...(topicSavable ? [removed.catch(() => undefined).then(() => saveTopic.mutateAsync({ id: editing?.id, text: trimmed }))] : []),
     ];
-    void Promise.allSettled(saves).then(results => {
-      if (results.every(result => result.status === 'fulfilled')) onDone();
+    void Promise.allSettled(saves).then(async results => {
+      if (!results.every(result => result.status === 'fulfilled')) return;
+      if (afterSavePath) {
+        // Let the destination see the saved follows and topics, or it would greet an "empty" account
+        // with the intro and reopen this pop-up.
+        setFinishing(true);
+        await Promise.all([
+          client.refetchQueries({ queryKey: researchQueryKeys.follows(user.hf_subject) }),
+          client.refetchQueries({ queryKey: researchQueryKeys.topics(user.hf_subject) }),
+        ]);
+        if (!mounted.current) return;
+        onDone();
+        navigate(afterSavePath);
+        return;
+      }
+      onDone();
     });
   };
   // Each group lists what is already followed, then the top suggestions not followed yet.
