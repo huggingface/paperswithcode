@@ -7,7 +7,7 @@ import { PaperDateFilter } from '@/components/PaperDateFilter';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePaperFeedQuery } from '@/hooks/usePapers';
 import { researchApi, TOPIC_PAPERS_PAGE_SIZE, type PublicTopic, type TopicPaperOrder, type TopicPerson } from '@/lib/api/research';
-import { readPaperDateRange, withPaperDateRange } from '@/lib/paperDateRange';
+import { readHomepagePaperDateRange, withHomepagePaperDateRange } from '@/lib/paperDateRange';
 import { researchQueryKeys } from '@/lib/api/queryKeys';
 import { hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
@@ -23,10 +23,10 @@ export default function TopicView() {
   const topicId = Number.parseInt(topicParam, 10);
   const user = useOptionalAuth()?.user;
   const subject = user?.hf_subject;
-  // Sort and date range live in the URL like the homepage feed; a topic shows all time by default.
+  // Sort and date range live in the URL like the homepage feed; a topic shows the last month by default.
   const [searchParams, setSearchParams] = useSearchParams();
   const order: TopicPaperOrder = searchParams.get('order') === 'newest' ? 'newest' : 'trending';
-  const dateRange = readPaperDateRange(searchParams);
+  const dateRange = readHomepagePaperDateRange(searchParams, undefined, 'month');
   const showOrder = (value: TopicPaperOrder) => {
     const next = new URLSearchParams(searchParams);
     if (value === 'newest') next.set('order', value);
@@ -117,7 +117,7 @@ export default function TopicView() {
             </div>
           </div>
           <PaperDateFilter startDate={dateRange.startDate} endDate={dateRange.endDate}
-            onChange={value => setSearchParams(withPaperDateRange(searchParams, value))} />
+            onChange={value => setSearchParams(withHomepagePaperDateRange(searchParams, value))} />
         </div>
         {(data.status === 'pending' || data.status === 'running') && <p className="following-topic-note" role="status">
           Showing the closest papers now. A model is reading papers to refine these matches, which takes a few minutes.
