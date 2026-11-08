@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Plus } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { catalogApi } from '@/lib/api/catalog';
@@ -20,22 +20,29 @@ const SUGGESTIONS_PER_GROUP = 16;
 
 /** Builds the Following feed in a pop-up, so /following shows no input field next to the chat box:
  * a free-text topic (the one with `topicId`, or a new one) plus the other followed topics, trending tasks and methods,
- * popular authors, and organizations to follow. Guests sign in on submit, and /following saves what they picked when they return. */
-export default function TopicDialog({ open, topicId = null, onOpenChange }: {
+ * popular authors, and organizations to follow. Guests sign in on submit, and /following saves what they picked when they return.
+ * Opened elsewhere, `afterSavePath` (/following) is where a save leads and where guests return after signing in. */
+export default function TopicDialog({ open, topicId = null, afterSavePath, onOpenChange }: {
   open: boolean;
   topicId?: number | null;
+  afterSavePath?: string;
   onOpenChange: (open: boolean) => void;
 }) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="topic-dialog" aria-describedby={undefined}>
-      <TopicDialogForm key={topicId ?? 'new'} topicId={topicId} onDone={() => onOpenChange(false)} />
+      <TopicDialogForm key={topicId ?? 'new'} topicId={topicId} afterSavePath={afterSavePath} onDone={() => onOpenChange(false)} />
     </DialogContent>
   </Dialog>;
 }
 
-function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: () => void }) {
+function TopicDialogForm({ topicId, afterSavePath, onDone }: {
+  topicId: number | null;
+  afterSavePath?: string;
+  onDone: () => void;
+}) {
   const { user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const topics = useResearchTopics();
   const follows = useResearchFollows();
   const tasks = useQuery({
@@ -91,7 +98,7 @@ function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: 
     if (!user) {
       if (topicSavable) stashPendingTopic(trimmed);
       if (changes.length) stashPendingFollows(changes);
-      window.location.href = hfLoginUrl(`${location.pathname}${location.search}`);
+      window.location.href = hfLoginUrl(afterSavePath ?? `${location.pathname}${location.search}`);
       return;
     }
     // Save the follows, removals, and the topic independently, so one failing still saves the others.
@@ -103,7 +110,9 @@ function TopicDialogForm({ topicId, onDone }: { topicId: number | null; onDone: 
       ...(topicSavable ? [removed.catch(() => undefined).then(() => saveTopic.mutateAsync({ id: editing?.id, text: trimmed }))] : []),
     ];
     void Promise.allSettled(saves).then(results => {
-      if (results.every(result => result.status === 'fulfilled')) onDone();
+      if (!results.every(result => result.status === 'fulfilled')) return;
+      onDone();
+      if (afterSavePath) navigate(afterSavePath);
     });
   };
   // Each group lists what is already followed, then the top suggestions not followed yet.

@@ -625,7 +625,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               />
             </div>
 
-            <TopicBubbles />
+            <TopicBubbles onAddTopic={canBuildFeed && (!following || canAddTopic) ? () => setEditingTopic(null) : undefined} />
 
             {error && (
               <Alert variant="destructive" className="mb-4">
@@ -662,10 +662,11 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               </div>
             ) : null)}
 
-            {following && canBuildFeed && (
+            {canBuildFeed && (
               <TopicDialog
                 open={editingTopic !== undefined}
                 topicId={editingTopic ?? null}
+                afterSavePath={following ? undefined : "/following"}
                 onOpenChange={(open) => { if (!open) setEditingTopic(undefined); }}
               />
             )}
