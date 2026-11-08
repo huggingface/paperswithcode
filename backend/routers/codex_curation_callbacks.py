@@ -120,10 +120,16 @@ def _leaderboard_inventory(db: Session, query: str) -> list[dict]:
     return _service(db).leaderboard_inventory(query)
 
 
+# Frontier LLM model cards list 40+ benchmarks, and the skill asks for each
+# name plus common variants, so leaderboard lookups need a larger budget than
+# taxonomy searches. Paper 131976 (Ripple-65B) ran out at 30 and got no evals.
+QUERY_LIMITS = {"taxonomy_query_count": 30, "leaderboard_query_count": 150}
+
+
 def _consume_query(db: Session, row: PaperCurationJob, field: str) -> None:
     db.refresh(row, with_for_update=True)
     value = getattr(row, field)
-    if value >= 30:
+    if value >= QUERY_LIMITS[field]:
         db.rollback()
         raise HTTPException(status_code=429, detail="Scoped query limit reached")
     setattr(row, field, value + 1)

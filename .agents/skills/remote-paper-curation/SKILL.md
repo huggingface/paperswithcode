@@ -153,6 +153,15 @@ Read result images before you list the paper's benchmarks:
 Prefer a text table whenever both carry the same score; images fill gaps.
 Report which values came from images in the audit.
 
+Each job has a budget of 150 `leaderboards` lookups; past it the command
+fails with HTTP 429 `Scoped query limit reached`. Look up the headline
+benchmarks of the release page or main results table first, then the long
+tail (for example a model card's base-model table). If you hit the limit,
+keep going: submit every eligible result whose leaderboard you already
+retrieved, and report each benchmark you could not look up as
+`not_applicable` with detail `leaderboard lookup budget exhausted`. A lookup
+failure for some benchmarks never justifies skipping verified ones.
+
 Query every benchmark the paper reports under its exact name and common
 variants (for example `ImageNet`, `ImageNet-1K`, `ILSVRC-2012`); the first match
 may be a different task, such as an inpainting board named `ImageNet`.
