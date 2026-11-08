@@ -184,7 +184,7 @@ const sortSubtasksForDisplay = (subtasks: Task[]) =>
 const TagBrowseView: React.FC = () => {
   const { taskSlug } = useParams<{ taskSlug: string }>();
   const navigate = useNavigate();
-  const feed = usePaperFeedParams();
+  const feed = usePaperFeedParams({ defaultToLastMonth: true });
   const { searchParams } = feed;
   const [benchmarksExpanded, setBenchmarksExpanded] = useState(false);
   // Selected protocol tab per benchmark group, keyed by the group's root id.
@@ -705,7 +705,7 @@ const TagBrowseView: React.FC = () => {
 
           <PaperFeedToolbar feed={feed} />
 
-          <PaperFeedList query={papersQ} cards={cards} empty="No papers in this task yet." />
+          <PaperFeedList query={papersQ} cards={cards} empty={feed.dateRange.startDate || feed.dateRange.endDate ? "No papers in this task in this date range." : "No papers in this task yet."} />
         </div>
 
         <aside className="task-side">

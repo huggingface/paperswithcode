@@ -25,7 +25,7 @@ import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const MethodDetailView: React.FC = () => {
   const { methodSlug } = useParams<{ methodSlug: string }>();
-  const feed = usePaperFeedParams();
+  const feed = usePaperFeedParams({ defaultToLastMonth: true });
 
   const methodQ = useQuery({
     queryKey: catalogQueryKeys.method(methodSlug),
@@ -227,7 +227,7 @@ const MethodDetailView: React.FC = () => {
         <div className="results-count">{cards.length} papers mentioning {m.name}</div>
       </PaperFeedToolbar>
 
-      <PaperFeedList query={papersQ} cards={cards} empty="No papers tagged with this method yet." />
+      <PaperFeedList query={papersQ} cards={cards} empty={feed.dateRange.startDate || feed.dateRange.endDate ? "No papers tagged with this method in this date range." : "No papers tagged with this method yet."} />
     </div>
   );
 };

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { TagChip } from "@/components/Chips";
 import { Icon } from "@/components/Icon";
@@ -28,15 +28,17 @@ const SEARCH_SORTS = [
 ] as const;
 
 const PapersListView: React.FC = () => {
-  const feed = usePaperFeedParams();
-  const { searchParams, setSearchParams } = feed;
+  const [searchParams] = useSearchParams();
   const framework = searchParams.get("framework") || undefined;
   const repository = searchParams.get("repository") || undefined;
   const isRepositoryFeed = Boolean(framework || repository);
   const urlSearch = searchParams.get("search") || "";
+  const isSearchMode = !isRepositoryFeed && urlSearch.trim().length > 0;
+  // Browsing defaults to the last month like other paper feeds; search results stay all time.
+  const feed = usePaperFeedParams({ defaultToLastMonth: !isSearchMode });
+  const { setSearchParams } = feed;
   const [searchInput, setSearchInput] = useState(urlSearch);
   const debouncedSearch = useDebounce(searchInput, 300);
-  const isSearchMode = !isRepositoryFeed && urlSearch.trim().length > 0;
 
   useEffect(() => setSearchInput(urlSearch), [urlSearch]);
 
@@ -147,7 +149,7 @@ const PapersListView: React.FC = () => {
                 : "Repository-scoped paper feed."
               : isSearchMode
                 ? `${cards.length} loaded from the most relevant results.`
-                : <>Search the full corpus. {totalCount > 0 && `${totalCount.toLocaleString()} papers indexed.`}</>}
+                : <>Search the full corpus. {totalCount > 0 && `${totalCount.toLocaleString()} ${feed.dateRange.startDate || feed.dateRange.endDate ? "papers in this date range" : "papers indexed"}.`}</>}
           </div>
           {isRepositoryFeed && scope && (
             <div className="paper-feed-scope-links">

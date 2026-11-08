@@ -1,7 +1,9 @@
 import { useSearchParams } from "react-router-dom";
 
 import {
+  readHomepagePaperDateRange,
   readPaperDateRange,
+  withHomepagePaperDateRange,
   withPaperDateRange,
   type PaperDateRangeValue,
 } from "@/lib/paperDateRange";
@@ -14,15 +16,20 @@ export const PAPER_FEED_SORTS: ReadonlyArray<readonly [PaperFeedSort, string]> =
   ["citation_count", "most cited"],
 ];
 
-/** A paper feed's sort, resource toggles and date range, kept in the URL so feeds stay shareable. */
-export function usePaperFeedParams() {
+/**
+ * A paper feed's sort, resource toggles and date range, kept in the URL so feeds stay shareable.
+ * With `defaultToLastMonth`, a URL without dates shows the last month and All Time is kept as `time=all_time`.
+ */
+export function usePaperFeedParams({ defaultToLastMonth = false }: { defaultToLastMonth?: boolean } = {}) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("order_by");
   const orderBy: PaperFeedSort =
     requested === "date_published" || requested === "citation_count" ? requested : "trending";
   const hasCode = searchParams.get("has_code") === "true";
   const hasHfArtifacts = searchParams.get("has_hf_artifacts") === "true";
-  const dateRange = readPaperDateRange(searchParams);
+  const dateRange = defaultToLastMonth
+    ? readHomepagePaperDateRange(searchParams, undefined, "month")
+    : readPaperDateRange(searchParams);
 
   const setParam = (key: string, value: string | null) => {
     const next = new URLSearchParams(searchParams);
@@ -42,7 +49,7 @@ export function usePaperFeedParams() {
     setHasCode: (active: boolean) => setParam("has_code", active ? "true" : null),
     setHasHfArtifacts: (active: boolean) => setParam("has_hf_artifacts", active ? "true" : null),
     setDateRange: (value: PaperDateRangeValue) =>
-      setSearchParams(withPaperDateRange(searchParams, value)),
+      setSearchParams((defaultToLastMonth ? withHomepagePaperDateRange : withPaperDateRange)(searchParams, value)),
     /** Request parameters every paper feed endpoint accepts. */
     filters: {
       order_by: orderBy,
