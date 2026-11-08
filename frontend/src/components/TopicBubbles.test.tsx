@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useRef } from "react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,6 +9,7 @@ import TopicBubbles from "@/components/TopicBubbles";
 import TopicDialog from "@/components/TopicDialog";
 import { catalogApi } from "@/lib/api/catalog";
 import { researchApi, type ResearchTopic } from "@/lib/api/research";
+import { useResearchFollows } from "@/lib/researchTopic";
 
 const auth = vi.hoisted(() => ({ value: { user: { username: "owner", hf_subject: "1" } as object | null, isLoading: false } }));
 vi.mock("@/lib/authContext", () => ({ useAuth: () => auth.value, useOptionalAuth: () => auth.value }));
@@ -68,5 +70,36 @@ describe("TopicDialog afterSavePath", () => {
     await userEvent.click(screen.getByRole("button", { name: "Follow" }));
     expect(await screen.findByText("Following feed")).toBeInTheDocument();
     expect(addTopic).toHaveBeenCalledWith("robot learning");
+  });
+
+  it("lands on the Following feed with the saved follows already loaded", async () => {
+    vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: [{ id: 5, name: "Robotics", slug: "robotics" }] } as never);
+    // The refreshed follows take a network round trip, as in production.
+    vi.spyOn(researchApi, "setFollow").mockImplementation(async () => {
+      vi.mocked(researchApi.follows).mockImplementation(() => new Promise(resolve => setTimeout(
+        () => resolve([{ kind: "task", entity_id: 5, name: "Robotics", url: "/tasks/robotics", created_at: "" }]), 50)));
+    });
+    // What /following sees on its first render decides whether it shows the empty-account intro.
+    const firstSeen: (number | undefined)[] = [];
+    function Destination() {
+      const follows = useResearchFollows();
+      const first = useRef(follows.data?.length);
+      firstSeen.push(first.current);
+      return <div>Following feed</div>;
+    }
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route path="/" element={<TopicDialog open afterSavePath="/following" onOpenChange={() => {}} />} />
+            <Route path="/following" element={<Destination />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /Robotics/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Follow" }));
+    expect(await screen.findByText("Following feed")).toBeInTheDocument();
+    expect(firstSeen[0]).toBe(1);
   });
 });

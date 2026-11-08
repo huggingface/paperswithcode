@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Plus } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -8,7 +8,7 @@ import { hfLoginUrl } from '@/lib/apiUrl';
 import { researchApi, TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
-import { TEN_MINUTES } from '@/lib/api/queryKeys';
+import { researchQueryKeys, TEN_MINUTES } from '@/lib/api/queryKeys';
 import {
   stashPendingFollows, stashPendingTopic, topicTitle, useRemoveTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic,
   type FollowPick,
@@ -43,6 +43,7 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
   const { user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const client = useQueryClient();
   const topics = useResearchTopics();
   const follows = useResearchFollows();
   const tasks = useQuery({
@@ -109,10 +110,20 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
       removed,
       ...(topicSavable ? [removed.catch(() => undefined).then(() => saveTopic.mutateAsync({ id: editing?.id, text: trimmed }))] : []),
     ];
-    void Promise.allSettled(saves).then(results => {
+    void Promise.allSettled(saves).then(async results => {
       if (!results.every(result => result.status === 'fulfilled')) return;
+      if (afterSavePath) {
+        // Let the destination see the saved follows and topics, or it would greet an "empty" account
+        // with the intro and reopen this pop-up.
+        await Promise.all([
+          client.refetchQueries({ queryKey: researchQueryKeys.follows(user.hf_subject) }),
+          client.refetchQueries({ queryKey: researchQueryKeys.topics(user.hf_subject) }),
+        ]);
+        onDone();
+        navigate(afterSavePath);
+        return;
+      }
       onDone();
-      if (afterSavePath) navigate(afterSavePath);
     });
   };
   // Each group lists what is already followed, then the top suggestions not followed yet.
