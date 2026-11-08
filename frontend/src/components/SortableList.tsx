@@ -3,8 +3,17 @@ import { GripVertical } from 'lucide-react';
 
 type Key = string | number;
 
-const MOVE = 'transform 180ms cubic-bezier(0.2, 0, 0, 1)';
+const DURATION = 180;
+const MOVE = `transform ${DURATION}ms cubic-bezier(0.2, 0, 0, 1), box-shadow ${DURATION}ms ease`;
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
+/** The vertical offset a row is drawn at right now, including a slide still in flight. */
+function currentShift(row: HTMLElement): number {
+  const values = getComputedStyle(row).transform.match(/matrix(3d)?\(([^)]+)\)/);
+  if (!values) return 0;
+  const numbers = values[2].split(',').map(Number);
+  return (values[1] ? numbers[13] : numbers[5]) || 0;
+}
 
 /** Drag a row by its handle (mouse or touch) or move it with the arrow keys. The dragged row follows the
  * pointer and the others slide into their new places. */
@@ -21,6 +30,8 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
   disabled?: boolean;
 }) {
   const [drag, setDrag] = useState<{ key: Key; order: T[] } | null>(null);
+  // The row that was just dropped keeps its lift (z-index, shadow) while it glides into its slot.
+  const [dropped, setDropped] = useState<Key | null>(null);
   // A dropped order shows until the parent passes new items, so the row never jumps back while saving.
   const [settled, setSettled] = useState<{ from: T[]; order: T[] } | null>(null);
   const rows = useRef(new Map<Key, HTMLElement>());
@@ -36,7 +47,8 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
     row.style.transform = `translateY(${pointer.current.y - pointer.current.grab - row.offsetTop}px)`;
   };
 
-  // FLIP: a row whose slot changed starts where it was and slides to its new slot.
+  // FLIP: a row whose slot changed starts where it is drawn now (its old slot plus any slide in flight)
+  // and slides to its new slot.
   useLayoutEffect(() => {
     const animate = !reducedMotion();
     rows.current.forEach((row, key) => {
@@ -45,8 +57,9 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
       tops.current.set(key, top);
       if (key === drag?.key) return followPointer(row);
       if (!animate || previous === undefined || previous === top) return;
+      const from = previous + currentShift(row) - top;
       row.style.transition = 'none';
-      row.style.transform = `translateY(${previous - top}px)`;
+      row.style.transform = `translateY(${from}px)`;
       void row.offsetHeight; // Apply the start position before transitioning from it.
       row.style.transition = MOVE;
       row.style.transform = '';
@@ -83,10 +96,15 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
     const finish = (commit: boolean) => {
       const { drag: current, items: saved, onReorder: report } = latest.current;
       const row = current ? rows.current.get(current.key) : undefined;
-      if (row) {
-        // Glide the dropped row from under the pointer into its slot.
-        row.style.transition = reducedMotion() ? 'none' : MOVE;
+      if (row && current) {
+        // Glide the dropped row from under the pointer into its slot, still lifted.
+        const animate = !reducedMotion();
+        row.style.transition = animate ? MOVE : 'none';
         row.style.transform = '';
+        if (animate) {
+          setDropped(current.key);
+          window.setTimeout(() => setDropped(key => (key === current.key ? null : key)), DURATION);
+        }
       }
       if (commit && current && !sameOrder(current.order, saved)) {
         setSettled({ from: saved, order: current.order });
@@ -121,6 +139,7 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
     {list.map(item => {
       const key = itemKey(item);
       const isDragged = drag?.key === key;
+      const lifted = isDragged || dropped === key;
       const handle = <button type="button" className="sortable-handle" disabled={disabled || items.length < 2}
         aria-label={`Reorder ${itemLabel(item)}. Use the up and down arrow keys to move it.`}
         onPointerDown={event => {
@@ -137,7 +156,7 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
         }}>
         <GripVertical aria-hidden="true" />
       </button>;
-      return <li key={key} className={isDragged ? 'sortable-item is-dragging' : 'sortable-item'}
+      return <li key={key} className={lifted ? 'sortable-item is-dragging' : 'sortable-item'}
         ref={element => { if (element) rows.current.set(key, element); else rows.current.delete(key); }}>
         {renderItem(item, handle, isDragged)}
       </li>;
