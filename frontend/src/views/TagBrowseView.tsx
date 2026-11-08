@@ -184,7 +184,7 @@ const sortSubtasksForDisplay = (subtasks: Task[]) =>
 const TagBrowseView: React.FC = () => {
   const { taskSlug } = useParams<{ taskSlug: string }>();
   const navigate = useNavigate();
-  const feed = usePaperFeedParams();
+  const feed = usePaperFeedParams({ defaultToLastMonth: true });
   const { searchParams } = feed;
   const [benchmarksExpanded, setBenchmarksExpanded] = useState(false);
   // Selected protocol tab per benchmark group, keyed by the group's root id.

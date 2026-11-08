@@ -25,7 +25,7 @@ import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const MethodDetailView: React.FC = () => {
   const { methodSlug } = useParams<{ methodSlug: string }>();
-  const feed = usePaperFeedParams();
+  const feed = usePaperFeedParams({ defaultToLastMonth: true });
 
   const methodQ = useQuery({
     queryKey: catalogQueryKeys.method(methodSlug),
