@@ -107,10 +107,17 @@ export function ChatSessionNavigation({
       return next;
     });
   };
-  /** Shift-click: add every listed chat between the anchor and `sessionId`. */
+  /**
+   * Shift-click: add every listed chat between the anchor and `sessionId`.
+   * With nothing selected yet, the range starts at the open chat.
+   */
   const selectRange = (sessionId: string) => {
-    const anchor = selectionAnchor.current;
-    const from = anchor && selectedIds.has(anchor) ? orderedSessionIds.indexOf(anchor) : -1;
+    const selectedAnchor = selectionAnchor.current && selectedIds.has(selectionAnchor.current)
+      ? selectionAnchor.current
+      : null;
+    const anchor = selectedAnchor ?? (selecting ? null : activeSessionId ?? null);
+    if (anchor) selectionAnchor.current = anchor;
+    const from = anchor ? orderedSessionIds.indexOf(anchor) : -1;
     const to = orderedSessionIds.indexOf(sessionId);
     if (from < 0 || to < 0) {
       // No range to extend: select this chat and start the next range here.
