@@ -625,7 +625,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               />
             </div>
 
-            <TopicBubbles onAddTopic={canBuildFeed && (!following || canAddTopic) ? () => setEditingTopic(null) : undefined} />
+            {following && <TopicBubbles onAddTopic={canBuildFeed && canAddTopic ? () => setEditingTopic(null) : undefined} />}
 
             {error && (
               <Alert variant="destructive" className="mb-4">

@@ -455,10 +455,13 @@ it('has no separate trending (X) tab: X likes are part of the trending score', a
   expect(screen.queryByRole('button', { name: 'trending (X)' })).not.toBeInTheDocument();
 });
 
-it('shows popular public topics with their creators under the feed tabs', async () => {
+it('shows popular public topics with their creators on following only, not on the trending homepage', async () => {
   vi.mocked(researchApi.featuredTopics).mockResolvedValue([{ id: 23, text: 'OCR releases', label: null, followers: 5,
     creator: { username: 'nielsr', avatar_url: 'https://huggingface.co/api/users/nielsr/avatar?redirect=true' } }]);
   renderFeed('/');
+  await screen.findByText('No papers in this window.');
+  expect(screen.queryByRole('navigation', { name: 'Popular topics' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'following' }));
   const bubble = await screen.findByRole('link', { name: /OCR releases/ });
   expect(bubble).toHaveAttribute('href', '/topics/23-ocr-releases');
   expect(bubble).toHaveTextContent('@nielsr');
