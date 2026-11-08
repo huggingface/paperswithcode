@@ -76,6 +76,22 @@ export function useFollowTopic() {
   });
 }
 
+/** Saves a new order for the account's topics, showing it at once and restoring the saved order on failure. */
+export function useReorderTopics() {
+  const user = useOptionalAuth()?.user;
+  const client = useQueryClient();
+  const key = researchQueryKeys.topics(user?.hf_subject);
+  return useMutation({
+    mutationFn: (topics: ResearchTopic[]) => researchApi.reorderTopics(topics.map(topic => topic.id)),
+    onMutate: async topics => {
+      await client.cancelQueries({ queryKey: key });
+      client.setQueryData(key, topics);
+    },
+    onSuccess: saved => client.setQueryData(key, saved),
+    onError: () => void client.invalidateQueries({ queryKey: key }),
+  });
+}
+
 /** Makes a topic the account created public or private. */
 export function useSetTopicPublic() {
   const user = useOptionalAuth()?.user;

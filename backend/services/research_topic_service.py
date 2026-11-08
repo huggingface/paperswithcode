@@ -518,12 +518,16 @@ def suggestions(db: Session, value: str) -> list[TopicSuggestion]:
 
 
 def topic_views(db: Session, subject: str) -> list[TopicView]:
-    """The account's topics, oldest first."""
+    """The account's topics in its own order, then oldest first."""
     rows = db.execute(
         select(ResearchTopic, ResearchTopicFollow.created_at)
         .join(ResearchTopicFollow, ResearchTopicFollow.topic_id == ResearchTopic.id)
         .where(ResearchTopicFollow.hf_subject == subject)
-        .order_by(ResearchTopicFollow.created_at, ResearchTopic.id)
+        .order_by(
+            ResearchTopicFollow.position.asc().nulls_last(),
+            ResearchTopicFollow.created_at,
+            ResearchTopic.id,
+        )
     ).all()
     return [
         TopicView(
@@ -558,7 +562,13 @@ def _follow(db: Session, subject: str, topic_id: int) -> ResearchTopicFollow | N
     return db.get(ResearchTopicFollow, (subject, topic_id))
 
 
-def _add_follow(db: Session, subject: str, topic: ResearchTopic, now: datetime) -> None:
+def _add_follow(
+    db: Session,
+    subject: str,
+    topic: ResearchTopic,
+    now: datetime,
+    position: int | None = None,
+) -> None:
     """Follow ``topic`` unless already followed; raises ``OverflowError`` at the cap."""
     # A topic that exhausted its retries gets a fresh start from a new follower.
     if topic.backfill_status == "failed":
@@ -575,7 +585,19 @@ def _add_follow(db: Session, subject: str, topic: ResearchTopic, now: datetime) 
     if count >= MAX_TOPICS:
         db.rollback()
         raise OverflowError(MAX_TOPICS)
-    db.add(ResearchTopicFollow(hf_subject=subject, topic_id=topic.id, created_at=now))
+    if position is None:
+        # After a reorder every topic has a position, so a new one goes last.
+        last = db.scalar(
+            select(func.max(ResearchTopicFollow.position)).where(
+                ResearchTopicFollow.hf_subject == subject
+            )
+        )
+        position = None if last is None else last + 1
+    db.add(
+        ResearchTopicFollow(
+            hf_subject=subject, topic_id=topic.id, created_at=now, position=position
+        )
+    )
 
 
 def follow_topic(
@@ -608,10 +630,15 @@ def follow_topic(
     topic = db.scalar(
         select(ResearchTopic).where(ResearchTopic.normalized == normalized)
     )
+    # An edited topic keeps its place in the account's order. Follow time drives
+    # digest freshness, so pin the current order as positions instead of reusing it.
+    if old is not None and old.position is None:
+        _pin_order(db, subject)
+    position = old.position if old is not None else None
     if old is not None and old.topic_id != topic.id:
         db.delete(old)
         db.flush()
-    _add_follow(db, subject, topic, now)
+    _add_follow(db, subject, topic, now, position)
     db.commit()
     # Saving the topic again retries a label or preview that failed.
     if topic.label is None:
@@ -645,6 +672,47 @@ def follow_existing_topic(
         raise LookupError(topic_id)
     _add_follow(db, subject, topic, now)
     db.commit()
+
+
+def _pin_order(db: Session, subject: str) -> None:
+    """Store the account's current topic order as explicit positions."""
+    follows = db.scalars(
+        select(ResearchTopicFollow)
+        .where(ResearchTopicFollow.hf_subject == subject)
+        .order_by(
+            ResearchTopicFollow.position.asc().nulls_last(),
+            ResearchTopicFollow.created_at,
+            ResearchTopicFollow.topic_id,
+        )
+    ).all()
+    for index, follow in enumerate(follows):
+        follow.position = index
+    db.flush()
+
+
+def reorder_topics(db: Session, subject: str, topic_ids: list[int]) -> None:
+    """Store the account's topic order; ``topic_ids`` must be exactly its topics.
+
+    Raises ``ValueError`` when the ids are not the followed topics.
+    """
+    _lock(db, subject)
+    follows = {
+        f.topic_id: f
+        for f in db.scalars(
+            select(ResearchTopicFollow).where(ResearchTopicFollow.hf_subject == subject)
+        )
+    }
+    if len(topic_ids) != len(set(topic_ids)) or set(topic_ids) != set(follows):
+        db.rollback()
+        raise ValueError("topic_ids must list every followed topic once")
+    for index, topic_id in enumerate(topic_ids):
+        follows[topic_id].position = index
+    db.commit()
+
+
+def capitalized(name: str) -> str:
+    """A topic name as shown: first letter upper-cased, the rest as written."""
+    return name[:1].upper() + name[1:]
 
 
 def set_public(db: Session, subject: str, topic_id: int, is_public: bool) -> None:

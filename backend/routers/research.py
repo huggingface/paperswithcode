@@ -22,6 +22,7 @@ from backend.models.research import (
     SubscriptionUpdate,
     SubscriptionView,
     TopicBubble,
+    TopicOrderUpdate,
     TopicUpdate,
     TopicView,
     TopicVisibilityUpdate,
@@ -118,6 +119,21 @@ def add_topic(
 ):
     """Follow one more topic; following one already followed returns it."""
     return _save_topic(db, request, user["hf_subject"], body, None)
+
+
+# Declared before /me/topics/{topic_id} so "order" is not read as an id.
+@router.put("/me/topics/order", response_model=list[TopicView])
+def reorder_topics(
+    body: TopicOrderUpdate,
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+):
+    """Store the account's topic order; the body lists every followed topic once."""
+    try:
+        research_topic_service.reorder_topics(db, user["hf_subject"], body.topic_ids)
+    except ValueError as exc:
+        raise HTTPException(409, "List every followed topic exactly once") from exc
+    return research_topic_service.topic_views(db, user["hf_subject"])
 
 
 @router.put("/me/topics/{topic_id}", response_model=TopicView)
@@ -247,7 +263,7 @@ def public_topic_papers(
 
 
 # Single-topic endpoints from before accounts could follow several: they read
-# and replace the oldest topic, and DELETE removes every topic.
+# and replace the account's first topic, and DELETE removes every topic.
 @router.get("/me/topic", response_model=TopicView | None)
 def topic(
     user: dict = Depends(require_user), db: Session = Depends(get_database_session)
@@ -262,10 +278,8 @@ def set_topic(
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
-    oldest = next(
-        iter(research_topic_service.topic_views(db, user["hf_subject"])), None
-    )
-    return _save_topic(db, request, user["hf_subject"], body, oldest and oldest.id)
+    first = next(iter(research_topic_service.topic_views(db, user["hf_subject"])), None)
+    return _save_topic(db, request, user["hf_subject"], body, first and first.id)
 
 
 @router.delete("/me/topic", status_code=204)

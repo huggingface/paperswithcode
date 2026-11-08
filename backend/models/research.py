@@ -63,6 +63,12 @@ class TopicView(BaseModel):
     is_creator: bool = False
 
 
+class TopicOrderUpdate(BaseModel):
+    """Every followed topic id, in the order the account wants them."""
+
+    topic_ids: list[int] = Field(max_length=100)
+
+
 class TopicVisibilityUpdate(BaseModel):
     is_public: bool
 

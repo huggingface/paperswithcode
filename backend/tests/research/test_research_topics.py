@@ -371,9 +371,9 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
     assert set(entries) == {"Video robots", "Video only", "Robot only"}
     assert set(entries["Video robots"].reasons) == {
         "Robotics",
-        "“video generation”",
+        "“Video generation”",
     }
-    assert entries["Video only"].reasons == ["“video generation”"]
+    assert entries["Video only"].reasons == ["“Video generation”"]
     assert entries["Robot only"].reasons == ["Robotics"]
     topic_only = {
         e.title: e
@@ -382,7 +382,7 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
     assert set(topic_only) == {"Video robots", "Video only"}
     assert set(topic_only["Video robots"].reasons) == {
         "Robotics",
-        "“video generation”",
+        "“Video generation”",
     }
     other = topics.follow_topic(db, "alice", "protein folding", now)
     db.add(
@@ -397,7 +397,7 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
     db.flush()
     one = follows.feed_entries(db, "alice", now, 0, 40, topic_id=other)
     assert [(e.title, set(e.reasons)) for e in one] == [
-        ("Robot only", {"Robotics", "“protein folding”"})
+        ("Robot only", {"Robotics", "“Protein folding”"})
     ]
     assert len(follows.feed_entries(db, "alice", now, 0, 40, topic_only=True)) == 3
 
@@ -456,15 +456,19 @@ def test_topic_api_follows_several_and_keeps_the_single_topic_routes(db, monkeyp
     robots = client.put(f"/me/topics/{video.json()['id']}", json={"text": "robots"})
     assert robots.json()["text"] == "robots"
     assert client.put("/me/topics/0", json={"text": "robots"}).status_code == 404
+    # An edited topic keeps its place in the account's order.
     assert [t["text"] for t in client.get("/me/topics").json()] == [
-        "speech recognition",
         "robots",
+        "speech recognition",
     ]
-    # The single-topic routes read and replace the oldest topic.
-    assert client.get("/me/topic").json()["id"] == speech["id"]
+    # The single-topic routes read and replace the account's first topic.
+    assert client.get("/me/topic").json()["id"] == robots.json()["id"]
     assert client.put("/me/topic", json={"text": "audio"}).json()["text"] == "audio"
-    assert [t["text"] for t in client.get("/me/topics").json()] == ["robots", "audio"]
-    assert client.delete(f"/me/topics/{robots.json()['id']}").status_code == 204
+    assert [t["text"] for t in client.get("/me/topics").json()] == [
+        "audio",
+        "speech recognition",
+    ]
+    assert client.delete(f"/me/topics/{speech['id']}").status_code == 204
     assert [t["text"] for t in client.get("/me/topics").json()] == ["audio"]
     assert client.delete("/me/topic").status_code == 204
     assert client.get("/me/topics").json() == []

@@ -45,7 +45,7 @@ beforeEach(() => {
   vi.spyOn(researchApi, 'topics').mockResolvedValue([]);
   vi.spyOn(researchApi, 'featuredTopics').mockResolvedValue([]);
 });
-const EDIT = 'Edit topic real-time video generation';
+const EDIT = 'Edit topic Real-time video generation';
 const topic = { id: 1, text: 'real-time video generation', label: null, set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
   judged: 10, total: 10, suggestions: [], is_public: true, is_creator: true };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); sessionStorage.clear(); login.hfLoginUrl.mockClear(); });
@@ -358,12 +358,12 @@ it('keeps domain lists out of the Following sidebar while follows load', () => {
 it('lists each topic first in the sidebar as a filter with an edit button, and links Settings below', async () => {
   vi.mocked(researchApi.topics).mockResolvedValue([topic, { ...topic, id: 2, text: 'speculative decoding' }]);
   const { container } = renderFeed();
-  const row = await screen.findByRole('link', { name: 'real-time video generation' });
+  const row = await screen.findByRole('link', { name: 'Real-time video generation' });
   expect(row).toHaveAttribute('href', '/following?topic=1');
-  expect(screen.getByRole('link', { name: 'speculative decoding' })).toHaveAttribute('href', '/following?topic=2');
+  expect(screen.getByRole('link', { name: 'Speculative decoding' })).toHaveAttribute('href', '/following?topic=2');
   expect(container.querySelector('.sidebar-follow-topics .sidebar-follow-kind')).toHaveTextContent('Topics');
   expect(screen.getByRole('button', { name: EDIT })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Edit topic speculative decoding' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Edit topic Speculative decoding' })).toBeInTheDocument();
   expect(screen.getByRole('link', { name: 'Manage in Settings' })).toHaveAttribute('href', '/settings');
   expect(screen.queryByRole('textbox', { name: 'Research topic' })).not.toBeInTheDocument();
 });
@@ -391,7 +391,7 @@ it('adds another topic from the sidebar and can drop an existing one in the same
   fireEvent.click(await screen.findByRole('button', { name: '+ Add topic' }));
   const input = await screen.findByRole('textbox', { name: 'Research topic' });
   expect(input).toHaveValue('');
-  const other = screen.getByRole('button', { name: 'speculative decoding' });
+  const other = screen.getByRole('button', { name: 'Speculative decoding' });
   expect(other).toHaveAttribute('aria-pressed', 'true');
   fireEvent.click(other);
   fireEvent.change(input, { target: { value: 'robot learning' } });
@@ -403,18 +403,18 @@ it('adds another topic from the sidebar and can drop an existing one in the same
 it('hides Add topic at the limit', async () => {
   vi.mocked(researchApi.topics).mockResolvedValue(Array.from({ length: TOPIC_LIMIT }, (_, i) => ({ ...topic, id: i + 1, text: `topic ${i}` })));
   renderFeed();
-  expect(await screen.findByRole('link', { name: 'topic 0' })).toBeInTheDocument();
+  expect(await screen.findByRole('link', { name: 'Topic 0' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '+ Add topic' })).not.toBeInTheDocument();
 });
 it('filters the feed to one topic from the sidebar and back', async () => {
   vi.mocked(researchApi.topics).mockResolvedValue([topic, { ...topic, id: 2, text: 'speculative decoding' }]);
   renderFeed('/following?topic=1');
   await waitFor(() => expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ topicId: 1, topicOnly: false })));
-  expect(await screen.findByText(/Showing only papers about \u201creal-time video generation\u201d/)).toBeInTheDocument();
-  const row = screen.getByRole('link', { name: 'real-time video generation' });
+  expect(await screen.findByText(/Showing only papers about \u201cReal-time video generation\u201d/)).toBeInTheDocument();
+  const row = screen.getByRole('link', { name: 'Real-time video generation' });
   expect(row).toHaveAttribute('aria-current', 'true');
   expect(row).toHaveAttribute('href', '/following');
-  expect(screen.getByRole('link', { name: 'speculative decoding' })).toHaveAttribute('href', '/following?topic=2');
+  expect(screen.getByRole('link', { name: 'Speculative decoding' })).toHaveAttribute('href', '/following?topic=2');
   expect(screen.getByRole('link', { name: 'Show everything you follow' })).toHaveAttribute('href', '/following');
 });
 it('still filters to every topic for older only=topic links', async () => {
@@ -445,7 +445,7 @@ it('shows the feed for an account that follows only a topic', async () => {
   vi.mocked(researchApi.follows).mockResolvedValue([]);
   vi.mocked(researchApi.topics).mockResolvedValue([{ ...topic, status: 'running', judged: 200, total: 4700 }]);
   renderFeed();
-  expect(await screen.findByText(/Showing the closest papers about \u201creal-time video generation\u201d now/)).toBeInTheDocument();
+  expect(await screen.findByText(/Showing the closest papers about \u201cReal-time video generation\u201d now/)).toBeInTheDocument();
   expect(await screen.findByText('A paper')).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Build your personal research feed' })).not.toBeInTheDocument();
 });
@@ -462,4 +462,22 @@ it('shows popular public topics with their creators under the feed tabs', async 
   const bubble = await screen.findByRole('link', { name: /OCR releases/ });
   expect(bubble).toHaveAttribute('href', '/topics/23-ocr-releases');
   expect(bubble).toHaveTextContent('@nielsr');
+});
+
+it('removes a topic from the sidebar and reorders topics with the arrow keys', async () => {
+  const speculative = { ...topic, id: 2, text: 'speculative decoding' };
+  vi.mocked(researchApi.topics).mockResolvedValue([topic, speculative]);
+  const reorder = vi.spyOn(researchApi, 'reorderTopics').mockResolvedValue([speculative, topic]);
+  renderFeed();
+  const handle = await screen.findByRole('button', { name: /^Reorder Speculative decoding/ });
+  fireEvent.keyDown(handle, { key: 'ArrowUp' });
+  await waitFor(() => expect(reorder).toHaveBeenCalledWith([2, 1]));
+  await waitFor(() => expect(screen.getAllByRole('link', { name: /Real-time video generation|Speculative decoding/ }).map(link => link.textContent))
+    .toEqual(['Speculative decoding', 'Real-time video generation']));
+  const remove = vi.spyOn(researchApi, 'removeTopic').mockImplementation(async () => {
+    vi.mocked(researchApi.topics).mockResolvedValue([speculative]);
+  });
+  fireEvent.click(screen.getByRole('button', { name: 'Remove topic Real-time video generation' }));
+  await waitFor(() => expect(remove).toHaveBeenCalledWith(1));
+  await waitFor(() => expect(screen.queryByRole('link', { name: 'Real-time video generation' })).not.toBeInTheDocument());
 });

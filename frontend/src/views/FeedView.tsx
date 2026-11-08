@@ -2,9 +2,10 @@ import FollowingIntro from "@/components/FollowingIntro";
 import TopicDialog from "@/components/TopicDialog";
 import TopicBubbles from "@/components/TopicBubbles";
 import { isAuthDisabled } from "@/lib/apiUrl";
-import { clearPendingTopic, isTopicBuilding, readPendingFollows, readPendingTopic, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
+import { clearPendingTopic, isTopicBuilding, readPendingFollows, readPendingTopic, topicTitle, useRemoveTopics, useReorderTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
+import SortableList from "@/components/SortableList";
 import { useOptionalAuth } from "@/lib/authContext";
-import { researchApi, TOPIC_LIMIT, type FollowKind, type ResearchTopic } from "@/lib/api/research";
+import { researchApi, TOPIC_LIMIT, type FollowKind } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -393,7 +394,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   );
   const follows = useResearchFollows(following);
   const topics = useResearchTopics(following, 10000);
-  const topicName = (topic: ResearchTopic) => topic.label ?? topic.text;
+  const topicName = topicTitle;
+  const removeTopics = useRemoveTopics();
+  const reorderTopics = useReorderTopics();
   const building = topics.data?.filter(isTopicBuilding) ?? [];
   const topicBuilding = building.length > 0;
   const filteredTopic = topics.data?.find(topic => topic.id === topicId);
@@ -493,23 +496,41 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 {!!topics.data?.length && (
                   <div className="sidebar-follow-group sidebar-follow-topics">
                     <span className="sidebar-follow-kind">{topics.data.length === 1 ? "Topic" : "Topics"}</span>
-                    {topics.data.map((topic) => {
-                      const active = topic.id === topicId;
-                      return (
-                        <div key={topic.id} className={`sidebar-follow-topic ${active ? "active" : ""}`}>
-                          <Link
-                            to={topicFilterHref(active ? null : topic.id)}
-                            className="sidebar-link sidebar-follow-link"
-                            title={active ? "Show papers from everything you follow" : `Show only papers about “${topic.text}”`}
-                            aria-current={active ? "true" : undefined}
-                          >
-                            <span className="sidebar-follow-name">{topicName(topic)}</span>
-                          </Link>
-                          <button type="button" className="sidebar-follow-edit" aria-label={`Edit topic ${topicName(topic)}`}
-                            aria-expanded={editingTopic === topic.id} onClick={() => setEditingTopic(topic.id)}>edit</button>
-                        </div>
-                      );
-                    })}
+                    <SortableList
+                      className="sidebar-follow-topic-list"
+                      items={topics.data}
+                      itemKey={(topic) => topic.id}
+                      itemLabel={(topic) => topicName(topic)}
+                      disabled={reorderTopics.isPending || removeTopics.isPending}
+                      onReorder={(order) => reorderTopics.mutate(order)}
+                      renderItem={(topic, handle) => {
+                        const active = topic.id === topicId;
+                        return (
+                          <div className={`sidebar-follow-topic ${active ? "active" : ""}`}>
+                            {handle}
+                            <Link
+                              to={topicFilterHref(active ? null : topic.id)}
+                              className="sidebar-link sidebar-follow-link"
+                              title={active ? "Show papers from everything you follow" : `Show only papers about “${topic.text}”`}
+                              aria-current={active ? "true" : undefined}
+                            >
+                              <span className="sidebar-follow-name">{topicName(topic)}</span>
+                            </Link>
+                            <button type="button" className="sidebar-follow-edit" aria-label={`Edit topic ${topicName(topic)}`}
+                              aria-expanded={editingTopic === topic.id} onClick={() => setEditingTopic(topic.id)}>edit</button>
+                            <button type="button" className="sidebar-follow-edit sidebar-follow-remove" aria-label={`Remove topic ${topicName(topic)}`}
+                              disabled={removeTopics.isPending}
+                              onClick={() => {
+                                if (active) navigate(topicFilterHref(null));
+                                removeTopics.mutate([topic.id]);
+                              }}>remove</button>
+                          </div>
+                        );
+                      }}
+                    />
+                    {(removeTopics.isError || reorderTopics.isError) && (
+                      <p className="sidebar-follow-error" role="alert">Could not update your topics. Please try again.</p>
+                    )}
                     {canAddTopic && (
                       <button type="button" className="sidebar-follow-add" aria-expanded={editingTopic === null}
                         onClick={() => setEditingTopic(null)}>+ Add topic</button>

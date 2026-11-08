@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Sparkles } from 'lucide-react';
 import { TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type ResearchTopic } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
-import { looksLikeTopicList, topicPath, useRemoveTopics, useResearchTopics, useSaveTopic, useSetTopicPublic } from '@/lib/researchTopic';
+import { looksLikeTopicList, topicPath, topicTitle, useRemoveTopics, useReorderTopics, useResearchTopics, useSaveTopic, useSetTopicPublic } from '@/lib/researchTopic';
+import SortableList from './SortableList';
 import { Switch } from './ui/switch';
 
 const KIND_NAMES: Record<FollowKind, string> = {
@@ -23,6 +24,7 @@ export default function TopicSettings() {
   const location = useLocation();
   const section = useRef<HTMLDivElement>(null);
   const topics = useResearchTopics();
+  const reorder = useReorderTopics();
   useEffect(() => {
     if (location.hash === '#topic' && topics.isSuccess) {
       const input = section.current?.querySelector('textarea');
@@ -44,14 +46,18 @@ export default function TopicSettings() {
     {topics.isLoading ? <p className="settings-billing-loading">Loading your topics…</p>
       : topics.error ? <p className="settings-token-error" role="alert">Could not load your topics.</p>
       : <>
-        {list.map(topic => <TopicEditor key={topic.id} topic={topic} />)}
+        <SortableList className="research-topic-list" items={list} itemKey={topic => topic.id}
+          itemLabel={topic => topicTitle(topic)} disabled={reorder.isPending}
+          onReorder={order => reorder.mutate(order)}
+          renderItem={(topic, handle) => <TopicEditor topic={topic} handle={handle} />} />
+        {reorder.error && <p className="settings-token-error" role="alert">Could not save the new order. Please try again.</p>}
         {list.length < TOPIC_LIMIT && <TopicEditor key={`new-${list.length}`} />}
       </>}
   </div>;
 }
 
 /** Edits one followed topic, or without `topic` adds a new one. */
-function TopicEditor({ topic }: { topic?: ResearchTopic }) {
+function TopicEditor({ topic, handle }: { topic?: ResearchTopic; handle?: ReactNode }) {
   const [draft, setDraft] = useState<string | null>(null);
   const save = useSaveTopic(() => setDraft(null));
   const remove = useRemoveTopics();
@@ -65,7 +71,9 @@ function TopicEditor({ topic }: { topic?: ResearchTopic }) {
   const submit = () => {
     if (savable && !busy) save.mutate({ id: topic?.id, text: trimmed });
   };
-  return <div className="research-topic-item">
+  return <div className={handle ? 'research-topic-item has-handle' : 'research-topic-item'}>
+    {handle}
+    <div className="research-topic-body">
     <form className="research-topic-form" onSubmit={event => {
       event.preventDefault();
       submit();
@@ -101,6 +109,7 @@ function TopicEditor({ topic }: { topic?: ResearchTopic }) {
     {(save.error || remove.error) && <p className="settings-token-error" role="alert">
       Could not save your topic. Please try again.
     </p>}
+    </div>
   </div>;
 }
 
