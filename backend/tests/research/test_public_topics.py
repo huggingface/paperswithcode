@@ -270,6 +270,11 @@ def test_accounts_reorder_topics_and_edits_keep_their_place(db, now):
     c = topics.follow_topic(db, "alice", "world models", now + timedelta(seconds=2))
     ids = lambda: [t.id for t in topics.topic_views(db, "alice")]  # noqa: E731
     assert ids() == [a, b, c]
+    # Before any reorder, an edit keeps its slot too.
+    b = topics.follow_topic(
+        db, "alice", "robot manipulation", now + timedelta(seconds=5), replace=b
+    )
+    assert ids() == [a, b, c]
     topics.reorder_topics(db, "alice", [c, a, b])
     assert ids() == [c, a, b]
     # Editing a topic keeps its slot; a new topic goes last.

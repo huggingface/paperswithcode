@@ -31,7 +31,7 @@ through `research_topic_follows`. The API is `GET/POST /me/topics`,
 the account's order, stored in `research_topic_follows.position`; edits keep a
 topic's place and new topics go last). Topic names are shown with a capital
 first letter (sidebar, cards, match reasons, digests); stored text is unchanged; the older single-topic `/me/topic` reads and
-replaces the oldest topic. Jev (`jev-1.14` through
+replaces the account's first topic. Jev (`jev-1.14` through
 OpenRouter's `systemone` endpoint) scores each paper's card (title, authors,
 organizations, venue, task/method/benchmark tags, abstract) against the topic,
 and `research_topic_verdicts` keeps the raw score with the card's SHA-256 and

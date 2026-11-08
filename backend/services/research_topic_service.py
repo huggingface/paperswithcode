@@ -630,7 +630,10 @@ def follow_topic(
     topic = db.scalar(
         select(ResearchTopic).where(ResearchTopic.normalized == normalized)
     )
-    # An edited topic keeps its place in the account's order.
+    # An edited topic keeps its place in the account's order. Follow time drives
+    # digest freshness, so pin the current order as positions instead of reusing it.
+    if old is not None and old.position is None:
+        _pin_order(db, subject)
     position = old.position if old is not None else None
     if old is not None and old.topic_id != topic.id:
         db.delete(old)
@@ -669,6 +672,22 @@ def follow_existing_topic(
         raise LookupError(topic_id)
     _add_follow(db, subject, topic, now)
     db.commit()
+
+
+def _pin_order(db: Session, subject: str) -> None:
+    """Store the account's current topic order as explicit positions."""
+    follows = db.scalars(
+        select(ResearchTopicFollow)
+        .where(ResearchTopicFollow.hf_subject == subject)
+        .order_by(
+            ResearchTopicFollow.position.asc().nulls_last(),
+            ResearchTopicFollow.created_at,
+            ResearchTopicFollow.topic_id,
+        )
+    ).all()
+    for index, follow in enumerate(follows):
+        follow.position = index
+    db.flush()
 
 
 def reorder_topics(db: Session, subject: str, topic_ids: list[int]) -> None:

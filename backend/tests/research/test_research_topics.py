@@ -456,15 +456,19 @@ def test_topic_api_follows_several_and_keeps_the_single_topic_routes(db, monkeyp
     robots = client.put(f"/me/topics/{video.json()['id']}", json={"text": "robots"})
     assert robots.json()["text"] == "robots"
     assert client.put("/me/topics/0", json={"text": "robots"}).status_code == 404
+    # An edited topic keeps its place in the account's order.
     assert [t["text"] for t in client.get("/me/topics").json()] == [
-        "speech recognition",
         "robots",
+        "speech recognition",
     ]
-    # The single-topic routes read and replace the oldest topic.
-    assert client.get("/me/topic").json()["id"] == speech["id"]
+    # The single-topic routes read and replace the account's first topic.
+    assert client.get("/me/topic").json()["id"] == robots.json()["id"]
     assert client.put("/me/topic", json={"text": "audio"}).json()["text"] == "audio"
-    assert [t["text"] for t in client.get("/me/topics").json()] == ["robots", "audio"]
-    assert client.delete(f"/me/topics/{robots.json()['id']}").status_code == 204
+    assert [t["text"] for t in client.get("/me/topics").json()] == [
+        "audio",
+        "speech recognition",
+    ]
+    assert client.delete(f"/me/topics/{speech['id']}").status_code == 204
     assert [t["text"] for t in client.get("/me/topics").json()] == ["audio"]
     assert client.delete("/me/topic").status_code == 204
     assert client.get("/me/topics").json() == []

@@ -263,7 +263,7 @@ def public_topic_papers(
 
 
 # Single-topic endpoints from before accounts could follow several: they read
-# and replace the oldest topic, and DELETE removes every topic.
+# and replace the account's first topic, and DELETE removes every topic.
 @router.get("/me/topic", response_model=TopicView | None)
 def topic(
     user: dict = Depends(require_user), db: Session = Depends(get_database_session)
@@ -278,10 +278,8 @@ def set_topic(
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
-    oldest = next(
-        iter(research_topic_service.topic_views(db, user["hf_subject"])), None
-    )
-    return _save_topic(db, request, user["hf_subject"], body, oldest and oldest.id)
+    first = next(iter(research_topic_service.topic_views(db, user["hf_subject"])), None)
+    return _save_topic(db, request, user["hf_subject"], body, first and first.id)
 
 
 @router.delete("/me/topic", status_code=204)
