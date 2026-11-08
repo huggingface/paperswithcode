@@ -320,6 +320,26 @@ def test_new_edition_is_created_with_series_metadata_and_sources():
     assert result.source_urls == [SOURCE]
 
 
+def test_new_edition_with_official_dates_needs_no_deadlines_yet():
+    result = plan(
+        cvpr_series(),
+        {
+            "year": 2027,
+            "start_date": "2027-06-12",
+            "end_date": "2027-06-18",
+            "deadlines": [],
+        },
+    )
+    assert result.create and not result.rejections
+    assert [c.kind for c in result.changes] == ["create_edition"]
+
+    undated = plan(cvpr_series(), {"year": 2027, "city": "Denver", "deadlines": []})
+    assert undated.changes == []
+    assert undated.rejections == [
+        "a new edition needs a deadline or official conference dates"
+    ]
+
+
 def test_past_editions_are_immutable():
     result = plan(
         cvpr_series(),
@@ -633,6 +653,55 @@ def test_writer_skips_plans_without_accepted_changes(db):
     empty = plan(neurips_series(), {"year": 2027, "deadlines": []})
     assert not service.apply_edition_plan(db, empty, request_id="test")
     assert db.query(CatalogMutationEvent).count() == 0
+
+
+def test_deadline_listing_appends_announced_tba_editions(db):
+    from backend.services.conference_service import ConferenceService
+
+    today = date.today()
+    db.add_all(
+        [
+            # Announced, deadlines not out yet: listed last.
+            Conference(
+                id=3,
+                slug=f"neurips-{today.year + 2}",
+                name="NeurIPS TBA",
+                year=today.year + 2,
+                start_date=today + timedelta(days=400),
+            ),
+            # Already over, and untracked or undated rows: never listed.
+            Conference(
+                id=4,
+                slug=f"neurips-{today.year - 1}",
+                name="NeurIPS past",
+                year=today.year - 1,
+                start_date=today - timedelta(days=300),
+                end_date=today - timedelta(days=294),
+            ),
+            Conference(
+                id=5,
+                slug=f"other-{today.year + 1}",
+                name="Untracked",
+                year=today.year + 1,
+                start_date=today + timedelta(days=100),
+            ),
+            Conference(
+                id=6,
+                slug=f"neurips-{today.year + 3}",
+                name="NeurIPS undated",
+                year=today.year + 3,
+            ),
+        ]
+    )
+    db.commit()
+
+    listing = ConferenceService(db).get_conference_deadlines()
+
+    assert [(c.slug, len(c.deadlines)) for c in listing.results] == [
+        ("neurips-2027", 2),
+        (f"neurips-{today.year + 2}", 0),
+    ]
+    assert listing.count == 2
 
 
 def test_admin_replace_edition_replaces_the_list_and_creates_editions(db):

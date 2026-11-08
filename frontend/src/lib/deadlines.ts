@@ -81,6 +81,11 @@ export const sortedDeadlines = (conf: Conference): ConferenceDeadline[] =>
     (a, b) => new Date(a.deadline_at).getTime() - new Date(b.deadline_at).getTime(),
   );
 
+// An announced edition whose deadlines are not published yet. The API only
+// returns these while the conference is still ahead.
+export const isDeadlinesTba = (conf: Conference): boolean =>
+  (conf.deadlines ?? []).length === 0;
+
 export const nextUpcomingDeadline = (
   conf: Conference,
   now: number,

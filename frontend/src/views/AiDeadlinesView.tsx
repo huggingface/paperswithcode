@@ -13,6 +13,7 @@ import {
   countdownLabel,
   formatDateRange,
   formatDeadlineDate,
+  isDeadlinesTba,
   labelFromTag,
   latestDeadline,
   nextUpcomingDeadline,
@@ -132,14 +133,14 @@ const DeadlineCard: React.FC<{
           <span
             style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-faint)" }}
           >
-            {primary?.label || primary?.type || "Deadline"}
+            {primary?.label || primary?.type || "Deadlines"}
           </span>
           <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-soft)" }}>
             {primary
               ? `${formatDeadlineDate(primary.deadline_at)}${
                   primary.timezone ? ` · ${primary.timezone}` : ""
                 }`
-              : "TBD"}
+              : "Not announced yet"}
           </span>
         </div>
         <span
@@ -151,7 +152,7 @@ const DeadlineCard: React.FC<{
             whiteSpace: "nowrap",
           }}
         >
-          {primaryTime != null ? countdownLabel(primaryTime, now) : "TBD"}
+          {primaryTime != null ? countdownLabel(primaryTime, now) : "TBA"}
         </span>
       </div>
 
@@ -242,16 +243,22 @@ const AiDeadlinesView: React.FC = () => {
         );
         if (!hasDomain) return false;
       }
-      if (!showPast && !nextUpcomingDeadline(conf, now)) return false;
+      if (!showPast && !isDeadlinesTba(conf) && !nextUpcomingDeadline(conf, now)) {
+        return false;
+      }
       return true;
     });
 
     const sortKey = (conf: Conference) => {
       const next = nextUpcomingDeadline(conf, now);
       if (next) return { group: 0, time: new Date(next.deadline_at).getTime() };
+      // Announced editions without deadlines follow, soonest conference first.
+      if (isDeadlinesTba(conf)) {
+        return { group: 1, time: conf.start_date ? new Date(conf.start_date).getTime() : 0 };
+      }
       const latest = latestDeadline(conf);
       // Past-only conferences sink below upcoming ones, most recent first.
-      return { group: 1, time: -(latest ? new Date(latest.deadline_at).getTime() : 0) };
+      return { group: 2, time: -(latest ? new Date(latest.deadline_at).getTime() : 0) };
     };
 
     return [...filtered].sort((a, b) => {
