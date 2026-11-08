@@ -149,7 +149,7 @@ const PapersListView: React.FC = () => {
                 : "Repository-scoped paper feed."
               : isSearchMode
                 ? `${cards.length} loaded from the most relevant results.`
-                : <>Search the full corpus. {totalCount > 0 && `${totalCount.toLocaleString()} papers indexed.`}</>}
+                : <>Search the full corpus. {totalCount > 0 && `${totalCount.toLocaleString()} ${feed.dateRange.startDate || feed.dateRange.endDate ? "papers in this date range" : "papers indexed"}.`}</>}
           </div>
           {isRepositoryFeed && scope && (
             <div className="paper-feed-scope-links">

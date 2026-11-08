@@ -227,7 +227,7 @@ const MethodDetailView: React.FC = () => {
         <div className="results-count">{cards.length} papers mentioning {m.name}</div>
       </PaperFeedToolbar>
 
-      <PaperFeedList query={papersQ} cards={cards} empty="No papers tagged with this method yet." />
+      <PaperFeedList query={papersQ} cards={cards} empty={feed.dateRange.startDate || feed.dateRange.endDate ? "No papers tagged with this method in this date range." : "No papers tagged with this method yet."} />
     </div>
   );
 };

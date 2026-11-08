@@ -705,7 +705,7 @@ const TagBrowseView: React.FC = () => {
 
           <PaperFeedToolbar feed={feed} />
 
-          <PaperFeedList query={papersQ} cards={cards} empty="No papers in this task yet." />
+          <PaperFeedList query={papersQ} cards={cards} empty={feed.dateRange.startDate || feed.dateRange.endDate ? "No papers in this task in this date range." : "No papers in this task yet."} />
         </div>
 
         <aside className="task-side">
