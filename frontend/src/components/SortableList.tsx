@@ -1,9 +1,13 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { GripVertical } from 'lucide-react';
 
 type Key = string | number;
 
-/** Drag a row by its handle (mouse or touch) or move it with the arrow keys; rows reorder live while dragging. */
+const MOVE = 'transform 180ms cubic-bezier(0.2, 0, 0, 1)';
+const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+
+/** Drag a row by its handle (mouse or touch) or move it with the arrow keys. The dragged row follows the
+ * pointer and the others slide into their new places. */
 export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, renderItem, className, disabled = false }: {
   items: T[];
   itemKey: (item: T) => Key;
@@ -20,8 +24,34 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
   // A dropped order shows until the parent passes new items, so the row never jumps back while saving.
   const [settled, setSettled] = useState<{ from: T[]; order: T[] } | null>(null);
   const rows = useRef(new Map<Key, HTMLElement>());
+  // Each row's layout position (offsetTop ignores transforms) after the last render.
+  const tops = useRef(new Map<Key, number>());
+  // Pointer y and where in the dragged row it grabbed, so the row stays under the pointer.
+  const pointer = useRef({ y: 0, grab: 0 });
   const list = drag?.order ?? (settled?.from === items ? settled.order : items);
   const sameOrder = (a: T[], b: T[]) => a.length === b.length && a.every((item, i) => itemKey(item) === itemKey(b[i]));
+
+  const followPointer = (row: HTMLElement) => {
+    row.style.transition = 'none';
+    row.style.transform = `translateY(${pointer.current.y - pointer.current.grab - row.offsetTop}px)`;
+  };
+
+  // FLIP: a row whose slot changed starts where it was and slides to its new slot.
+  useLayoutEffect(() => {
+    const animate = !reducedMotion();
+    rows.current.forEach((row, key) => {
+      const top = row.offsetTop;
+      const previous = tops.current.get(key);
+      tops.current.set(key, top);
+      if (key === drag?.key) return followPointer(row);
+      if (!animate || previous === undefined || previous === top) return;
+      row.style.transition = 'none';
+      row.style.transform = `translateY(${previous - top}px)`;
+      void row.offsetHeight; // Apply the start position before transitioning from it.
+      row.style.transition = MOVE;
+      row.style.transform = '';
+    });
+  });
 
   // Follow the pointer on window: a moving row's DOM node is re-inserted, which would drop pointer capture.
   const latest = useRef({ items, onReorder, drag });
@@ -31,14 +61,20 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
     if (!dragging) return;
     const onMove = (event: PointerEvent) => {
       const y = event.clientY;
+      pointer.current.y = y;
+      const key = latest.current.drag?.key;
+      const row = key === undefined ? undefined : rows.current.get(key);
+      if (row) followPointer(row);
+      // Compare layout positions (not on-screen ones, which shift while rows slide):
+      // the dragged row goes after every other row whose middle is above its own middle.
+      const middle = y - pointer.current.grab + (row?.offsetHeight ?? 0) / 2;
       setDrag(current => {
         if (!current) return current;
         const dragged = current.order.find(item => itemKey(item) === current.key)!;
         const others = current.order.filter(item => itemKey(item) !== current.key);
-        // The dragged row goes after every other row whose middle is above the pointer.
         const index = others.filter(item => {
-          const rect = rows.current.get(itemKey(item))?.getBoundingClientRect();
-          return rect ? rect.top + rect.height / 2 < y : false;
+          const other = rows.current.get(itemKey(item));
+          return other ? other.offsetTop + other.offsetHeight / 2 < middle : false;
         }).length;
         const order = [...others.slice(0, index), dragged, ...others.slice(index)];
         return sameOrder(order, current.order) ? current : { ...current, order };
@@ -46,6 +82,12 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
     };
     const finish = (commit: boolean) => {
       const { drag: current, items: saved, onReorder: report } = latest.current;
+      const row = current ? rows.current.get(current.key) : undefined;
+      if (row) {
+        // Glide the dropped row from under the pointer into its slot.
+        row.style.transition = reducedMotion() ? 'none' : MOVE;
+        row.style.transform = '';
+      }
       if (commit && current && !sameOrder(current.order, saved)) {
         setSettled({ from: saved, order: current.order });
         report(current.order);
@@ -84,6 +126,8 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
         onPointerDown={event => {
           if (event.button !== 0) return;
           event.preventDefault();
+          const row = rows.current.get(key);
+          pointer.current = { y: event.clientY, grab: event.clientY - (row?.offsetTop ?? 0) };
           setDrag({ key, order: items });
         }}
         onKeyDown={(event: KeyboardEvent<HTMLButtonElement>) => {

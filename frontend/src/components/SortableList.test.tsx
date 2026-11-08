@@ -7,9 +7,10 @@ const items = ['alpha', 'beta', 'gamma'];
 function renderList(onReorder = vi.fn()) {
   render(<SortableList items={items} itemKey={item => item} itemLabel={item => item} onReorder={onReorder}
     renderItem={(item, handle) => <div>{handle}<span>{item}</span></div>} />);
-  // Rows are 20px tall, stacked from the top of the viewport.
-  screen.getAllByRole('listitem').forEach((row, index) => {
-    row.getBoundingClientRect = () => ({ top: index * 20, height: 20, bottom: index * 20 + 20, left: 0, right: 100, width: 100, x: 0, y: index * 20, toJSON: () => ({}) });
+  // Rows are 20px tall and laid out in DOM order, so moving a row moves its offsetTop.
+  screen.getAllByRole('listitem').forEach(row => {
+    Object.defineProperty(row, 'offsetTop', { get: () => Array.from(row.parentElement!.children).indexOf(row) * 20 });
+    Object.defineProperty(row, 'offsetHeight', { get: () => 20 });
   });
   return onReorder;
 }
@@ -42,5 +43,29 @@ describe('SortableList', () => {
     expect(onReorder).toHaveBeenLastCalledWith(['alpha', 'gamma', 'beta']);
     fireEvent.keyDown(screen.getByRole('button', { name: /^Reorder alpha/ }), { key: 'ArrowUp' });
     expect(onReorder).toHaveBeenCalledTimes(1);
+  });
+
+  it('slides moved rows from their old slot and keeps the dragged row under the pointer', () => {
+    renderList();
+    fireEvent.pointerDown(screen.getByRole('button', { name: /^Reorder alpha/ }), { button: 0, pointerId: 1, clientY: 10 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientY: 35 });
+    const [beta, alpha] = screen.getAllByRole('listitem');
+    // Alpha now sits in slot 1 (top 20) but the pointer moved 25px, so it is drawn 5px lower.
+    expect(alpha.textContent).toBe('alpha');
+    expect(alpha.style.transform).toBe('translateY(5px)');
+    // Beta moved up one slot and slides from where it was.
+    expect(beta.style.transition).toContain('transform');
+    expect(beta.style.transform).toBe('');
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    expect(alpha.style.transform).toBe('');
+    expect(alpha.style.transition).toContain('transform');
+  });
+
+  it('skips the slide when the user prefers reduced motion', () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('reduce') }));
+    renderList();
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Reorder beta/ }), { key: 'ArrowUp' });
+    expect(screen.getAllByRole('listitem').every(row => row.style.transition === '')).toBe(true);
+    vi.unstubAllGlobals();
   });
 });
