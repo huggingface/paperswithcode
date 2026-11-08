@@ -69,12 +69,9 @@ export function useFollowTopic() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => researchApi.followTopic(id),
-    onSuccess: async (_, id) => {
+    onSuccess: async () => {
       clearPendingTopicFollow();
-      await Promise.all([
-        refreshTopics(client, user?.hf_subject),
-        client.invalidateQueries({ queryKey: researchQueryKeys.publicTopic(id, user?.hf_subject) }),
-      ]);
+      await refreshTopics(client, user?.hf_subject);
     },
   });
 }
@@ -127,6 +124,8 @@ export interface TopicSave {
 /** Refreshes the topics and what depends on them; resolves once the topics have reloaded. */
 function refreshTopics(client: QueryClient, subject: string | undefined) {
   void invalidateResearch(client, subject, { follows: false });
+  // Topic pages show whether you follow them and their follower count.
+  void client.invalidateQueries({ queryKey: researchQueryKeys.publicTopics });
   return client.invalidateQueries({ queryKey: researchQueryKeys.topics(subject) });
 }
 

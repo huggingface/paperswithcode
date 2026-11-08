@@ -51,6 +51,14 @@ describe('TopicView', () => {
     await waitFor(() => expect(follow).toHaveBeenCalledWith(23));
     expect(await screen.findByText('4 people follow this topic')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Following/ })).toHaveAttribute('aria-pressed', 'true');
+    // Unfollowing refreshes the header too.
+    const remove = vi.spyOn(researchApi, 'removeTopic').mockImplementation(async () => {
+      view.mockResolvedValue(topic);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Following/ }));
+    await waitFor(() => expect(remove).toHaveBeenCalledWith(23));
+    expect(await screen.findByText('3 people follow this topic')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Follow' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('keeps thin topics out of search engines', async () => {
