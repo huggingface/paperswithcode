@@ -74,15 +74,15 @@ describe('TopicView', () => {
     expect(await screen.findByRole('heading', { name: 'Topic not found' })).toBeInTheDocument();
   });
 
-  it('creates an edited copy as your own topic', async () => {
+  it('filters by the homepage date range and sorts newest first through the URL', async () => {
     vi.spyOn(researchApi, 'publicTopic').mockResolvedValue(topic);
-    const add = vi.spyOn(researchApi, 'addTopic').mockResolvedValue({
-      id: 60, text: 'OCR model releases', label: null, set_at: null, status: 'pending', judged: 0, total: null, suggestions: [], is_public: true, is_creator: true,
-    });
-    renderAt('/topics/23');
-    fireEvent.click(await screen.findByRole('button', { name: 'Duplicate and edit' }));
-    fireEvent.change(screen.getByRole('textbox', { name: 'Your topic' }), { target: { value: 'OCR model releases' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Follow topic' }));
-    await waitFor(() => expect(add).toHaveBeenCalledWith('OCR model releases'));
+    const papers = vi.mocked(researchApi.topicPapers);
+    renderAt('/topics/23?order=newest&start_date=2026-11-01&end_date=2026-11-07');
+    await screen.findByRole('heading', { name: 'OCR releases' });
+    await waitFor(() => expect(papers).toHaveBeenCalledWith(23, 'newest', 0, { startDate: '2026-11-01', endDate: '2026-11-07' }));
+    expect(screen.getByRole('button', { name: 'newest' })).toHaveClass('active');
+    expect(screen.queryByRole('button', { name: 'Duplicate and edit' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'trending' }));
+    await waitFor(() => expect(papers).toHaveBeenCalledWith(23, 'trending', 0, { startDate: '2026-11-01', endDate: '2026-11-07' }));
   });
 });

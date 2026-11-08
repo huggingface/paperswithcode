@@ -423,6 +423,16 @@
   font-weight: 600;
   text-decoration: none;
 }
+.topic-creator {
+  max-width: 100%;
+  min-width: 0;
+}
+.topic-creator-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .topic-creator:hover {
   color: var(--accent-text);
 }
@@ -483,10 +493,6 @@
     flex-direction: row;
     flex-wrap: wrap;
   }
-}
-.topic-duplicate-dialog form {
-  display: grid;
-  gap: 10px;
 }
 .research-topic-sharing {
   display: flex;

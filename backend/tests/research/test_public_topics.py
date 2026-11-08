@@ -176,6 +176,17 @@ def test_topic_papers_use_verdicts_or_the_preview_while_building(db, now):
         ]
 
     assert titles() == ["Preview only", "New match", "Old match"]
+    recent = public.topic_papers(
+        db,
+        topic_id,
+        None,
+        order="newest",
+        offset=0,
+        limit=10,
+        start_date=(now - timedelta(days=7)).date(),
+        end_date=now.date(),
+    )
+    assert [p.title for p in recent] == ["Preview only", "New match"]
     done(db, topic_id)
     assert titles() == ["New match", "Old match"]
     topics.set_public(db, "alice", topic_id, False)
