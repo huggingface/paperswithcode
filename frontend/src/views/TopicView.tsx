@@ -16,8 +16,6 @@ import {
 } from '@/lib/researchTopic';
 import { transformPaperForCard } from '@/lib/transform';
 
-const BANNER_TILES = 8;
-
 /** A public free-text topic: who made it, who follows it, and the papers a model matched to it. */
 export default function TopicView() {
   const { topicParam = '' } = useParams();
@@ -43,56 +41,65 @@ export default function TopicView() {
     () => papers.data?.pages.flatMap(page => page.results.map(transformPaperForCard)) ?? [],
     [papers.data],
   );
-  const thumbnails = useMemo(
-    () => (papers.data?.pages[0]?.results ?? []).map(p => p.thumbnail_url).filter((url): url is string => !!url).slice(0, BANNER_TILES),
-    [papers.data],
-  );
   useTopicHead(topic.data);
 
   if (topic.error || !(topicId > 0)) {
     return <div className="page topic-page">
-      <h1 className="topic-title">Topic not found</h1>
+      <h1 className="feed-title">Topic not found</h1>
       <p className="topic-description">This topic does not exist or its creator made it private.</p>
       <p><Link to="/">Back to trending research</Link></p>
     </div>;
   }
-  if (!topic.data) return <div className="page topic-page"><div className="topic-banner is-loading" /></div>;
+  if (!topic.data) return <div className="page topic-page" aria-busy="true" />;
   const data = topic.data;
   const title = topicTitle(data);
   return <div className="page topic-page">
-    <div className="topic-banner" aria-hidden="true">
-      {thumbnails.map(url => <img key={url} src={url} alt="" loading="lazy" />)}
+    <div className="feed-header">
+      <div>
+        <span className="topic-kicker">Topic</span>
+        <h1 className="feed-title">{title}</h1>
+        {data.text.toLowerCase() !== title.toLowerCase() && <p className="topic-description">{data.text}</p>}
+      </div>
     </div>
-    <h1 className="topic-title">{title}</h1>
-    {data.text !== title && <p className="topic-description">{data.text}</p>}
-    {!data.is_public && <p className="topic-private"><Lock aria-hidden="true" />Private: only you and existing followers can open this page.</p>}
-    {data.creator && <div className="topic-creator">
-      <Avatar person={data.creator} size={36} />
-      <span>Created by <a href={`https://huggingface.co/${data.creator.username}`} target="_blank" rel="noreferrer">@{data.creator.username}</a></span>
-    </div>}
-    <div className="topic-followers">
-      {data.follower_avatars.length > 0 && <span className="topic-follower-avatars">
-        {data.follower_avatars.map(p => <Avatar key={p.username} person={p} size={26} />)}
-      </span>}
-      <span>{data.followers === 1 ? '1 person follows this topic' : `${data.followers.toLocaleString()} people follow this topic`}</span>
+    <div className="layout-with-sidebar">
+      <aside className="sidebar topic-sidebar">
+        {!data.is_public && <p className="topic-private"><Lock aria-hidden="true" />Private: only you and existing followers can open this page.</p>}
+        {data.creator && <div className="sidebar-section">
+          <div className="sidebar-label">Created by</div>
+          <a className="topic-creator" href={`https://huggingface.co/${data.creator.username}`} target="_blank" rel="noreferrer">
+            <Avatar person={data.creator} size={32} />@{data.creator.username}
+          </a>
+        </div>}
+        <div className="sidebar-section">
+          <div className="sidebar-label">Followers</div>
+          <div className="topic-followers">
+            {data.follower_avatars.length > 0 && <span className="topic-follower-avatars">
+              {data.follower_avatars.map(p => <Avatar key={p.username} person={p} size={26} />)}
+            </span>}
+            <span>{data.followers === 1 ? '1 person follows this topic' : `${data.followers.toLocaleString()} people follow this topic`}</span>
+          </div>
+        </div>
+        <div className="sidebar-section topic-actions">
+          <FollowTopicButton topic={data} />
+          <ShareButton path={topicPath(data)} />
+          <DuplicateTopicButton text={data.text} />
+        </div>
+      </aside>
+      <div className="feed-main">
+        <div className="sort-bar">
+          <div className="sort-options" role="group" aria-label="Sort papers">
+            {(['trending', 'newest'] as const).map(value => <button key={value} type="button"
+              className={`sort-btn ${order === value ? 'active' : ''}`} aria-pressed={order === value}
+              onClick={() => setOrder(value)}>{value}</button>)}
+          </div>
+        </div>
+        {(data.status === 'pending' || data.status === 'running') && <p className="following-topic-note" role="status">
+          Showing the closest papers now. A model is reading papers to refine these matches, which takes a few minutes.
+        </p>}
+        <PaperFeedList query={papers} cards={cards} skeleton="card" rootMargin="400px"
+          empty={papers.error ? 'Could not load papers for this topic.' : 'No papers match this topic yet.'} />
+      </div>
     </div>
-    <div className="topic-actions">
-      <FollowTopicButton topic={data} />
-      <ShareButton path={topicPath(data)} />
-      <DuplicateTopicButton text={data.text} />
-      <label className="topic-order">
-        <span className="sr-only">Sort papers</span>
-        <select value={order} onChange={event => setOrder(event.target.value as TopicPaperOrder)}>
-          <option value="trending">Trending</option>
-          <option value="newest">Newest</option>
-        </select>
-      </label>
-    </div>
-    {(data.status === 'pending' || data.status === 'running') && <p className="following-topic-note" role="status">
-      Showing the closest papers now. A model is reading papers to refine these matches, which takes a few minutes.
-    </p>}
-    <PaperFeedList query={papers} cards={cards} skeleton="card" rootMargin="400px"
-      empty={papers.error ? 'Could not load papers for this topic.' : 'No papers match this topic yet.'} />
   </div>;
 }
 
