@@ -21,6 +21,14 @@ import NotFound from "@/pages/NotFound";
 import { loadFailurePage } from "@/components/LoadFailurePage";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 
+/** Methods whose figure is a wide diagram that needs more of the hero than a portrait card. */
+const WIDE_FIGURE_METHODS: ReadonlySet<string | undefined> = new Set([
+  "grokking",
+  "latent-reasoning",
+  "world-action-models",
+  "continuous-language-model",
+]);
+
 const MethodDetailView: React.FC = () => {
   const { methodSlug } = useParams<{ methodSlug: string }>();
   const feed = usePaperFeedParams({ defaultToLastMonth: true });
@@ -78,14 +86,7 @@ const MethodDetailView: React.FC = () => {
       </div>
 
       <div
-        className={`tag-hero method-hero-grid${
-          m.slug === "grokking" ||
-          m.slug === "latent-reasoning" ||
-          m.slug === "world-action-models" ||
-          m.slug === "continuous-language-model"
-            ? " method-hero-grid--wide-figure"
-            : ""
-        }`}
+        className={`tag-hero method-hero-grid${WIDE_FIGURE_METHODS.has(m.slug) ? " method-hero-grid--wide-figure" : ""}`}
       >
         <div>
           <div className="tag-hero-eyebrow">METHOD</div>
