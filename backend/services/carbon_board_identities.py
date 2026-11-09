@@ -988,7 +988,9 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             is_open=True,
         ),
         "Kimi K3.1 Pro": ModelIdentity(
-            "Kimi K3.1 Pro", source_url="https://www.kimi.com/blog/kimi-k3-1-pro"
+            "Kimi K3.1 Pro",
+            source_url="https://www.kimi.com/blog/kimi-k3-1-pro",
+            is_open=True,
         ),
         "MiMo-V2.6-Pro": ModelIdentity(
             "MiMo-V2.6-Pro", arxiv_id="2610.11959", is_open=True
@@ -1084,7 +1086,9 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             "K2 Horizon 375B A23B", source_url="https://ifm.ai/blog/k2/", is_open=True
         ),
         "Kimi K3.1 Pro": ModelIdentity(
-            "Kimi K3.1 Pro", source_url="https://www.kimi.com/blog/kimi-k3-1-pro"
+            "Kimi K3.1 Pro",
+            source_url="https://www.kimi.com/blog/kimi-k3-1-pro",
+            is_open=True,
         ),
         "MiMo-V2.6-Pro": ModelIdentity(
             "MiMo-V2.6-Pro", arxiv_id="2610.11959", is_open=True
