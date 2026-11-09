@@ -111,12 +111,39 @@ def _benchmark_label(name: str) -> str:
     return re.sub(r"\s*\([^()]*\)$", "", _plain(name)) or _plain(name)
 
 
+def _newest_versions(labels: list[str]) -> list[str]:
+    """Keep one dotted version per family, in the family's first position.
+
+    "Terminal Bench 2.1" and "Terminal-Bench 4.0" share the family
+    "terminalbench", so only "Terminal-Bench 4.0" is kept.
+    """
+    newest: dict[str, tuple[tuple[int, ...], str]] = {}
+    entries: list[str] = []
+    for label in labels:
+        match = re.search(r"\d+(?:\.\d+)+", label)
+        family = (
+            re.sub(r"[^a-z0-9]", "", label[: match.start()].lower()) if match else ""
+        )
+        if not family:
+            entries.append(label)
+            continue
+        version = tuple(map(int, match.group().split(".")))
+        if family not in newest:
+            entries.append(f"\0{family}")
+            newest[family] = (version, label)
+        elif version > newest[family][0]:
+            newest[family] = (version, label)
+    return [newest[e[1:]][1] if e.startswith("\0") else e for e in entries]
+
+
 def _benchmark_title(title: str, benchmark_names: Iterable[str]) -> Optional[str]:
     """Return "<name> benchmarks: A, B, C" when the paper has a short name."""
     prefix = re.sub(r"^Introducing\s+", "", title.split(":", 1)[0].strip())
     if len(prefix) > BENCHMARK_TITLE_NAME_CHARS:
         return None
-    labels = list(dict.fromkeys(filter(None, map(_benchmark_label, benchmark_names))))
+    labels = _newest_versions(
+        list(dict.fromkeys(filter(None, map(_benchmark_label, benchmark_names))))
+    )
     heading = f"{prefix} benchmarks: "
     chosen: list[str] = []
     for label in labels:
