@@ -57,7 +57,10 @@ from backend.services.trending_model_resolution_service import (
 # reappear in a later run before it costs a curation job. Vendor feeds are
 # first-party and qualify on their first sighting.
 WEB_SEARCH_MIN_SIGHTINGS = 2
-MAX_RADAR_JOBS_PER_DAY = 6
+# Leaderboard syncs report every unmatched model, so the backlog can reach
+# hundreds; resolve jobs mostly succeed and the curation runner handles
+# ~150+ jobs a day, so a backlog clears in about a week.
+MAX_RADAR_JOBS_PER_DAY = 30
 # A failed resolution is retried once the release has been seen again after
 # this long, so a transient Job failure does not drop the release.
 FAILED_RETRY_AFTER = timedelta(days=2)
