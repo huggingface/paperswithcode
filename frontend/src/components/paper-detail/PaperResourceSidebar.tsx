@@ -7,7 +7,8 @@ import type { AuthUser } from "@/lib/authContext";
 import type { HuggingFaceArtifactsViewer } from "@/lib/paperDetailPresentation";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 
-import { CopyToBucketCard, paperArtifactBucketName } from "./CopyToBucketCard";
+import { paperArtifactBucketName } from "@/lib/bucketCopy";
+import { CopyToBucketCard } from "./CopyToBucketCard";
 import { RelatedPapersCard } from "./RelatedPapersCard";
 import { XThreadsCard } from "./XThreadsCard";
 

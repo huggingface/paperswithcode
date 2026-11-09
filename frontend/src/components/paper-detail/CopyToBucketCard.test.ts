@@ -14,12 +14,12 @@ vi.mock("@/lib/api/papers", () => ({
 }));
 
 import {
-  CopyToBucketCard,
   buildBucketCopyCommands,
   chunkBucketArtifacts,
   collectBucketArtifacts,
   paperArtifactBucketName,
-} from "./CopyToBucketCard";
+} from "@/lib/bucketCopy";
+import { CopyToBucketCard } from "./CopyToBucketCard";
 
 beforeEach(() => {
   copyPaperToBucketMock.mockReset();
