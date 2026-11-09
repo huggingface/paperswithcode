@@ -66,7 +66,10 @@ class DatabaseManager:
     def engine(self) -> Engine:
         """Get the SQLAlchemy engine."""
         if self._engine is None:
-            options = f"-c search_path={self.settings.db_search_path}"
+            # JIT compiles any plan whose estimated cost passes jit_above_cost.
+            # Catalog queries finish in tens of milliseconds, yet compilation
+            # took ~0.5 s per affected request, so application connections skip it.
+            options = f"-c search_path={self.settings.db_search_path} -c jit=off"
             # The staging role defaults to read-only for every ad hoc login.
             # The application explicitly opts its connections into read/write
             # transactions; PostgreSQL privileges still limit those writes to
