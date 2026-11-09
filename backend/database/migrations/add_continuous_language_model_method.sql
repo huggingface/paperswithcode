@@ -207,8 +207,6 @@ WHERE m.slug = 'continuous-language-model'
         '2610.42018', -- Asynchronous Flow Map Language Models
         '2610.42084' -- RangeSWA: Training-Free Length Extrapolation for Continuous Diffusion Language M
       )
-      -- Towards Closing the Autoregressive Gap in Language Modeling via Entropy-Gated Continuous Bitstream Diffusion
-      OR (p.source = 'external' AND p.title ILIKE 'Towards Closing the Autoregressive Gap in Language Modeling via Entropy-Gated Continuous Bitstream Diffusion%')
   );
 
 DELETE FROM paper_method_exclusions x
