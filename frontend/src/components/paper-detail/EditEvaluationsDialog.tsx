@@ -147,7 +147,7 @@ export function EditEvaluationsDialog({
       toast({ title: "No changes to submit", description: "Your evaluation list matches the existing data." });
       return;
     }
-    save.mutate(prepared.operations);
+    save.submit(prepared.operations);
   };
 
   const visibleRowNumber = (rowIndex: number) =>

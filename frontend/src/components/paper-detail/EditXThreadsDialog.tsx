@@ -44,6 +44,10 @@ export function EditXThreadsDialog({
     toPendingPayload: (next: string[]) => ({ x_threads: next }),
     applyDirect: (next) => papersApi.updateXThreads(paperId, next),
     onClose: () => onOpenChange(false),
+    removal: {
+      removes: (next) => initialUrls.some((url) => !next.some((candidate) => postId(candidate) === postId(url))),
+      prompt: "Remove one or more X threads from this paper?",
+    },
   });
 
   // Folds the typed-but-not-added URL into the list; null means it is invalid.
@@ -82,13 +86,7 @@ export function EditXThreadsDialog({
 
   const handleSave = () => {
     const next = withTypedUrl();
-    if (next === null) return;
-    if (
-      submitMode === "direct" &&
-      initialUrls.some((url) => !next.some((candidate) => postId(candidate) === postId(url))) &&
-      !window.confirm("Remove one or more X threads from this paper?")
-    ) return;
-    save.mutate(next);
+    if (next !== null) save.submit(next);
   };
 
   const hasChange = useMemo(() => {

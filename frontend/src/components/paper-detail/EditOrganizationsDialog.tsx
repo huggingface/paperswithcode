@@ -60,16 +60,11 @@ export const EditOrganizationsDialog = ({
     toPendingPayload: (organizationIds: number[]) => ({ organization_ids: organizationIds }),
     applyDirect: (organizationIds) => papersApi.updateOrganizations(paperId, organizationIds),
     onClose: () => onOpenChange(false),
+    removal: {
+      removes: (next) => initialOrganizationIds.some((id) => !next.includes(id)),
+      prompt: "Remove one or more organizations from this paper? Destructive edits may require a fresh sign-in.",
+    },
   });
-  const handleSave = () => {
-    if (
-      initialOrganizationIds.some((id) => !selected.includes(id)) &&
-      !window.confirm(
-        "Remove one or more organizations from this paper? Destructive edits may require a fresh sign-in.",
-      )
-    ) return;
-    save.mutate(selected);
-  };
   return (
     <PaperEditDialogShell
       title="Edit organizations"
@@ -77,7 +72,7 @@ export const EditOrganizationsDialog = ({
       submitMode={submitMode}
       isAuthor={isAuthor}
       onOpenChange={onOpenChange}
-      onSave={handleSave}
+      onSave={() => save.submit(selected)}
       isSaving={save.isPending}
       saveDisabled={suggestionUnsent}
     >

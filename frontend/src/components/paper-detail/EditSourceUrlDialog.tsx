@@ -38,7 +38,7 @@ export function EditSourceUrlDialog({
 
   const handleSave = () => {
     if (!isValidUrl) return;
-    save.mutate(trimmed);
+    save.submit(trimmed);
   };
 
   return (
