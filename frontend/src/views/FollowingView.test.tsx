@@ -492,3 +492,15 @@ it('follows the popular topics a visitor picked before signing in', async () => 
   await waitFor(() => expect(follow).toHaveBeenCalledWith(23));
   await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull());
 });
+
+it('keeps popular topics a visitor picked when following them fails, and retries', async () => {
+  sessionStorage.setItem('pwc:following-pending-topic-follows', JSON.stringify([23, 24]));
+  const follow = vi.spyOn(researchApi, 'followTopic')
+    .mockResolvedValueOnce({ ...topic, id: 23 }).mockRejectedValueOnce(new Error('down'))
+    .mockResolvedValueOnce({ ...topic, id: 24 });
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Try again' }));
+  await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull());
+  expect(follow).toHaveBeenLastCalledWith(24);
+  expect(follow).toHaveBeenCalledTimes(3);
+});

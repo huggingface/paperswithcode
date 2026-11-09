@@ -2,7 +2,7 @@ import FollowingIntro from "@/components/FollowingIntro";
 import TopicDialog from "@/components/TopicDialog";
 import FollowBubbles, { type FeedFilter } from "@/components/FollowBubbles";
 import { isAuthDisabled } from "@/lib/apiUrl";
-import { clearPendingTopic, clearPendingTopicFollows, isTopicBuilding, readPendingFollows, readPendingTopic, readPendingTopicFollows, topicTitle, useFollowTopic, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
+import { clearPendingTopic, isTopicBuilding, readPendingFollows, readPendingTopic, readPendingTopicFollows, topicTitle, useFollowTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -455,15 +455,16 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   useEffect(() => {
     if (filterGone) navigate(filterHref(undefined), { replace: true });
   });
-  // And the popular topics a guest picked there.
-  const { mutateAsync: followPendingTopic } = useFollowTopic();
+  // And the popular topics a guest picked there; failed ones stay stashed until a retry succeeds.
+  const pendingTopicFollows = useFollowTopics();
+  const { mutate: followPendingTopics } = pendingTopicFollows;
   const pendingTopicFollowsStarted = useRef(false);
   useEffect(() => {
     const ids = readPendingTopicFollows();
     if (!user || !ids.length || pendingTopicFollowsStarted.current) return;
     pendingTopicFollowsStarted.current = true;
-    void Promise.allSettled(ids.map(id => followPendingTopic(id))).then(clearPendingTopicFollows);
-  }, [user, followPendingTopic]);
+    followPendingTopics(ids);
+  }, [user, followPendingTopics]);
   const cards = useMemo<PaperFeedCard[]>(
     () => infinite.data?.pages.flatMap((page) =>
       page.results.map((entry) => ({ ...transformPaperForCard(entry.paper), followReasons: entry.reasons })),
@@ -590,6 +591,14 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>
                   Could not follow {pendingFollows.variables.map(pick => pick.name).join(", ")}. <button type="button" onClick={() => savePendingFollows(pendingFollows.variables)}>Try again</button>
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {pendingTopicFollows.isError && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertDescription>
+                  Could not follow the popular topics you picked. <button type="button" onClick={() => followPendingTopics(readPendingTopicFollows())}>Try again</button>
                 </AlertDescription>
               </Alert>
             )}
