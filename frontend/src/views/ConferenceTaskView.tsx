@@ -5,14 +5,12 @@ import { useQuery } from "@tanstack/react-query";
 import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
 import MarkdownText from "@/components/MarkdownText";
 import { papersApi } from "@/lib/api/papers";
-import { isNotFound } from "@/lib/apiTransport";
 import { CONFERENCE_LISTINGS } from "@/lib/conferenceListings";
 
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import NotFound from "@/pages/NotFound";
+import { loadFailurePage } from "@/components/LoadFailurePage";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 
 // Award announcements, keyed by `${conference}/${listing}`.
@@ -67,16 +65,11 @@ const ConferenceTaskView: React.FC = () => {
   const totalCount = papersQ.data?.pages[0]?.count ?? conferenceQ.data?.paper_count ?? 0;
   const task = taskQ.data;
 
-  if (isNotFound(conferenceQ.error) || isNotFound(taskQ.error)) return <NotFound />;
-  if (conferenceQ.error || taskQ.error || papersQ.error) {
-    return (
-      <div className="page">
-        <Alert variant="destructive">
-          <AlertDescription>Failed to load conference papers. Please try again.</AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
+  const failure = loadFailurePage(
+    [conferenceQ.error, taskQ.error, papersQ.error],
+    "Failed to load conference papers. Please try again.",
+  );
+  if (failure) return failure;
 
   return (
     <div className="page">

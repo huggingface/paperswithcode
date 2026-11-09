@@ -11,7 +11,6 @@ import BenchmarkTable from "@/components/benchmark/BenchmarkTable";
 import BenchmarkProgression from "@/components/benchmark/BenchmarkProgression";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import LatexTitle from "@/components/LatexTitle";
 import BenchmarkTrendSparkline from "@/components/BenchmarkTrendSparkline";
 import CopyScreenshotButton from "@/components/benchmark/CopyScreenshotButton";
@@ -19,8 +18,8 @@ import { parseParameterFilter } from "@/lib/benchmarkLeaderboard";
 import "@/styles/benchmark-detail.css";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import { slugify } from "@/lib/slug";
-import { isNotFound } from "@/lib/apiTransport";
 import NotFound from "@/pages/NotFound";
+import { loadFailurePage } from "@/components/LoadFailurePage";
 
 
 function extractSourcePaperRouteId(paperUrl?: string | null): string | null {
@@ -168,15 +167,8 @@ const BenchmarkDetailView: React.FC = () => {
     );
   }
 
-  if (isNotFound(datasetQ.error)) return <NotFound />;
-  if (datasetQ.error || !datasetQ.data) {
-    return (
-      <div className="page">
-        <Alert variant="destructive">
-          <AlertDescription>Benchmark not found.</AlertDescription>
-        </Alert>
-      </div>
-    );
+  if (!datasetQ.data) {
+    return loadFailurePage([datasetQ.error], "Failed to load this benchmark. Please try again.") ?? <NotFound />;
   }
 
   const dataset = datasetQ.data;
