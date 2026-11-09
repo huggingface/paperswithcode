@@ -10,16 +10,15 @@ import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
 import MethodUsageChart from "@/components/MethodUsageChart";
 import MarkdownText from "@/components/MarkdownText";
 import { papersApi } from "@/lib/api/papers";
-import { isNotFound } from "@/lib/apiTransport";
 import { slugify } from "@/lib/slug";
 import { transformPaperForCard } from "@/lib/transform";
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import { resolveInternalPath } from "@/lib/internalLinks";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import NotFound from "@/pages/NotFound";
+import { loadFailurePage } from "@/components/LoadFailurePage";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 
 const MethodDetailView: React.FC = () => {
@@ -55,15 +54,8 @@ const MethodDetailView: React.FC = () => {
     );
   }
 
-  if (isNotFound(methodQ.error)) return <NotFound />;
-  if (methodQ.error || !methodQ.data) {
-    return (
-      <div className="page">
-        <Alert variant="destructive">
-          <AlertDescription>Method not found.</AlertDescription>
-        </Alert>
-      </div>
-    );
+  if (!methodQ.data) {
+    return loadFailurePage([methodQ.error], "Failed to load this method. Please try again.") ?? <NotFound />;
   }
 
   const m = methodQ.data;

@@ -6,7 +6,6 @@ import { useQuery } from "@tanstack/react-query";
 import MarkdownText from "@/components/MarkdownText";
 import { OrganizationContributionGraph } from "@/components/OrganizationContributionGraph";
 import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   SearchableSelect,
   type SearchableSelectOption,
@@ -20,6 +19,7 @@ import { isNotFound } from "@/lib/apiTransport";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { isLongOrganizationName, organizationShortName } from "@/lib/organizationNames";
 import NotFound from "@/pages/NotFound";
+import { loadFailurePage } from "@/components/LoadFailurePage";
 
 
 export const OrganizationPaperFeed: React.FC<{
@@ -66,20 +66,13 @@ export const OrganizationPaperFeed: React.FC<{
   const shortName = organization ? organizationShortName(organization) : null;
   const totalCount = papersQ.data?.pages[0]?.count ?? 0;
 
-  if ([organizationQ.error, taxonomyQ.error, papersQ.error].some(isNotFound)) {
-    return <NotFound />;
-  }
-  if (taxonomyQ.error || papersQ.error) {
-    return (
-      <div className="page">
-        <Alert variant="destructive">
-          <AlertDescription>
-            Failed to load organization papers. Please try again.
-          </AlertDescription>
-        </Alert>
-      </div>
-    );
-  }
+  // The page still renders from taxonomy data when only the organization lookup fails.
+  if (isNotFound(organizationQ.error)) return <NotFound />;
+  const failure = loadFailurePage(
+    [taxonomyQ.error, papersQ.error],
+    "Failed to load organization papers. Please try again.",
+  );
+  if (failure) return failure;
 
   const taskOptions = (query: string): SearchableSelectOption[] => {
     const needle = query.trim().toLocaleLowerCase();

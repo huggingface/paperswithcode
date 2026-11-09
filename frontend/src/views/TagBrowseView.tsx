@@ -18,7 +18,6 @@ import type {
   TrendingBenchmark,
 } from "@/lib/api/catalog.types";
 import { papersApi } from "@/lib/api/papers";
-import { isNotFound } from "@/lib/apiTransport";
 import { assetUrl } from "@/lib/apiUrl";
 import { formatStarCount } from "@/lib/frameworks";
 
@@ -28,8 +27,8 @@ import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription } from "@/components/ui/alert";
 import NotFound from "@/pages/NotFound";
+import { loadFailurePage } from "@/components/LoadFailurePage";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 
 const SUBTASK_BENCH_PREVIEW = 3;
@@ -278,15 +277,8 @@ const TagBrowseView: React.FC = () => {
     );
   }
 
-  if (isNotFound(pageQ.error)) return <NotFound />;
-  if (pageQ.error || !pageQ.data) {
-    return (
-      <div className="page">
-        <Alert variant="destructive">
-          <AlertDescription>Task not found.</AlertDescription>
-        </Alert>
-      </div>
-    );
+  if (!pageQ.data) {
+    return loadFailurePage([pageQ.error], "Failed to load this task. Please try again.") ?? <NotFound />;
   }
 
   const task = pageQ.data.task;
