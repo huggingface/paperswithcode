@@ -13,18 +13,20 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
-    Paper,
     PaperTask,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
 from backend.services.leaderboard_model_matching_service import (
     LeaderboardModel,
     LeaderboardModelMatcher,
+)
+from backend.services.leaderboard_sync_catalog import (
+    ModelIdentity,
+    curated_notes,
+    resolve_identity_papers,
+    resolve_leaderboard,
+    score_matches,
 )
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
@@ -46,33 +48,6 @@ MIN_EXPECTED_ROWS = 25
 MAX_EXPECTED_ROWS = 400
 # Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 30
-
-
-@dataclass(frozen=True)
-class ModelIdentity:
-    """A reviewed leaderboard model and the paper that introduces it.
-
-    `model_name` is the catalog name without the " (no tools)" suffix that
-    every row on this benchmark carries.
-    """
-
-    model_name: str
-    arxiv_id: str | None = None
-    source_url: str | None = None
-    is_open: bool = False
-    hf_model_url: str | None = None
-
-    def __post_init__(self) -> None:
-        if (self.arxiv_id is None) == (self.source_url is None):
-            raise ValueError("ModelIdentity requires exactly one paper identity")
-
-    @property
-    def paper_key(self) -> str:
-        return self.arxiv_id or self.source_url or ""
-
-    @property
-    def row_model_name(self) -> str:
-        return f"{self.model_name}{MODEL_NAME_SUFFIX}"
 
 
 _GEMINI_BLOG = "https://blog.google/innovation-and-ai/models-and-research/gemini-models"
@@ -380,71 +355,11 @@ def _methodology(entry: SurgeEntry, notes: str) -> str:
     return f"{head} {notes}" if notes else head
 
 
-def _curated_notes(row: Evaluation) -> str:
-    """Return the reviewer-written methodology kept beneath the managed head."""
-    methodology = (row.methodology or "").strip()
-    head = _MANAGED_HEAD.match(methodology)
-    if head is not None:
-        return head.group("notes") or ""
-    return methodology
-
-
-def _score_matches(stored: Any, published: Decimal) -> bool:
-    """A stored percent is current when it rounds to the published percent."""
-    if isinstance(stored, bool) or not isinstance(stored, (int, float)):
-        return False
-    exponent = published.as_tuple().exponent
-    places = -exponent if isinstance(exponent, int) and exponent < 0 else 0
-    return Decimal(str(stored)).quantize(Decimal(1).scaleb(-places)) == published
-
-
 class SurgeChartographySyncService:
     """Create and revise reviewed Chartography rows; never create papers."""
 
     def __init__(self, db: Session):
         self.db = db
-
-    def _leaderboard_identity(self) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == DATASET_SLUG).one_or_none()
-        )
-        if task is None or dataset is None:
-            raise RuntimeError("Chartography task or benchmark is not configured")
-        configured = (
-            self.db.query(TaskDatasetMetric)
-            .join(Metric, Metric.id == TaskDatasetMetric.metric_id)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-                Metric.name == METRIC_NAME,
-            )
-            .count()
-        )
-        if configured != 1:
-            raise RuntimeError("Chartography Pass@1 is not linked to the task")
-        return task, dataset
-
-    def _paper_ids(self) -> dict[str, int]:
-        """Resolve reviewed paper identities without ever creating papers."""
-        identities = MODEL_IDENTITIES.values()
-        arxiv_ids = {i.arxiv_id for i in identities if i.arxiv_id}
-        source_urls = {i.source_url for i in identities if i.source_url}
-        papers = (
-            self.db.query(Paper.id, Paper.arxiv_id, Paper.source_url)
-            .filter(
-                Paper.is_latest_version,
-                (Paper.arxiv_id.in_(arxiv_ids))
-                | ((Paper.source == "external") & Paper.source_url.in_(source_urls)),
-            )
-            .order_by(Paper.id)
-            .all()
-        )
-        resolved: dict[str, int] = {}
-        for paper_id, arxiv_id, source_url in papers:
-            key = arxiv_id if arxiv_id in arxiv_ids else source_url
-            resolved[key] = paper_id
-        return resolved
 
     def sync(self, entries: list[SurgeEntry], *, commit: bool = True) -> SurgeSyncStats:
         selected = [
@@ -462,8 +377,10 @@ class SurgeChartographySyncService:
             excluded=[e.label for e in entries if e.label in EXCLUDED_LABELS],
         )
         try:
-            task, dataset = self._leaderboard_identity()
-            paper_ids = self._paper_ids()
+            task, dataset = resolve_leaderboard(
+                self.db, "Chartography", TASK_SLUG, DATASET_SLUG, (METRIC_NAME,)
+            )
+            paper_ids = resolve_identity_papers(self.db, MODEL_IDENTITIES.values())
             new_entries = [
                 e
                 for e in entries
@@ -482,7 +399,7 @@ class SurgeChartographySyncService:
             published_entries = [
                 (
                     paper_ids.get(identity.paper_key),
-                    identity.row_model_name,
+                    f"{identity.model_name}{MODEL_NAME_SUFFIX}",
                     identity.is_open,
                     identity.hf_model_url,
                     entry,
@@ -566,9 +483,9 @@ class SurgeChartographySyncService:
                 else:
                     # Adopted rows keep their reviewed provenance fields; only
                     # the leaderboard-owned score and methodology head change.
-                    notes = _curated_notes(row)
+                    notes = curated_notes(row.methodology, _MANAGED_HEAD)
                     managed = _MANAGED_HEAD.match((row.methodology or "").strip())
-                    current = _score_matches(
+                    current = score_matches(
                         (row.metrics or {}).get(METRIC_NAME), entry.score
                     )
                     if managed is None:

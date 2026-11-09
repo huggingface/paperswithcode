@@ -15,20 +15,19 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
     HfArtifact,
-    Metric,
     Paper,
     PaperHfArtifact,
     PaperProjectPage,
     PaperRepository,
     ProjectPage,
     Repository,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_catalog import (
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 TABARENA_SOURCE_URL = "https://huggingface.co/spaces/TabArena/leaderboard"
@@ -325,27 +324,6 @@ class TabArenaSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == DATASET_SLUG).one_or_none()
-        )
-        metric = self.db.query(Metric).filter(Metric.name == METRIC_NAME).one_or_none()
-        if task is None or dataset is None or metric is None:
-            raise RuntimeError("TabArena task, benchmark, or metric is not configured")
-        configured = (
-            self.db.query(TaskDatasetMetric)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-                TaskDatasetMetric.metric_id == metric.id,
-            )
-            .one_or_none()
-        )
-        if configured is None:
-            raise RuntimeError("TabArena Elo metric is not linked to the task")
-        return task, dataset
-
     def _paper_ids_by_url(
         self, entries: list[TabArenaEntry]
     ) -> tuple[dict[str, int], set[str]]:
@@ -436,7 +414,9 @@ class TabArenaSyncService:
         stats = TabArenaSyncStats(fetched=len(entries))
 
         try:
-            task, dataset = self._leaderboard_identity()
+            task, dataset = resolve_leaderboard(
+                self.db, "TabArena", TASK_SLUG, DATASET_SLUG, (METRIC_NAME,)
+            )
             paper_ids_by_url, missing_arxiv = self._paper_ids_by_url(entries)
             stats.missing_papers.extend(sorted(missing_arxiv))
             managed_rows = (

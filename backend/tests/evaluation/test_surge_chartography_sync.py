@@ -115,7 +115,7 @@ def _identity(model_name: str):
     return next(
         identity
         for identity in MODEL_IDENTITIES.values()
-        if identity.row_model_name == model_name
+        if f"{identity.model_name}{service.MODEL_NAME_SUFFIX}" == model_name
     )
 
 

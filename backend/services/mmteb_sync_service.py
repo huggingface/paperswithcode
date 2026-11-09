@@ -14,16 +14,15 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
     HfArtifact,
-    Metric,
     Paper,
     PaperHfArtifact,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_catalog import (
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 BENCHMARK_NAME = "MTEB(Multilingual, v2)"
@@ -274,33 +273,6 @@ class MmtebSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self, lane: MmtebLane) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == lane.task_slug).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == DATASET_SLUG).one_or_none()
-        )
-        metric = (
-            self.db.query(Metric).filter(Metric.name == lane.metric_name).one_or_none()
-        )
-        if task is None or dataset is None or metric is None:
-            raise RuntimeError(
-                f"MMTEB {lane.task_slug} task, benchmark, or metric is not configured"
-            )
-        configured = (
-            self.db.query(TaskDatasetMetric)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-                TaskDatasetMetric.metric_id == metric.id,
-            )
-            .one_or_none()
-        )
-        if configured is None:
-            raise RuntimeError(
-                f"MMTEB {lane.metric_name} metric is not linked to {lane.task_slug}"
-            )
-        return task, dataset
-
     def _resolve_papers(
         self,
         entries: list[MmtebEntry],
@@ -422,7 +394,13 @@ class MmtebSyncService:
         stats = MmtebSyncStats(fetched=len(entries))
 
         try:
-            task, dataset = self._leaderboard_identity(lane)
+            task, dataset = resolve_leaderboard(
+                self.db,
+                f"MMTEB {lane.task_slug}",
+                lane.task_slug,
+                DATASET_SLUG,
+                (lane.metric_name,),
+            )
             scored_entries = [
                 entry for entry in entries if entry.score_for(lane) is not None
             ]

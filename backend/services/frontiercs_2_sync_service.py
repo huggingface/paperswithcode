@@ -11,21 +11,23 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
-    Paper,
     PaperTask,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
 from backend.services.leaderboard_model_matching_service import (
     LeaderboardModel,
     LeaderboardModelMatcher,
 )
+from backend.services.leaderboard_sync_catalog import (
+    ModelIdentity,
+    resolve_identity_papers,
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
-from backend.services.live_leaderboard_sync import js_literal
+from backend.services.live_leaderboard_sync import (
+    js_literal,
+)
 
 FRONTIERCS_2_URL = "https://frontier-cs.org/#leaderboard"
 # The leaderboard page renders client-side from constants in this bundle.
@@ -40,25 +42,6 @@ MIN_EXPECTED_ENTRIES = 8
 MAX_EXPECTED_ENTRIES = 200
 # Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 8
-
-
-@dataclass(frozen=True)
-class ModelIdentity:
-    """A reviewed leaderboard model and the paper that introduces it."""
-
-    model_name: str
-    arxiv_id: str | None = None
-    source_url: str | None = None
-    is_open: bool = False
-    hf_model_url: str | None = None
-
-    def __post_init__(self) -> None:
-        if (self.arxiv_id is None) == (self.source_url is None):
-            raise ValueError("ModelIdentity requires exactly one paper identity")
-
-    @property
-    def paper_key(self) -> str:
-        return self.arxiv_id or self.source_url or ""
 
 
 _DEEPSEEK_V4_1_FLASH = "2609.19969"
@@ -298,48 +281,6 @@ class FrontierCS2SyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == DATASET_SLUG).one_or_none()
-        )
-        if task is None or dataset is None:
-            raise RuntimeError("FrontierCS 2 task or benchmark is not configured")
-        configured = (
-            self.db.query(TaskDatasetMetric)
-            .join(Metric, Metric.id == TaskDatasetMetric.metric_id)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-                Metric.name.in_(METRIC_NAMES),
-            )
-            .count()
-        )
-        if configured != len(METRIC_NAMES):
-            raise RuntimeError("FrontierCS 2 metrics are not linked to the task")
-        return task, dataset
-
-    def _paper_ids(self) -> dict[str, int]:
-        """Resolve reviewed paper identities without ever creating papers."""
-        identities = MODEL_IDENTITIES.values()
-        arxiv_ids = {i.arxiv_id for i in identities if i.arxiv_id}
-        source_urls = {i.source_url for i in identities if i.source_url}
-        papers = (
-            self.db.query(Paper.id, Paper.arxiv_id, Paper.source_url)
-            .filter(
-                Paper.is_latest_version,
-                (Paper.arxiv_id.in_(arxiv_ids))
-                | ((Paper.source == "external") & Paper.source_url.in_(source_urls)),
-            )
-            .order_by(Paper.id)
-            .all()
-        )
-        resolved: dict[str, int] = {}
-        for paper_id, arxiv_id, source_url in papers:
-            key = arxiv_id if arxiv_id in arxiv_ids else source_url
-            resolved[key] = paper_id
-        return resolved
-
     def sync(
         self, leaderboard: FrontierCSLeaderboard, *, commit: bool = True
     ) -> FrontierCSSyncStats:
@@ -356,8 +297,10 @@ class FrontierCS2SyncService:
             )
         stats = FrontierCSSyncStats(fetched=len(entries))
         try:
-            task, dataset = self._leaderboard_identity()
-            paper_ids = self._paper_ids()
+            task, dataset = resolve_leaderboard(
+                self.db, "FrontierCS 2", TASK_SLUG, DATASET_SLUG, METRIC_NAMES
+            )
+            paper_ids = resolve_identity_papers(self.db, MODEL_IDENTITIES.values())
             new_entries = [e for e in entries if e.name not in MODEL_IDENTITIES]
             matcher = LeaderboardModelMatcher(
                 self.db,

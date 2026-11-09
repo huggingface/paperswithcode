@@ -11,14 +11,13 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
     Paper,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_catalog import (
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 COARENA_ENDPOINT = "https://coarena.ai/api/leaderboard"
@@ -298,27 +297,6 @@ class CoArenaSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == DATASET_SLUG).one_or_none()
-        )
-        metric = self.db.query(Metric).filter(Metric.name == METRIC_NAME).one_or_none()
-        if task is None or dataset is None or metric is None:
-            raise RuntimeError("CoArena task, benchmark, or metric is not configured")
-        configured = (
-            self.db.query(TaskDatasetMetric)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-                TaskDatasetMetric.metric_id == metric.id,
-            )
-            .one_or_none()
-        )
-        if configured is None:
-            raise RuntimeError("CoArena leaderboard metric is not linked to the task")
-        return task, dataset
-
     def sync(
         self,
         entries: list[CoArenaEntry],
@@ -334,7 +312,9 @@ class CoArenaSyncService:
         stats = CoArenaSyncStats(fetched=len(entries))
 
         try:
-            task, dataset = self._leaderboard_identity()
+            task, dataset = resolve_leaderboard(
+                self.db, "CoArena", TASK_SLUG, DATASET_SLUG, (METRIC_NAME,)
+            )
             arxiv_ids = {
                 identity.arxiv_id
                 for identity in MODEL_PAPER_IDENTITIES.values()
