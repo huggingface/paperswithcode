@@ -26,7 +26,8 @@ from backend.models.papers import Paper
 from backend.models.research import PublicTopicView, TopicBubble, TopicPerson
 from backend.services.research_topic_service import THRESHOLD
 
-BUBBLE_LIMIT = 8
+# Enough to still offer five after hiding the viewer's own and followed topics.
+BUBBLE_LIMIT = 20
 BUBBLE_MIN_RECENT_PAPERS = 5
 RECENT_DAYS = 30
 INDEX_MIN_FOLLOWERS = 3

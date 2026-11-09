@@ -307,6 +307,11 @@ def following(
     ),
     topic_only: bool = Query(False, description="Only papers matching a topic"),
     topic_id: int | None = Query(None, description="Only papers matching this topic"),
+    follow: str | None = Query(
+        None,
+        description="Only papers matching one follow, as <kind>:<entity_id>",
+        pattern=r"^(task|method|benchmark|author|organization):[0-9]+$",
+    ),
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
@@ -326,7 +331,15 @@ def following(
         has_hf_artifacts=has_hf_artifacts,
         topic_only=topic_only,
         topic_id=topic_id,
+        follow=parse_follow(follow),
     )
+
+
+def parse_follow(value: str | None) -> tuple[str, int] | None:
+    if value is None:
+        return None
+    kind, entity_id = value.split(":")
+    return kind, int(entity_id)
 
 
 def verified_email(request: Request) -> str | None:

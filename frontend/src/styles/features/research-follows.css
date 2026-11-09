@@ -131,108 +131,14 @@
     padding: 22px 18px;
   }
 }
-.sidebar-follow-link {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 0;
-}
-.sidebar-follow-kind {
-  flex: 0 0 76px;
-  padding: 3px 0;
-  border-radius: 6px;
-  color: var(--accent-text);
-  background: var(--accent-soft);
-  font-family: var(--mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  text-align: center;
-  text-transform: uppercase;
-}
-.sidebar-follow-name {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--ink);
-  font-size: 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.sidebar-follow-link:hover .sidebar-follow-name {
-  text-decoration: underline;
-  text-underline-offset: 2px;
-}
-.sidebar-follow-group {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  margin-top: 10px;
-}
-.sidebar-follow-group .sidebar-follow-kind { flex: none; width: 76px; margin-bottom: 2px; }
-@media (max-width: 880px) {
-  .sidebar-follow-link { gap: 8px; }
-  .sidebar-follow-kind { flex: none; padding: 1px 6px; }
-  /* Mobile: the kind badge leads its names in the swipeable chip row. */
-  .sidebar-follow-group { display: contents; }
-  .sidebar-follow-group .sidebar-follow-kind { width: auto; margin: 0; align-self: center; }
-}
-.sidebar-follow-topic {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sidebar-follow-topic .sidebar-follow-link { flex: 1; min-width: 0; }
-/* On desktop, wrap follow names instead of truncating them, with the free-text
-   topic below its badge; mobile keeps one-line chips. */
-@media (min-width: 881px) {
-  .sidebar-follow-link { align-items: flex-start; }
-  .sidebar-follow-name {
-    overflow: visible;
-    overflow-wrap: anywhere;
-    white-space: normal;
-    line-height: 1.4;
-  }
-  .sidebar-follow-topic { align-items: flex-start; }
-  .sidebar-follow-topic .sidebar-follow-link { flex-wrap: wrap; row-gap: 6px; }
-  .sidebar-follow-topic .sidebar-follow-name { flex-basis: 100%; }
-  .sidebar-follow-topic .sidebar-follow-edit { padding-top: 7px; }
-}
-.sidebar-follow-topic.active .sidebar-follow-kind {
-  color: var(--accent-soft);
-  background: var(--accent-text);
-}
-.sidebar-follow-topic.active .sidebar-follow-name { font-weight: 600; }
-.sidebar-follow-edit,
 .no-results .link-button {
   padding: 0;
   font: inherit;
 }
-.sidebar-follow-edit {
-  margin-left: auto;
-  color: var(--ink-faint);
-  font-size: 12px;
-}
-.sidebar-follow-edit:hover { color: var(--ink); }
-.sidebar-follow-topics .sidebar-follow-topic { align-self: stretch; }
-.sidebar-follow-add {
-  padding: 4px 0;
-  color: var(--accent-text);
-  font: inherit;
-  font-size: 13px;
-}
-.sidebar-follow-add:hover { text-decoration: underline; text-underline-offset: 2px; }
-.sidebar-follow-manage {
-  display: inline-block;
-  margin-top: 8px;
-  color: var(--ink-faint);
-  font-size: 12px;
-}
-.sidebar-follow-manage:hover { color: var(--ink); }
 
 /* Free-text topic editor, in Settings and on the Following feed for accounts without one. */
 .research-topic { margin: 4px 0 20px; }
 .research-topic .settings-row-desc { margin: 4px 0 10px; }
-.research-topic-form { display: flex; flex-direction: column; gap: 8px; }
-.research-topic-item + .research-topic-item { margin-top: 14px; }
 .research-topic-input {
   width: 100%;
   padding: 10px 12px;
@@ -246,7 +152,6 @@
   resize: vertical;
 }
 .research-topic-input:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent-text); }
-.research-topic-actions { display: flex; align-items: center; gap: 8px; }
 .research-topic-count { margin-right: auto; color: var(--ink-faint); font-family: var(--mono); font-size: 11px; }
 .research-topic-save {
   min-height: 30px;
@@ -259,7 +164,6 @@
   font-weight: 600;
 }
 .research-topic-save:disabled { opacity: 0.45; cursor: default; }
-.research-topic-suggestion { margin: 6px 0 0; color: var(--ink-soft); font-size: 13px; }
 
 /* Pop-up on /following: a topic plus trending tasks and methods to follow. */
 .topic-dialog { max-width: 640px; max-height: calc(100vh - 32px); overflow-y: auto; }
@@ -378,11 +282,23 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.topic-bubble-add {
+.topic-bubble-add,
+.topic-bubble-more {
   padding-left: 10px;
-  color: var(--accent);
+  color: var(--accent-text);
   cursor: pointer;
 }
+.topic-bubble-more { border-style: dashed; }
+/* /following filter bubbles: text-only ones get even padding; the active one is solid accent. */
+.follow-bubbles .topic-bubble { padding-left: 10px; }
+.follow-bubbles .topic-bubble:has(> img) { padding-left: 5px; }
+.follow-bubbles .topic-bubble svg { flex: none; }
+.follow-bubbles .topic-bubble.active {
+  border-color: var(--accent-text);
+  color: #fff;
+  background: var(--accent-text);
+}
+.follow-bubbles .topic-bubble.active svg { color: #fff !important; }
 .topic-bubble-creator {
   flex: none;
   color: var(--ink-faint);
@@ -524,22 +440,6 @@
     flex-wrap: wrap;
   }
 }
-.research-topic-sharing {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  margin-top: 6px;
-  font-size: 13px;
-}
-.research-topic-sharing label {
-  margin-left: 6px;
-  color: var(--ink);
-  font-weight: 600;
-}
-.research-topic-sharing-note {
-  color: var(--ink-faint);
-}
 
 /* Drag-to-reorder lists (SortableList). */
 .sortable-list {
@@ -579,28 +479,35 @@
 .sortable-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .sortable-handle:disabled { cursor: default; opacity: 0.4; }
 .sortable-item.is-dragging .sortable-handle { cursor: grabbing; }
-.sidebar-follow-topic-list { align-self: stretch; }
-.sidebar-follow-topic-list .sortable-item + .sortable-item { margin-top: 2px; }
-.sidebar-follow-remove { margin-left: 0; }
-.sidebar-follow-error {
-  margin: 4px 0 0;
-  color: var(--danger, #b42318);
-  font-size: 12px;
+
+/* Feed pop-up: a chip's page link (or reword button) sits beside its toggle. */
+.topic-dialog-chip-wrap { display: inline-flex; align-items: center; gap: 1px; max-width: 100%; }
+.topic-dialog-chips > .topic-dialog-chip-wrap[hidden] { display: none; }
+.topic-dialog-chip-open {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--ink-faint);
+  background: transparent;
 }
-.research-topic-item.has-handle {
+.topic-dialog-chip-open svg { width: 13px; height: 13px; }
+.topic-dialog-chip-open:hover:not(:disabled),
+.topic-dialog-chip-open:focus-visible { color: var(--accent-text); background: var(--accent-soft); }
+.topic-dialog-chip-open:disabled { opacity: 0.35; cursor: default; }
+.topic-dialog-chip-creator { color: inherit; opacity: 0.7; font-size: 12px; }
+.topic-dialog-topic { display: flex; align-items: center; gap: 6px; }
+.topic-dialog-topic.is-editing .topic-dialog-chip { outline: 2px solid var(--accent); outline-offset: 1px; }
+.topic-dialog-topic-list .sortable-item + .sortable-item { margin-top: 6px; }
+.topic-dialog-editing {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  font-size: 13px;
 }
-.research-topic-item.has-handle > .sortable-handle { margin-top: 10px; }
-.research-topic-body { flex: 1; min-width: 0; }
-.research-topic-list .sortable-item + .sortable-item { margin-top: 14px; }
-@media (min-width: 881px) {
-  .sidebar-follow-topic .sortable-handle { margin-top: 2px; }
-}
-@media (max-width: 880px) {
-  /* Mobile shows topics as one swipeable chip row; reorder them in Settings. */
-  .sidebar-follow-topic-list,
-  .sidebar-follow-topic-list .sortable-item { display: contents; }
-  .sidebar-follow-topic .sortable-handle { display: none; }
-}
+.topic-dialog-privacy { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-soft); }

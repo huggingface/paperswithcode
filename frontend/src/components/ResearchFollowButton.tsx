@@ -47,7 +47,7 @@ export default function ResearchFollowButton({ kind, entityId }: { kind: FollowK
     {failed ? <span className="research-follow-hint is-error" role="alert">Could not update follows. Please try again.</span>
       : followed ? justFollowed === entityKey && <span className="research-follow-hint" role="status">
         Added to <Link to="/following">your Following feed</Link>
-        {' · '}<Link to="/settings">Manage in Settings</Link>
+        {' · '}<Link to="/following?edit=1">Edit feed</Link>
       </span>
       : <span className="research-follow-hint">{HINTS[kind]} in <Link to="/following">your Following feed</Link>.</span>}
   </div>;

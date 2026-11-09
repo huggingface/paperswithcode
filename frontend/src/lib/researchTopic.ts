@@ -118,6 +118,39 @@ export function clearPendingTopicFollow() {
   sessionStorage.removeItem(PENDING_TOPIC_FOLLOW_KEY);
 }
 
+/** Follows several popular topics at once; only those that failed stay stashed for a retry. */
+export function useFollowTopics() {
+  const user = useOptionalAuth()?.user;
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (ids: number[]) => {
+      const results = await Promise.allSettled(ids.map(id => researchApi.followTopic(id)));
+      const failed = ids.filter((_, i) => results[i].status === 'rejected');
+      if (failed.length) {
+        stashPendingTopicFollows(failed);
+        throw (results.find(result => result.status === 'rejected') as PromiseRejectedResult).reason;
+      }
+      clearPendingTopicFollows();
+    },
+    onSettled: () => void refreshTopics(client, user?.hf_subject),
+  });
+}
+
+// Popular topics a guest picked in the feed pop-up wait here while they sign in.
+const PENDING_TOPIC_FOLLOWS_KEY = 'pwc:following-pending-topic-follows';
+
+export function stashPendingTopicFollows(ids: number[]) {
+  sessionStorage.setItem(PENDING_TOPIC_FOLLOWS_KEY, JSON.stringify(ids));
+}
+
+export function readPendingTopicFollows(): number[] {
+  return JSON.parse(sessionStorage.getItem(PENDING_TOPIC_FOLLOWS_KEY) ?? '[]');
+}
+
+export function clearPendingTopicFollows() {
+  sessionStorage.removeItem(PENDING_TOPIC_FOLLOWS_KEY);
+}
+
 export const isTopicBuilding = (topic: ResearchTopic) => topic.status === 'pending' || topic.status === 'running';
 
 /** The signed-in account's topics, oldest first; polled every `pollMs` while one is still being matched. */
