@@ -147,6 +147,28 @@ def test_papers_with_results_get_a_benchmark_title():
     )
 
 
+def test_benchmark_title_lists_only_the_newest_benchmark_version():
+    paper = _paper(
+        id="131915",
+        arxiv_id=None,
+        source="external",
+        title="Introducing SWE-2 Flash",
+        evaluated_benchmarks=[
+            "Terminal Bench 2.1",
+            "DeepSWE",
+            "FrontierCode 1.1 Main",
+            "Terminal-Bench 4.0",
+            "FrontierCode 2.0",
+            "KITTI 2012 Stereo Test",
+        ],
+    )
+    document = build_paper_seo_document(paper, "131915")
+    assert document.search_title == (
+        "SWE-2 Flash benchmarks: Terminal-Bench 4.0, DeepSWE, FrontierCode 2.0"
+        " | Papers with Code"
+    )
+
+
 def test_benchmark_title_keeps_curated_type_and_skips_long_names():
     with_type = build_paper_seo_document(
         _paper(evaluated_benchmarks=["GPQA Diamond"]), "2607.24653"
