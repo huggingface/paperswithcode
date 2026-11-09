@@ -58,11 +58,6 @@ const SettingsView: React.FC = () => {
   const location = useLocation();
   const closedSourceRow = React.useRef<HTMLDivElement>(null);
   const highlightClosedSource = location.hash === "#closed-source-evals";
-  React.useEffect(() => {
-    if (!highlightClosedSource) return;
-    closedSourceRow.current?.scrollIntoView({ block: "center" });
-    closedSourceRow.current?.querySelector<HTMLElement>("#hide-closed-source-evals")?.focus();
-  }, [highlightClosedSource]);
   const selectedTheme = theme ?? "system";
   const chatEnabled = isChatEnabled();
   const [billingError, setBillingError] = React.useState("");
@@ -106,6 +101,12 @@ const SettingsView: React.FC = () => {
   const initialSettingsLoading = (
     authLoading || preferencesLoading || theme === undefined || providerDataLoading
   );
+  // The toggle mounts only after the initial loading state, so wait for it.
+  React.useEffect(() => {
+    if (!highlightClosedSource || initialSettingsLoading) return;
+    closedSourceRow.current?.scrollIntoView({ block: "center" });
+    closedSourceRow.current?.querySelector<HTMLElement>("#hide-closed-source-evals")?.focus();
+  }, [highlightClosedSource, initialSettingsLoading]);
   const selectBillingAccountMutation = useMutation({
     mutationFn: (billTo: string | null) => (
       chatApi.selectInferenceBillingAccount(billTo)
