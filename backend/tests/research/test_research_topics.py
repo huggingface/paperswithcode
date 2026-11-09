@@ -395,16 +395,38 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
         )
     )
     db.flush()
-    one = follows.feed_entries(db, "alice", now, 0, 40, topic_id=other)
+    one = follows.feed_entries(db, "alice", now, 0, 40, topic_ids=[other])
     assert [(e.title, set(e.reasons)) for e in one] == [
         ("Robot only", {"Robotics", "“Protein folding”"})
     ]
     assert len(follows.feed_entries(db, "alice", now, 0, 40, topic_only=True)) == 3
-    by_task = follows.feed_entries(db, "alice", now, 0, 40, follow=("task", task.id))
+    by_task = follows.feed_entries(db, "alice", now, 0, 40, follows=[("task", task.id)])
     assert {e.title for e in by_task} == {"Video robots", "Robot only"}
     assert (
-        follows.feed_entries(db, "alice", now, 0, 40, follow=("method", task.id)) == []
+        follows.feed_entries(db, "alice", now, 0, 40, follows=[("method", task.id)])
+        == []
     )
+    # Several bubbles show papers matching any of them.
+    both_topics = follows.feed_entries(
+        db, "alice", now, 0, 40, topic_ids=[topic_id, other]
+    )
+    assert {e.title for e in both_topics} == {
+        "Video robots",
+        "Video only",
+        "Robot only",
+    }
+    topic_or_task = follows.feed_entries(
+        db, "alice", now, 0, 40, topic_ids=[topic_id], follows=[("task", task.id)]
+    )
+    assert {e.title for e in topic_or_task} == {
+        "Video robots",
+        "Video only",
+        "Robot only",
+    }
+    method_or_other = follows.feed_entries(
+        db, "alice", now, 0, 40, topic_ids=[other], follows=[("method", task.id)]
+    )
+    assert [e.title for e in method_or_other] == ["Robot only"]
 
 
 def test_preview_fills_the_feed_until_the_backfill_is_done(db, now, monkeypatch):

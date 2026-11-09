@@ -407,6 +407,8 @@ def test_api_ownership_optin_and_unsubscribe(db, now, monkeypatch):
     assert len(client.get("/me/follows").json()) == 1
     assert client.get(f"/me/following?follow=task:{t.id}").status_code == 200
     assert client.get("/me/following?follow=topic:1").status_code == 422
+    several = f"/me/following?follow=task:{t.id}&follow=method:1&topic_id=1&topic_id=2"
+    assert client.get(several).status_code == 200
     assert client.delete(f"/me/follows/task/{t.id}").status_code == 204
     assert db.get(ResearchFollow, ("bob", "task", t.id)) is not None
     # The follow turned the weekly email on by default; unfollowing keeps it.

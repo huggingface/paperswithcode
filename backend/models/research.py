@@ -48,6 +48,13 @@ class TopicSuggestion(BaseModel):
     url: str
 
 
+class TopicPerson(BaseModel):
+    """A Hugging Face account shown on a public topic."""
+
+    username: str
+    avatar_url: str
+
+
 class TopicView(BaseModel):
     id: int
     text: str
@@ -63,6 +70,8 @@ class TopicView(BaseModel):
     # creator may change it.
     is_public: bool = True
     is_creator: bool = False
+    # Who made a topic the account follows from someone else; None for its own.
+    creator: TopicPerson | None = None
 
 
 class TopicOrderUpdate(BaseModel):
@@ -73,13 +82,6 @@ class TopicOrderUpdate(BaseModel):
 
 class TopicVisibilityUpdate(BaseModel):
     is_public: bool
-
-
-class TopicPerson(BaseModel):
-    """A Hugging Face account shown on a public topic."""
-
-    username: str
-    avatar_url: str
 
 
 class PublicTopicView(BaseModel):

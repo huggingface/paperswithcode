@@ -3,6 +3,7 @@
 from datetime import date, datetime, timezone
 import binascii
 import json
+import re
 from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse
@@ -306,11 +307,15 @@ def following(
         False, description="Only papers with Hugging Face artifacts"
     ),
     topic_only: bool = Query(False, description="Only papers matching a topic"),
-    topic_id: int | None = Query(None, description="Only papers matching this topic"),
-    follow: str | None = Query(
-        None,
-        description="Only papers matching one follow, as <kind>:<entity_id>",
-        pattern=r"^(task|method|benchmark|author|organization):[0-9]+$",
+    topic_id: list[int] = Query(
+        [], description="Only papers matching any of these topics; repeat to add more"
+    ),
+    follow: list[str] = Query(
+        [],
+        description=(
+            "Only papers matching any of these follows, as <kind>:<entity_id>; "
+            "repeat to add more. Combines with topic_id as either-or."
+        ),
     ),
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
@@ -330,16 +335,19 @@ def following(
         has_code=has_code,
         has_hf_artifacts=has_hf_artifacts,
         topic_only=topic_only,
-        topic_id=topic_id,
-        follow=parse_follow(follow),
+        topic_ids=topic_id,
+        follows=[parse_follow(value) for value in follow],
     )
 
 
-def parse_follow(value: str | None) -> tuple[str, int] | None:
-    if value is None:
-        return None
-    kind, entity_id = value.split(":")
-    return kind, int(entity_id)
+FOLLOW_FILTER = re.compile(r"(task|method|benchmark|author|organization):([0-9]+)")
+
+
+def parse_follow(value: str) -> tuple[str, int]:
+    match = FOLLOW_FILTER.fullmatch(value)
+    if match is None:
+        raise HTTPException(422, "follow must look like <kind>:<entity_id>")
+    return match[1], int(match[2])
 
 
 def verified_email(request: Request) -> str | None:

@@ -43,6 +43,8 @@ export interface ResearchTopic {
   /** Public topics are listed with their creator's HF username; only the creator may change it. */
   is_public: boolean;
   is_creator: boolean;
+  /** Who made a public topic the account follows from someone else; null for its own. */
+  creator?: TopicPerson | null;
 }
 /** A Hugging Face account shown on a public topic. */
 export interface TopicPerson {
@@ -101,10 +103,10 @@ export interface FollowingFilters {
   endDate?: string;
   /** Only papers matching any followed topic. */
   topicOnly?: boolean;
-  /** Only papers matching this topic. */
-  topicId?: number;
-  /** Only papers matching this follow, as `<kind>:<entity_id>`. */
-  follow?: string;
+  /** Only papers matching any of these topics or follows. */
+  topicIds?: number[];
+  /** Follows as `<kind>:<entity_id>`. */
+  follows?: string[];
 }
 export const researchApi = {
   follows: () => apiRequest<ResearchFollow[]>('/me/follows'),
@@ -117,8 +119,8 @@ export const researchApi = {
     if (filters.endDate) params.set('end_date', filters.endDate);
     if (!filters.startDate && !filters.endDate) params.set('all_time', 'true');
     if (filters.topicOnly) params.set('topic_only', 'true');
-    if (filters.topicId !== undefined) params.set('topic_id', String(filters.topicId));
-    if (filters.follow) params.set('follow', filters.follow);
+    filters.topicIds?.forEach(id => params.append('topic_id', String(id)));
+    filters.follows?.forEach(follow => params.append('follow', follow));
     return apiRequest<ResearchEntry[]>(`/me/following?${params}`);
   },
   topics: () => apiRequest<ResearchTopic[]>('/me/topics'),

@@ -13,8 +13,10 @@ const KIND_LABELS: Record<FollowKind, string> = {
   task: 'Task', method: 'Method', benchmark: 'Benchmark', author: 'Author', organization: 'Organization',
 };
 
-/** The feed filter a bubble applies: one topic, or one follow as `<kind>:<entity_id>`. */
-export type FeedFilter = { topicId: number } | { follow: string };
+/** The selected bubbles: topic ids and follows as `<kind>:<entity_id>`. Nothing selected shows everything. */
+export type FeedFilter = { topicIds: number[]; follows: string[] };
+
+const NO_FILTER: FeedFilter = { topicIds: [], follows: [] };
 
 const followKey = (follow: Pick<ResearchFollow, 'kind' | 'entity_id'>) => `${follow.kind}:${follow.entity_id}`;
 
@@ -38,13 +40,18 @@ function FollowMark({ follow }: { follow: ResearchFollow }) {
   return null;
 }
 
-/** The /following filter row: All, the account's topics and follows, and the Edit feed button. */
+const toggle = <T,>(values: T[], value: T) =>
+  values.includes(value) ? values.filter(v => v !== value) : [...values, value];
+
+/**
+ * The /following filter row: All, the account's topics and follows, and the Edit feed button.
+ * Each bubble toggles on or off; the feed shows papers matching any selected bubble.
+ */
 export default function FollowBubbles({ topics, follows, active, hrefFor, onEdit, editLabel }: {
   topics: ResearchTopic[];
   follows: ResearchFollow[];
-  /** The applied filter; undefined shows everything. */
-  active: FeedFilter | undefined;
-  hrefFor: (filter: FeedFilter | undefined) => string;
+  active: FeedFilter;
+  hrefFor: (filter: FeedFilter) => string;
   onEdit?: () => void;
   editLabel: string;
 }) {
@@ -52,39 +59,40 @@ export default function FollowBubbles({ topics, follows, active, hrefFor, onEdit
   const bubbles = [
     ...topics.map(topic => ({
       key: `topic:${topic.id}`,
-      filter: { topicId: topic.id } as FeedFilter,
+      filter: { ...active, topicIds: toggle(active.topicIds, topic.id) },
       name: topicTitle(topic),
       title: topic.text,
       mark: null as React.ReactNode,
-      on: !!active && 'topicId' in active && active.topicId === topic.id,
+      on: active.topicIds.includes(topic.id),
     })),
     ...orderFollows(follows).map(follow => ({
       key: followKey(follow),
-      filter: { follow: followKey(follow) } as FeedFilter,
+      filter: { ...active, follows: toggle(active.follows, followKey(follow)) },
       name: follow.name,
       title: `${KIND_LABELS[follow.kind]} · ${follow.name}`,
       mark: <FollowMark follow={follow} />,
-      on: !!active && 'follow' in active && active.follow === followKey(follow),
+      on: active.follows.includes(followKey(follow)),
     })),
   ];
-  // Keep the active bubble visible even when it sits past the fold.
-  const activeIndex = bubbles.findIndex(bubble => bubble.on);
+  const all = active.topicIds.length === 0 && active.follows.length === 0;
+  // Keep selected bubbles visible even when they sit past the fold.
   const collapsed = !expanded && bubbles.length > VISIBLE_BUBBLES + 1;
   const shown = collapsed
-    ? bubbles.filter((_, index) => index < VISIBLE_BUBBLES || index === activeIndex)
+    ? bubbles.filter((bubble, index) => index < VISIBLE_BUBBLES || bubble.on)
     : bubbles;
+  const hidden = bubbles.length - shown.length;
   return <nav className="topic-bubbles follow-bubbles" aria-label="Filter your feed">
-    {bubbles.length > 0 && <Link className={`topic-bubble ${active ? '' : 'active'}`} to={hrefFor(undefined)}
-      aria-current={active ? undefined : 'true'}>
+    {bubbles.length > 0 && <Link className={`topic-bubble ${all ? 'active' : ''}`} to={hrefFor(NO_FILTER)}
+      aria-current={all ? 'true' : undefined}>
       <span className="topic-bubble-name">All</span>
     </Link>}
     {shown.map(bubble => <Link key={bubble.key} className={`topic-bubble ${bubble.on ? 'active' : ''}`}
-      to={hrefFor(bubble.on ? undefined : bubble.filter)} title={bubble.title} aria-current={bubble.on ? 'true' : undefined}>
+      to={hrefFor(bubble.filter)} title={bubble.title} aria-current={bubble.on ? 'true' : undefined}>
       {bubble.mark}
       <span className="topic-bubble-name">{bubble.name}</span>
     </Link>)}
-    {collapsed && <button type="button" className="topic-bubble topic-bubble-more" onClick={() => setExpanded(true)}>
-      <span className="topic-bubble-name">+{bubbles.length - shown.length} more</span>
+    {hidden > 0 && <button type="button" className="topic-bubble topic-bubble-more" onClick={() => setExpanded(true)}>
+      <span className="topic-bubble-name">+{hidden} more</span>
     </button>}
     {onEdit && <button type="button" className="topic-bubble topic-bubble-add" onClick={onEdit}>
       <Pencil size={13} aria-hidden="true" />
