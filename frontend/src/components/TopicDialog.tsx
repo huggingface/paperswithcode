@@ -271,6 +271,7 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
                 onClick={() => setRemovals(current => on ? [...current, topic.id] : current.filter(id => id !== topic.id))}>
                 {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}
                 {topicTitle(topic)}
+                {topic.creator && <span className="topic-dialog-chip-creator">@{topic.creator.username}</span>}
               </button>
               <button type="button" className="topic-dialog-chip-open" disabled={saving || topic.id === editId}
                 aria-label={`Reword ${topicTitle(topic)}`} title="Reword this topic" onClick={() => startEditing(topic.id)}>

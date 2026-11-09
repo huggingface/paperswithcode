@@ -3,10 +3,11 @@
 from datetime import date, datetime, timedelta
 import re
 import secrets
+from collections.abc import Sequence
 from typing import NamedTuple
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, String, column, exists, select, text
+from sqlalchemy import Integer, String, and_, column, exists, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -486,8 +487,8 @@ def feed_entries(
     has_code: bool = False,
     has_hf_artifacts: bool = False,
     topic_only: bool = False,
-    topic_id: int | None = None,
-    follow: tuple[str, int] | None = None,
+    topic_ids: Sequence[int] = (),
+    follows: Sequence[tuple[str, int]] = (),
 ) -> list[ResearchFeedEntry]:
     """Filter and rank matches like the home feed, then explain only the returned page."""
     from backend.services.paper_service import PaperService
@@ -508,14 +509,19 @@ def feed_entries(
         .subquery("matches")
     )
     matched_ids = select(matches.c.id)
-    if topic_only or topic_id is not None:
-        matched_ids = matched_ids.where(matches.c.kind == "topic")
-    if topic_id is not None:
-        matched_ids = matched_ids.where(matches.c.entity_id == topic_id)
-    if follow is not None:
-        matched_ids = matched_ids.where(
-            matches.c.kind == follow[0], matches.c.entity_id == follow[1]
+    # Selected topics and follows combine as either-or, like merging their feeds.
+    selected = [
+        and_(matches.c.kind == kind, matches.c.entity_id == entity_id)
+        for kind, entity_id in follows
+    ]
+    if topic_ids:
+        selected.append(
+            and_(matches.c.kind == "topic", matches.c.entity_id.in_(topic_ids))
         )
+    if selected:
+        matched_ids = matched_ids.where(or_(*selected))
+    elif topic_only:
+        matched_ids = matched_ids.where(matches.c.kind == "topic")
     service = PaperService(db)
     query = db.query(DBPaper).filter(DBPaper.id.in_(matched_ids))
     if has_code:

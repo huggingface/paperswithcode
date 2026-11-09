@@ -101,7 +101,8 @@ describe("TopicDialog afterSavePath", () => {
 describe("TopicDialog feed management", () => {
   const topic: ResearchTopic = { id: 1, text: "real-time video generation", label: null, set_at: null, status: "done",
     judged: 1, total: 1, suggestions: [], is_public: true, is_creator: true };
-  const other: ResearchTopic = { ...topic, id: 2, text: "speculative decoding", is_creator: false };
+  const other: ResearchTopic = { ...topic, id: 2, text: "speculative decoding", is_creator: false,
+    creator: { username: "nielsr", avatar_url: "https://huggingface.co/api/users/nielsr/avatar" } };
   beforeEach(() => {
     vi.spyOn(catalogApi, "trendingTasks").mockResolvedValue({ results: [{ id: "7", name: "Robotics", slug: "robotics" }] } as never);
     vi.spyOn(catalogApi, "trendingMethods").mockResolvedValue({ results: [] } as never);
@@ -131,6 +132,13 @@ describe("TopicDialog feed management", () => {
       expect(link).toHaveAttribute("target", "_blank");
       expect(link.closest("button")).toBeNull();
     }
+  });
+
+  it("names the creator of a followed topic someone else made, not your own", async () => {
+    renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
+    const group = (await screen.findByRole("heading", { name: "Your topics" })).parentElement!;
+    expect(await within(group).findByRole("button", { name: /^Speculative decoding/ })).toHaveTextContent("@nielsr");
+    expect(within(group).getByRole("button", { name: /^Real-time video generation/ })).not.toHaveTextContent("@");
   });
 
   it("offers popular topics you do not follow yet, with their creator, and follows them on save", async () => {

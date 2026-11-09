@@ -114,9 +114,13 @@ def test_only_the_creator_changes_visibility_and_private_topics_refuse_strangers
 ):
     topic_id = topics.follow_topic(db, "alice", "agent memory", now)
     topics.follow_existing_topic(db, "bob", topic_id, now)
+    # A follower's topic list names the creator; the creator's own does not.
+    assert topics.topic_view(db, "bob", topic_id).creator.username == "alice"
+    assert topics.topic_view(db, "alice", topic_id).creator is None
     with pytest.raises(LookupError):
         topics.set_public(db, "bob", topic_id, False)
     topics.set_public(db, "alice", topic_id, False)
+    assert topics.topic_view(db, "bob", topic_id).creator is None
     with pytest.raises(LookupError):
         topics.follow_existing_topic(db, "carol", topic_id, now)
     with pytest.raises(LookupError):

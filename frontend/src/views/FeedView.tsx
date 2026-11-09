@@ -334,15 +334,16 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     navigate(query ? `${path}?${query}` : path);
   };
 
-  // `?topic=<id>` shows one topic's papers and `?follow=<kind>:<id>` one follow's;
-  // `?only=topic` (older links) shows every topic's.
-  const filterHref = (filter: FeedFilter | undefined) => {
+  const NO_FILTER: FeedFilter = { topicIds: [], follows: [] };
+  // Each `?topic=<id>` and `?follow=<kind>:<id>` selects a bubble; the feed shows papers
+  // matching any of them. `?only=topic` (older links) shows every topic's.
+  const filterHref = (filter: FeedFilter) => {
     const next = new URLSearchParams(searchParams);
     next.delete("only");
     next.delete("topic");
     next.delete("follow");
-    if (filter && "topicId" in filter) next.set("topic", String(filter.topicId));
-    if (filter && "follow" in filter) next.set("follow", filter.follow);
+    filter.topicIds.forEach(id => next.append("topic", String(id)));
+    filter.follows.forEach(follow => next.append("follow", follow));
     const query = next.toString();
     return query ? `/following?${query}` : "/following";
   };
@@ -356,15 +357,14 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const trendingTasks = useQuery(catalogQueries.trendingTasks({ limit: 8, level: 0, min_recent_papers: 10 }));
 
   const topicOnly = following && searchParams.get("only") === "topic";
-  const topicParam = following ? Number(searchParams.get("topic") ?? NaN) : NaN;
-  const topicId = Number.isInteger(topicParam) ? topicParam : undefined;
-  const followParam = following ? searchParams.get("follow") ?? "" : "";
-  const followFilter = topicId === undefined && /^(task|method|benchmark|author|organization):\d+$/.test(followParam)
-    ? followParam : undefined;
-  const activeFilter: FeedFilter | undefined = topicId !== undefined ? { topicId }
-    : followFilter ? { follow: followFilter } : undefined;
+  const activeFilter: FeedFilter = following ? {
+    topicIds: [...new Set(searchParams.getAll("topic").map(Number).filter(Number.isInteger))],
+    follows: [...new Set(searchParams.getAll("follow")
+      .filter(value => /^(task|method|benchmark|author|organization):\d+$/.test(value)))],
+  } : NO_FILTER;
+  const filtering = activeFilter.topicIds.length > 0 || activeFilter.follows.length > 0;
   const dateFilters = { start_date: dateRange.startDate, end_date: dateRange.endDate };
-  const followingFilters = { ...dateRange, topicOnly, topicId, follow: followFilter };
+  const followingFilters = { ...dateRange, topicOnly, ...activeFilter };
   // Following pages by offset; the public feeds by page number.
   const infinite = usePaperFeedQuery<FeedPage>(
     following
@@ -386,7 +386,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const topicName = topicTitle;
   const building = topics.data?.filter(isTopicBuilding) ?? [];
   const topicBuilding = building.length > 0;
-  const filteredTopic = topics.data?.find(topic => topic.id === topicId);
+  // The one selected topic, when it is the only bubble selected.
+  const filteredTopic = activeFilter.topicIds.length === 1 && !activeFilter.follows.length
+    ? topics.data?.find(topic => topic.id === activeFilter.topicIds[0]) : undefined;
   // The pop-up edits one topic (its id) or the whole feed (null); undefined while closed.
   // `?edit=1` (linked from Settings) opens it on arrival.
   const [editingTopic, setEditingTopic] = useState<number | null | undefined>(
@@ -438,12 +440,15 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     pendingFollowsStarted.current = true;
     savePendingFollows(picks);
   }, [user, savePendingFollows]);
-  // Drop a filter whose topic or follow is gone, e.g. after unfollowing it in the pop-up.
-  const filterGone = !!activeFilter && topics.isSuccess && follows.isSuccess && ("topicId" in activeFilter
-    ? !topics.data.some(topic => topic.id === activeFilter.topicId)
-    : !follows.data.some(follow => `${follow.kind}:${follow.entity_id}` === activeFilter.follow));
+  // Drop selected bubbles whose topic or follow is gone, e.g. after unfollowing it in the pop-up.
+  const kept: FeedFilter | undefined = filtering && topics.isSuccess && follows.isSuccess ? {
+    topicIds: activeFilter.topicIds.filter(id => topics.data.some(topic => topic.id === id)),
+    follows: activeFilter.follows.filter(key => follows.data.some(follow => `${follow.kind}:${follow.entity_id}` === key)),
+  } : undefined;
+  const filterGone = !!kept && (kept.topicIds.length < activeFilter.topicIds.length
+    || kept.follows.length < activeFilter.follows.length);
   useEffect(() => {
-    if (filterGone) navigate(filterHref(undefined), { replace: true });
+    if (filterGone && kept) navigate(filterHref(kept), { replace: true });
   });
   // And the popular topics a guest picked there; failed ones stay stashed until a retry succeeds.
   const pendingTopicFollows = useFollowTopics();
@@ -616,9 +621,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               />
             )}
 
-            {topicOnly && !activeFilter && (
+            {topicOnly && !filtering && (
               <div className="following-topic-note following-topic-filter" role="status">
-                Showing only papers about your topics. <Link to={filterHref(undefined)}>Show everything you follow</Link>
+                Showing only papers about your topics. <Link to={filterHref(NO_FILTER)}>Show everything you follow</Link>
               </div>
             )}
 
@@ -631,7 +636,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 cards={cards}
                 skeleton="card"
                 rootMargin="400px"
-                empty={error ? null : filteredTopic ? <>No papers about this topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(filteredTopic.id)}>edit the topic</button>.</> : followFilter ? <>No papers match this follow in this window. Widen the date range or pick another bubble.</> : topicOnly ? <>No papers about your topics match these filters. Widen the date range or follow more topics.</> : following ? <>No papers from your topics or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}
+                empty={error ? null : filteredTopic ? <>No papers about this topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(filteredTopic.id)}>edit the topic</button>.</> : filtering ? <>No papers match the selected bubbles in this window. Widen the date range or pick more bubbles.</> : topicOnly ? <>No papers about your topics match these filters. Widen the date range or follow more topics.</> : following ? <>No papers from your topics or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}
               />
             )}
           </div>

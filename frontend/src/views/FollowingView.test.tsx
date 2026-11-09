@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { researchApi, TOPIC_LIMIT } from '@/lib/api/research';
@@ -320,7 +320,7 @@ it('sends the date filter to Following without resource filters', async () => {
   expect(screen.queryByRole('button', { name: /Has artifacts/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'All Time' }));
   await vi.waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0, {
-    startDate: undefined, endDate: undefined, topicOnly: false, topicId: undefined,
+    startDate: undefined, endDate: undefined, topicOnly: false, topicIds: [], follows: [],
   }));
 });
 
@@ -330,7 +330,7 @@ it('keeps the date range when switching from the public feed to Following', asyn
   fireEvent.click(screen.getByRole('button', { name: 'following' }));
   await screen.findByText('A paper');
   expect(researchApi.following).toHaveBeenLastCalledWith(0, {
-    startDate: '2026-09-01', endDate: '2026-09-30', topicOnly: false, topicId: undefined,
+    startDate: '2026-09-01', endDate: '2026-09-30', topicOnly: false, topicIds: [], follows: [],
   });
 });
 
@@ -361,7 +361,7 @@ it('shows topics, then follows grouped by kind, as filter bubbles with the homep
   expect(screen.queryByText('You follow')).not.toBeInTheDocument();
   expect(container.querySelector('.sidebar-section-top-domains')).not.toBeNull();
 });
-it('collapses a long row behind +N more, keeping the active bubble visible', async () => {
+it('collapses a long row behind +N more, keeping selected bubbles visible', async () => {
   vi.mocked(researchApi.follows).mockResolvedValue(Array.from({ length: 15 }, (_, i) => (
     { kind: 'task' as const, entity_id: i + 1, name: `Task ${i + 1}`, url: `/tasks/task-${i + 1}`, created_at: `2026-10-${String(30 - i).padStart(2, '0')}` })));
   renderFeed('/following?follow=task:15');
@@ -373,15 +373,34 @@ it('collapses a long row behind +N more, keeping the active bubble visible', asy
 });
 it('filters the feed to one follow from its bubble', async () => {
   renderFeed('/following?follow=task:1');
-  await waitFor(() => expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ follow: 'task:1', topicId: undefined })));
+  await waitFor(() => expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ follows: ['task:1'], topicIds: [] })));
   const bubble = await screen.findByRole('link', { name: 'Task' });
   expect(bubble).toHaveAttribute('aria-current', 'true');
   expect(bubble).toHaveAttribute('href', '/following');
 });
-it('drops a filter whose follow is gone', async () => {
+it('selects several bubbles at once and shows papers matching any of them', async () => {
+  vi.mocked(researchApi.topics).mockResolvedValue([topic, { ...topic, id: 2, text: 'speculative decoding' }]);
+  renderFeed('/following?topic=1');
+  const row = await screen.findByRole('navigation', { name: 'Filter your feed' });
+  // Unselected bubbles add themselves to the selection; selected ones remove themselves.
+  expect(await within(row).findByRole('link', { name: 'Speculative decoding' })).toHaveAttribute('href', '/following?topic=1&topic=2');
+  expect(await within(row).findByRole('link', { name: 'Task' })).toHaveAttribute('href', '/following?topic=1&follow=task%3A1');
+  fireEvent.click(within(row).getByRole('link', { name: 'Task' }));
+  await waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0, expect.objectContaining({ topicIds: [1], follows: ['task:1'] })));
+  expect(within(row).getByRole('link', { name: 'Task' })).toHaveAttribute('aria-current', 'true');
+  expect(within(row).getByRole('link', { name: 'Real-time video generation' })).toHaveAttribute('aria-current', 'true');
+  expect(within(row).getByRole('link', { name: 'Real-time video generation' })).toHaveAttribute('href', '/following?follow=task%3A1');
+  expect(within(row).getByRole('link', { name: 'All' })).not.toHaveAttribute('aria-current');
+  fireEvent.click(within(row).getByRole('link', { name: 'All' }));
+  await waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0, expect.objectContaining({ topicIds: [], follows: [] })));
+});
+it('drops a filter whose follow is gone, keeping the rest of the selection', async () => {
   renderFeed('/following?follow=task:99');
-  await waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0, expect.objectContaining({ follow: undefined })));
+  await waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0, expect.objectContaining({ follows: [] })));
   expect(await screen.findByRole('link', { name: 'All' })).toHaveAttribute('aria-current', 'true');
+  cleanup();
+  renderFeed('/following?follow=task:99&follow=task:1');
+  await waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0, expect.objectContaining({ follows: ['task:1'] })));
 });
 it('opens the feed pop-up from ?edit=1, as Settings links it', async () => {
   renderFeed('/following?edit=1');
@@ -426,11 +445,11 @@ it('keeps Edit feed at the topic limit and explains it', async () => {
 it('filters the feed to one topic from its bubble and back', async () => {
   vi.mocked(researchApi.topics).mockResolvedValue([topic, { ...topic, id: 2, text: 'speculative decoding' }]);
   renderFeed('/following?topic=1');
-  await waitFor(() => expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ topicId: 1, topicOnly: false })));
+  await waitFor(() => expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ topicIds: [1], topicOnly: false })));
   const bubble = await screen.findByRole('link', { name: 'Real-time video generation' });
   expect(bubble).toHaveAttribute('aria-current', 'true');
   expect(bubble).toHaveAttribute('href', '/following');
-  expect(screen.getByRole('link', { name: 'Speculative decoding' })).toHaveAttribute('href', '/following?topic=2');
+  expect(screen.getByRole('link', { name: 'Speculative decoding' })).toHaveAttribute('href', '/following?topic=1&topic=2');
   expect(screen.queryByText(/Showing only papers about/)).not.toBeInTheDocument();
 });
 it('still filters to every topic for older only=topic links', async () => {

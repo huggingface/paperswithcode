@@ -32,6 +32,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
+from backend.models.database import UserProfile
 from backend.models.database.research import (
     ResearchTopic,
     ResearchTopicFollow,
@@ -519,9 +520,16 @@ def suggestions(db: Session, value: str) -> list[TopicSuggestion]:
 
 def topic_views(db: Session, subject: str) -> list[TopicView]:
     """The account's topics in its own order, then oldest first."""
+    from backend.services.public_topic_service import person
+
     rows = db.execute(
-        select(ResearchTopic, ResearchTopicFollow.created_at)
+        select(
+            ResearchTopic, ResearchTopicFollow.created_at, UserProfile.current_username
+        )
         .join(ResearchTopicFollow, ResearchTopicFollow.topic_id == ResearchTopic.id)
+        .outerjoin(
+            UserProfile, UserProfile.hf_subject == ResearchTopic.created_by_hf_subject
+        )
         .where(ResearchTopicFollow.hf_subject == subject)
         .order_by(
             ResearchTopicFollow.position.asc().nulls_last(),
@@ -541,8 +549,12 @@ def topic_views(db: Session, subject: str) -> list[TopicView]:
             suggestions=suggestions(db, topic.text),
             is_public=topic.is_public,
             is_creator=topic.created_by_hf_subject == subject,
+            # Only public topics name their creator.
+            creator=person(creator)
+            if topic.is_public and topic.created_by_hf_subject != subject
+            else None,
         )
-        for topic, set_at in rows
+        for topic, set_at, creator in rows
     ]
 
 
