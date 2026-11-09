@@ -130,16 +130,20 @@ def _beats(board: Board, mine: Row, other: Row) -> bool:
     return mine.value < other.value if board.lower else mine.value > other.value
 
 
-def classify_win(board: Board, paper_id: int) -> tuple[str, Row, Row] | None:
+def classify_win(
+    board: Board, paper_id: int, recent_ids: set[int]
+) -> tuple[str, Row, Row] | None:
     """("new_sota" | "open_sota", the paper's best row, the row it beat).
 
     `new_sota`: the paper's best entry beats every other paper's best.
     `open_sota`: a closed model leads, and the paper's best entry is open and
-    beats every other paper's best open entry.
+    beats every other paper's best open entry. Either way the winning entry
+    must be one of `recent_ids` (just added), so a new minor result never
+    resurfaces an old lead.
     """
     mine = next((row for row in board.rows if row.paper_id == paper_id), None)
     others = [row for row in board.rows if row.paper_id != paper_id]
-    if mine is None or not others:
+    if mine is None or not others or mine.evaluation_id not in recent_ids:
         return None
     if _beats(board, mine, others[0]):
         return "new_sota", mine, others[0]
@@ -192,6 +196,7 @@ def leaderboard_wins(
             Paper.date_published >= published_after,
         )
     ).all()
+    recent_ids = {evaluation.id for evaluation, *_ in recent}
     seen: set[tuple[int, str, int]] = set()
     found: list[tuple[Candidate, Paper]] = []
     for evaluation, paper, dataset, task in recent:
@@ -202,7 +207,7 @@ def leaderboard_wins(
         board = load_board(db, dataset.id, metric)
         if len(board.rows) < SOTA_MIN_ENTRIES:
             continue
-        win = classify_win(board, paper.id)
+        win = classify_win(board, paper.id, recent_ids)
         if win is None:
             continue
         kind, mine, beaten = win
@@ -375,8 +380,10 @@ def plain_text(markdown: str) -> str:
 def lab_league(db: Session, *, now: datetime) -> Candidate | None:
     """Organizations ranked by first places on active leaderboards.
 
-    A leaderboard is active when a result from a paper published in the last
-    `LEAGUE_ACTIVE_DAYS` is on it, and it has `SOTA_MIN_ENTRIES` entries.
+    A benchmark+metric leaderboard is active when a paper published in the
+    last `LEAGUE_ACTIVE_DAYS` reports on it; it counts with at least
+    `SOTA_MIN_ENTRIES` entries, and its leader is its best entry across all
+    tasks (`load_board`).
     Posted once per ISO week.
     """
     week = now.isocalendar()
@@ -384,39 +391,34 @@ def lab_league(db: Session, *, now: datetime) -> Candidate | None:
     if recently_posted(db, "lab_league", subject, now, ever=True):
         return None
     active_after = now.date() - timedelta(days=LEAGUE_ACTIVE_DAYS)
-    sizes = dict(
-        db.execute(
-            select(Evaluation.dataset_id, func.count(Evaluation.id)).group_by(
-                Evaluation.dataset_id
-            )
-        ).all()
-    )
-    active = set(
-        db.scalars(
-            select(Evaluation.dataset_id)
-            .join(Paper, Paper.id == Evaluation.paper_id)
-            .where(Paper.date_published >= active_after)
-            .distinct()
-        )
-    )
-    leaders = db.execute(
-        select(Evaluation, Paper)
+    pairs = db.execute(
+        select(Evaluation.dataset_id, Evaluation.best_metric)
         .join(Paper, Paper.id == Evaluation.paper_id)
-        .where(Evaluation.best_rank == 1, Evaluation.dataset_id.in_(active))
-    ).all()
-    boards: dict[tuple[int, str], tuple[Evaluation, Paper]] = {}
-    for evaluation, paper in leaders:
-        if sizes.get(evaluation.dataset_id, 0) < SOTA_MIN_ENTRIES:
-            continue
-        boards.setdefault(
-            (evaluation.dataset_id, evaluation.best_metric), (evaluation, paper)
+        .where(
+            Evaluation.best_metric.is_not(None), Paper.date_published >= active_after
         )
-    if len(boards) < 20:
+        .distinct()
+    ).all()
+    # Rank each benchmark+metric across all tasks, as the SOTA posts do.
+    leaders: dict[tuple[int, str], int] = {}
+    for dataset_id, metric in pairs:
+        board = load_board(db, dataset_id, metric)
+        if len(board.rows) >= SOTA_MIN_ENTRIES:
+            leaders[(dataset_id, metric)] = board.rows[0].paper_id
+    if len(leaders) < 20:
         return None
+    papers = {
+        paper.id: paper
+        for paper in db.scalars(
+            select(Paper).where(Paper.id.in_(set(leaders.values())))
+        )
+    }
     wins: Counter[str] = Counter()
-    for evaluation, paper in boards.values():
-        if paper.organizations:
+    for paper_id in leaders.values():
+        paper = papers.get(paper_id)
+        if paper is not None and paper.organizations:
             wins[paper.organizations[0].name] += 1
+    boards = leaders
     top = wins.most_common(LEAGUE_SIZE)
     if len(top) < 5:
         return None

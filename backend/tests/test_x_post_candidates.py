@@ -16,6 +16,9 @@ from backend.services.x_post_candidates import (
 from backend.services.x_trending_post_service import Row
 
 
+ALL = set(range(100))
+
+
 def board(rows, *, open_ids, lower=False):
     rows = [Row(eid, pid, model, value) for eid, pid, model, value in rows]
     rows.sort(key=lambda row: row.value, reverse=not lower)
@@ -27,14 +30,14 @@ def test_classify_win_new_sota_beats_every_other_paper():
         [(1, 10, "Mine", 90.0), (2, 10, "Mine small", 80.0), (3, 20, "Prev", 85.0)],
         open_ids={1, 2, 3},
     )
-    kind, mine, beaten = classify_win(b, 10)
+    kind, mine, beaten = classify_win(b, 10, ALL)
     assert (kind, mine.model, beaten.model) == ("new_sota", "Mine", "Prev")
 
 
 def test_classify_win_lower_is_better():
     b = board([(1, 10, "Mine", 4.7), (2, 20, "Prev", 5.2)], open_ids={1, 2}, lower=True)
-    assert classify_win(b, 10)[0] == "new_sota"
-    assert classify_win(b, 20) is None
+    assert classify_win(b, 10, ALL)[0] == "new_sota"
+    assert classify_win(b, 20, ALL) is None
 
 
 def test_classify_win_open_sota_needs_a_closed_leader():
@@ -47,14 +50,14 @@ def test_classify_win_open_sota_needs_a_closed_leader():
         ],
         open_ids={2, 3},
     )
-    kind, mine, beaten = classify_win(b, 10)
+    kind, mine, beaten = classify_win(b, 10, ALL)
     assert (kind, mine.model, beaten.model) == ("open_sota", "Mine", "Open prev")
 
     all_open = board(
         [(1, 30, "Open lead", 95.0), (2, 10, "Mine", 90.0), (3, 20, "Prev", 88.0)],
         open_ids={1, 2, 3},
     )
-    assert classify_win(all_open, 10) is None
+    assert classify_win(all_open, 10, ALL) is None
 
 
 def test_classify_win_rejects_closed_or_beaten_entries():
@@ -62,10 +65,10 @@ def test_classify_win_rejects_closed_or_beaten_entries():
         [(1, 30, "Closed", 95.0), (2, 10, "Mine", 90.0), (3, 20, "Open", 91.0)],
         open_ids={3},
     )
-    assert classify_win(b, 10) is None  # mine is closed
+    assert classify_win(b, 10, ALL) is None  # mine is closed
     b.open_ids = {2, 3}
-    assert classify_win(b, 10) is None  # another open model is better
-    assert classify_win(board([(1, 10, "Only", 1.0)], open_ids={1}), 10) is None
+    assert classify_win(b, 10, ALL) is None  # another open model is better
+    assert classify_win(board([(1, 10, "Only", 1.0)], open_ids={1}), 10, ALL) is None
 
 
 def test_open_sota_text_names_both_comparisons():
@@ -146,3 +149,12 @@ def test_record_validates_kind_and_post_id():
     with pytest.raises(ValueError):
         service.record(db, kind="concept", subject_key="x", post_id="https://x.com/1")
     assert len(db.added) == 1
+
+
+def test_classify_win_ignores_an_old_lead_when_another_result_is_new():
+    b = board(
+        [(1, 10, "Old best", 90.0), (2, 10, "New small", 70.0), (3, 20, "Prev", 85.0)],
+        open_ids={1, 2, 3},
+    )
+    assert classify_win(b, 10, {2}) is None
+    assert classify_win(b, 10, {1})[0] == "new_sota"
