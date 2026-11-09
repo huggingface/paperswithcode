@@ -1,5 +1,31 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
+
+def test_qualification_settings_disable_all_user_facing_artifacts() -> None:
+    from backend.config import Settings
+    from backend.scripts.qualify_latex_compiler_sandbox import validate_settings
+
+    settings = Settings(
+        environment="staging",
+        chat_scope_guardrail_enabled=True,
+        chat_latex_compiler_qualification_mode=True,
+        chat_artifacts_enabled=True,
+        chat_artifact_shared_preview_enabled=True,
+        chat_posterly_enabled=False,
+        chat_artifact_storage_backend="hf_bucket",
+        chat_artifact_hf_bucket_id="nielsr/pwc-chat-artifacts-staging",
+        chat_latex_compiler_modal_image_id="im-TestLatexCompilerImage0",
+        chat_latex_compiler_modal_environment="pwc-latex-staging",
+    )
+
+    assert settings.chat_artifacts_enabled is False
+    assert settings.chat_artifact_shared_preview_enabled is False
+    validate_settings(settings)
+
 
 def test_qualification_cases_cover_the_required_hostile_boundaries() -> None:
     from backend.services.latex_compiler_qualification_service import (
@@ -42,7 +68,13 @@ def test_qualification_report_is_bounded_and_never_contains_case_source() -> Non
     assert "private manuscript source" not in str(payload)
 
 
-def test_sandbox_qualification_uses_the_transport_contract() -> None:
+@pytest.mark.parametrize(
+    ("failure_category", "expected"),
+    [("compiler_error", "failed"), ("invalid_bundle", "rejected")],
+)
+def test_sandbox_qualification_uses_the_transport_contract(
+    failure_category: str, expected: str
+) -> None:
     from backend.scripts.qualify_latex_compiler_sandbox import run_case
     from backend.services.latex_compiler_qualification_service import (
         QualificationCase,
@@ -63,15 +95,17 @@ def test_sandbox_qualification_uses_the_transport_contract() -> None:
         def status(self, job_id: str) -> CompilerStatus:
             return CompilerStatus(job_id=job_id, state=CompilerJobState.FAILED)
 
-        def result(self, job_id: str) -> None:
+        def result(self, job_id: str) -> SimpleNamespace:
             self.results.append(job_id)
+            return SimpleNamespace(failure_category=failure_category)
 
     compiler = Compiler()
     outcome, elapsed = run_case(
-        QualificationCase("synthetic", b"private manuscript source", "failed"), compiler
+        QualificationCase("synthetic", b"private manuscript source", expected),
+        compiler,
     )
 
-    assert outcome == "failed"
+    assert outcome == expected
     assert elapsed >= 0
     assert compiler.submitted[0][1] == b"private manuscript source"
     assert compiler.results
