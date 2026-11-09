@@ -555,7 +555,13 @@ class ExtractBenchSyncService:
                     stats.unreviewed.append(entry.provider)
                     continue
                 publishable.append(
-                    (entry, match.paper_id, match.is_open, match.hf_model_url)
+                    (
+                        entry,
+                        match.paper_id,
+                        # Upstream lists open-weight models as OSS.
+                        entry.category == "OSS" or match.is_open,
+                        match.hf_model_url,
+                    )
                 )
                 stats.auto_matched.append(entry.provider)
             matcher.report_unmatched(

@@ -17,6 +17,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
@@ -103,6 +104,27 @@ _VENDORS = {
     "xai",
 }
 _SETTINGS = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+_HF_SECTIONS = {"blog", "datasets", "models", "spaces"}
+
+
+def link_owner(url: str) -> str | None:
+    """The Hub or GitHub account a model link belongs to.
+
+    "" for a Hub paper page, which names no publisher; None for any other
+    host, so callers decide whether that host is a publisher.
+    """
+    parsed = urlsplit(url)
+    host = parsed.netloc.lower().removeprefix("www.")
+    parts = [part for part in parsed.path.split("/") if part]
+    if host not in {"huggingface.co", "github.com"}:
+        return None
+    if host == "huggingface.co" and parts and parts[0] == "papers":
+        return ""
+    if host == "huggingface.co" and parts and parts[0] in _HF_SECTIONS:
+        parts = parts[1:]
+    return parts[0] if parts else ""
 
 
 def vendor_label_model(label: str, lab: str = "") -> LeaderboardModel:

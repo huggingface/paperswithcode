@@ -329,6 +329,31 @@ def test_unknown_models_match_announcements_or_become_radar_signals(monkeypatch)
     assert signal.sightings == 2
 
 
+def test_auto_matched_oss_rows_are_open(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(eb, "MODEL_PAPER_IDENTITIES", _identities())
+    session.add(
+        Paper(
+            id=2000,
+            title="Nova Parse 2: Open Document Extraction",
+            source="external",
+            source_url="https://example.com/nova-parse-2",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 2000)
+    session.commit()
+    entries = parse_extractbench_leaderboard(
+        _csv() + _row("Nova Parse 2", 91, category="OSS")
+    )
+
+    ExtractBenchSyncService(session).sync(entries, discovery=_discovery())
+
+    row = session.query(Evaluation).filter(Evaluation.paper_id == 2000).one()
+    assert row.is_open is True
+
+
 def test_sync_refuses_when_reviewed_coverage_collapses(monkeypatch):
     session = _session()
     monkeypatch.setattr(eb, "MODEL_PAPER_IDENTITIES", _identities(10))

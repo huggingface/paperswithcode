@@ -28,6 +28,7 @@ from backend.services.evaluation_service import EvaluationService
 from backend.services.leaderboard_model_matching_service import (
     LeaderboardModel,
     LeaderboardModelMatcher,
+    link_owner,
 )
 from backend.services.leaderboard_sync_catalog import (
     resolve_leaderboard,
@@ -332,12 +333,7 @@ def _leaderboard_model(entry: TabArenaEntry) -> LeaderboardModel:
     classic baselines' papers or docs; they get no lab, so they never take a
     release-radar slot.
     """
-    parsed = urlsplit(entry.model_url)
-    host = parsed.netloc.lower().removeprefix("www.")
-    parts = [part for part in parsed.path.split("/") if part]
-    owner = ""
-    if host in {"github.com", "huggingface.co"} and parts:
-        owner = parts[1] if parts[0] == "blog" and len(parts) > 1 else parts[0]
+    owner = link_owner(entry.model_url) or ""
     return LeaderboardModel(entry.model_name.rsplit(" (", 1)[0], owner)
 
 

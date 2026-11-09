@@ -32,6 +32,7 @@ from backend.services import carbon_board_syncs as boards
 from backend.services.carbon_board_identities import IDENTITIES
 from backend.services.leaderboard_model_matching_service import (
     family_lab,
+    link_owner,
     vendor_label_model,
 )
 from backend.services.live_leaderboard_sync import (
@@ -770,3 +771,19 @@ def test_sync_appends_the_board_model_name_suffix():
         "Claude Opus 5.5 (no tools) (mini-SWE-agent)",
         "GPT-5.6 Sol (no tools) (mini-SWE-agent)",
     }
+
+
+@pytest.mark.parametrize(
+    ("url", "owner"),
+    [
+        ("https://huggingface.co/nvidia/Kumo", "nvidia"),
+        ("https://huggingface.co/blog/nvidia/kumo-tabular", "nvidia"),
+        ("https://huggingface.co/spaces/nvidia/kumo-demo", "nvidia"),
+        ("https://huggingface.co/datasets/nvidia/kumo-data", "nvidia"),
+        ("https://huggingface.co/papers/2611.01234", ""),
+        ("https://github.com/layer6ai-labs/TabDPT-inference/releases", "layer6ai-labs"),
+        ("https://scikit-learn.org/stable/modules/neighbors.html", None),
+    ],
+)
+def test_link_owner(url, owner):
+    assert link_owner(url) == owner

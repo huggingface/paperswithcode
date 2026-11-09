@@ -27,6 +27,7 @@ from backend.services.evaluation_service import EvaluationService
 from backend.services.leaderboard_model_matching_service import (
     LeaderboardModel,
     LeaderboardModelMatcher,
+    link_owner,
 )
 from backend.services.leaderboard_sync_catalog import (
     resolve_leaderboard,
@@ -287,7 +288,6 @@ def _repo_id(url: str | None) -> str | None:
     return "/".join(parts[:2])
 
 
-_HF_SECTIONS = {"blog", "datasets", "models", "papers", "spaces"}
 _PAPER_HOSTS = {"arxiv.org", "openreview.net", "aclanthology.org", "doi.org"}
 
 
@@ -297,15 +297,9 @@ def _lab(model_url: str) -> str:
     The Space has no organization column, so this is the Hub or GitHub owner,
     else the link's host. Paper hosts and unlinked models name no publisher.
     """
-    parsed = urlsplit(model_url)
-    host = parsed.netloc.lower().removeprefix("www.")
-    parts = [part for part in parsed.path.split("/") if part]
-    if host == "huggingface.co" and parts and parts[0] in _HF_SECTIONS:
-        # /spaces/<owner>/..., /datasets/<owner>/..., /blog/<author>/...;
-        # /papers/<arxiv id> names no publisher.
-        return parts[1] if parts[0] != "papers" and len(parts) > 1 else ""
-    if host in {"huggingface.co", "github.com"} and parts:
-        return parts[0]
+    if (owner := link_owner(model_url)) is not None:
+        return owner
+    host = urlsplit(model_url).netloc.lower().removeprefix("www.")
     return "" if host in _PAPER_HOSTS else host
 
 
