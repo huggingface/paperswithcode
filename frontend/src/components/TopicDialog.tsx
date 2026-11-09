@@ -109,12 +109,16 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
   const value = draft ?? saved;
   const trimmed = trimmedDraft(value);
   // Only matches for the text in the box count, not for what it said a moment ago.
-  const duplicates = lookup === trimmed.toLowerCase() ? lookupMatches.data ?? [] : [];
+  const lookupCurrent = lookup === trimmed.toLowerCase() && !lookupMatches.isFetching;
+  const duplicates = lookupCurrent ? lookupMatches.data ?? [] : [];
+  // The server's reason for refusing a topic, shown only while the box still holds that text.
+  const refusal = isConflict(saveTopic.error) && saveTopic.variables?.text === trimmed ? saveTopic.error : null;
   // Saving the same text again restarts a backfill that gave up.
   const retry = editing?.status === 'failed' && trimmed === saved;
   const topicCount = ownTopics.length - pendingRemovals.length + pendingTopicFollows.length;
   const atLimit = topicCount >= TOPIC_LIMIT;
   // A reworded topic that is also unticked is only removed.
+  // A text saved before its catalog check returns is refused by the server, which explains why.
   const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry) && !duplicates.length
     && (editing ? !pendingRemovals.includes(editing.id) : !atLimit);
   // Set while a saved pop-up waits for fresh follows before opening afterSavePath; it stays disabled meanwhile.
@@ -333,9 +337,9 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
     {chips('Popular authors', 'author', suggested(suggestions.data?.authors))}
     {chips('Popular organizations', 'organization', suggested(suggestions.data?.organizations),
       { to: '/organizations', label: 'Browse organizations' })}
-    {isConflict(saveTopic.error) ? <p className="settings-token-error" role="alert">{saveTopic.error.message}.</p>
-      : (saveTopic.error || removeTopics.error || saveFollows.error || followTopic.error || reorderTopics.error
-      || setTopicPublic.error) && <p className="settings-token-error" role="alert">
+    {refusal && <p className="settings-token-error" role="alert">{refusal.message}.</p>}
+    {((saveTopic.error && !isConflict(saveTopic.error)) || removeTopics.error || saveFollows.error || followTopic.error
+      || reorderTopics.error || setTopicPublic.error) && <p className="settings-token-error" role="alert">
       Could not save your feed. Please try again.
     </p>}
     <div className="topic-dialog-actions">

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TopicDialog from "@/components/TopicDialog";
 import { catalogApi } from "@/lib/api/catalog";
 import { researchApi, type ResearchTopic } from "@/lib/api/research";
+import { ApiError } from "@/lib/apiTransport";
 import { useResearchFollows } from "@/lib/researchTopic";
 
 const auth = vi.hoisted(() => ({ value: { user: { username: "owner", hf_subject: "1" } as object | null, isLoading: false } }));
@@ -171,6 +172,18 @@ describe("TopicDialog feed management", () => {
     fireEvent.click(screen.getByRole("button", { name: "Follow" }));
     await waitFor(() => expect(follow).toHaveBeenCalledWith("task", "9", true));
     expect(add).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's refusal only while the box holds the refused text", async () => {
+    const body = JSON.stringify({ detail: "“robotics” is already a task; follow Robotics instead" });
+    vi.spyOn(researchApi, "addTopic").mockRejectedValue(new ApiError(new Response(body, { status: 409 }), body));
+    renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
+    const input = await screen.findByRole("textbox", { name: "Research topic" });
+    fireEvent.change(input, { target: { value: "robotics" } });
+    fireEvent.click(screen.getByRole("button", { name: "Follow" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("follow Robotics instead.");
+    fireEvent.change(input, { target: { value: "robot learning for kitchens" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("rewords a topic and makes it private in one save", async () => {
