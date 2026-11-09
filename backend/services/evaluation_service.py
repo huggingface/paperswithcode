@@ -10,6 +10,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlparse, urlunparse
 from sqlalchemy.orm import Session, load_only
 from sqlalchemy import desc, asc, or_, func
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.models.database import (
     Evaluation as DBEvaluation,
@@ -42,7 +43,6 @@ from backend.services.metric_value_service import parse_metric_value
 from backend.services.catalog_errors import (
     CatalogConflictError,
     CatalogNotFoundError,
-    CatalogPersistenceError,
     CatalogValidationError,
 )
 
@@ -916,8 +916,8 @@ class EvaluationService:
                 parameter_coverage_total=parameter_coverage_total,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve evaluations: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve evaluations: {str(e)}") from e
 
     @staticmethod
     def _parameter_entries(
@@ -974,8 +974,8 @@ class EvaluationService:
 
             return self._serialize_evaluation(db_evaluation)
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve evaluation: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve evaluation: {str(e)}") from e
 
     def list_catalog_evaluations(
         self, *, ordering: Optional[str], **filters
@@ -993,19 +993,11 @@ class EvaluationService:
             "benchmark_popularity",
         }:
             order_by = "created_at"
-        try:
-            return self.get_evaluations(
-                order_by=order_by, order_dir=order_dir, **filters
-            )
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return self.get_evaluations(order_by=order_by, order_dir=order_dir, **filters)
 
     def get_catalog_evaluation(self, evaluation_id: int) -> Evaluation:
         """Return one evaluation or a typed not-found/persistence failure."""
-        try:
-            evaluation = self.get_evaluation(evaluation_id)
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        evaluation = self.get_evaluation(evaluation_id)
         if evaluation is None:
             raise CatalogNotFoundError(f"Evaluation {evaluation_id} not found")
         return evaluation

@@ -10,6 +10,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, asc, or_
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.models.database import (
     Author as DBAuthor,
@@ -208,8 +209,8 @@ class AuthorService:
                 results=authors,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve authors: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve authors: {str(e)}") from e
 
     def get_photo(self, author_id: int, sha256: str) -> AuthorPhoto:
         """Return the stored photo when the URL names its current version."""
@@ -285,8 +286,8 @@ class AuthorService:
             raise
         except ValueError:
             raise PaperNotFoundError(f"Invalid author ID: {author_id}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve author: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve author: {str(e)}") from e
 
     def get_author_papers(
         self,
@@ -378,8 +379,8 @@ class AuthorService:
             raise
         except ValueError:
             raise PaperNotFoundError(f"Invalid author ID: {author_id}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve author papers: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve author papers: {str(e)}") from e
 
     def search_authors(
         self,
@@ -458,5 +459,5 @@ class AuthorService:
                 results=authors,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to search authors: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to search authors: {str(e)}") from e

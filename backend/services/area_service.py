@@ -8,6 +8,7 @@ including pagination, filtering, and task relationships.
 from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, desc, asc, or_
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.models.database import (
     Area as DBArea,
@@ -32,8 +33,6 @@ from backend.services.dataset_service import _leaderboard_row_count
 from backend.utils.entity_images import entity_image_url
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
 from backend.services.catalog_errors import (
-    CatalogNotFoundError,
-    CatalogPersistenceError,
     CatalogValidationError,
 )
 
@@ -125,34 +124,20 @@ class AreaService:
                 results=areas,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve areas: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve areas: {str(e)}") from e
 
     def list_areas(self, **kwargs) -> Areas:
-        try:
-            return self.get_areas(**kwargs)
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return self.get_areas(**kwargs)
 
     def list_areas_with_tasks(self) -> AreasWithTasks:
-        try:
-            return self.get_areas_with_tasks()
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return self.get_areas_with_tasks()
 
     def list_areas_with_task_benchmarks(self, **kwargs) -> AreasWithTaskBenchmarks:
-        try:
-            return self.get_areas_with_task_benchmarks(**kwargs)
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return self.get_areas_with_task_benchmarks(**kwargs)
 
     def lookup_area(self, area_id: str) -> Area:
-        try:
-            return self.get_area_by_id(area_id)
-        except PaperNotFoundError as error:
-            raise CatalogNotFoundError(str(error)) from error
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return self.get_area_by_id(area_id)
 
     def get_area_by_id(self, area_id: str) -> Area:
         """
@@ -188,8 +173,8 @@ class AreaService:
             raise
         except ValueError as error:
             raise CatalogValidationError("Invalid area ID format") from error
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve area: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve area: {str(e)}") from e
 
     def search_areas(
         self,
@@ -255,8 +240,8 @@ class AreaService:
                 results=areas,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to search areas: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to search areas: {str(e)}") from e
 
     def get_areas_with_tasks(self) -> AreasWithTasks:
         """
@@ -355,8 +340,8 @@ class AreaService:
 
             return AreasWithTasks(results=results)
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve areas with tasks: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve areas with tasks: {str(e)}") from e
 
     def get_areas_with_task_benchmarks(
         self,
@@ -466,7 +451,7 @@ class AreaService:
                     )
 
             return AreasWithTaskBenchmarks(results=results)
-        except Exception as e:
+        except SQLAlchemyError as e:
             raise DatabaseError(
                 f"Failed to retrieve areas with task benchmarks: {str(e)}"
-            )
+            ) from e
