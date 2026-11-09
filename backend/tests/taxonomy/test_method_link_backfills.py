@@ -753,6 +753,31 @@ def test_method_trend_returns_more_than_ten_years_without_an_override():
     assert trend.history[-1].start_date == date(2026, 7, 1)
 
 
+def test_method_trend_start_date_overrides_a_later_source_paper():
+    db = _session()
+    db.add_all(
+        [
+            _paper(1, "Field survey", date(2026, 11, 8)),
+            _paper(2, "Early work", date(2022, 5, 28)),
+            Method(
+                id=10,
+                name="Field",
+                slug="field",
+                source_paper_id=1,
+                trend_start_date=date(2015, 1, 1),
+            ),
+            PaperMethod(paper_id=2, method_id=10),
+        ]
+    )
+    db.commit()
+
+    trend = MethodTrendService(db).get_method_trend("field", today=date(2026, 11, 9))
+
+    assert trend.history[0].start_date == date(2015, 1, 1)
+    by_month = {point.start_date: point.paper_count for point in trend.history}
+    assert by_month[date(2022, 5, 1)] == 1
+
+
 def test_method_trend_counts_every_paper_published_on_the_same_day():
     db = _session()
     db.add_all(
