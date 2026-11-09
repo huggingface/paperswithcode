@@ -7,7 +7,6 @@ catalog and never create papers.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
@@ -102,17 +101,3 @@ def score_matches(stored: Any, published: Decimal) -> bool:
     exponent = published.as_tuple().exponent
     places = -exponent if isinstance(exponent, int) and exponent < 0 else 0
     return Decimal(str(stored)).quantize(Decimal(1).scaleb(-places)) == published
-
-
-def curated_notes(methodology: str | None, managed_head: re.Pattern[str]) -> str:
-    """Return the reviewer-written methodology kept beneath a managed head.
-
-    ``managed_head`` matches the whole managed methodology and captures the
-    reviewer text after the head as ``notes``; an unmanaged methodology is all
-    reviewer text.
-    """
-    methodology = (methodology or "").strip()
-    head = managed_head.match(methodology)
-    if head is not None:
-        return head.group("notes") or ""
-    return methodology
