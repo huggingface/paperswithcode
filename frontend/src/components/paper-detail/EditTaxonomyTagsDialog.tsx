@@ -133,6 +133,13 @@ function TaxonomyTagsEditor<Item extends Task | Method>({
       });
     },
     onClose: () => onOpenChange(false),
+    removal: {
+      removes: (items) => {
+        const kept = new Set(tagIds(items));
+        return tagIds(initialItems).some((id) => !kept.has(id));
+      },
+      prompt: `Remove one or more ${singular} links from this paper?`,
+    },
   });
 
   const selectedIds = useMemo(() => new Set(tagIds(selected)), [selected]);
@@ -151,14 +158,6 @@ function TaxonomyTagsEditor<Item extends Task | Method>({
   const hasChange =
     selected.length !== initialIds.length || initialIds.some((id) => !selectedIds.has(id));
 
-  const handleSave = () => {
-    if (
-      submitMode === "direct" &&
-      initialIds.some((id) => !selectedIds.has(id)) &&
-      !window.confirm(`Remove one or more ${singular} links from this paper?`)
-    ) return;
-    save.mutate(selected);
-  };
 
   const toggle = (item: Item, checked: boolean) => {
     setSelected((current) => {
@@ -176,7 +175,7 @@ function TaxonomyTagsEditor<Item extends Task | Method>({
         submitMode={submitMode}
         isAuthor={isAuthor}
         onOpenChange={onOpenChange}
-        onSave={handleSave}
+        onSave={() => save.submit(selected)}
         isSaving={save.isPending}
         saveDisabled={!hasChange}
         footerStart={

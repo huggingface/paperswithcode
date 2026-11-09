@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { AreaDirectoryFooter, AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
 import MarkdownText from "@/components/MarkdownText";
 import { catalogQueries } from "@/lib/api/queries";
-import { isNotFound } from "@/lib/apiErrors";
+import { isNotFound } from "@/lib/apiTransport";
 import { sortAreas } from "@/lib/areas";
 import { chipColors, hueFromSlug } from "@/lib/colors";
 import { CONFERENCE_LISTINGS } from "@/lib/conferenceListings";

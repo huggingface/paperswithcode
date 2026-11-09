@@ -1,5 +1,5 @@
 import { withStaleAuthNotification } from "../apiAuth";
-import { ApiError, ApiTransport, type ApiRequest } from "../apiTransport";
+import { ApiTransport, isNotFound, type ApiRequest } from "../apiTransport";
 import { getApiOrigin } from "../apiUrl";
 
 const apiTransport = new ApiTransport(`${getApiOrigin()}/api/v1`);
@@ -24,7 +24,7 @@ export async function apiRequestOrNull<T>(
   try {
     return await apiRequest<T>(endpoint, options);
   } catch (error) {
-    if (error instanceof ApiError && error.status === 404) return null;
+    if (isNotFound(error)) return null;
     throw error;
   }
 }

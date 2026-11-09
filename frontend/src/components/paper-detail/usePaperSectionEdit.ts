@@ -47,6 +47,8 @@ interface PaperSectionEditOptions<Type extends PendingEditType, Value> {
   /** Runs once the server accepted the edit; `live` is false while it waits for review. */
   onSaved?: (value: Value, outcome: { direct: boolean; live: boolean }) => void;
   onClose: () => void;
+  /** A direct save that removes something asks `prompt` first; reviewed edits never ask. */
+  removal?: { removes: (value: Value) => boolean; prompt: string };
 }
 
 /** The submit-or-apply save flow shared by the paper section editors. */
@@ -61,12 +63,13 @@ export function usePaperSectionEdit<Type extends PendingEditType, Value>({
   applyOptimistic,
   onSaved,
   onClose,
+  removal,
 }: PaperSectionEditOptions<Type, Value>) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const pending = submitMode === "pending";
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: async (value: Value): Promise<{ submitted: PendingPaperEdit } | { paper: Paper | void }> => pending
       ? {
           submitted: await submissionsApi.submit(
@@ -107,4 +110,11 @@ export function usePaperSectionEdit<Type extends PendingEditType, Value>({
       });
     },
   });
+
+  /** Saves `value`, after confirming any removal a direct save would apply at once. */
+  const submit = (value: Value) => {
+    if (!pending && removal?.removes(value) && !window.confirm(removal.prompt)) return;
+    mutation.mutate(value);
+  };
+  return { submit, isPending: mutation.isPending };
 }

@@ -13,7 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useQuery } from "@tanstack/react-query";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
-import { isNotFound } from "@/lib/apiErrors";
+import { isNotFound } from "@/lib/apiTransport";
 import { formatStarCount } from "@/lib/frameworks";
 
 import { queryCenteredExcerpt } from "@/lib/paperSearchPresentation";
