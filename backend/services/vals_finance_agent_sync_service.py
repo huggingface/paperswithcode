@@ -69,6 +69,13 @@ _MUSE_SPARK_1_3 = "https://research.meta.ai/blog/introducing-muse-spark-1-3"
 # its introducing paper. Model names follow the catalog (reviewed on
 # 2026-10-14, 2026-10-16 and 2026-10-18), not Vals' spelling. Unreviewed labels are
 # reported, never imported.
+_MISTRAL_LARGE_4 = ModelIdentity(
+    "Mistral Large 4 Preview",
+    source_url=(
+        "https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/"
+        "assets/technical_report.pdf"
+    ),
+)
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Gemini 4 Argon": ModelIdentity(
         "Gemini 4 Argon",
@@ -172,9 +179,9 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "GPT-5.6 Luna": ModelIdentity(
         "GPT-5.6 Luna", source_url="https://openai.com/index/gpt-5-6/"
     ),
-    "Mistral Large 4": ModelIdentity(
-        "Mistral Large 4 Preview", source_url="https://mistral.ai/news/mistral-large-4/"
-    ),
+    # Upstream switches between both labels.
+    "Mistral Large 4": _MISTRAL_LARGE_4,
+    "Mistral Large 4 Preview": _MISTRAL_LARGE_4,
     "GPT-5.6 Terra": ModelIdentity(
         "GPT-5.6 Terra", source_url="https://openai.com/index/gpt-5-6/"
     ),
