@@ -719,6 +719,7 @@ const PaperDetailView: React.FC = () => {
             canEdit
             evaluationsByTask={evaluationsByTask}
             evaluationsLoading={evaluationsLoading}
+            hiddenClosedSourceCount={(evaluations?.length ?? 0) - (visibleEvaluations?.length ?? 0)}
             isAdmin={isAdmin}
             onCopyBadge={handleCopyLeaderboardBadge}
             onEdit={() => openEdit("evaluations")}
