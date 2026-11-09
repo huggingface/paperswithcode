@@ -183,6 +183,8 @@
 .topic-dialog .research-topic-input { min-height: 112px; font-size: 15px; }
 .topic-dialog .research-topic-count { align-self: flex-end; margin: 0; }
 .topic-dialog-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.topic-dialog-duplicate { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft); }
+.topic-dialog-duplicate p { margin: 0; font-size: 13px; color: var(--ink); }
 .topic-dialog-chips > [hidden] { display: none; }
 .topic-dialog-chip {
   display: inline-flex;

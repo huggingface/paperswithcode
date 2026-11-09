@@ -2,7 +2,7 @@ import FollowingIntro from "@/components/FollowingIntro";
 import TopicDialog from "@/components/TopicDialog";
 import FollowBubbles, { type FeedFilter } from "@/components/FollowBubbles";
 import { isAuthDisabled } from "@/lib/apiUrl";
-import { clearPendingTopic, isTopicBuilding, readPendingFollows, readPendingTopic, readPendingTopicFollows, topicTitle, useFollowTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
+import { clearPendingTopic, isConflict, isTopicBuilding, readPendingFollows, readPendingTopic, readPendingTopicFollows, topicTitle, useFollowTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -577,7 +577,8 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
             {pendingSave.isError && pendingSave.variables && (
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>
-                  Could not follow “{pendingSave.variables.text}”. <button type="button" onClick={() => savePendingTopic(pendingSave.variables)}>Try again</button>
+                  {isConflict(pendingSave.error) ? <>Could not follow “{pendingSave.variables.text}”: {pendingSave.error.message}.</>
+                    : <>Could not follow “{pendingSave.variables.text}”. <button type="button" onClick={() => savePendingTopic(pendingSave.variables)}>Try again</button></>}
                 </AlertDescription>
               </Alert>
             )}

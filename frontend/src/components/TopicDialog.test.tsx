@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import TopicDialog from "@/components/TopicDialog";
 import { catalogApi } from "@/lib/api/catalog";
 import { researchApi, type ResearchTopic } from "@/lib/api/research";
+import { ApiError } from "@/lib/apiTransport";
 import { useResearchFollows } from "@/lib/researchTopic";
 
 const auth = vi.hoisted(() => ({ value: { user: { username: "owner", hf_subject: "1" } as object | null, isLoading: false } }));
@@ -111,6 +112,7 @@ describe("TopicDialog feed management", () => {
       { kind: "benchmark", entity_id: 12, name: "SWE-bench Verified", url: "/benchmark/swe-bench-verified", created_at: "" },
     ]);
     vi.spyOn(researchApi, "topics").mockResolvedValue([topic, other]);
+    vi.spyOn(researchApi, "topicMatches").mockResolvedValue([]);
     vi.spyOn(researchApi, "featuredTopics").mockResolvedValue([
       { id: 1, text: "real-time video generation", label: null, creator: null, followers: 4 },
       { id: 23, text: "OCR releases", label: null, followers: 5,
@@ -152,6 +154,36 @@ describe("TopicDialog feed management", () => {
     fireEvent.click(chip);
     fireEvent.click(screen.getByRole("button", { name: "Follow" }));
     await waitFor(() => expect(follow).toHaveBeenCalledWith(23));
+  });
+
+  it("offers following the catalog page instead of adding a topic named like it", async () => {
+    vi.mocked(researchApi.topicMatches).mockImplementation(async text => text === "harness engineering"
+      ? [{ kind: "task", entity_id: 9, name: "Harness Engineering", url: "/tasks/harness-engineering" }] : []);
+    const add = vi.spyOn(researchApi, "addTopic");
+    const follow = vi.spyOn(researchApi, "setFollow").mockResolvedValue(undefined);
+    renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Research topic" }), { target: { value: "Harness  engineering" } });
+    const hint = await screen.findByRole("status");
+    expect(hint).toHaveTextContent("already has a task page for “Harness engineering”");
+    expect(within(hint).getByRole("link", { name: "Open the Harness Engineering page" })).toHaveAttribute("href", "/tasks/harness-engineering");
+    // The topic itself cannot be saved; following the task can.
+    expect(screen.getByRole("button", { name: "Follow" })).toBeDisabled();
+    fireEvent.click(within(hint).getByRole("button", { name: "Harness Engineering" }));
+    fireEvent.click(screen.getByRole("button", { name: "Follow" }));
+    await waitFor(() => expect(follow).toHaveBeenCalledWith("task", "9", true));
+    expect(add).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's refusal only while the box holds the refused text", async () => {
+    const body = JSON.stringify({ detail: "“robotics” is already a task; follow Robotics instead" });
+    vi.spyOn(researchApi, "addTopic").mockRejectedValue(new ApiError(new Response(body, { status: 409 }), body));
+    renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
+    const input = await screen.findByRole("textbox", { name: "Research topic" });
+    fireEvent.change(input, { target: { value: "robotics" } });
+    fireEvent.click(screen.getByRole("button", { name: "Follow" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("follow Robotics instead.");
+    fireEvent.change(input, { target: { value: "robot learning for kitchens" } });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("rewords a topic and makes it private in one save", async () => {

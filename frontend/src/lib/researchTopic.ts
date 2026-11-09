@@ -1,3 +1,4 @@
+import { ApiError } from '@/lib/apiTransport';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { researchApi, type FollowKind, type ResearchTopic } from '@/lib/api/research';
 import { paperFeedKeys, researchKeys, researchQueries } from '@/lib/api/queries';
@@ -185,8 +186,15 @@ export function useSaveTopic(onSaved?: () => void) {
       await refreshTopics(client, user?.hf_subject);
       onSaved?.();
     },
+    // A refused topic (a catalog name, or the topic limit) would fail again; drop a guest's stash.
+    onError: error => {
+      if (isConflict(error)) clearPendingTopic();
+    },
   });
 }
+
+/** A request the server refused on purpose, whose message explains why. */
+export const isConflict = (error: unknown): error is ApiError => error instanceof ApiError && error.status === 409;
 
 /** Stops following the given topics, refreshing what depends on them even when some fail. */
 export function useRemoveTopics() {
