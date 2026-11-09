@@ -19,7 +19,7 @@ import { parseParameterFilter } from "@/lib/benchmarkLeaderboard";
 import "@/styles/benchmark-detail.css";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import { slugify } from "@/lib/slug";
-import { isNotFound } from "@/lib/apiErrors";
+import { isNotFound } from "@/lib/apiTransport";
 import NotFound from "@/pages/NotFound";
 
 

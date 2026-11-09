@@ -10,7 +10,7 @@ import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
 import MethodUsageChart from "@/components/MethodUsageChart";
 import MarkdownText from "@/components/MarkdownText";
 import { papersApi } from "@/lib/api/papers";
-import { isNotFound } from "@/lib/apiErrors";
+import { isNotFound } from "@/lib/apiTransport";
 import { slugify } from "@/lib/slug";
 import { transformPaperForCard } from "@/lib/transform";
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
