@@ -160,8 +160,6 @@ def copy_paper_artifacts_to_bucket(
             pdf_url=paper.url_pdf if payload.include_pdf else None,
             pdf_name=paper.arxiv_id.replace("/", "-") if paper.arxiv_id else None,
         )
-    except PaperNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
     except PaperBucketError as error:
         if error.authorization_required:
             raise HTTPException(
@@ -248,10 +246,7 @@ def get_paper_leaderboard_badge(
     db: Session = Depends(get_database_session),
 ):
     """Return an embeddable SVG summarizing this paper's top-three rankings."""
-    try:
-        paper = PaperService(db).get_paper_by_id_or_arxiv(paper_id)
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    paper = PaperService(db).get_paper_by_id_or_arxiv(paper_id)
 
     ranks = paper.leaderboard_ranks or []
     if evaluation_id is not None:
@@ -288,10 +283,7 @@ def get_paper_leaderboard_badge_link(
     db: Session = Depends(get_database_session),
 ):
     """Redirect a durable badge link to its live row or paper results."""
-    try:
-        paper = PaperService(db).get_paper_by_id_or_arxiv(paper_id)
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    paper = PaperService(db).get_paper_by_id_or_arxiv(paper_id)
 
     target = resolve_leaderboard_badge_target(
         db,
@@ -444,8 +436,6 @@ def get_papers(
         ) from error
     except InvalidAuthorFilterError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get(
@@ -589,10 +579,7 @@ def get_related_papers(
     db: Session = Depends(get_database_session),
 ):
     """Return latest-version recommendations without synchronous model inference."""
-    try:
-        return PaperService(db).get_related_papers(paper_id, limit)
-    except PaperNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from error
+    return PaperService(db).get_related_papers(paper_id, limit)
 
 
 @router.get("/papers/stats", summary="Get paper statistics")
@@ -843,11 +830,8 @@ def get_paper_by_arxiv_id(
             detail=f"Invalid version format: {version}. Expected format: v1, v2, etc.",
         )
 
-    try:
-        service = PaperService(db)
-        return service.get_paper_by_arxiv_id(arxiv_id, version, include_resources)
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    service = PaperService(db)
+    return service.get_paper_by_arxiv_id(arxiv_id, version, include_resources)
 
 
 @router.get(
@@ -874,11 +858,8 @@ def get_paper_versions(
             status_code=400, detail=f"Invalid ArXiv ID format: {arxiv_id}"
         )
 
-    try:
-        service = PaperService(db)
-        return service.get_paper_versions(arxiv_id)
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    service = PaperService(db)
+    return service.get_paper_versions(arxiv_id)
 
 
 @router.get(
@@ -916,11 +897,8 @@ def compare_paper_versions(
             status_code=400, detail=f"Invalid target version format: {to_version}"
         )
 
-    try:
-        service = PaperService(db)
-        return service.compare_paper_versions(arxiv_id, from_version, to_version)
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    service = PaperService(db)
+    return service.compare_paper_versions(arxiv_id, from_version, to_version)
 
 
 def _arxiv_metadata_error(arxiv_id: str, error_type: Optional[str]) -> HTTPException:
@@ -1219,24 +1197,21 @@ def get_paper_methods(
     - `/api/v1/papers/1234/methods/` - Get methods for paper ID 1234
     - `/api/v1/papers/1706.03762/methods/` - Get methods for ArXiv paper 1706.03762 (Attention is All You Need)
     """
-    try:
-        # Import here to avoid circular imports
-        from backend.services.method_service import MethodService
+    # Import here to avoid circular imports
+    from backend.services.method_service import MethodService
 
-        paper_service = PaperService(db)
+    paper_service = PaperService(db)
 
-        # Get the paper to verify it exists and get the numeric ID
-        paper = paper_service.get_paper_by_id_or_arxiv(paper_id)
+    # Get the paper to verify it exists and get the numeric ID
+    paper = paper_service.get_paper_by_id_or_arxiv(paper_id)
 
-        # Get methods for this paper
-        method_service = MethodService(db)
-        return method_service.get_methods_for_paper(
-            paper_id=int(paper.id),
-            page=page,
-            page_size=page_size,
-        )
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    # Get methods for this paper
+    method_service = MethodService(db)
+    return method_service.get_methods_for_paper(
+        paper_id=int(paper.id),
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.put(
@@ -1272,12 +1247,9 @@ def update_paper_tasks(
     PUT /api/v1/papers/123/tasks?task_ids=1&task_ids=2&task_ids=3
     ```
     """
-    try:
-        return _curated_paper_update(
-            db, mutation, paper_id, "tasks", {"task_ids": task_ids}
-        )
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    return _curated_paper_update(
+        db, mutation, paper_id, "tasks", {"task_ids": task_ids}
+    )
 
 
 @router.put(
@@ -1313,12 +1285,9 @@ def update_paper_methods(
     PUT /api/v1/papers/123/methods?method_ids=1&method_ids=2&method_ids=3
     ```
     """
-    try:
-        return _curated_paper_update(
-            db, mutation, paper_id, "methods", {"method_ids": method_ids}
-        )
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    return _curated_paper_update(
+        db, mutation, paper_id, "methods", {"method_ids": method_ids}
+    )
 
 
 @router.put(
@@ -1348,16 +1317,13 @@ def update_paper_organizations(
     PUT /api/v1/papers/123/organizations?organization_ids=1&organization_ids=2
     ```
     """
-    try:
-        return _curated_paper_update(
-            db,
-            mutation,
-            paper_id,
-            "organizations",
-            {"organization_ids": organization_ids},
-        )
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    return _curated_paper_update(
+        db,
+        mutation,
+        paper_id,
+        "organizations",
+        {"organization_ids": organization_ids},
+    )
 
 
 class RepositoryInput(BaseModel):
@@ -1434,21 +1400,18 @@ def update_paper_repositories(
     }
     ```
     """
-    try:
-        # Convert Pydantic models to dict for service layer
-        repositories_data = [
-            {"url": repo.url, "is_official": repo.is_official}
-            for repo in request.repositories
-        ]
-        return _curated_paper_update(
-            db,
-            mutation,
-            paper_id,
-            "repositories",
-            {"repositories": repositories_data},
-        )
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    # Convert Pydantic models to dict for service layer
+    repositories_data = [
+        {"url": repo.url, "is_official": repo.is_official}
+        for repo in request.repositories
+    ]
+    return _curated_paper_update(
+        db,
+        mutation,
+        paper_id,
+        "repositories",
+        {"repositories": repositories_data},
+    )
 
 
 @router.put(
@@ -1488,21 +1451,18 @@ def update_paper_project_pages(
     }
     ```
     """
-    try:
-        # Convert Pydantic models to dict for service layer
-        project_pages_data = [
-            {"url": page.url, "is_official": page.is_official}
-            for page in request.project_pages
-        ]
-        return _curated_paper_update(
-            db,
-            mutation,
-            paper_id,
-            "project_pages",
-            {"project_pages": project_pages_data},
-        )
-    except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    # Convert Pydantic models to dict for service layer
+    project_pages_data = [
+        {"url": page.url, "is_official": page.is_official}
+        for page in request.project_pages
+    ]
+    return _curated_paper_update(
+        db,
+        mutation,
+        paper_id,
+        "project_pages",
+        {"project_pages": project_pages_data},
+    )
 
 
 class UpdateHfArtifactsRequest(BaseModel):

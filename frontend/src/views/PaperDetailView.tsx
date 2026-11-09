@@ -17,6 +17,7 @@ import {
   isStagingEnvironment,
 } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
+import { usePreferences } from "@/lib/preferences";
 import { paperEditSubmitMode } from "@/lib/contributorCapabilities";
 import { toSotaRanks } from "@/lib/transform";
 import { leaderboardBadgeMarkdown } from "@/lib/leaderboardBadges";
@@ -84,6 +85,7 @@ const PaperDetailView: React.FC = () => {
   // Admins can save edits directly. Linked authors and everyone else go
   // through the pending-edit queue for admin review.
   const isAdmin = user?.is_admin ?? false;
+  const { setHideClosedSourceEvals } = usePreferences();
   const isSignedIn = !!user;
   const editSubmitMode = paperEditSubmitMode(user);
 
@@ -724,6 +726,7 @@ const PaperDetailView: React.FC = () => {
             onCopyBadge={handleCopyLeaderboardBadge}
             onEdit={() => openEdit("evaluations")}
             onRefresh={() => void refetchEvaluations()}
+            onShowClosedSourceEvals={() => setHideClosedSourceEvals(false)}
             paper={paper}
             visibleEvaluationCount={visibleEvaluations?.length ?? 0}
           />

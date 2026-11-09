@@ -656,3 +656,17 @@ def test_radar_resolution_refuses_another_versions_paper(db, fake_external):
             ),
             commit=False,
         )
+
+
+def test_undated_leaderboard_signals_queue_by_first_sighting(db, monkeypatch):
+    monkeypatch.setattr(signals, "MAX_RADAR_JOBS_PER_DAY", 1)
+    dated = _signal_row(db, "Older Dated Model", status="discovered")
+    dated.published = date(2026, 10, 10)
+    undated = _signal_row(db, "Leaderboard Model", status="discovered")
+    undated.published = None
+    undated.first_seen_at = NOW - timedelta(days=1)
+    db.flush()
+
+    queued = signals.queue_release_signals(db, SETTINGS, jobs=_Jobs(), now=NOW)
+
+    assert queued == [undated]

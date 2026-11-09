@@ -107,7 +107,7 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
         "Beam 1.0": ModelIdentity(
             "Beam 1.0",
-            source_url="https://reflection.ai/blog/introducing-beam",
+            source_url="https://reflection.ai/documents/beam-model-tech-report.pdf",
             is_open=True,
         ),
         "Inkling": ModelIdentity(
@@ -664,7 +664,7 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
         "Beam 1.0": ModelIdentity(
             "Beam 1.0",
-            source_url="https://reflection.ai/blog/introducing-beam",
+            source_url="https://reflection.ai/documents/beam-model-tech-report.pdf",
             is_open=True,
         ),
         "Mistral Large 4": ModelIdentity(
@@ -1029,7 +1029,7 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
     "critpt-v2": {
         "Beam 1.0": ModelIdentity(
             "Beam 1.0",
-            source_url="https://reflection.ai/blog/introducing-beam",
+            source_url="https://reflection.ai/documents/beam-model-tech-report.pdf",
             is_open=True,
         ),
         "Claude Fable 5.1 (max)": ModelIdentity(

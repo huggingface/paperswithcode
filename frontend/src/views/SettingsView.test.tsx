@@ -133,13 +133,13 @@ function mockProviderRequests(
   });
 }
 
-function renderSettings() {
+function renderSettings(initialEntry = "/settings") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter><SettingsView /></MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}><SettingsView /></MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -234,6 +234,31 @@ describe("SettingsView provider-aware chat billing", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("focuses the closed-source toggle from its deep link once settings finish loading", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    let resolveBilling!: (response: Response) => void;
+    const billingResponse = new Promise<Response>((resolve) => {
+      resolveBilling = resolve;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes("/me/follows")) return jsonResponse([]);
+      if (url.includes("/me/research-email")) return jsonResponse({ enabled: false, email: null, suppressed: false, delivery_ready: false });
+      if (url.includes("/chat/models")) return jsonResponse(providerModels(["huggingface"]));
+      if (url.includes("/me/inference-billing")) return billingResponse;
+      return jsonResponse({ detail: "unexpected request" }, 500);
+    });
+
+    renderSettings("/settings#closed-source-evals");
+    expect(await screen.findByRole("status")).toHaveTextContent("Loading settings…");
+    act(() => resolveBilling(jsonResponse(personalStatus)));
+
+    const toggle = await screen.findByRole("switch", { name: /Hide closed-source models/ });
+    await waitFor(() => expect(toggle).toHaveFocus());
+    expect(scrollIntoView).toHaveBeenCalled();
+  });
+
   it("lets a connected HF user select an organization billing account", async () => {
     const fetchMock = mockProviderRequests(["huggingface"]);
 
@@ -326,6 +351,6 @@ describe("SettingsView chat-disabled boundary", () => {
     expect(screen.queryByRole("heading", { name: "Inference Providers" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "OpenRouter" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeVisible();
-    expect(fetchMock.mock.calls.every(([url]) => String(url).includes("/me/follows") || String(url).includes("/me/research-email"))).toBe(true);
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes("/me/follows") || String(url).includes("/me/topics") || String(url).includes("/me/research-email"))).toBe(true);
   });
 });

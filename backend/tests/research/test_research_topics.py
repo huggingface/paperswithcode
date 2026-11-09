@@ -400,6 +400,11 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
         ("Robot only", {"Robotics", "“Protein folding”"})
     ]
     assert len(follows.feed_entries(db, "alice", now, 0, 40, topic_only=True)) == 3
+    by_task = follows.feed_entries(db, "alice", now, 0, 40, follow=("task", task.id))
+    assert {e.title for e in by_task} == {"Video robots", "Robot only"}
+    assert (
+        follows.feed_entries(db, "alice", now, 0, 40, follow=("method", task.id)) == []
+    )
 
 
 def test_preview_fills_the_feed_until_the_backfill_is_done(db, now, monkeypatch):

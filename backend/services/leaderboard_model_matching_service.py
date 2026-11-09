@@ -50,6 +50,12 @@ class MatchedModel:
     hf_model_url: str | None = None
 
 
+# Reasoning-effort settings: "GPT-6 Sol (max)", "DeepSeek V4.1 Flash (xhigh)".
+_EFFORT_SUFFIX = re.compile(
+    r"\s*\((?:max|xhigh|high|medium|low|minimal)\)\s*$", re.IGNORECASE
+)
+
+
 def _identity_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
@@ -61,12 +67,12 @@ def _phrase(value: str) -> str:
 def title_announces_model(title: str, model_name: str) -> bool:
     """Whether ``title`` is the model's own announcement.
 
-    "Kimi K3.1 Pro: ..." and "Introducing GPT-6.1 Terra" announce those
-    models; "Kimi K3.1 Pro: ..." does not announce "Kimi K3" or "Kimi K3.1",
+    "Kimi K3.1 Pro: ...", "Introducing GPT-6.1 Terra" and "Introducing GPT-6
+    Sol and Luna" announce those models; "Kimi K3.1 Pro: ..." does not announce "Kimi K3" or "Kimi K3.1",
     and "Evaluating GPT-6.1 Terra on ..." announces nothing.
     """
     name = re.escape(_phrase(model_name))
-    pattern = rf"(?:(?:introducing|announcing|meet) )?(?:the )?{name}(?:$|\s*[:,;(|]|\s+[-–—]\s)"
+    pattern = rf"(?:(?:introducing|announcing|meet) )?(?:the )?{name}(?:$|\s*[:,;(|&]|\s+[-–—]\s|\s+and\s)"
     return re.match(pattern, _phrase(title)) is not None
 
 
@@ -106,6 +112,20 @@ class LeaderboardModelMatcher:
                 matched[name] = MatchedModel(
                     paper_id, name, hf_model_url is not None, hf_model_url
                 )
+        # An effort setting names the same model; its rows share the base
+        # name, so the board keeps that model's best setting.
+        bases = {
+            name: base
+            for name in names
+            if name not in matched and (base := _EFFORT_SUFFIX.sub("", name)) != name
+        }
+        if bases:
+            base_matches = self.match(
+                [LeaderboardModel(base, "") for base in bases.values()]
+            )
+            for name, base in bases.items():
+                if (match := base_matches.get(base)) is not None:
+                    matched[name] = match
         return matched
 
     def _alias_matches(self, names: list[str]) -> dict[str, ModelRelease]:

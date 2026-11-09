@@ -12,6 +12,7 @@ relationship structure, including:
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc, func
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.models.database import (
     ProjectPage as DBProjectPage,
@@ -141,8 +142,8 @@ class ProjectPageService:
                 results=api_project_pages,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to fetch project pages: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to fetch project pages: {str(e)}") from e
 
     def get_project_page_by_id(self, page_id: str) -> ProjectPage:
         """
@@ -171,8 +172,8 @@ class ProjectPageService:
 
         except ValueError:
             raise PaperNotFoundError(f"Invalid project page ID: {page_id}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to fetch project page: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to fetch project page: {str(e)}") from e
 
     def get_project_pages_for_paper(self, paper_id: str) -> List[ProjectPage]:
         """
@@ -201,8 +202,10 @@ class ProjectPageService:
 
         except ValueError:
             raise PaperNotFoundError(f"Invalid paper ID: {paper_id}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to fetch project pages for paper: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                f"Failed to fetch project pages for paper: {str(e)}"
+            ) from e
 
     def get_project_page_with_papers(self, page_id: str) -> ProjectPageWithPapers:
         """
@@ -245,8 +248,10 @@ class ProjectPageService:
 
         except ValueError:
             raise PaperNotFoundError(f"Invalid project page ID: {page_id}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to fetch project page with papers: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                f"Failed to fetch project page with papers: {str(e)}"
+            ) from e
 
     def get_paper_project_page_relationships(
         self, paper_id: Optional[str] = None, project_page_id: Optional[str] = None
@@ -277,8 +282,8 @@ class ProjectPageService:
 
         except ValueError as e:
             raise PaperNotFoundError(f"Invalid ID provided: {str(e)}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to fetch relationships: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to fetch relationships: {str(e)}") from e
 
     def _db_project_page_to_api(self, db_project_page: DBProjectPage) -> ProjectPage:
         """
@@ -370,7 +375,9 @@ class ProjectPageService:
 
         except Exception as e:
             self.db.rollback()
-            raise DatabaseError(f"Failed to create/update project page: {str(e)}")
+            raise DatabaseError(
+                f"Failed to create/update project page: {str(e)}"
+            ) from e
 
     def associate_project_page_with_paper(
         self,
@@ -444,7 +451,7 @@ class ProjectPageService:
             self.db.rollback()
             raise DatabaseError(
                 f"Failed to associate project page with paper: {str(e)}"
-            )
+            ) from e
 
     def create_project_page_for_paper(
         self,
@@ -509,8 +516,10 @@ class ProjectPageService:
 
         except ValueError:
             raise PaperNotFoundError(f"Invalid paper ID: {paper_id}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to create project page for paper: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                f"Failed to create project page for paper: {str(e)}"
+            ) from e
 
     def create_project_page(self, request: ProjectPageCreateRequest) -> ProjectPage:
         """
@@ -555,7 +564,7 @@ class ProjectPageService:
             raise
         except Exception as e:
             self.db.rollback()
-            raise DatabaseError(f"Failed to create project page: {str(e)}")
+            raise DatabaseError(f"Failed to create project page: {str(e)}") from e
 
     def update_project_page(
         self, page_id: str, request: ProjectPageUpdateRequest
@@ -618,7 +627,7 @@ class ProjectPageService:
             raise
         except Exception as e:
             self.db.rollback()
-            raise DatabaseError(f"Failed to update project page: {str(e)}")
+            raise DatabaseError(f"Failed to update project page: {str(e)}") from e
 
     def delete_project_page(self, page_id: str) -> None:
         """
@@ -649,4 +658,4 @@ class ProjectPageService:
             raise
         except Exception as e:
             self.db.rollback()
-            raise DatabaseError(f"Failed to delete project page: {str(e)}")
+            raise DatabaseError(f"Failed to delete project page: {str(e)}") from e
