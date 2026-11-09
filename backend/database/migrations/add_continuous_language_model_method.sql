@@ -2,7 +2,8 @@
 -- Umbrella method for the field mapped by the survey site
 -- https://continuous-lm.github.io/ (Tang, Lee, Eijkelboom, Kim, 2026). There is no
 -- single introducing paper: embedding, simplex, bit and latent-space variants appeared
--- in parallel in 2022, so source_paper_id stays NULL and the survey is the source.
+-- in parallel in 2022. source_paper_id therefore points at the field survey (an
+-- external paper whose PDF is hosted on alphaXiv), not at an introducing paper.
 -- It replaces the narrower continuous-diffusion-language-model method (removed in
 -- remove_continuous_diffusion_language_model_method.sql).
 --
@@ -24,8 +25,10 @@ VALUES (
     (SELECT id FROM areas WHERE name IN ('Language', 'Natural Language Processing')
      ORDER BY CASE name WHEN 'Language' THEN 0 ELSE 1 END LIMIT 1),
     NULL,
+    (SELECT id FROM papers WHERE source = 'external'
+     AND source_url = 'https://www.alphaxiv.org/abs/2611.continuous-diffusion-flow-language-models.pdf'
+     ORDER BY id DESC LIMIT 1),
     NULL,
-    'https://continuous-lm.github.io/',
     'A Survey on Continuous Diffusion and Flow Language Models',
     NULL,
     NULL,
@@ -221,3 +224,8 @@ ON CONFLICT (paper_id, method_id) DO NOTHING;
 INSERT INTO paper_method_evidence (paper_id, method_id, evidence_type)
 SELECT paper_id, method_id, 'manual' FROM clm_papers
 ON CONFLICT (paper_id, method_id, evidence_type) DO NOTHING;
+
+INSERT INTO paper_methods (paper_id, method_id)
+SELECT source_paper_id, id FROM methods
+WHERE slug = 'continuous-language-model' AND source_paper_id IS NOT NULL
+ON CONFLICT (paper_id, method_id) DO NOTHING;
