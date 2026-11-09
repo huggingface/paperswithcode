@@ -16,43 +16,23 @@ from datetime import UTC, date, datetime
 from typing import Any
 
 import httpx
-
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
-    Paper,
     PaperTask,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
 from backend.services.leaderboard_model_matching_service import (
     LeaderboardModel,
     LeaderboardModelMatcher,
 )
+from backend.services.leaderboard_sync_catalog import (
+    ModelIdentity,
+    resolve_identity_papers,
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
-
-
-@dataclass(frozen=True)
-class ModelIdentity:
-    """A reviewed leaderboard model and the paper that introduces it."""
-
-    model_name: str
-    arxiv_id: str | None = None
-    source_url: str | None = None
-    is_open: bool = False
-    hf_model_url: str | None = None
-
-    def __post_init__(self) -> None:
-        if (self.arxiv_id is None) == (self.source_url is None):
-            raise ValueError("ModelIdentity requires exactly one paper identity")
-
-    @property
-    def paper_key(self) -> str:
-        return self.arxiv_id or self.source_url or ""
 
 
 @dataclass(frozen=True)
@@ -199,50 +179,6 @@ class LiveLeaderboardSyncService:
         self.db = db
         self.board = board
 
-    def _leaderboard_identity(self) -> tuple[Task, Dataset]:
-        board = self.board
-        task = self.db.query(Task).filter(Task.slug == board.task_slug).one_or_none()
-        dataset = (
-            self.db.query(Dataset)
-            .filter(Dataset.slug == board.dataset_slug)
-            .one_or_none()
-        )
-        if task is None or dataset is None:
-            raise RuntimeError(f"{board.source} task or benchmark is not configured")
-        configured = (
-            self.db.query(TaskDatasetMetric)
-            .join(Metric, Metric.id == TaskDatasetMetric.metric_id)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-                Metric.name == board.metric,
-            )
-            .count()
-        )
-        if configured != 1:
-            raise RuntimeError(f"{board.source} metric is not linked to the task")
-        return task, dataset
-
-    def _paper_ids(self) -> dict[str, int]:
-        """Resolve reviewed paper identities without ever creating papers."""
-        identities = self.board.identities.values()
-        arxiv_ids = {i.arxiv_id for i in identities if i.arxiv_id}
-        source_urls = {i.source_url for i in identities if i.source_url}
-        papers = (
-            self.db.query(Paper.id, Paper.arxiv_id, Paper.source_url)
-            .filter(
-                Paper.is_latest_version,
-                (Paper.arxiv_id.in_(arxiv_ids))
-                | ((Paper.source == "external") & Paper.source_url.in_(source_urls)),
-            )
-            .order_by(Paper.id)
-            .all()
-        )
-        resolved: dict[str, int] = {}
-        for paper_id, arxiv_id, source_url in papers:
-            resolved[arxiv_id if arxiv_id in arxiv_ids else source_url] = paper_id
-        return resolved
-
     def _methodology(self, entry: LeaderboardEntry) -> str:
         board = self.board
         return (
@@ -269,8 +205,14 @@ class LiveLeaderboardSyncService:
             )
         stats = LiveSyncStats(fetched=fetched, excluded=fetched - len(entries))
         try:
-            task, dataset = self._leaderboard_identity()
-            paper_ids = self._paper_ids()
+            task, dataset = resolve_leaderboard(
+                self.db,
+                board.source,
+                board.task_slug,
+                board.dataset_slug,
+                (board.metric,),
+            )
+            paper_ids = resolve_identity_papers(self.db, board.identities.values())
             new_entries = [e for e in entries if e.name not in board.identities]
             matcher = LeaderboardModelMatcher(
                 self.db,

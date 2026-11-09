@@ -12,13 +12,9 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
     Paper,
     PaperTask,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
 from backend.services.external_resource_service import (
@@ -28,6 +24,9 @@ from backend.services.external_resource_service import (
 from backend.services.leaderboard_model_matching_service import (
     LeaderboardModel,
     LeaderboardModelMatcher,
+)
+from backend.services.leaderboard_sync_catalog import (
+    resolve_leaderboard,
 )
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.paper_ingestion_service import PaperIngestionService
@@ -509,39 +508,6 @@ class FrontierCodeSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self) -> tuple[Task, dict[str, Dataset]]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        datasets = {
-            subset: self.db.query(Dataset).filter(Dataset.slug == slug).one_or_none()
-            for subset, slug in DATASET_SLUGS.items()
-        }
-        metric_ids = {
-            metric.name: metric.id
-            for metric in self.db.query(Metric)
-            .filter(Metric.name.in_(METRIC_NAMES))
-            .all()
-        }
-        if task is None or any(dataset is None for dataset in datasets.values()):
-            raise RuntimeError("FrontierCode task or benchmarks are not configured")
-        if set(metric_ids) != set(METRIC_NAMES):
-            raise RuntimeError("FrontierCode metrics are not configured")
-        for dataset in datasets.values():
-            for metric_id in metric_ids.values():
-                configured = (
-                    self.db.query(TaskDatasetMetric)
-                    .filter(
-                        TaskDatasetMetric.task_id == task.id,
-                        TaskDatasetMetric.dataset_id == dataset.id,
-                        TaskDatasetMetric.metric_id == metric_id,
-                    )
-                    .one_or_none()
-                )
-                if configured is None:
-                    raise RuntimeError(
-                        "FrontierCode leaderboard metrics are not linked"
-                    )
-        return task, datasets  # type: ignore[return-value]
-
     def sync(
         self,
         leaderboard: FrontierCodeLeaderboard,
@@ -560,7 +526,11 @@ class FrontierCodeSyncService:
             indexed_papers=len(discovery.indexed_papers),
         )
         try:
-            task, datasets = self._leaderboard_identity()
+            datasets = {}
+            for subset, slug in DATASET_SLUGS.items():
+                task, datasets[subset] = resolve_leaderboard(
+                    self.db, "FrontierCode", TASK_SLUG, slug, METRIC_NAMES
+                )
             stats.datasets = {
                 subset: dataset.id for subset, dataset in datasets.items()
             }

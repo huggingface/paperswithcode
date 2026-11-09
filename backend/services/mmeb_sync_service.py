@@ -14,20 +14,19 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
     HfArtifact,
-    Metric,
     Paper,
     PaperHfArtifact,
     PaperProjectPage,
     PaperRepository,
     ProjectPage,
     Repository,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_catalog import (
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 MMEB_SPACE_URL = "https://huggingface.co/spaces/TIGER-Lab/MMEB-Leaderboard"
@@ -288,33 +287,6 @@ class MmebSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self, version: str) -> tuple[Task, Dataset, str, str]:
-        try:
-            dataset_slug, metric_name, source_label = LANES[version]
-        except KeyError as exc:
-            raise ValueError(f"Unknown MMEB version: {version}") from exc
-        task = self.db.query(Task).filter(Task.slug == "embedding-models").one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == dataset_slug).one_or_none()
-        )
-        metric = self.db.query(Metric).filter(Metric.name == metric_name).one_or_none()
-        if task is None or dataset is None or metric is None:
-            raise RuntimeError(
-                f"MMEB {version} task, benchmark, or metric is not configured"
-            )
-        configured = (
-            self.db.query(TaskDatasetMetric)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-                TaskDatasetMetric.metric_id == metric.id,
-            )
-            .one_or_none()
-        )
-        if configured is None:
-            raise RuntimeError(f"MMEB {metric_name} is not linked to embedding-models")
-        return task, dataset, metric_name, source_label
-
     def _paper_candidates(self, entry: MmebEntry) -> list[Paper]:
         ids: set[int] = set()
         match = _ARXIV_URL.search(entry.model_url)
@@ -436,8 +408,16 @@ class MmebSyncService:
         stats = MmebSyncStats(fetched=len(entries))
 
         try:
-            task, dataset, metric_name, source_label = self._leaderboard_identity(
-                version
+            try:
+                dataset_slug, metric_name, source_label = LANES[version]
+            except KeyError as exc:
+                raise ValueError(f"Unknown MMEB version: {version}") from exc
+            task, dataset = resolve_leaderboard(
+                self.db,
+                f"MMEB {version}",
+                "embedding-models",
+                dataset_slug,
+                (metric_name,),
             )
             scored = [
                 entry for entry in entries if (entry.scores.get(version) or 0) > 0

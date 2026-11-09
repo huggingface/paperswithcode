@@ -15,15 +15,14 @@ from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
     Paper,
     PaperTask,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_catalog import (
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 PROGRAMBENCH_URL = "https://programbench.com/"
@@ -319,35 +318,6 @@ class ProgramBenchSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == DATASET_SLUG).one_or_none()
-        )
-        metrics = {
-            metric.name: metric.id
-            for metric in self.db.query(Metric)
-            .filter(Metric.name.in_(METRIC_NAMES))
-            .all()
-        }
-        if task is None or dataset is None or set(metrics) != set(METRIC_NAMES):
-            raise RuntimeError(
-                "ProgramBench task, benchmark, or metrics are not configured"
-            )
-        for metric_id in metrics.values():
-            configured = (
-                self.db.query(TaskDatasetMetric)
-                .filter(
-                    TaskDatasetMetric.task_id == task.id,
-                    TaskDatasetMetric.dataset_id == dataset.id,
-                    TaskDatasetMetric.metric_id == metric_id,
-                )
-                .one_or_none()
-            )
-            if configured is None:
-                raise RuntimeError("ProgramBench metrics are not linked to the task")
-        return task, dataset
-
     def sync(
         self, entries: list[ProgramBenchEntry], *, commit: bool = True
     ) -> ProgramBenchSyncStats:
@@ -357,7 +327,9 @@ class ProgramBenchSyncService:
             )
         stats = ProgramBenchSyncStats(fetched=len(entries))
         try:
-            task, dataset = self._leaderboard_identity()
+            task, dataset = resolve_leaderboard(
+                self.db, "ProgramBench", TASK_SLUG, DATASET_SLUG, METRIC_NAMES
+            )
             source_urls = {
                 identity.source_url for identity in MODEL_PAPER_IDENTITIES.values()
             }

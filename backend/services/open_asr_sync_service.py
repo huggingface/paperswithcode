@@ -11,21 +11,20 @@ from typing import Any
 
 from gradio_client import Client
 from huggingface_hub import HfApi
-from huggingface_hub.errors import HFValidationError, HfHubHTTPError
+from huggingface_hub.errors import HfHubHTTPError, HFValidationError
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
     Paper,
     PaperTask,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.arxiv_service import ArxivService
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_catalog import (
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.paper_ingestion_service import (
     PaperIngestionError,
@@ -530,36 +529,6 @@ class OpenAsrSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == DATASET_SLUG).one_or_none()
-        )
-        metrics = {
-            metric.name: metric
-            for metric in self.db.query(Metric)
-            .filter(Metric.name.in_((WER_METRIC, RTFX_METRIC)))
-            .all()
-        }
-        if task is None or dataset is None or set(metrics) != {WER_METRIC, RTFX_METRIC}:
-            raise RuntimeError(
-                "Open ASR task, benchmark, or metrics are not configured"
-            )
-        configured = {
-            row.metric_id
-            for row in self.db.query(TaskDatasetMetric)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-            )
-            .all()
-        }
-        if {metric.id for metric in metrics.values()} - configured:
-            raise RuntimeError(
-                "Open ASR leaderboard metrics are not linked to the task"
-            )
-        return task, dataset
-
     @staticmethod
     def _legacy_model_id(row: Evaluation) -> str | None:
         match = _LEGACY_MODEL_RE.search(row.methodology or "")
@@ -579,7 +548,9 @@ class OpenAsrSyncService:
 
     def models_needing_discovery(self, entries: list[OpenAsrEntry]) -> list[str]:
         """Return upstream model ids not already resolvable without Hub lookup."""
-        task, dataset = self._leaderboard_identity()
+        task, dataset = resolve_leaderboard(
+            self.db, "Open ASR", TASK_SLUG, DATASET_SLUG, (WER_METRIC, RTFX_METRIC)
+        )
         candidate_rows = (
             self.db.query(Evaluation)
             .filter(
@@ -634,7 +605,9 @@ class OpenAsrSyncService:
         stats = OpenAsrSyncStats(fetched=len(entries))
 
         try:
-            task, dataset = self._leaderboard_identity()
+            task, dataset = resolve_leaderboard(
+                self.db, "Open ASR", TASK_SLUG, DATASET_SLUG, (WER_METRIC, RTFX_METRIC)
+            )
             papers_by_arxiv = {
                 paper.arxiv_id: paper.id
                 for paper in self.db.query(Paper)

@@ -15,12 +15,8 @@ from gradio_client import Client
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
     PaperTask,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.artificial_analysis_sync_service import (
     ArtificialAnalysisDiscovery,
@@ -28,6 +24,9 @@ from backend.services.artificial_analysis_sync_service import (
     PaperIdentity,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_catalog import (
+    resolve_leaderboard,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 SPACE_APP_URL = "https://hf-audio-open-tts-leaderboard.hf.space"
@@ -368,44 +367,6 @@ class OpenTtsSyncService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _leaderboard_identity(self, dataset_slug: str) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == dataset_slug).one_or_none()
-        )
-        metrics = {
-            metric.name: metric
-            for metric in self.db.query(Metric)
-            .filter(Metric.name.in_((WER_METRIC, RTFX_METRIC)))
-            .all()
-        }
-        if (
-            task is None
-            or dataset is None
-            or set(metrics)
-            != {
-                WER_METRIC,
-                RTFX_METRIC,
-            }
-        ):
-            raise RuntimeError(
-                "Open TTS task, benchmark, or metrics are not configured"
-            )
-        configured = {
-            row.metric_id
-            for row in self.db.query(TaskDatasetMetric)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-            )
-            .all()
-        }
-        if {metric.id for metric in metrics.values()} - configured:
-            raise RuntimeError(
-                "Open TTS leaderboard metrics are not linked to the task"
-            )
-        return task, dataset
-
     def _sync_dataset(
         self,
         entries: list[OpenTtsEntry],
@@ -415,7 +376,9 @@ class OpenTtsSyncService:
         now: datetime,
     ) -> OpenTtsSyncStats:
         stats = OpenTtsSyncStats(fetched=len(entries))
-        task, dataset = self._leaderboard_identity(dataset_slug)
+        task, dataset = resolve_leaderboard(
+            self.db, "Open TTS", TASK_SLUG, dataset_slug, (WER_METRIC, RTFX_METRIC)
+        )
         candidate_rows = (
             self.db.query(Evaluation)
             .filter(

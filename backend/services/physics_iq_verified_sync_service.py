@@ -13,15 +13,17 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Dataset,
     Evaluation,
-    Metric,
-    Paper,
     PaperTask,
-    Task,
-    TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_catalog import (
+    ModelIdentity,
+    curated_notes,
+    resolve_identity_papers,
+    resolve_leaderboard,
+    score_matches,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 # physics-iq-verified.anates.ai renders the same table from data compiled into
@@ -50,25 +52,6 @@ MIN_EXPECTED_ROWS = 30
 MAX_EXPECTED_ROWS = 300
 # Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 25
-
-
-@dataclass(frozen=True)
-class ModelIdentity:
-    """A reviewed leaderboard model and the paper that introduces it."""
-
-    model_name: str
-    arxiv_id: str | None = None
-    source_url: str | None = None
-    is_open: bool = False
-    hf_model_url: str | None = None
-
-    def __post_init__(self) -> None:
-        if (self.arxiv_id is None) == (self.source_url is None):
-            raise ValueError("ModelIdentity requires exactly one paper identity")
-
-    @property
-    def paper_key(self) -> str:
-        return self.arxiv_id or self.source_url or ""
 
 
 _COSMOS_3 = "2606.02800"
@@ -455,82 +438,11 @@ def _methodology(entry: PhysicsIqEntry, notes: str) -> str:
     return f"{head} {notes}" if notes else head
 
 
-def _curated_notes(row: Evaluation) -> str:
-    """Return the reviewer-written methodology kept beneath the managed head."""
-    methodology = (row.methodology or "").strip()
-    head = _MANAGED_HEAD.match(methodology)
-    if head is not None:
-        return head.group("notes") or ""
-    return methodology
-
-
-def _score_matches(stored: Any, published: Decimal) -> bool:
-    """Treat a stored value as current when it rounds to the published one.
-
-    Reviewers sometimes import the unrounded submission value (48.23) that the
-    README lists at lower precision (48.2); that is not a revision.
-    """
-    if isinstance(stored, bool) or not isinstance(stored, (int, float)):
-        return False
-    exponent = published.as_tuple().exponent
-    places = -exponent if isinstance(exponent, int) and exponent < 0 else 0
-    return Decimal(str(stored)).quantize(Decimal(1).scaleb(-places)) == published
-
-
 class PhysicsIqSyncService:
     """Create and revise reviewed Physics-IQ Verified rows; never create papers."""
 
     def __init__(self, db: Session):
         self.db = db
-
-    def _leaderboard_identity(self) -> tuple[Task, Dataset]:
-        task = self.db.query(Task).filter(Task.slug == TASK_SLUG).one_or_none()
-        dataset = (
-            self.db.query(Dataset).filter(Dataset.slug == DATASET_SLUG).one_or_none()
-        )
-        if task is None or dataset is None:
-            raise RuntimeError(
-                "Physics-IQ Verified task or benchmark is not configured"
-            )
-        metric_ids = [
-            metric_id
-            for (metric_id,) in self.db.query(Metric.id)
-            .filter(Metric.name.in_(METRIC_BY_TRACK.values()))
-            .all()
-        ]
-        configured = (
-            self.db.query(TaskDatasetMetric)
-            .filter(
-                TaskDatasetMetric.task_id == task.id,
-                TaskDatasetMetric.dataset_id == dataset.id,
-                TaskDatasetMetric.metric_id.in_(metric_ids),
-            )
-            .count()
-        )
-        if len(metric_ids) != len(METRIC_BY_TRACK) or configured != len(metric_ids):
-            raise RuntimeError("Physics-IQ Verified metrics are not linked to the task")
-        return task, dataset
-
-    def _paper_ids(self) -> dict[str, int]:
-        """Resolve reviewed paper identities without ever creating papers."""
-        identities = MODEL_IDENTITIES.values()
-        arxiv_ids = {i.arxiv_id for i in identities if i.arxiv_id}
-        source_urls = {i.source_url for i in identities if i.source_url}
-        papers = (
-            self.db.query(Paper.id, Paper.arxiv_id, Paper.source_url)
-            .filter(
-                Paper.is_latest_version,
-                (Paper.arxiv_id.in_(arxiv_ids))
-                | ((Paper.source == "external") & Paper.source_url.in_(source_urls)),
-            )
-            .order_by(Paper.id)
-            .all()
-        )
-        resolved: dict[str, int] = {}
-        for paper_id, arxiv_id, source_url in papers:
-            key = arxiv_id if arxiv_id in arxiv_ids else source_url
-            resolved[key] = paper_id
-        return resolved
 
     def sync(
         self, entries: list[PhysicsIqEntry], *, commit: bool = True
@@ -548,8 +460,14 @@ class PhysicsIqSyncService:
             unreviewed=selection.unreviewed,
         )
         try:
-            task, dataset = self._leaderboard_identity()
-            paper_ids = self._paper_ids()
+            task, dataset = resolve_leaderboard(
+                self.db,
+                "Physics-IQ Verified",
+                TASK_SLUG,
+                DATASET_SLUG,
+                METRIC_BY_TRACK.values(),
+            )
+            paper_ids = resolve_identity_papers(self.db, MODEL_IDENTITIES.values())
             rows = (
                 self.db.query(Evaluation)
                 .filter(
@@ -601,9 +519,9 @@ class PhysicsIqSyncService:
                 else:
                     # Adopted rows keep their reviewed provenance fields; only
                     # the leaderboard-owned score and methodology head change.
-                    notes = _curated_notes(row)
+                    notes = curated_notes(row.methodology, _MANAGED_HEAD)
                     managed = _MANAGED_HEAD.match((row.methodology or "").strip())
-                    current = _score_matches(
+                    current = score_matches(
                         (row.metrics or {}).get(metric_name), entry.score
                     )
                     if managed is None:
