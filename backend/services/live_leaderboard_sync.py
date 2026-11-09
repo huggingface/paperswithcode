@@ -344,6 +344,8 @@ class LiveLeaderboardSyncService:
                         source_url=board.url,
                         external=True,
                         uses_additional_data=False,
+                        # The leaderboard's year column reads this date.
+                        evaluated_on=now.date(),
                     )
                     self.db.add(row)
                     rows_by_identity[key] = row

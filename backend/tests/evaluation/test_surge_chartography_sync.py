@@ -353,6 +353,7 @@ def test_new_mapped_rows_are_created_and_new_labels_reported():
     created = _rows(session)["Mistral Large 3 (no tools)"]
     assert created.metrics == {METRIC_NAME: 9.0}
     assert created.is_open and created.external_source_url == SURGE_CHARTOGRAPHY_URL
+    assert created.evaluated_on is not None
     # Its row shows no lab logo, so there is no lab to hand to the radar.
     assert session.query(ModelReleaseSignal).count() == 0
 

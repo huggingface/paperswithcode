@@ -500,6 +500,7 @@ def test_sync_creates_rows_keeping_each_models_best_setting():
         'Official leaderboard entry "Sol 5.6 (xhigh) (mini-SWE-agent)"'
     )
     assert sol.best_rank == 1 and sol.external is True
+    assert sol.evaluated_on == datetime.now(UTC).date()
     assert (stats.created, stats.matched) == (2, 2)
 
 
