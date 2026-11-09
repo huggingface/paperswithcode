@@ -30,9 +30,6 @@ from backend.models.database import (
 )
 from backend.services import frontiercs_2_sync_service as service
 from backend.services import leaderboard_model_matching_service as matching
-from backend.services.leaderboard_model_matching_service import (
-    title_announces_model,
-)
 from backend.services.frontiercs_2_sync_service import (
     FCI,
     FRONTIERCS_2_DATA_URL,
@@ -45,6 +42,10 @@ from backend.services.frontiercs_2_sync_service import (
     fetch_frontiercs_2,
     parse_frontiercs_2,
 )
+from backend.services.leaderboard_model_matching_service import (
+    title_announces_model,
+)
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -368,6 +369,7 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
             PaperHfArtifact(paper_id=2001, hf_artifact_id=1),
         ]
     )
+    add_release_evidence(session, 2001, 2002)
     session.commit()
     source = _new_model(SOURCE, "k3", "Kimi K3.2")
     source = _new_model(source, "terra", "GPT-6.2 Terra")
@@ -398,6 +400,37 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
     }
 
 
+def test_titles_without_evaluations_or_a_release_are_not_matched():
+    session = _session()
+    # Title-only papers ("KNN and ANN-based Recognition of ...") name a model
+    # without introducing it.
+    session.add(
+        Paper(
+            id=2001,
+            title="Kimi K3.2: Open Agentic Intelligence",
+            source="external",
+            source_url="https://www.kimi.com/blog/kimi-k3-2",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.commit()
+    source = parse_frontiercs_2(_new_model(SOURCE, "k3", "Kimi K3.2"))
+
+    stats = FrontierCS2SyncService(session).sync(source)
+
+    assert stats.auto_matched == []
+    assert stats.unreviewed == ["Kimi K3.2 (Kimi Code)"]
+    assert session.query(ModelReleaseSignal).one().model_name == "Kimi K3.2"
+    assert not session.query(Evaluation).filter_by(paper_id=2001).count()
+
+    add_release_evidence(session, 2001)
+    session.commit()
+    assert FrontierCS2SyncService(session).sync(source).auto_matched == [
+        "Kimi K3.2 (Kimi Code)"
+    ]
+
+
 def test_ambiguous_titles_are_not_matched(monkeypatch):
     session = _session()
     for paper_id, url in ((2001, "https://a.example/x"), (2002, "https://b.example/x")):
@@ -411,6 +444,7 @@ def test_ambiguous_titles_are_not_matched(monkeypatch):
                 is_latest_version=True,
             )
         )
+    add_release_evidence(session, 2001, 2002)
     session.commit()
     stats = FrontierCS2SyncService(session).sync(
         parse_frontiercs_2(_new_model(SOURCE, "k3", "Kimi K3.2"))
@@ -431,6 +465,7 @@ def test_ambiguous_titles_are_not_matched(monkeypatch):
             is_latest_version=True,
         )
     )
+    add_release_evidence(session, 2000)
     session.commit()
     source = parse_frontiercs_2(_new_model(SOURCE, "k3", "Kimi K3.2"))
     assert FrontierCS2SyncService(session).sync(source).auto_matched == [
@@ -472,6 +507,7 @@ def test_effort_settings_match_their_base_model():
             is_latest_version=True,
         )
     )
+    add_release_evidence(session, 2101)
     session.commit()
     matcher = matching.LeaderboardModelMatcher(
         session,
@@ -507,6 +543,7 @@ def test_effort_settings_of_one_model_keep_its_best_row():
             is_latest_version=True,
         )
     )
+    add_release_evidence(session, 2102)
     session.commit()
     # Two Codex CLI rows become two settings of one new model.
     source = _new_model(SOURCE, "astra", "Effort Model (max)")

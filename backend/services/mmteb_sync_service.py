@@ -20,6 +20,10 @@ from backend.models.database import (
     PaperHfArtifact,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+)
 from backend.services.leaderboard_sync_catalog import (
     resolve_leaderboard,
 )
@@ -89,6 +93,8 @@ class MmtebEntry:
     total_params: int | None
     is_open: bool
     hf_model_url: str | None
+    # Hub organization of the upstream model name ("intfloat/e5-..." -> "intfloat").
+    organization: str = ""
 
     def score_for(self, lane: MmtebLane) -> float | None:
         return None if self.mean_task is None else self.mean_task * 100
@@ -102,6 +108,7 @@ class MmtebSyncStats:
     created: int = 0
     updated: int = 0
     deleted: int = 0
+    auto_matched: list[str] = field(default_factory=list)
     no_arxiv_models: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
     ambiguous_papers: list[str] = field(default_factory=list)
@@ -115,6 +122,7 @@ class MmtebSyncStats:
             "created": self.created,
             "updated": self.updated,
             "deleted": self.deleted,
+            "auto_matched": self.auto_matched,
             "no_arxiv_models": self.no_arxiv_models,
             "missing_papers": self.missing_papers,
             "ambiguous_papers": self.ambiguous_papers,
@@ -186,7 +194,7 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
         canonical_name = model.get("name")
         if not isinstance(canonical_name, str) or not canonical_name.strip():
             raise ValueError("MMTEB API model names must be non-empty strings")
-        model_name = canonical_name.rstrip("/").rsplit("/", 1)[-1]
+        organization, _, model_name = canonical_name.rstrip("/").rpartition("/")
         if len(model_name) > 255 or model_name in names:
             raise ValueError("MMTEB model names must be unique and at most 255 chars")
         names.add(model_name)
@@ -233,6 +241,7 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
                 total_params=total_params,
                 is_open=open_weights,
                 hf_model_url=_official_hf_model_url(canonical_name, model_url),
+                organization=organization,
             )
         )
     return entries
@@ -354,6 +363,7 @@ class MmtebSyncService:
         fetched: int,
         scored: int,
         resolved: int,
+        auto_matched: int,
         existing_managed: int,
     ) -> None:
         if fetched < MIN_EXPECTED_ENTRIES:
@@ -368,9 +378,10 @@ class MmtebSyncService:
                 f"MMTEB {lane_id} resolved only {resolved} arXiv-backed rows; "
                 "refusing to replace the managed leaderboard"
             )
-        if existing_managed and resolved * 2 < existing_managed:
+        published = resolved + auto_matched
+        if existing_managed and published * 2 < existing_managed:
             raise RuntimeError(
-                f"MMTEB {lane_id} resolved {resolved} rows versus "
+                f"MMTEB {lane_id} resolved {published} rows versus "
                 f"{existing_managed} managed rows; refusing a drop over 50%"
             )
 
@@ -406,6 +417,28 @@ class MmtebSyncService:
             ]
             stats.scored = len(scored_entries)
             papers_by_model = self._resolve_papers(scored_entries, stats)
+            # Models without a cited local paper go to the shared matcher; the
+            # rest become release-radar signals. Ambiguous citations stay out.
+            ambiguous = set(stats.ambiguous_papers)
+            unknown = [
+                LeaderboardModel(entry.model_name, entry.organization)
+                for entry in scored_entries
+                if entry.model_name not in papers_by_model
+                and f"{entry.model_name}:{','.join(entry.arxiv_ids)}" not in ambiguous
+            ]
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="mmteb",
+                leaderboard_name="MMTEB v2",
+                leaderboard_url=MMTEB_API_URL,
+            )
+            auto_matched = matcher.match(unknown)
+            auto_papers = {
+                paper.id: paper
+                for paper in self.db.query(Paper)
+                .filter(Paper.id.in_({m.paper_id for m in auto_matched.values()}))
+                .all()
+            }
             managed_rows = (
                 self.db.query(Evaluation)
                 .filter(
@@ -425,6 +458,7 @@ class MmtebSyncService:
                 fetched=len(entries),
                 scored=len(scored_entries),
                 resolved=len(papers_by_model),
+                auto_matched=len(auto_matched),
                 existing_managed=len(managed_rows),
             )
             managed_ids = {row.id for row in managed_rows}
@@ -441,10 +475,13 @@ class MmtebSyncService:
                 )
                 if row_id not in managed_ids
             }
-            current_names = set(papers_by_model)
+            current_names = set(papers_by_model) | set(auto_matched)
 
             for entry in scored_entries:
                 paper = papers_by_model.get(entry.model_name)
+                match = auto_matched.get(entry.model_name)
+                if paper is None and match is not None:
+                    paper = auto_papers[match.paper_id]
                 if paper is None:
                     continue
                 if (
@@ -458,8 +495,13 @@ class MmtebSyncService:
                 methodology = (
                     f"{MANAGED_METHODOLOGY_PREFIX} {BENCHMARK_NAME} "
                     f"{lane.api_score_label} × 100; official API Borda rank "
-                    f"{entry.api_rank}; fetched {now.isoformat()}. Only models with "
-                    "an unambiguous local arXiv paper are synchronized."
+                    f"{entry.api_rank}; fetched {now.isoformat()}. "
+                    + (
+                        "Matched to the model's release paper by name."
+                        if match is not None
+                        else "Only models with an unambiguous local arXiv paper "
+                        "are synchronized."
+                    )
                 )
                 row = managed_by_name.get(entry.model_name)
                 if row is None:
@@ -480,19 +522,37 @@ class MmtebSyncService:
                 row.uses_additional_data = False
                 row.is_open = entry.is_open
                 row.num_parameters = entry.total_params
-                row.hf_model_url = entry.hf_model_url
+                row.hf_model_url = entry.hf_model_url or (
+                    match.hf_model_url if match is not None else None
+                )
                 row.evaluated_on = now.date()
                 row.external_source_url = MMTEB_API_URL
                 row.source_url = MMTEB_API_URL
                 row.external = True
                 row.updated_at = now
-                if entry.hf_model_url:
+                if match is not None:
+                    stats.auto_matched.append(entry.model_name)
+                elif entry.hf_model_url:
                     hf_models = list(paper.hf_models or [])
                     if entry.hf_model_url not in hf_models:
                         hf_models.append(entry.hf_model_url)
                         paper.hf_models = hf_models
                 stats.matched += 1
 
+            # Auto-matched models are published, so they are not reported as
+            # missing; the rest become release-radar signals.
+            published = set(stats.auto_matched)
+            stats.no_arxiv_models = [
+                name for name in stats.no_arxiv_models if name not in published
+            ]
+            stats.missing_papers = [
+                item
+                for item in stats.missing_papers
+                if item.rpartition(":")[0] not in published
+            ]
+            matcher.report_unmatched(
+                [model for model in unknown if model.name not in auto_matched]
+            )
             for row in managed_rows:
                 if row.model_name not in current_names:
                     self.db.delete(row)

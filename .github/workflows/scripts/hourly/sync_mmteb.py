@@ -28,6 +28,7 @@ class SyncMmtebJob(CronJobBase):
             )
             summary = stats.to_dict()
             for key in (
+                "auto_matched",
                 "no_arxiv_models",
                 "missing_papers",
                 "ambiguous_papers",
@@ -37,6 +38,7 @@ class SyncMmtebJob(CronJobBase):
             self.logger.info("mmteb_sync lane=%s stats=%s", self.lane_id, summary)
             self.logger.info("Papers processed: %s", stats.matched)
             for label, values in (
+                ("auto_matched", stats.auto_matched),
                 ("no_arxiv_models", stats.no_arxiv_models),
                 ("missing_papers", stats.missing_papers),
                 ("ambiguous_papers", stats.ambiguous_papers),

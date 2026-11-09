@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from math import isfinite
@@ -19,12 +20,27 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+    MatchedModel,
+)
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 ARC_PRIZE_SOURCE_URL = "https://arcprize.org/leaderboard"
 TASK_SLUG = "reasoning"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("ARC Prize")
 LEGACY_METHODOLOGY_PREFIX = "Strongest verified configuration for this paper/release"
+# Upstream model types that name one model. "Refinement", "Custom" and
+# "CoT + Synthesis" are systems built on a model; humans have no type.
+MODEL_TYPES = frozenset({"CoT", "Base LLM"})
+# Run settings in display names: "GPT-5.1 (Thinking, High)", "o3-mini (Low)",
+# "Claude Haiku 4.5 (Thinking 16K)", "Grok 4 (Thinking)".
+_CONFIG_SUFFIX = re.compile(
+    r"\s*\((?=[^)])(?:thinking|reasoning)?,?\s*"
+    r"(?:\d+k|none|minimal|low|medium|high|xhigh|max)?\)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -304,6 +320,8 @@ class ArcPrizeEntry:
     model_name: str
     score: float
     results_url: str | None
+    model_type: str | None = None
+    provider: str | None = None
 
 
 @dataclass(frozen=True)
@@ -323,6 +341,7 @@ class ArcPrizeSyncStats:
     updated: int = 0
     deleted: int = 0
     suppressed: int = 0
+    auto_matched: list[str] = field(default_factory=list)
     unmatched_model_families: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
 
@@ -333,6 +352,13 @@ class ArcPrizeSyncStats:
 def _required_text(raw: dict[str, Any], field_name: str) -> str:
     value = raw.get(field_name)
     if not isinstance(value, str) or not value.strip() or len(value) > 255:
+        raise ValueError(f"ARC Prize row has an invalid {field_name}")
+    return value
+
+
+def _optional_text(raw: dict[str, Any], field_name: str) -> str | None:
+    value = raw.get(field_name) or None
+    if value is not None and (not isinstance(value, str) or len(value) > 255):
         raise ValueError(f"ARC Prize row has an invalid {field_name}")
     return value
 
@@ -410,6 +436,8 @@ def parse_arc_prize_leaderboard(
                 model_name=model_name,
                 score=score * 100,
                 results_url=results_url,
+                model_type=_optional_text(raw, "modelType"),
+                provider=_optional_text(raw, "providerDisplayName"),
             )
         )
     return ArcPrizeSnapshot(
@@ -444,6 +472,19 @@ def _entry_identity(entry: ArcPrizeEntry) -> PaperIdentity | None:
         if identity:
             return identity
     return SELECTOR_PAPER_IDENTITIES.get(f"model:{entry.model_id}")
+
+
+def _model_name(entry: ArcPrizeEntry) -> str | None:
+    """The model an unreviewed row evaluates, or None for a system.
+
+    Provider-adapter harness runs, refinement and synthesis systems, Kaggle
+    entries and human panels are not one model, so they are never matched.
+    """
+    if entry.model_type not in MODEL_TYPES or entry.model_id.endswith(
+        "provider-adapter"
+    ):
+        return None
+    return _CONFIG_SUFFIX.sub("", entry.model_name)
 
 
 def _metric_value(row: Evaluation, metric_name: str) -> float | None:
@@ -520,13 +561,33 @@ class ArcPrizeSyncService:
 
         try:
             task, leaderboards = self._leaderboards()
+            # Unreviewed models go to the shared matcher under one name per
+            # model; the rest become release-radar signals.
+            unknown = {
+                name: LeaderboardModel(name, entry.provider or "")
+                for snapshot in snapshots
+                for entry in snapshot.entries
+                if _entry_identity(entry) is None
+                and (name := _model_name(entry)) is not None
+            }
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="arc-prize",
+                leaderboard_name="ARC Prize",
+                leaderboard_url=ARC_PRIZE_SOURCE_URL,
+            )
+            auto_identities = self._auto_identities(
+                matcher.match(list(unknown.values()))
+            )
             selected: dict[
                 tuple[str, str], tuple[ArcPrizeEntry, PaperIdentity, datetime]
             ] = {}
             unmatched: set[str] = set()
             for snapshot in snapshots:
                 for entry in snapshot.entries:
-                    identity = _entry_identity(entry)
+                    identity = _entry_identity(entry) or auto_identities.get(
+                        _model_name(entry) or ""
+                    )
                     if identity is None:
                         unmatched.add(entry.model_group or entry.model_id)
                         continue
@@ -536,6 +597,14 @@ class ArcPrizeSyncService:
                         selected[key] = (entry, identity, snapshot.generated_at)
             stats.selected = len(selected)
             stats.unmatched_model_families = sorted(unmatched)
+            matcher.report_unmatched(
+                [
+                    model
+                    for name, model in unknown.items()
+                    if name not in auto_identities
+                ]
+            )
+            auto_matched: set[str] = set()
 
             identities = {identity for _, identity, _ in selected.values()}
             arxiv_ids = {
@@ -680,8 +749,11 @@ class ArcPrizeSyncService:
                 managed.external = True
                 managed.hf_model_url = identity.hf_model_url
                 managed.updated_at = now
+                if _entry_identity(entry) is None:
+                    auto_matched.add(_model_name(entry) or entry.model_name)
                 stats.matched += 1
 
+            stats.auto_matched = sorted(auto_matched)
             for (dataset_id, identity_key), row in managed_by_key.items():
                 if (dataset_id, identity_key) not in active_keys:
                     self.db.delete(row)
@@ -700,6 +772,33 @@ class ArcPrizeSyncService:
         except Exception:
             self.db.rollback()
             raise
+
+    def _auto_identities(
+        self, matched: dict[str, MatchedModel]
+    ) -> dict[str, PaperIdentity]:
+        """Express matched papers as reviewed identities do.
+
+        Auto-matched rows then share the reviewed rows' one-row-per-release
+        selection and their methodology identity marker.
+        """
+        papers = {
+            paper.id: paper
+            for paper in self.db.query(Paper)
+            .filter(Paper.id.in_({match.paper_id for match in matched.values()}))
+            .all()
+        }
+        identities: dict[str, PaperIdentity] = {}
+        for name, match in matched.items():
+            paper = papers[match.paper_id]
+            if paper.arxiv_id:
+                identities[name] = _arxiv(
+                    paper.arxiv_id, is_open=match.is_open, hf=match.hf_model_url
+                )
+            elif paper.source == "external" and paper.source_url:
+                identities[name] = _source(
+                    paper.source_url, is_open=match.is_open, hf=match.hf_model_url
+                )
+        return identities
 
     @staticmethod
     def _managed_identity(methodology: str | None) -> str | None:

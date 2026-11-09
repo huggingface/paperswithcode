@@ -28,6 +28,7 @@ class SyncMmebJob(DatabaseCronJob):
             )
             summary = stats.to_dict()
             for key in (
+                "auto_matched",
                 "unresolved_models",
                 "ambiguous_models",
                 "unmanaged_conflicts",
@@ -36,6 +37,7 @@ class SyncMmebJob(DatabaseCronJob):
             self.logger.info("mmeb_sync version=%s stats=%s", self.version, summary)
             self.logger.info("Papers processed: %s", stats.matched)
             for label, values in (
+                ("auto_matched", stats.auto_matched),
                 ("unresolved_models", stats.unresolved_models),
                 ("ambiguous_models", stats.ambiguous_models),
                 ("unmanaged_conflicts", stats.unmanaged_conflicts),

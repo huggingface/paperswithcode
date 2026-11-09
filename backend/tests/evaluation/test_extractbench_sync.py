@@ -15,8 +15,14 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     PaperTask,
     Task,
     TaskDataset,
@@ -37,6 +43,7 @@ from backend.services.extractbench_sync_service import (
     fetch_extractbench_leaderboard,
     parse_extractbench_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -64,11 +71,13 @@ def _row(
     word: float | None = None,
     page: float | None = None,
     cost: str = "",
+    category: str = "OSS",
 ) -> str:
     word = overall - 10 if word is None else word
     page = overall - 5 if page is None else page
     return (
-        f"{provider},OSS,{overall},{overall},{overall},{overall},{cost},{word},{page}\n"
+        f"{provider},{category},{overall},{overall},{overall},{overall},{cost},"
+        f"{word},{page}\n"
     )
 
 
@@ -103,6 +112,12 @@ def _session() -> Session:
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
             PaperTask.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -248,6 +263,7 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
         "updated": 1,
         "deleted": 1,
         "excluded": 1,
+        "auto_matched": [],
         "unreviewed": ["Brand New Product"],
         "missing_papers": [],
     }
@@ -273,6 +289,69 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
     assert second.updated == 29
     assert second.deleted == 0
     assert session.query(Evaluation).count() == 30
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(eb, "MODEL_PAPER_IDENTITIES", _identities())
+    session.add(
+        Paper(
+            id=2000,
+            title="Introducing Nova Parse 2",
+            source="external",
+            source_url="https://example.com/nova-parse-2",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 2000)
+    session.commit()
+    entries = parse_extractbench_leaderboard(
+        _csv()
+        + _row("Nova Parse 2", 91, category="Commercial VLM")
+        + _row("OpenAI GPT-9 Mini", 88, category="Commercial VLM")
+        + _row("Acme Extract", 93, category="Specialized APIs")
+    )
+
+    first = ExtractBenchSyncService(session).sync(entries, discovery=_discovery())
+    second = ExtractBenchSyncService(session).sync(entries, discovery=_discovery())
+
+    assert first.auto_matched == second.auto_matched == ["Nova Parse 2"]
+    assert first.unreviewed == ["Acme Extract", "OpenAI GPT-9 Mini"]
+    assert (first.created, second.created, second.updated) == (31, 0, 31)
+    row = session.query(Evaluation).filter(Evaluation.paper_id == 2000).one()
+    assert (row.model_name, row.metrics[PRIMARY_METRIC_NAME]) == ("Nova Parse 2", 91)
+    assert row.is_open is False
+    assert session.query(PaperTask).filter(PaperTask.paper_id == 2000).count() == 1
+    # Products never become release signals; the unmatched model does.
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("OpenAI", "GPT-9 Mini")
+    assert signal.sightings == 2
+
+
+def test_auto_matched_oss_rows_are_open(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(eb, "MODEL_PAPER_IDENTITIES", _identities())
+    session.add(
+        Paper(
+            id=2000,
+            title="Nova Parse 2: Open Document Extraction",
+            source="external",
+            source_url="https://example.com/nova-parse-2",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 2000)
+    session.commit()
+    entries = parse_extractbench_leaderboard(
+        _csv() + _row("Nova Parse 2", 91, category="OSS")
+    )
+
+    ExtractBenchSyncService(session).sync(entries, discovery=_discovery())
+
+    row = session.query(Evaluation).filter(Evaluation.paper_id == 2000).one()
+    assert row.is_open is True
 
 
 def test_sync_refuses_when_reviewed_coverage_collapses(monkeypatch):

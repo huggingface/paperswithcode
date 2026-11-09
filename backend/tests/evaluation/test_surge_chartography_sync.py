@@ -36,6 +36,7 @@ from backend.services.surge_chartography_sync_service import (
     fetch_surge_chartography,
     parse_surge_chartography,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -371,6 +372,7 @@ def test_new_labels_are_auto_matched_or_handed_to_the_radar():
             is_latest_version=True,
         )
     )
+    add_release_evidence(session, 2001)
     session.commit()
     renamed = HTML.replace(">K2.5 (Thinking on)<", ">K3.5 (Thinking on)<", 1).replace(
         ">Large 3<", ">Large 4<", 1

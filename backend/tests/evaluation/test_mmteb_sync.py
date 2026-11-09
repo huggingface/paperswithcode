@@ -17,6 +17,10 @@ from backend.models.database import (
     Evaluation,
     HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
     PaperHfArtifact,
     Task,
@@ -36,6 +40,7 @@ from backend.services.mmteb_sync_service import (
     fetch_mmteb_leaderboard,
     parse_mmteb_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -113,6 +118,10 @@ def _session() -> Session:
             Evaluation.__table__,
             HfArtifact.__table__,
             PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -190,6 +199,7 @@ def test_parse_and_fetch_official_mmteb_api_contract():
 
     assert len(entries) == 100
     assert entries[0].model_name == "model-0"
+    assert entries[0].organization == "example"
     assert entries[0].arxiv_ids == ("2501.00000",)
     assert entries[0].total_params == 1_500_000_000
     assert entries[0].hf_model_url == "https://huggingface.co/example/model-0"
@@ -364,6 +374,67 @@ def test_sync_keeps_only_arxiv_resolved_models_and_is_idempotent():
     assert second.created == 0
     assert second.updated == 2
     assert session.query(Evaluation).count() == 3
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals():
+    session = _session()
+    session.add(
+        Paper(
+            id=5,
+            title="Nova-Embed-2: Scaling Multilingual Embeddings",
+            source="external",
+            source_url="https://example.com/nova-embed-2",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 5)
+    session.commit()
+    entries = [
+        _entry(
+            "alpha", ("2501.00001",), model_url="https://huggingface.co/example/alpha"
+        ),
+        MmtebEntry(
+            **{
+                **_entry(
+                    "Nova-Embed-2",
+                    (),
+                    model_url="https://huggingface.co/nova/Nova-Embed-2",
+                ).__dict__,
+                "organization": "nova",
+            }
+        ),
+        MmtebEntry(
+            **{
+                **_entry(
+                    "ghost-embed",
+                    ("2501.99999",),
+                    model_url="https://huggingface.co/ghost-lab/ghost-embed",
+                ).__dict__,
+                "organization": "ghost-lab",
+            }
+        ),
+    ]
+    now = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+
+    stats = MmtebSyncService(session).sync(entries, lane_id="overall", fetched_at=now)
+
+    assert stats.auto_matched == ["Nova-Embed-2"]
+    assert stats.no_arxiv_models == []
+    assert stats.missing_papers == ["ghost-embed:2501.99999"]
+    assert stats.to_dict()["auto_matched"] == ["Nova-Embed-2"]
+    row = session.query(Evaluation).filter(Evaluation.paper_id == 5).one()
+    assert row.model_name == "Nova-Embed-2"
+    assert row.is_open is True
+    assert row.hf_model_url == "https://huggingface.co/nova/Nova-Embed-2"
+    assert row.methodology.startswith(MANAGED_METHODOLOGY_PREFIX)
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("ghost-lab", "ghost-embed")
+
+    second = MmtebSyncService(session).sync(entries, lane_id="overall", fetched_at=now)
+    assert (second.created, second.updated, second.deleted) == (0, 2, 0)
+    assert session.query(Evaluation).count() == 2
+    assert session.query(ModelReleaseSignal).one().sightings == 2
 
 
 def test_dry_run_rolls_back_all_evaluation_and_paper_changes():

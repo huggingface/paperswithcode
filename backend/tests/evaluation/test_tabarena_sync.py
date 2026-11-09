@@ -17,6 +17,10 @@ from backend.models.database import (
     Evaluation,
     HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
     PaperHfArtifact,
     PaperProjectPage,
@@ -38,6 +42,7 @@ from backend.services.tabarena_sync_service import (
     fetch_tabarena_leaderboard,
     parse_tabarena_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -119,6 +124,10 @@ def _session() -> Session:
             PaperProjectPage.__table__,
             HfArtifact.__table__,
             PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -358,3 +367,43 @@ def test_tabfm_missing_canonical_report_does_not_fall_back_to_blog():
     assert stats.missing_papers == [f"{url}:2609.37959"]
     assert stats.created == 0
     assert session.query(Evaluation).count() == 0
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals():
+    session = _session()
+    session.add(
+        Paper(
+            id=3,
+            title="Lumen: A Tabular Foundation Model",
+            arxiv_id="2611.00001",
+            source="arxiv",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 3)
+    session.commit()
+    lumen_url = "https://github.com/lumen-lab/lumen"
+    seldon_url = "https://huggingface.co/Neuralk-AI/seldon"
+    entries = [
+        _entry("Lumen (tuned + ensembled)", lumen_url, 0, 1700),
+        _entry("Lumen (default)", lumen_url, 1, 1650),
+        _entry("Seldon (default)", seldon_url, 2, 1600),
+    ]
+    now = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+
+    stats = TabArenaSyncService(session).sync(entries, fetched_at=now)
+
+    assert stats.auto_matched == ["Lumen (tuned + ensembled)", "Lumen (default)"]
+    assert stats.unmatched_sources == [f"Seldon (default):{seldon_url}"]
+    rows = session.query(Evaluation).filter(Evaluation.paper_id == 3).all()
+    assert {row.model_name: row.metrics for row in rows} == {
+        "Lumen (tuned + ensembled)": {METRIC_NAME: 1700},
+        "Lumen (default)": {METRIC_NAME: 1650},
+    }
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("Neuralk-AI", "Seldon")
+
+    second = TabArenaSyncService(session).sync(entries, fetched_at=now)
+    assert (second.created, second.updated, second.deleted) == (0, 2, 0)
+    assert session.query(Evaluation).filter(Evaluation.paper_id == 3).count() == 2

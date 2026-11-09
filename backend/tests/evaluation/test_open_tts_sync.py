@@ -11,35 +11,41 @@ from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
 
+from backend.database.datasets_setup import add_open_tts_leaderboard as setup
 from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     PaperTask,
     Task,
     TaskDataset,
     TaskDatasetMetric,
 )
+from backend.services import open_tts_sync_service as tts
 from backend.services.artificial_analysis_sync_service import (
     ArtificialAnalysisDiscovery,
     PaperIdentity,
 )
-from backend.services import open_tts_sync_service as tts
-from backend.database.datasets_setup import add_open_tts_leaderboard as setup
-
 from backend.services.open_tts_sync_service import (
     DEFAULT_DATASETS,
     DEFAULT_LANGUAGE,
-    SPACE_APP_URL,
     MANAGED_METHODOLOGY_PREFIX,
+    SPACE_APP_URL,
     SPACE_SOURCE_URL,
     OpenTtsEntry,
     OpenTtsSyncService,
     fetch_open_tts_leaderboard,
     parse_open_tts_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -291,6 +297,12 @@ def _session() -> Session:
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
             PaperTask.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -404,6 +416,7 @@ def test_sync_is_idempotent_and_only_replaces_managed_rows(monkeypatch):
         "created": 1,
         "updated": 0,
         "deleted": 2,
+        "auto_matched": [],
         "excluded_models": ["org/unreviewed"],
         "missing_papers": [],
     }
@@ -420,6 +433,56 @@ def test_sync_is_idempotent_and_only_replaces_managed_rows(monkeypatch):
     assert managed.evaluated_on.isoformat() == "2026-09-11"
     assert rows["Manual result"].best_rank == 1
     assert session.query(PaperTask).one().source == "auto"
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(tts, "MODEL_PAPER_IDENTITIES", {})
+    session.add(
+        Paper(
+            id=10,
+            title="Introducing Echo TTS 2",
+            source="external",
+            source_url="https://example.com/echo-tts-2",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 10)
+    session.commit()
+    english = [
+        OpenTtsEntry("echo-lab/echo-tts-2", "Echo TTS 2", 1, 1.5, 20.0, True),
+        OpenTtsEntry("voice-lab/Voice-9", "Voice 9", 2, 2.5, 8.0, False),
+    ]
+    leaderboards = {
+        tts.DATASET_SLUG: english,
+        tts.ALL_LANGUAGE_DATASET_SLUG: english[:1],
+    }
+    discovery = ArtificialAnalysisDiscovery(papers={})
+    now = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+
+    first = OpenTtsSyncService(session).sync_benchmarks(
+        leaderboards, discovery=discovery, fetched_at=now
+    )
+    second = OpenTtsSyncService(session).sync_benchmarks(
+        leaderboards, discovery=discovery, fetched_at=now
+    )
+
+    for stats in (*first.values(), *second.values()):
+        assert stats.auto_matched == ["echo-lab/echo-tts-2"]
+    assert first[tts.DATASET_SLUG].excluded_models == ["voice-lab/Voice-9"]
+    assert first[tts.DATASET_SLUG].created == second[tts.DATASET_SLUG].updated == 1
+    rows = session.query(Evaluation).filter(Evaluation.paper_id == 10).all()
+    assert sorted(row.dataset_id for row in rows) == [2_400, 2_401]
+    assert {row.model_name for row in rows} == {"Echo TTS 2"}
+    assert {row.hf_model_url for row in rows} == {
+        "https://huggingface.co/echo-lab/echo-tts-2"
+    }
+    assert session.query(PaperTask).filter(PaperTask.paper_id == 10).count() == 1
+    # One signal per sync run, whichever views list the model.
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("voice-lab", "Voice 9")
+    assert signal.sightings == 2
 
 
 def test_sync_rolls_back_dry_run(monkeypatch):

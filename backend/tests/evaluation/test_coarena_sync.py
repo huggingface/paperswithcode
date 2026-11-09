@@ -1,5 +1,6 @@
 """Validation and idempotency tests for the living CoArena sync."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import httpx
@@ -13,8 +14,14 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     Task,
     TaskDataset,
     TaskDatasetMetric,
@@ -30,6 +37,7 @@ from backend.services.coarena_sync_service import (
     fetch_coarena_leaderboard,
     parse_coarena_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -56,6 +64,12 @@ def _session() -> Session:
             TaskDataset.__table__,
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -232,6 +246,7 @@ def test_sync_upserts_matched_rows_and_deletes_only_stale_managed_rows():
         "created": 1,
         "updated": 1,
         "deleted": 1,
+        "auto_matched": [],
         "unmatched_models": ["unreviewed"],
         "missing_papers": [],
     }
@@ -301,3 +316,39 @@ def test_company_still_rejects_malformed_non_null_values(company):
 )
 def test_reviewed_models_resolve_to_release_pages(model_id, source_url):
     assert MODEL_PAPER_IDENTITIES[model_id].source_url == source_url
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals():
+    session = _session()
+    session.add(
+        Paper(
+            id=3,
+            title="Introducing Nova Agent 2",
+            source="external",
+            source_url="https://example.com/nova-agent-2",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 3)
+    session.commit()
+    entries = [
+        _entry("nova-agent-2", "Nova Agent 2", 1100),
+        replace(_entry("ghost-1", "Ghost 1", 1000), company="Ghost Labs"),
+    ]
+    now = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+
+    stats = CoArenaSyncService(session).sync(entries, fetched_at=now)
+
+    assert stats.auto_matched == ["nova-agent-2"]
+    assert stats.unmatched_models == ["ghost-1"]
+    row = session.query(Evaluation).filter(Evaluation.paper_id == 3).one()
+    assert (row.model_name, row.metrics) == ("Nova Agent 2", {METRIC_NAME: 1100})
+    assert row.is_open is False
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("Ghost Labs", "Ghost 1")
+
+    second = CoArenaSyncService(session).sync(entries, fetched_at=now)
+    assert (second.created, second.updated, second.deleted) == (0, 1, 0)
+    assert session.query(Evaluation).filter(Evaluation.paper_id == 3).count() == 1
+    assert session.query(ModelReleaseSignal).one().sightings == 2

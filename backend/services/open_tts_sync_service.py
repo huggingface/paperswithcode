@@ -24,6 +24,11 @@ from backend.services.artificial_analysis_sync_service import (
     PaperIdentity,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+    MatchedModel,
+)
 from backend.services.leaderboard_sync_catalog import (
     resolve_leaderboard,
 )
@@ -140,6 +145,7 @@ class OpenTtsSyncStats:
     created: int = 0
     updated: int = 0
     deleted: int = 0
+    auto_matched: list[str] = field(default_factory=list)
     excluded_models: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
 
@@ -373,6 +379,7 @@ class OpenTtsSyncService:
         *,
         dataset_slug: str,
         discovery: ArtificialAnalysisDiscovery,
+        auto_matched: dict[str, MatchedModel],
         now: datetime,
     ) -> OpenTtsSyncStats:
         stats = OpenTtsSyncStats(fetched=len(entries))
@@ -409,12 +416,16 @@ class OpenTtsSyncService:
         }
         for entry in entries:
             key = entry.model_id.casefold()
-            if key not in reviewed_ids:
+            if key in reviewed_ids:
+                paper_id = discovery.papers.get(entry.model_id)
+                if paper_id is None:
+                    stats.missing_papers.append(entry.model_id)
+                    continue
+            elif (match := auto_matched.get(entry.model_name)) is not None:
+                paper_id = match.paper_id
+                stats.auto_matched.append(entry.model_id)
+            else:
                 stats.excluded_models.append(entry.model_id)
-                continue
-            paper_id = discovery.papers.get(entry.model_id)
-            if paper_id is None:
-                stats.missing_papers.append(entry.model_id)
                 continue
             selected_ids.add(key)
             row = managed_by_id.get(key)
@@ -480,15 +491,39 @@ class OpenTtsSyncService:
         if now.tzinfo is None:
             now = now.replace(tzinfo=UTC)
         try:
+            # Models outside the reviewed catalog go to the shared matcher
+            # once for both views; the rest become release-radar signals.
+            reviewed_ids = {model_id.casefold() for model_id in MODEL_PAPER_IDENTITIES}
+            unknown = list(
+                {
+                    entry.model_id.casefold(): LeaderboardModel(
+                        entry.model_name, entry.model_id.split("/", 1)[0]
+                    )
+                    for entries in leaderboards.values()
+                    for entry in entries
+                    if entry.model_id.casefold() not in reviewed_ids
+                }.values()
+            )
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="open-tts",
+                leaderboard_name="Open TTS",
+                leaderboard_url=SPACE_SOURCE_URL,
+            )
+            auto_matched = matcher.match(unknown)
             stats = {
                 dataset_slug: self._sync_dataset(
                     entries,
                     dataset_slug=dataset_slug,
                     discovery=discovery,
+                    auto_matched=auto_matched,
                     now=now,
                 )
                 for dataset_slug, entries in leaderboards.items()
             }
+            matcher.report_unmatched(
+                [model for model in unknown if model.name not in auto_matched]
+            )
             if commit:
                 self.db.commit()
             else:

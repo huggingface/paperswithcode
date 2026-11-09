@@ -15,8 +15,18 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
+    PaperProjectPage,
+    PaperRepository,
+    ProjectPage,
+    Repository,
     Task,
     TaskDataset,
     TaskDatasetMetric,
@@ -26,9 +36,11 @@ from backend.services.mmeb_sync_service import (
     MMEB_CONFIG_URL,
     MmebEntry,
     MmebSyncService,
+    _lab,
     fetch_mmeb_leaderboard,
     parse_mmeb_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -162,6 +174,16 @@ def _session() -> Session:
             TaskDataset.__table__,
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            Repository.__table__,
+            PaperRepository.__table__,
+            ProjectPage.__table__,
+            PaperProjectPage.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -256,3 +278,71 @@ def test_sync_replaces_only_managed_rows_and_is_idempotent():
     assert second.created == 0
     assert second.updated == 1
     assert session.query(Evaluation).count() == 2
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals():
+    session = _session()
+    session.add(
+        Paper(
+            id=2,
+            title="Introducing Nova Embed 2",
+            source="external",
+            source_url="https://example.com/nova-embed-2",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 2)
+    session.commit()
+    entries = [
+        _entry(),
+        MmebEntry(
+            **{
+                **_entry().__dict__,
+                "model_name": "Nova Embed 2",
+                "model_url": "https://github.com/nova-lab/nova-embed",
+                "is_open": True,
+            }
+        ),
+        MmebEntry(
+            **{
+                **_entry().__dict__,
+                "model_name": "Ghost-Embed-7B",
+                "model_url": "https://huggingface.co/ghost-lab/Ghost-Embed-7B",
+                "hf_model_url": "https://huggingface.co/ghost-lab/Ghost-Embed-7B",
+            }
+        ),
+    ]
+
+    stats = MmebSyncService(session).sync(entries, version="v2")
+
+    assert stats.auto_matched == ["Nova Embed 2"]
+    assert stats.unresolved_models == ["Ghost-Embed-7B"]
+    assert stats.to_dict()["auto_matched"] == ["Nova Embed 2"]
+    row = session.query(Evaluation).filter(Evaluation.paper_id == 2).one()
+    assert (row.model_name, row.is_open) == ("Nova Embed 2", True)
+    assert row.methodology.startswith(MANAGED_METHODOLOGY_PREFIX)
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("ghost-lab", "Ghost-Embed-7B")
+
+    second = MmebSyncService(session).sync(entries, version="v2")
+
+    assert (second.created, second.updated, second.deleted) == (0, 2, 0)
+    assert session.query(Evaluation).count() == 2
+
+
+@pytest.mark.parametrize(
+    ("url", "lab"),
+    [
+        ("https://huggingface.co/ghost-lab/Ghost-Embed", "ghost-lab"),
+        ("https://huggingface.co/spaces/ghost-lab/demo", "ghost-lab"),
+        ("https://huggingface.co/blog/ghost-lab/ghost-embed", "ghost-lab"),
+        ("https://huggingface.co/papers/2611.01234", ""),
+        ("https://github.com/ghost-lab/ghost-embed", "ghost-lab"),
+        ("https://arxiv.org/abs/2611.01234", ""),
+        ("https://docs.octen.ai/embed", "docs.octen.ai"),
+        ("", ""),
+    ],
+)
+def test_lab_reads_the_publisher_from_a_model_link(url, lab):
+    assert _lab(url) == lab

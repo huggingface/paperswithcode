@@ -13,8 +13,14 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     Task,
     TaskDataset,
     TaskDatasetMetric,
@@ -30,6 +36,7 @@ from backend.services.three_d_arena_sync_service import (
     fetch_arena_leaderboard,
     parse_arena_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 def _public_payload() -> list[dict]:
@@ -69,6 +76,12 @@ def _session() -> Session:
             TaskDataset.__table__,
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -252,6 +265,7 @@ def test_sync_upserts_matched_rows_deletes_only_stale_managed_rows():
         "created": 1,
         "updated": 1,
         "deleted": 1,
+        "auto_matched": [],
         "unmatched_models": ["Unmatched Product"],
         "missing_papers": [],
     }
@@ -372,3 +386,41 @@ def test_sync_deletes_duplicate_leftover_when_canonical_row_exists():
 def test_unilat3d_variants_resolve_to_the_unilat3d_paper():
     assert MODEL_PAPER_ARXIV_IDS["UniLat3D-3DGS"] == "2509.25079"
     assert MODEL_PAPER_ARXIV_IDS["UniLat3D-Mesh"] == "2509.25079"
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals():
+    session = _session()
+    session.add(
+        Paper(
+            id=3,
+            title="Meshy-7: Production-Ready 3D Generation",
+            source="external",
+            source_url="https://example.com/meshy-7",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 3)
+    session.commit()
+    entries = [
+        ArenaEntry("Meshy-7", 1, 1400, 500, False),
+        ArenaEntry("PicGen3D", 2, 1300, 400, False),
+    ]
+    now = datetime(2026, 11, 9, 12, 0, tzinfo=UTC)
+
+    stats = ThreeDArenaSyncService(session).sync(entries, fetched_at=now)
+
+    assert stats.auto_matched == ["Meshy-7"]
+    assert stats.unmatched_models == ["PicGen3D"]
+    row = session.query(Evaluation).filter(Evaluation.paper_id == 3).one()
+    assert (row.model_name, row.metrics, row.is_open) == (
+        "Meshy-7",
+        {METRIC_NAME: 1400},
+        False,
+    )
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("PicGen3D", "PicGen3D")
+
+    second = ThreeDArenaSyncService(session).sync(entries, fetched_at=now)
+    assert (second.created, second.updated, second.deleted) == (0, 1, 0)
+    assert session.query(Evaluation).filter(Evaluation.paper_id == 3).count() == 1

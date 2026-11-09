@@ -23,6 +23,11 @@ from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
 )
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+    vendor_label_model,
+)
 from backend.services.leaderboard_sync_catalog import (
     resolve_leaderboard,
 )
@@ -56,6 +61,9 @@ MIN_EXPECTED_ENTRIES = 30
 MAX_EXPECTED_ENTRIES = 400
 # Refuse to replace the managed leaderboard when the reviewed subset collapses.
 MIN_REVIEWED_ENTRIES = 20
+# Categories whose rows are single models; the rest are extraction products,
+# coding-agent harnesses and LlamaExtract tiers that need a reviewed identity.
+MODEL_CATEGORIES = frozenset({"Commercial VLM", "OSS"})
 
 
 @dataclass(frozen=True)
@@ -320,11 +328,18 @@ class ExtractBenchSyncStats:
     updated: int = 0
     deleted: int = 0
     excluded: int = 0
+    auto_matched: list[str] = field(default_factory=list)
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
+
+
+def _leaderboard_model(entry: ExtractBenchEntry) -> LeaderboardModel:
+    # The CSV has no lab column: take the lab of a known model family
+    # ("Qwen3.8 27B"), else the vendor the label leads with ("OpenAI GPT-6").
+    return vendor_label_model(entry.provider)
 
 
 def _score(value: str, *, field_name: str, provider: str) -> float:
@@ -498,11 +513,14 @@ class ExtractBenchSyncService:
                 .all()
             }
             reviewed: list[ExtractBenchEntry] = []
+            new_models: list[ExtractBenchEntry] = []
             for entry in entries:
                 if entry.provider in MODEL_PAPER_IDENTITIES:
                     reviewed.append(entry)
                 elif entry.provider in EXCLUDED_PROVIDERS:
                     stats.excluded += 1
+                elif entry.category in MODEL_CATEGORIES:
+                    new_models.append(entry)
                 else:
                     stats.unreviewed.append(entry.provider)
             if len(reviewed) < MIN_REVIEWED_ENTRIES:
@@ -510,9 +528,17 @@ class ExtractBenchSyncService:
                     f"ExtractBench has only {len(reviewed)} reviewed rows; refusing "
                     "to replace the managed leaderboard"
                 )
-
-            now = datetime.now(UTC)
-            published: set[str] = set()
+            # New single-model rows are matched to an indexed paper; the rest
+            # become release-radar signals and match on a later run.
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="extractbench",
+                leaderboard_name="ExtractBench",
+                leaderboard_url=EXTRACTBENCH_SOURCE_URL,
+            )
+            matched = matcher.match([_leaderboard_model(e) for e in new_models])
+            # (entry, paper id, is_open, HF model URL)
+            publishable: list[tuple[ExtractBenchEntry, int, bool, str | None]] = []
             for entry in reviewed:
                 identity = MODEL_PAPER_IDENTITIES[entry.provider]
                 paper_id = discovery.papers.get(identity.key)
@@ -523,6 +549,32 @@ class ExtractBenchSyncService:
                         )
                     stats.missing_papers.append(entry.provider)
                     continue
+                publishable.append((entry, paper_id, identity.is_open, None))
+            for entry in new_models:
+                if (match := matched.get(_leaderboard_model(entry).name)) is None:
+                    stats.unreviewed.append(entry.provider)
+                    continue
+                publishable.append(
+                    (
+                        entry,
+                        match.paper_id,
+                        # Upstream lists open-weight models as OSS.
+                        entry.category == "OSS" or match.is_open,
+                        match.hf_model_url,
+                    )
+                )
+                stats.auto_matched.append(entry.provider)
+            matcher.report_unmatched(
+                [
+                    _leaderboard_model(e)
+                    for e in new_models
+                    if _leaderboard_model(e).name not in matched
+                ]
+            )
+
+            now = datetime.now(UTC)
+            published: set[str] = set()
+            for entry, paper_id, is_open, hf_model_url in publishable:
                 row = managed.get(entry.provider)
                 if row is None:
                     row = Evaluation(
@@ -538,13 +590,13 @@ class ExtractBenchSyncService:
                 row.methodology = _methodology(entry)
                 row.metrics = entry.metrics
                 row.uses_additional_data = False
-                row.is_open = identity.is_open
+                row.is_open = is_open
                 row.best_metric = PRIMARY_METRIC_NAME
                 row.evaluated_on = now.date()
                 row.external_source_url = EXTRACTBENCH_SOURCE_URL
                 row.source_url = EXTRACTBENCH_SOURCE_URL
                 row.external = True
-                row.hf_model_url = None
+                row.hf_model_url = hf_model_url
                 row.updated_at = now
                 if paper_id not in linked_paper_ids:
                     self.db.add(
