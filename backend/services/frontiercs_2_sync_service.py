@@ -400,6 +400,15 @@ class FrontierCS2SyncService:
                     if e.name not in matched
                 ]
             )
+            # Effort settings of one model match one catalog model name; the
+            # board keeps that model's best row.
+            best: dict[tuple[int | None, str, str | None], tuple] = {}
+            for item in selected:
+                paper_id, model_name, _, _, entry = item
+                key = (paper_id, model_name, entry.harness)
+                if key not in best or entry.pass_rate > best[key][4].pass_rate:
+                    best[key] = item
+            selected = list(best.values())
             rows = (
                 self.db.query(Evaluation)
                 .filter(

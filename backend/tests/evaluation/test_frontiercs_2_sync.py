@@ -493,3 +493,33 @@ def test_effort_settings_match_their_base_model():
         "GPT-6 Sol (max)": (2101, "GPT-6 Sol"),
         "GPT-6 Sol (high)": (2101, "GPT-6 Sol"),
     }
+
+
+def test_effort_settings_of_one_model_keep_its_best_row():
+    session = _session()
+    session.add(
+        Paper(
+            id=2102,
+            title="Introducing Effort Model",
+            source="external",
+            source_url="https://lab.example/effort-model",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.commit()
+    # Two Codex CLI rows become two settings of one new model.
+    source = _new_model(SOURCE, "astra", "Effort Model (max)")
+    source = _new_model(source, "sol", "Effort Model (high)")
+    parsed = parse_frontiercs_2(source)
+    best = max(
+        (e for e in parsed.entries if e.name.startswith("Effort Model")),
+        key=lambda e: e.pass_rate,
+    )
+
+    FrontierCS2SyncService(session).sync(parsed)
+
+    effort_rows = [row for row in _rows(session).values() if row.paper_id == 2102]
+    assert len(effort_rows) == 1
+    assert effort_rows[0].model_name.startswith("Effort Model")
+    assert effort_rows[0].metrics[PASS_RATE] == best.pass_rate
