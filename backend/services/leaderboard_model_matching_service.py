@@ -18,9 +18,11 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
+    Evaluation,
     HfArtifact,
     ModelProviderAlias,
     ModelRelease,
@@ -54,6 +56,66 @@ class MatchedModel:
 _EFFORT_SUFFIX = re.compile(
     r"\s*\((?:max|xhigh|high|medium|low|minimal)\)\s*$", re.IGNORECASE
 )
+
+
+# Model families whose name alone identifies the lab, for boards that list
+# bare model names. A name outside these families reports no signal.
+_FAMILY_LABS = (
+    (re.compile(r"(?:claude|opus|sonnet|haiku)\b", re.I), "Anthropic"),
+    (re.compile(r"(?:gpt|chatgpt|codex)\b|o\d+(?:\b|-)", re.I), "OpenAI"),
+    (re.compile(r"(?:gemini|gemma)\b", re.I), "Google DeepMind"),
+    (re.compile(r"grok\b", re.I), "xAI"),
+    (re.compile(r"(?:qwen|qwq)", re.I), "Alibaba"),
+    (re.compile(r"deepseek\b", re.I), "DeepSeek"),
+    (re.compile(r"kimi\b", re.I), "Moonshot AI"),
+    (re.compile(r"glm\b", re.I), "Z.ai"),
+    (re.compile(r"minimax\b", re.I), "MiniMax"),
+    (re.compile(r"(?:mistral|magistral|devstral|codestral)\b", re.I), "Mistral AI"),
+    (re.compile(r"llama\b", re.I), "Meta"),
+    (re.compile(r"amazon nova\b", re.I), "Amazon"),
+    (re.compile(r"(?:hunyuan|hy\d)", re.I), "Tencent"),
+    (re.compile(r"ernie\b", re.I), "Baidu"),
+    (re.compile(r"(?:doubao|seed)\b", re.I), "ByteDance"),
+    (re.compile(r"longcat\b", re.I), "Meituan"),
+    (re.compile(r"nemotron\b", re.I), "NVIDIA"),
+    (re.compile(r"mimo\b", re.I), "Xiaomi"),
+)
+
+
+def family_lab(model_name: str) -> str:
+    """The lab a bare model name belongs to, or "" when it is not obvious."""
+    name = model_name.strip()
+    return next((lab for pattern, lab in _FAMILY_LABS if pattern.match(name)), "")
+
+
+_VENDORS = {
+    "alibaba",
+    "amazon",
+    "anthropic",
+    "deepseek",
+    "google",
+    "meta",
+    "microsoft",
+    "mistral",
+    "moonshot",
+    "nvidia",
+    "openai",
+    "xai",
+}
+_SETTINGS = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def vendor_label_model(label: str, lab: str = "") -> LeaderboardModel:
+    """The model a vendor-prefixed board label names.
+
+    "OpenAI GPT-6.1 Sol (Reasoning Low)" is GPT-6.1 Sol by OpenAI, so every
+    setting of one model matches, and reaches the radar, as one model.
+    """
+    name = _SETTINGS.sub("", label).strip() or label
+    vendor, _, rest = name.partition(" ")
+    if rest and vendor.casefold() in _VENDORS:
+        lab, name = lab or vendor, rest
+    return LeaderboardModel(name, lab or family_lab(name) or vendor)
 
 
 def _identity_key(value: str) -> str:
@@ -186,6 +248,12 @@ class LeaderboardModelMatcher:
             .filter(
                 Paper.is_latest_version,
                 Paper.title.ilike(f"%{'%'.join(tokens)}%"),
+                # A model's own paper reports results or records its release;
+                # "KNN and ANN-based ..." or "GPT-4o: ... in piglets" do not.
+                or_(
+                    exists().where(Evaluation.paper_id == Paper.id),
+                    exists().where(ModelRelease.paper_id == Paper.id),
+                ),
             )
             .order_by(Paper.id)
             .limit(TITLE_CANDIDATE_LIMIT + 1)
@@ -208,9 +276,10 @@ class LeaderboardModelMatcher:
         now = now or datetime.now(UTC)
         reported: list[str] = []
         for model in dict.fromkeys(models):
-            if not model.lab.strip():
+            lab = model.lab.strip() or family_lab(model.name)
+            if not lab:
                 continue
-            key = signal_key(model.lab, model.name)
+            key = signal_key(lab, model.name)
             row = (
                 self.db.query(ModelReleaseSignal)
                 .filter(ModelReleaseSignal.signal_key == key)
@@ -221,7 +290,7 @@ class LeaderboardModelMatcher:
                     ModelReleaseSignal(
                         id=uuid.uuid4(),
                         signal_key=key,
-                        lab=model.lab,
+                        lab=lab,
                         model_name=model.name,
                         title=f"{model.name} on the {self.leaderboard_name} leaderboard",
                         lead_url=self.leaderboard_url,

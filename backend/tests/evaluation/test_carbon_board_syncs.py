@@ -30,6 +30,10 @@ from backend.models.database import (
 )
 from backend.services import carbon_board_syncs as boards
 from backend.services.carbon_board_identities import IDENTITIES
+from backend.services.leaderboard_model_matching_service import (
+    family_lab,
+    vendor_label_model,
+)
 from backend.services.live_leaderboard_sync import (
     LeaderboardEntry,
     LiveLeaderboard,
@@ -597,6 +601,39 @@ def test_sync_reports_unknown_models_to_the_release_radar():
     assert session.query(ModelReleaseSignal).count() == 1
 
 
+def test_bare_model_names_reach_the_radar_with_their_family_lab():
+    session = _session()
+    LiveLeaderboardSyncService(session, _board()).sync(
+        [
+            _entry("Opus 5.5 (xhigh)", 3.61),
+            _entry("Sol 5.6 (xhigh)", 4.7),
+            LeaderboardEntry("Claude Mythos 6", 2.0, "2.0% resolved", "mini-SWE-agent"),
+            LeaderboardEntry("Mystery 9", 1.0, "1.0% resolved", "mini-SWE-agent"),
+        ]
+    )
+    signals = session.query(ModelReleaseSignal).all()
+    assert [(s.lab, s.model_name) for s in signals] == [
+        ("Anthropic", "Claude Mythos 6")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "lab"),
+    [
+        ("GPT-6.2 Terra", "OpenAI"),
+        ("o5-mini", "OpenAI"),
+        ("Gemini 4.1 Pro", "Google DeepMind"),
+        ("Qwen3.9-Max", "Alibaba"),
+        ("Kimi K4", "Moonshot AI"),
+        ("Nova 2", ""),
+        ("Opus 5.5", "Anthropic"),
+        ("Sol 5.6", ""),
+    ],
+)
+def test_family_lab(name, lab):
+    assert family_lab(name) == lab
+
+
 def test_sync_refuses_a_collapsed_board_without_writing():
     session = _session()
     with pytest.raises(RuntimeError, match="only 1 reviewed entries"):
@@ -673,3 +710,17 @@ def test_vals_index_maps_the_open_mistral_large_4_release():
     assert IDENTITIES["vals-index-v2-2"]["Mercury 3"].source_url == (
         "https://www.inceptionlabs.ai/blog/introducing-mercury-3"
     )
+
+
+@pytest.mark.parametrize(
+    ("label", "lab", "expected"),
+    [
+        ("OpenAI GPT-6.1 Sol (Reasoning Low)", "", ("GPT-6.1 Sol", "OpenAI")),
+        ("Google Gemini 3.7 Flash (Thinking High)", "", ("Gemini 3.7 Flash", "Google")),
+        ("Qwen3.8 27B", "", ("Qwen3.8 27B", "Alibaba")),
+        ("NovaOCR-3", "nova-lab", ("NovaOCR-3", "nova-lab")),
+    ],
+)
+def test_vendor_label_model(label, lab, expected):
+    model = vendor_label_model(label, lab)
+    assert (model.name, model.lab) == expected

@@ -14,8 +14,14 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     PaperTask,
     Task,
     TaskDataset,
@@ -32,11 +38,12 @@ from backend.services.open_asr_sync_service import (
     OpenAsrPaperDiscoveryService,
     OpenAsrSyncService,
     _model_identity_matches_paper,
-    display_model_names,
     default_table_columns,
+    display_model_names,
     fetch_open_asr_leaderboard,
     parse_open_asr_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -80,6 +87,12 @@ def _session() -> Session:
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
             PaperTask.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -375,6 +388,7 @@ def test_sync_replaces_legacy_and_only_deletes_stale_managed_rows(monkeypatch):
         "created": 2,
         "updated": 0,
         "deleted": 2,
+        "auto_matched": [],
         "unmatched_models": ["vendor/unmatched"],
         "missing_papers": [],
     }
@@ -465,6 +479,38 @@ def test_discovered_paper_creates_managed_row_and_task_link():
     task_link = session.query(PaperTask).filter(PaperTask.paper_id == paper.id).one()
     assert task_link.task_id == 12
     assert task_link.source == "auto"
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals():
+    session = _session()
+    session.add(
+        Paper(
+            id=3,
+            title="Introducing Scribe v3",
+            source="external",
+            source_url="https://example.com/scribe-v3",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 3)
+    session.commit()
+
+    stats = OpenAsrSyncService(session).sync(
+        [
+            OpenAsrEntry("vendor/scribe-v3", 1, 4.1, None, False),
+            OpenAsrEntry("other-lab/Ear-2", 2, 4.9, None, False),
+        ],
+        fetched_at=datetime(2026, 11, 9, 12, 0, tzinfo=UTC),
+    )
+
+    assert stats.auto_matched == ["vendor/scribe-v3"]
+    assert stats.unmatched_models == ["other-lab/Ear-2"]
+    row = session.query(Evaluation).filter(Evaluation.paper_id == 3).one()
+    assert (row.model_name, row.metrics) == ("scribe-v3", {"WER": 4.1})
+    assert session.query(PaperTask).filter(PaperTask.paper_id == 3).one().task_id == 12
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("other-lab", "Ear-2")
 
 
 def test_display_names_drop_org_and_hf_suffix_but_keep_runtime_and_collisions():

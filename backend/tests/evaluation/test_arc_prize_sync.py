@@ -12,8 +12,14 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     Task,
     TaskDataset,
     TaskDatasetMetric,
@@ -22,14 +28,16 @@ from backend.services.arc_prize_sync_service import (
     ARC_PRIZE_SOURCE_URL,
     LEGACY_METHODOLOGY_PREFIX,
     MANAGED_METHODOLOGY_PREFIX,
+    VERSION_CONFIGS,
     ArcPrizeEntry,
     ArcPrizeSnapshot,
     ArcPrizeSyncService,
-    VERSION_CONFIGS,
     VersionConfig,
     _entry_identity,
+    _model_name,
     parse_arc_prize_leaderboard,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -56,6 +64,12 @@ def _session() -> Session:
             TaskDataset.__table__,
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -139,6 +153,8 @@ def test_parser_validates_contract_and_converts_scores_to_percent():
                 "modelId": f"model-{index}",
                 "modelGroup": "example",
                 "modelDisplayName": f"Model {index}",
+                "modelType": "CoT",
+                "providerDisplayName": "Example Lab",
                 "datasetId": "test_private",
                 "datasetDisplayName": "ARC-Test",
                 "score": 0.25 + index / 10,
@@ -153,6 +169,8 @@ def test_parser_validates_contract_and_converts_scores_to_percent():
 
     assert snapshot.version == "test"
     assert snapshot.entries[0].score == 25
+    assert snapshot.entries[0].model_type == "CoT"
+    assert snapshot.entries[0].provider == "Example Lab"
     assert snapshot.generated_at.tzinfo == UTC
 
     payload["evaluations"][1]["modelId"] = "model-0"
@@ -354,3 +372,140 @@ def test_sync_adopts_legacy_preserves_stronger_manual_and_deletes_only_managed()
     assert second.updated == 2
     assert second.suppressed == 1
     assert session.query(Evaluation).count() == 3
+
+
+def _model_entry(
+    version: str,
+    model_id: str,
+    name: str,
+    score: float,
+    *,
+    model_type: str = "CoT",
+    provider: str = "Anthropic",
+) -> ArcPrizeEntry:
+    return ArcPrizeEntry(
+        version, model_id, f"{model_id}-group", name, score, None, model_type, provider
+    )
+
+
+@pytest.mark.parametrize(
+    ("entry", "model_name"),
+    [
+        (_model_entry("v1", "a", "GPT-5.1 (Thinking, High)", 1), "GPT-5.1"),
+        (
+            _model_entry("v1", "b", "Claude Haiku 4.5 (Thinking 16K)", 1),
+            "Claude Haiku 4.5",
+        ),
+        (_model_entry("v1", "c", "o3-mini (Low)", 1), "o3-mini"),
+        (
+            _model_entry("v1", "d", "Gemini 2.5 Flash (Preview) (Thinking 1K)", 1),
+            "Gemini 2.5 Flash (Preview)",
+        ),
+        (
+            _model_entry("v1", "e", "Grok 4 (Fast Reasoning)", 1),
+            "Grok 4 (Fast Reasoning)",
+        ),
+        (_model_entry("v1", "f", "GPT-4.1", 1, model_type="Base LLM"), "GPT-4.1"),
+        (
+            _model_entry(
+                "v3",
+                "gpt-6-sol-high-provider-adapter",
+                "GPT-6 Sol - Provider Adapter (High)",
+                1,
+            ),
+            None,
+        ),
+        (
+            _model_entry("v1", "g", "Grok 4 (Refinement)", 1, model_type="Refinement"),
+            None,
+        ),
+        (
+            _model_entry(
+                "v1", "h", "o3-preview (Low)", 1, model_type="CoT + Synthesis"
+            ),
+            None,
+        ),
+        (_model_entry("v1", "i", "Human Panel", 1, model_type=None), None),
+    ],
+)
+def test_only_single_model_rows_are_routed_under_their_model_name(entry, model_name):
+    assert _model_name(entry) == model_name
+
+
+def test_unknown_models_match_announcements_or_become_radar_signals():
+    session = _session()
+    session.add(
+        Paper(
+            id=3,
+            title="Introducing Claude Haiku 4.5",
+            source="external",
+            source_url="https://www.anthropic.com/news/claude-haiku-4-5",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    add_release_evidence(session, 3)
+    session.commit()
+    snapshots = [
+        _snapshot(
+            "v1",
+            [
+                _model_entry("v1", "haiku-16k", "Claude Haiku 4.5 (Thinking 16K)", 40),
+                _model_entry("v1", "haiku-1k", "Claude Haiku 4.5 (Thinking 1K)", 20),
+                _model_entry(
+                    "v1",
+                    "nemotron-high",
+                    "Nemotron 3.5 Super VL (High)",
+                    30,
+                    provider="NVIDIA",
+                ),
+                _model_entry(
+                    "v1",
+                    "gpt-6-sol-high-provider-adapter",
+                    "GPT-6 Sol - Provider Adapter (High)",
+                    50,
+                    provider="OpenAI",
+                ),
+            ],
+        ),
+        _snapshot(
+            "v2",
+            [
+                _model_entry(
+                    "v2",
+                    "jeremy",
+                    "Grok 4 (Refinement)",
+                    30,
+                    model_type="Refinement",
+                    provider="J. Berman",
+                )
+            ],
+        ),
+        _snapshot("v3", []),
+    ]
+
+    stats = ArcPrizeSyncService(session).sync(snapshots)
+
+    assert stats.auto_matched == ["Claude Haiku 4.5"]
+    assert stats.to_dict()["auto_matched"] == ["Claude Haiku 4.5"]
+    assert stats.unmatched_model_families == [
+        "gpt-6-sol-high-provider-adapter-group",
+        "jeremy-group",
+        "nemotron-high-group",
+    ]
+    row = session.query(Evaluation).one()
+    assert (row.paper_id, row.dataset_id) == (3, 67)
+    assert row.model_name == "Claude Haiku 4.5 (Thinking 16K)"
+    assert row.metrics == {"Accuracy": 40}
+    assert row.methodology.startswith(
+        f"{MANAGED_METHODOLOGY_PREFIX} "
+        "identity=source:https://www.anthropic.com/news/claude-haiku-4-5;"
+    )
+    signal = session.query(ModelReleaseSignal).one()
+    assert (signal.lab, signal.model_name) == ("NVIDIA", "Nemotron 3.5 Super VL")
+
+    second = ArcPrizeSyncService(session).sync(snapshots)
+
+    assert (second.created, second.updated, second.deleted) == (0, 1, 0)
+    assert session.query(Evaluation).count() == 1
+    assert session.query(ModelReleaseSignal).one().sightings == 2

@@ -22,6 +22,10 @@ from backend.models.database import (
 )
 from backend.services.arxiv_service import ArxivService
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_model_matching_service import (
+    LeaderboardModel,
+    LeaderboardModelMatcher,
+)
 from backend.services.leaderboard_sync_catalog import (
     resolve_leaderboard,
 )
@@ -214,6 +218,7 @@ class OpenAsrSyncStats:
     created: int = 0
     updated: int = 0
     deleted: int = 0
+    auto_matched: list[str] = field(default_factory=list)
     unmatched_models: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
 
@@ -224,6 +229,7 @@ class OpenAsrSyncStats:
             "created": self.created,
             "updated": self.updated,
             "deleted": self.deleted,
+            "auto_matched": self.auto_matched,
             "unmatched_models": self.unmatched_models,
             "missing_papers": self.missing_papers,
         }
@@ -656,6 +662,28 @@ class OpenAsrSyncService:
                 for row in legacy_rows
             }
             upstream_names = {entry.model_id.casefold() for entry in entries}
+            # Models without a reviewed, carried-over or discovered paper go
+            # to the shared matcher; the rest become release-radar signals.
+            unknown = [
+                LeaderboardModel(
+                    display_names[entry.model_id], entry.model_id.split("/", 1)[0]
+                )
+                for entry in entries
+                if entry.model_id.casefold() not in managed_by_id
+                and entry.model_id.casefold() not in legacy_papers
+                and self._reviewed_arxiv_id(entry.model_id) is None
+                and (
+                    discovery is None
+                    or hub_model_id(entry.model_id).casefold() not in discovery.resolved
+                )
+            ]
+            matcher = LeaderboardModelMatcher(
+                self.db,
+                provider="open-asr",
+                leaderboard_name="Open ASR",
+                leaderboard_url=SPACE_SOURCE_URL,
+            )
+            auto_matched = matcher.match(unknown)
 
             for entry in entries:
                 key = entry.model_id.casefold()
@@ -676,6 +704,9 @@ class OpenAsrSyncService:
                 if paper_id is None:
                     if discovered is not None:
                         paper_id = discovered.paper_id
+                    elif (match := auto_matched.get(display_name)) is not None:
+                        paper_id = match.paper_id
+                        stats.auto_matched.append(entry.model_id)
                     if paper_id is None and arxiv_id is None:
                         stats.unmatched_models.append(entry.model_id)
                         continue
@@ -722,6 +753,7 @@ class OpenAsrSyncService:
                 if discovered is not None:
                     row.hf_model_url = discovered.hf_model_url
                     row.num_parameters = discovered.num_parameters
+                if discovered is not None or entry.model_id in stats.auto_matched:
                     if (
                         self.db.query(PaperTask)
                         .filter(
@@ -740,6 +772,9 @@ class OpenAsrSyncService:
                         )
                 stats.matched += 1
 
+            matcher.report_unmatched(
+                [model for model in unknown if model.name not in auto_matched]
+            )
             for row in managed_rows:
                 if self._managed_model_id(row).casefold() not in upstream_names:
                     self.db.delete(row)

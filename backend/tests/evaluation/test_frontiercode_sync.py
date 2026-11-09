@@ -44,6 +44,7 @@ from backend.services.frontiercode_sync_service import (
     parse_frontiercode_leaderboard,
     select_best_entries,
 )
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -301,6 +302,7 @@ def test_unreviewed_models_are_auto_matched_or_handed_to_the_radar(monkeypatch):
     session = _session()
     # Paper 1018 announces "Model 18"; nothing announces "Model 19".
     session.get(Paper, 1019).title = "Benchmarking Model 19 on Long Tasks"
+    add_release_evidence(session, 1018)
     session.commit()
     payload = _payload()
     payload["v1_1"]["colors"] = {"Model 18": "#111", "Model 19": "#222"}
