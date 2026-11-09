@@ -10,6 +10,8 @@ export interface ResearchFollow {
   created_at: string;
   /** An author's face or an organization's logo. */
   image_url?: string | null;
+  /** A subtask's parent task slug, for its icon. */
+  parent_slug?: string | null;
 }
 export interface FollowSuggestion {
   entity_id: number;
@@ -101,6 +103,8 @@ export interface FollowingFilters {
   topicOnly?: boolean;
   /** Only papers matching this topic. */
   topicId?: number;
+  /** Only papers matching this follow, as `<kind>:<entity_id>`. */
+  follow?: string;
 }
 export const researchApi = {
   follows: () => apiRequest<ResearchFollow[]>('/me/follows'),
@@ -114,6 +118,7 @@ export const researchApi = {
     if (!filters.startDate && !filters.endDate) params.set('all_time', 'true');
     if (filters.topicOnly) params.set('topic_only', 'true');
     if (filters.topicId !== undefined) params.set('topic_id', String(filters.topicId));
+    if (filters.follow) params.set('follow', filters.follow);
     return apiRequest<ResearchEntry[]>(`/me/following?${params}`);
   },
   topics: () => apiRequest<ResearchTopic[]>('/me/topics'),

@@ -1,85 +1,19 @@
-import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Building2, FlaskConical, ListChecks, Mail, Trophy, User, type LucideIcon } from 'lucide-react';
-import { researchApi, type FollowKind, type ResearchFollow } from '@/lib/api/research';
+import { ArrowRight, Mail } from 'lucide-react';
+import { researchApi } from '@/lib/api/research';
 import { researchQueryKeys } from '@/lib/api/queryKeys';
 import { useAuth } from '@/lib/authContext';
-import { useResearchFollows, useSetFollow, type FollowChange } from '@/lib/researchTopic';
+import { useResearchFollows, useResearchTopics } from '@/lib/researchTopic';
 import { hfLoginUrl } from '@/lib/apiUrl';
 import HfSignInButton from './HfSignInButton';
 import { Switch } from './ui/switch';
-import TopicSettings from './TopicSettings';
-
-const KINDS: { kind: FollowKind; label: string; icon: LucideIcon; browse?: string }[] = [
-  { kind: 'task', label: 'Tasks', icon: ListChecks, browse: '/tasks' },
-  { kind: 'method', label: 'Methods', icon: FlaskConical, browse: '/methods' },
-  { kind: 'benchmark', label: 'Benchmarks', icon: Trophy },
-  { kind: 'author', label: 'Authors', icon: User },
-  { kind: 'organization', label: 'Organizations', icon: Building2, browse: '/organizations' },
-];
-const followKey = (f: Pick<ResearchFollow, 'kind' | 'entity_id'>) => `${f.kind}:${f.entity_id}`;
-const since = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-
-function FollowList({ follows }: { follows: ResearchFollow[] }) {
-  const { user } = useAuth();
-  const client = useQueryClient();
-  // Unfollowed rows stay until the page is left, so a misclick can be undone in place.
-  const [unfollowed, setUnfollowed] = useState<ResearchFollow[]>([]);
-  const change = useSetFollow<FollowChange & { row: ResearchFollow }>({ onChanged: ({ row, follow }) => {
-    // Update the cached list in the same render as `unfollowed` so a row never flips state late.
-    client.setQueryData<ResearchFollow[]>(researchQueryKeys.follows(user?.hf_subject), current => follow
-      ? [...(current ?? []), row]
-      : (current ?? []).filter(f => followKey(f) !== followKey(row)));
-    setUnfollowed(current => [
-      ...current.filter(r => followKey(r) !== followKey(row)),
-      ...(follow ? [] : [row]),
-    ]);
-  } });
-  const active = new Set(follows.map(followKey));
-  const rows = [...follows, ...unfollowed.filter(f => !active.has(followKey(f)))];
-  if (!rows.length) return <EmptyFollows />;
-  return <>
-    {KINDS.map(({ kind, label, icon: Icon }) => {
-      const group = rows.filter(f => f.kind === kind).sort((a, b) => a.name.localeCompare(b.name));
-      if (!group.length) return null;
-      return <div key={kind} className="research-follow-group">
-        <h3 className="research-follow-group-title"><Icon aria-hidden="true" />{label}</h3>
-        <ul className="research-follow-list">{group.map(f => {
-          const following = active.has(followKey(f));
-          return <li key={followKey(f)} className={following ? 'research-follow-row' : 'research-follow-row is-unfollowed'}>
-            <div className="research-follow-text">
-              <Link to={f.url}>{f.name}</Link>
-              <span>{following ? `Following since ${since(f.created_at)}` : 'Unfollowed'}</span>
-            </div>
-            <button type="button" className={following ? 'research-follow-action' : 'research-follow-action is-refollow'}
-              disabled={change.isPending} aria-label={`${following ? 'Unfollow' : 'Follow'} ${f.name}`}
-              onClick={() => change.mutate({ kind: f.kind, entityId: f.entity_id, follow: !following, row: f })}>
-              {following ? 'Unfollow' : 'Follow again'}
-            </button>
-          </li>;
-        })}</ul>
-      </div>;
-    })}
-    {change.error && <p className="settings-token-error" role="alert">Could not update follows. Please try again.</p>}
-  </>;
-}
-
-function EmptyFollows() {
-  return <div className="research-follow-empty">
-    <p><strong>You are not following any tasks, methods, benchmarks, authors, or organizations yet.</strong></p>
-    <p>Use the Follow button on any task, method, benchmark, author, or organization page.</p>
-    <div className="research-follow-browse">
-      {KINDS.filter(k => k.browse).map(({ kind, label, icon: Icon, browse }) =>
-        <Link key={kind} to={browse!}><Icon aria-hidden="true" />Browse {label.toLowerCase()}</Link>)}
-    </div>
-  </div>;
-}
 
 export default function ResearchSettings() {
   const { user } = useAuth();
   const client = useQueryClient();
   const follows = useResearchFollows();
+  const topics = useResearchTopics();
   const emailKey = researchQueryKeys.email(user?.hf_subject);
   const email = useQuery({ queryKey: emailKey, queryFn: researchApi.email, enabled: !!user });
   const update = useMutation({ mutationFn: researchApi.setEmail, onSuccess: data => client.setQueryData(emailKey, data) });
@@ -90,7 +24,7 @@ export default function ResearchSettings() {
     },
     onSuccess: show => client.setQueryData<typeof email.data>(emailKey, current => current && { ...current, show_as_follower: show }),
   });
-  const count = follows.data?.length ?? 0;
+  const count = (follows.data?.length ?? 0) + (topics.data?.length ?? 0);
   const prefs = email.data;
   const canOptIn = !!prefs?.email && !prefs.suppressed;
   return <>
@@ -108,9 +42,15 @@ export default function ResearchSettings() {
       {!user ? <div className="settings-note">
         <span>Sign in to follow research and build your personal feed.</span>
         <div className="settings-note-action"><HfSignInButton returnTo="/settings" /></div>
-      </div> : follows.isLoading ? <p className="settings-billing-loading">Loading follows…</p>
-        : follows.error ? <p className="settings-token-error" role="alert">Could not load your follows.</p>
-        : <><TopicSettings /><FollowList follows={follows.data ?? []} /></>}
+      </div> : <div className="settings-row">
+        <span className="settings-row-text">
+          <span className="settings-row-label">Topics and follows</span>
+          <span className="settings-row-desc">
+            Add, reword, reorder, unfollow, or make topics private in one place, the Edit feed pop-up on Following.
+          </span>
+        </span>
+        <Link className="research-feed-link" to="/following?edit=1">Edit feed <ArrowRight aria-hidden="true" /></Link>
+      </div>}
       {user && prefs && <div className="settings-row">
         <label className="settings-row-text" htmlFor="research-show-as-follower">
           <span className="settings-row-label">Show my avatar on topics I follow</span>

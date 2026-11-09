@@ -326,6 +326,6 @@ describe("SettingsView chat-disabled boundary", () => {
     expect(screen.queryByRole("heading", { name: "Inference Providers" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "OpenRouter" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeVisible();
-    expect(fetchMock.mock.calls.every(([url]) => String(url).includes("/me/follows") || String(url).includes("/me/research-email"))).toBe(true);
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes("/me/follows") || String(url).includes("/me/topics") || String(url).includes("/me/research-email"))).toBe(true);
   });
 });

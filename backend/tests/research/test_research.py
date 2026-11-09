@@ -241,6 +241,19 @@ def test_descendants_privacy_methods_and_canonical_versions(db, now):
     )
 
 
+def test_follows_carry_a_subtasks_parent_slug(db, now):
+    parent = Task(name="Parent", slug="parent-task")
+    db.add(parent)
+    db.flush()
+    child = Task(name="Child", slug="child-task", parent_id=parent.id)
+    db.add(child)
+    db.flush()
+    follow(db, "task", parent, now)
+    follow(db, "task", child, now)
+    listed = {f.name: f.parent_slug for f in follows.follows(db, "alice")}
+    assert listed == {"Parent": None, "Child": "parent-task"}
+
+
 def test_all_entity_types_and_feed_backfill_not_email(db, now):
     p = paper(db, now)
     author = Author(name="Author")
@@ -392,6 +405,8 @@ def test_api_ownership_optin_and_unsubscribe(db, now, monkeypatch):
     assert client.get("/me/follows").json() == []
     assert client.put(f"/me/follows/task/{t.id}").status_code == 204
     assert len(client.get("/me/follows").json()) == 1
+    assert client.get(f"/me/following?follow=task:{t.id}").status_code == 200
+    assert client.get("/me/following?follow=topic:1").status_code == 422
     assert client.delete(f"/me/follows/task/{t.id}").status_code == 204
     assert db.get(ResearchFollow, ("bob", "task", t.id)) is not None
     # The follow turned the weekly email on by default; unfollowing keeps it.

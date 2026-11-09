@@ -200,7 +200,7 @@ function FollowTopicButton({ topic }: { topic: PublicTopic }) {
       </> : <><Plus aria-hidden="true" />Follow</>}
     </button>
     {error && <span className="research-follow-hint is-error" role="alert">
-      {error instanceof ApiError && error.status === 409 ? 'You follow the maximum number of topics. Remove one in Settings first.' : 'Could not update this topic. Please try again.'}
+      {error instanceof ApiError && error.status === 409 ? 'You follow the maximum number of topics. Unfollow one in Edit feed on Following first.' : 'Could not update this topic. Please try again.'}
     </span>}
   </>;
 }

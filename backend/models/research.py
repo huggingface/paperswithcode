@@ -17,6 +17,8 @@ class FollowView(BaseModel):
     created_at: datetime
     # An author's face or an organization's logo, for follow chips.
     image_url: str | None = None
+    # A subtask's parent task slug, so the bubble can borrow the parent's icon.
+    parent_slug: str | None = None
 
 
 class FollowSuggestion(BaseModel):

@@ -118,6 +118,21 @@ export function clearPendingTopicFollow() {
   sessionStorage.removeItem(PENDING_TOPIC_FOLLOW_KEY);
 }
 
+// Popular topics a guest picked in the feed pop-up wait here while they sign in.
+const PENDING_TOPIC_FOLLOWS_KEY = 'pwc:following-pending-topic-follows';
+
+export function stashPendingTopicFollows(ids: number[]) {
+  sessionStorage.setItem(PENDING_TOPIC_FOLLOWS_KEY, JSON.stringify(ids));
+}
+
+export function readPendingTopicFollows(): number[] {
+  return JSON.parse(sessionStorage.getItem(PENDING_TOPIC_FOLLOWS_KEY) ?? '[]');
+}
+
+export function clearPendingTopicFollows() {
+  sessionStorage.removeItem(PENDING_TOPIC_FOLLOWS_KEY);
+}
+
 export const isTopicBuilding = (topic: ResearchTopic) => topic.status === 'pending' || topic.status === 'running';
 
 /** The signed-in account's topics, oldest first; polled every `pollMs` while one is still being matched. */
