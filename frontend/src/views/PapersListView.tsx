@@ -19,6 +19,8 @@ import { formatStarCount } from "@/lib/frameworks";
 import { queryCenteredExcerpt } from "@/lib/paperSearchPresentation";
 import { isChatEnabled } from "@/lib/apiUrl";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
+import type { Paper } from "@/lib/api/papers.types";
+import type { PaginatedResponse } from "@/lib/api/shared.types";
 
 const SEARCH_SORTS = [
   ["relevance", "relevance"],
@@ -26,13 +28,27 @@ const SEARCH_SORTS = [
   ["citation_count", "most cited"],
 ] as const;
 
+type PaperScope = NonNullable<PaginatedResponse<Paper>["scope"]>;
+
+/**
+ * /papers serves three feeds: papers implemented by one framework or GitHub
+ * repository (`scoped`), ranked full-text results (`search`), and the
+ * browsable corpus (`browse`). A scope wins over a search query.
+ */
+type PapersListMode = "scoped" | "search" | "browse";
+
+function papersListMode(searchParams: URLSearchParams): PapersListMode {
+  if (searchParams.get("framework") || searchParams.get("repository")) return "scoped";
+  return (searchParams.get("search") || "").trim() ? "search" : "browse";
+}
+
 const PapersListView: React.FC = () => {
   const [searchParams] = useSearchParams();
   const framework = searchParams.get("framework") || undefined;
   const repository = searchParams.get("repository") || undefined;
-  const isRepositoryFeed = Boolean(framework || repository);
   const urlSearch = searchParams.get("search") || "";
-  const isSearchMode = !isRepositoryFeed && urlSearch.trim().length > 0;
+  const mode = papersListMode(searchParams);
+  const isSearchMode = mode === "search";
   // Browsing defaults to the last month like other paper feeds; search results stay all time.
   const feed = usePaperFeedParams({ defaultToLastMonth: !isSearchMode });
   const { setSearchParams } = feed;
@@ -64,12 +80,12 @@ const PapersListView: React.FC = () => {
 
   // Search results default to relevance, which other paper feeds do not offer.
   const sortBy = isSearchMode && feed.orderBy === "trending" ? "relevance" : feed.orderBy;
-  const hasCode = !isRepositoryFeed && feed.hasCode;
+  const hasCode = mode !== "scoped" && feed.hasCode;
 
   const listFilters = {
     ...feed.filters,
     has_code: hasCode,
-    search: isRepositoryFeed ? debouncedSearch || undefined : undefined,
+    search: mode === "scoped" ? debouncedSearch || undefined : undefined,
     conference: searchParams.get("conference") || undefined,
     latest_only: searchParams.get("latest_only") !== "false",
     framework,
@@ -96,7 +112,6 @@ const PapersListView: React.FC = () => {
   );
   const infinite = isSearchMode ? searchInfinite : regularInfinite;
 
-  const topTasks = useQuery({ ...catalogQueries.topTasks(8), enabled: !isRepositoryFeed && !isSearchMode });
 
   const cards = useMemo(() => {
     const all = infinite.data?.pages.flatMap((p) => p.results) || [];
@@ -112,7 +127,6 @@ const PapersListView: React.FC = () => {
   const scope = regularInfinite.data?.pages?.[0]?.scope;
   const searchMetadata = searchInfinite.data?.pages?.at(-1);
   const frameworkNotFound = framework && isNotFound(infinite.error);
-  const headingName = scope?.kind === "framework" ? scope.framework_name : scope?.repository;
 
   return (
     <div className="page">
@@ -127,65 +141,16 @@ const PapersListView: React.FC = () => {
       )}
       <div className="feed-header">
         <div>
-          <h1 className="feed-title">
-            {isRepositoryFeed
-              ? <>Papers implemented by <em>{headingName || framework || repository}</em></>
-              : isSearchMode
-                ? <>Search results for <em>“{urlSearch}”</em></>
-                : <>All <em>Papers</em></>}
-          </h1>
-          <div className="feed-subtitle">
-            {isRepositoryFeed
-              ? scope?.kind === "framework"
-                ? totalCount > 0 && `${totalCount.toLocaleString()} papers.`
-                : scope?.repository
-                ? <>GitHub repository <strong>{scope.repository}</strong>. {totalCount > 0 && `${totalCount.toLocaleString()} papers.`}</>
-                : "Repository-scoped paper feed."
-              : isSearchMode
-                ? `${cards.length} loaded from the most relevant results.`
-                : <>Search the full corpus. {totalCount > 0 && `${totalCount.toLocaleString()} ${feed.dateRange.startDate || feed.dateRange.endDate ? "papers in this date range" : "papers indexed"}.`}</>}
-          </div>
-          {isRepositoryFeed && scope && (
-            <div className="paper-feed-scope-links">
-              <div className="paper-feed-primary-links">
-                {scope.github_url && (
-                  <a
-                    href={scope.github_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={scope.kind === "framework" ? "task-framework-link" : "framework-link"}
-                  >
-                    <Icon name="github" size={13} />
-                    {scope.kind === "framework" ? (
-                      <>
-                        <span>{scope.repository || "GitHub"}</span>
-                        {scope.num_stars != null && (
-                          <span className="task-framework-link-stars">
-                            ★ {formatStarCount(scope.num_stars)}
-                          </span>
-                        )}
-                      </>
-                    ) : "GitHub"}
-                  </a>
-                )}
-                {scope.kind === "framework" && scope.introducing_paper_arxiv_id && (
-                  <Link
-                    to={`/paper/${scope.introducing_paper_arxiv_id}`}
-                    className="framework-link"
-                  >
-                    Introducing paper
-                  </Link>
-                )}
-              </div>
-              {scope.kind === "framework" && scope.recommended_tasks && scope.recommended_tasks.length > 0 && (
-                <div className="paper-feed-task-tags">
-                  {scope.recommended_tasks.map((task) =>
-                    task.slug ? <TagChip key={task.id} slug={task.slug} label={task.name} /> : null
-                  )}
-                </div>
-              )}
-            </div>
-          )}
+          <PapersListHeading
+            mode={mode}
+            scope={scope}
+            scopeName={framework || repository}
+            search={urlSearch}
+            totalCount={totalCount}
+            loadedCount={cards.length}
+            hasDateRange={Boolean(feed.dateRange.startDate || feed.dateRange.endDate)}
+          />
+          {mode === "scoped" && scope && <ScopeLinks scope={scope} />}
         </div>
         <PaperDateFilter
           startDate={feed.dateRange.startDate}
@@ -206,27 +171,8 @@ const PapersListView: React.FC = () => {
         </div>
       </div>
 
-      <div className={isRepositoryFeed || isSearchMode ? "papers-feed-layout-scoped" : "layout-with-sidebar"}>
-        {!isRepositoryFeed && !isSearchMode && <aside className="sidebar">
-          <div className="sidebar-section">
-            <div className="sidebar-label">Top Domains</div>
-            {topTasks.isLoading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Skeleton key={i} className="h-5 w-full" />
-                ))}
-              </div>
-            )}
-            <div className="sidebar-links">
-              {topTasks.data?.map((task) => (
-                <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
-                  {displayTaskName(task.name, task.slug)}
-                  {task.paper_count != null && <span className="count">{task.paper_count}</span>}
-                </Link>
-              ))}
-            </div>
-          </div>
-        </aside>}
+      <div className={mode === "browse" ? "layout-with-sidebar" : "papers-feed-layout-scoped"}>
+        {mode === "browse" && <TopDomainsSidebar />}
 
         <div>
           <PaperFeedToolbar
@@ -234,7 +180,7 @@ const PapersListView: React.FC = () => {
             sorts={isSearchMode ? SEARCH_SORTS : PAPER_FEED_SORTS}
             activeSort={sortBy}
             showDateFilter={false}
-            showHasCode={!isRepositoryFeed}
+            showHasCode={mode !== "scoped"}
           >
             <div className="results-count">{cards.length} loaded</div>
           </PaperFeedToolbar>
@@ -277,5 +223,130 @@ const PapersListView: React.FC = () => {
     </div>
   );
 };
+
+function PapersListHeading({
+  mode,
+  scope,
+  scopeName,
+  search,
+  totalCount,
+  loadedCount,
+  hasDateRange,
+}: {
+  mode: PapersListMode;
+  scope: PaperScope | null | undefined;
+  scopeName: string | undefined;
+  search: string;
+  totalCount: number;
+  loadedCount: number;
+  hasDateRange: boolean;
+}) {
+  const papers = totalCount > 0 && `${totalCount.toLocaleString()} papers.`;
+  switch (mode) {
+    case "scoped": {
+      const name = scope?.kind === "framework" ? scope.framework_name : scope?.repository;
+      return (
+        <>
+          <h1 className="feed-title">Papers implemented by <em>{name || scopeName}</em></h1>
+          <div className="feed-subtitle">
+            {scope?.kind === "framework"
+              ? papers
+              : scope?.repository
+                ? <>GitHub repository <strong>{scope.repository}</strong>. {papers}</>
+                : "Repository-scoped paper feed."}
+          </div>
+        </>
+      );
+    }
+    case "search":
+      return (
+        <>
+          <h1 className="feed-title">Search results for <em>“{search}”</em></h1>
+          <div className="feed-subtitle">{`${loadedCount} loaded from the most relevant results.`}</div>
+        </>
+      );
+    case "browse":
+      return (
+        <>
+          <h1 className="feed-title">All <em>Papers</em></h1>
+          <div className="feed-subtitle">
+            Search the full corpus. {totalCount > 0 && `${totalCount.toLocaleString()} ${hasDateRange ? "papers in this date range" : "papers indexed"}.`}
+          </div>
+        </>
+      );
+  }
+}
+
+/** GitHub, introducing paper and recommended tasks of a framework or repository feed. */
+function ScopeLinks({ scope }: { scope: PaperScope }) {
+  const isFramework = scope.kind === "framework";
+  return (
+    <div className="paper-feed-scope-links">
+      <div className="paper-feed-primary-links">
+        {scope.github_url && (
+          <a
+            href={scope.github_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={isFramework ? "task-framework-link" : "framework-link"}
+          >
+            <Icon name="github" size={13} />
+            {isFramework ? (
+              <>
+                <span>{scope.repository || "GitHub"}</span>
+                {scope.num_stars != null && (
+                  <span className="task-framework-link-stars">
+                    ★ {formatStarCount(scope.num_stars)}
+                  </span>
+                )}
+              </>
+            ) : "GitHub"}
+          </a>
+        )}
+        {isFramework && scope.introducing_paper_arxiv_id && (
+          <Link
+            to={`/paper/${scope.introducing_paper_arxiv_id}`}
+            className="framework-link"
+          >
+            Introducing paper
+          </Link>
+        )}
+      </div>
+      {isFramework && scope.recommended_tasks && scope.recommended_tasks.length > 0 && (
+        <div className="paper-feed-task-tags">
+          {scope.recommended_tasks.map((task) =>
+            task.slug ? <TagChip key={task.id} slug={task.slug} label={task.name} /> : null
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TopDomainsSidebar() {
+  const topTasks = useQuery(catalogQueries.topTasks(8));
+  return (
+    <aside className="sidebar">
+      <div className="sidebar-section">
+        <div className="sidebar-label">Top Domains</div>
+        {topTasks.isLoading && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-5 w-full" />
+            ))}
+          </div>
+        )}
+        <div className="sidebar-links">
+          {topTasks.data?.map((task) => (
+            <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
+              {displayTaskName(task.name, task.slug)}
+              {task.paper_count != null && <span className="count">{task.paper_count}</span>}
+            </Link>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
 
 export default PapersListView;

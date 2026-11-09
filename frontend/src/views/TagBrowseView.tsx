@@ -170,14 +170,30 @@ export const HealthcareMedicalAiHub: React.FC<{
   );
 };
 
-const sortSubtasksForDisplay = (subtasks: Task[]) =>
-  [...subtasks].sort((a, b) => {
-    const aIsClassic = a.slug === "classic-language-modeling";
-    const bIsClassic = b.slug === "classic-language-modeling";
+/** Hand-tuned presentation for individual task pages; every other task uses the defaults. */
+interface TaskPagePresentation {
+  wideHero?: boolean;
+  compactFigure?: boolean;
+  /** A feature section between the hero and the benchmarks. */
+  feature?: React.FC<{ task: Task; relatedTasks: Task[] }>;
+  /** The feature already links the related tasks, so the sidebar does not repeat them. */
+  featureListsRelatedTasks?: boolean;
+}
 
-    if (aIsClassic !== bIsClassic) return aIsClassic ? 1 : -1;
-    return 0;
-  });
+const TASK_PAGES: Record<string, TaskPagePresentation> = {
+  "auto-research": { wideHero: true },
+  "omni-models": { compactFigure: true },
+  healthcare: { feature: HealthcareMedicalAiHub, featureListsRelatedTasks: true },
+  robotics: { feature: AstraRoboticsFeature },
+};
+
+/** Subtasks kept after the others, such as the pre-LLM language-modeling lineage. */
+const SUBTASKS_LISTED_LAST: ReadonlySet<string | undefined> = new Set(["classic-language-modeling"]);
+
+const sortSubtasksForDisplay = (subtasks: Task[]) =>
+  [...subtasks].sort(
+    (a, b) => Number(SUBTASKS_LISTED_LAST.has(a.slug)) - Number(SUBTASKS_LISTED_LAST.has(b.slug)),
+  );
 
 const TagBrowseView: React.FC = () => {
   const { taskSlug } = useParams<{ taskSlug: string }>();
@@ -285,6 +301,8 @@ const TagBrowseView: React.FC = () => {
   const parents = pageQ.data.parents || [];
   const taskName = displayTaskName(task.name, task.slug);
   const sisters = (pageQ.data.sisters || []).filter((s) => s.id !== task.id);
+  const presentation: TaskPagePresentation = (task.slug && TASK_PAGES[task.slug]) || {};
+  const Feature = presentation.feature;
   const recommendedFrameworks = pageQ.data.recommended_frameworks || [];
   const datasets = pageQ.data.benchmarks || [];
   const datasetsById = new Map(datasets.map((dataset) => [dataset.id, dataset]));
@@ -370,7 +388,7 @@ const TagBrowseView: React.FC = () => {
       <div
         className={
           task.image_url
-            ? `task-hero-grid${task.slug === "auto-research" ? " task-hero-grid--wide" : ""}`
+            ? `task-hero-grid${presentation.wideHero ? " task-hero-grid--wide" : ""}`
             : undefined
         }
       >
@@ -398,9 +416,7 @@ const TagBrowseView: React.FC = () => {
         </div>
         {task.image_url && (
           <figure
-            className={`task-figure-card${
-              task.slug === "omni-models" ? " task-figure-card--compact" : ""
-            }`}
+            className={`task-figure-card${presentation.compactFigure ? " task-figure-card--compact" : ""}`}
           >
             <div className="task-figure-img-wrap">
               <img
@@ -425,11 +441,7 @@ const TagBrowseView: React.FC = () => {
         )}
       </div>
 
-      {task.slug === "healthcare" && (
-        <HealthcareMedicalAiHub task={task} relatedTasks={sisters} />
-      )}
-
-      {task.slug === "robotics" && <AstraRoboticsFeature />}
+      {Feature && <Feature task={task} relatedTasks={sisters} />}
 
       <div className="task-page-grid" style={{ marginTop: 28 }}>
         <div>
@@ -689,7 +701,7 @@ const TagBrowseView: React.FC = () => {
         </div>
 
         <aside className="task-side">
-          {sisters.length > 0 && task.slug !== "healthcare" && (
+          {sisters.length > 0 && !presentation.featureListsRelatedTasks && (
             <div className="side-block">
               <div className="side-block-num">01/</div>
               <div className="side-block-label">Sister Tasks</div>
