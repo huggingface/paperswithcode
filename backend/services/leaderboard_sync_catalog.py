@@ -20,18 +20,13 @@ from backend.models.database import Dataset, Metric, Paper, Task, TaskDatasetMet
 
 @dataclass(frozen=True)
 class ModelIdentity:
-    """A reviewed leaderboard model and the paper that introduces it.
-
-    `renamed_from` lets a board adopt a hand-imported row stored under an
-    older model name instead of duplicating it.
-    """
+    """A reviewed leaderboard model and the paper that introduces it."""
 
     model_name: str
     arxiv_id: str | None = None
     source_url: str | None = None
     is_open: bool = False
     hf_model_url: str | None = None
-    renamed_from: str | None = None
 
     def __post_init__(self) -> None:
         if (self.arxiv_id is None) == (self.source_url is None):

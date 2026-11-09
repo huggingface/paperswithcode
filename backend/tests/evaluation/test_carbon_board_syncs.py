@@ -387,10 +387,13 @@ def test_every_board_has_identities_and_a_configured_fetcher():
         "sync_critpt",
         "sync_critpt_v2",
         "sync_terminal_bench_science",
+        "sync_vals_finance_agent",
+        "sync_surge_chartography",
     }
-    for sync in boards.BOARD_SYNCS.values():
+    for job, sync in boards.BOARD_SYNCS.items():
         assert len(sync.board.identities) >= sync.board.min_selected
-        assert sync.board.identities is IDENTITIES[sync.board.dataset_slug]
+        if job not in ("sync_vals_finance_agent", "sync_surge_chartography"):
+            assert sync.board.identities is IDENTITIES[sync.board.dataset_slug]
 
 
 # --- Engine -------------------------------------------------------------------
@@ -497,6 +500,7 @@ def test_sync_creates_rows_keeping_each_models_best_setting():
         'Official leaderboard entry "Sol 5.6 (xhigh) (mini-SWE-agent)"'
     )
     assert sol.best_rank == 1 and sol.external is True
+    assert sol.evaluated_on == datetime.now(UTC).date()
     assert (stats.created, stats.matched) == (2, 2)
 
 
@@ -524,6 +528,11 @@ def test_sync_adopts_a_hand_imported_row_and_its_unreported_harness():
     )
     assert (hand.harness, hand.metrics) == ("mini-SWE-agent", {METRIC: 3.61})
     assert hand.source_url == "https://example.com/board"
+    # The hand-written methodology stays as reviewer notes beneath the head.
+    assert hand.methodology.endswith(
+        "listed at https://example.com/board. Test protocol. "
+        "Hand import from the system card."
+    )
 
     # A second run only reports unchanged managed rows.
     again = LiveLeaderboardSyncService(session, _board()).sync(
@@ -673,3 +682,35 @@ def test_vals_index_maps_the_open_mistral_large_4_release():
     assert IDENTITIES["vals-index-v2-2"]["Mercury 3"].source_url == (
         "https://www.inceptionlabs.ai/blog/introducing-mercury-3"
     )
+
+
+def test_sync_keeps_reviewer_notes_and_other_metrics_of_managed_rows():
+    session = _session()
+    service = LiveLeaderboardSyncService(session, _board())
+    entries = [_entry("Opus 5.5 (xhigh)", 3.61), _entry("Sol 5.6 (xhigh)", 4.7)]
+    service.sync(entries)
+    opus = _rows(session)["Claude Opus 5.5 (mini-SWE-agent)"]
+    opus.methodology += " Reviewed against the paper."
+    opus.metrics = {**opus.metrics, "Cost ($)": 12.0}
+    session.commit()
+
+    unchanged = service.sync(entries)
+    assert unchanged.changed == 0
+    revised = service.sync([_entry("Opus 5.5 (xhigh)", 3.9), entries[1]])
+    assert revised.changed == 1
+    assert opus.metrics == {METRIC: 3.9, "Cost ($)": 12.0}
+    assert opus.methodology.endswith(
+        "3.9% resolved, listed at https://example.com/board. Test protocol. "
+        "Reviewed against the paper."
+    )
+
+
+def test_sync_appends_the_board_model_name_suffix():
+    session = _session()
+    LiveLeaderboardSyncService(session, _board(model_name_suffix=" (no tools)")).sync(
+        [_entry("Opus 5.5 (xhigh)", 3.61), _entry("Sol 5.6 (xhigh)", 4.7)]
+    )
+    assert set(_rows(session)) == {
+        "Claude Opus 5.5 (no tools) (mini-SWE-agent)",
+        "GPT-5.6 Sol (no tools) (mini-SWE-agent)",
+    }

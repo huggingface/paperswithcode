@@ -1,7 +1,6 @@
-"""Parsing, adoption, and rename tests for the Vals AI Finance Agent v2 sync."""
+"""Parsing and adoption tests for the Vals AI Finance Agent v2 board."""
 
 from dataclasses import replace
-from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -15,8 +14,14 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     PaperTask,
     Task,
     TaskDataset,
@@ -24,12 +29,12 @@ from backend.models.database import (
 )
 from backend.services import vals_finance_agent_sync_service as service
 from backend.services.carbon_board_identities import IDENTITIES
+from backend.services.live_leaderboard_sync import LiveLeaderboardSyncService
 from backend.services.vals_finance_agent_sync_service import (
-    MANAGED_METHODOLOGY_PREFIX,
+    BOARD,
     METRIC_NAME,
     MODEL_IDENTITIES,
     VALS_FINANCE_AGENT_URL,
-    ValsFinanceAgentSyncService,
     fetch_vals_finance_agent,
     parse_vals_finance_agent,
 )
@@ -51,12 +56,11 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
 HTML = (Path(__file__).parent / "fixtures" / "vals_finance_agent_v2.html").read_text()
 
 # The 69 rows hand-imported on 2026-10-14: model_name -> stored accuracy.
-# "Muse Spark 1.3" at 59.96 is Vals' "Muse Spark 1.3 Max" (mislabelled).
 PRODUCTION_ROWS = {
     "Gemini 4 Argon": 65.4,
     "Gemini 3.8 Flash": 61.44,
     "Muse Spark 1.2": 60.6,
-    "Muse Spark 1.3": 59.96,
+    "Muse Spark 1.3 Max": 59.96,
     "Muse Wonder Full (max)": 59.1,
     "Gemini 3.7 Flash": 59.04,
     "Claude Fable 5.1": 58.88,
@@ -139,7 +143,7 @@ def _identity(model_name: str):
     return next(
         identity
         for identity in MODEL_IDENTITIES.values()
-        if model_name in (identity.model_name, identity.renamed_from)
+        if identity.model_name == model_name
     )
 
 
@@ -156,6 +160,12 @@ def _session() -> Session:
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
             PaperTask.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -202,6 +212,10 @@ def _seed_production(session: Session) -> None:
     session.commit()
 
 
+def _sync(session: Session, entries, **kwargs):
+    return LiveLeaderboardSyncService(session, BOARD).sync(entries, **kwargs)
+
+
 def _rows(session: Session) -> dict[str, Evaluation]:
     return {
         row.model_name: row
@@ -215,12 +229,11 @@ def test_parse_and_fetch_the_leaderboard_table():
     entries = parse_vals_finance_agent(HTML)
     assert len(entries) == 78
     first = entries[0]
-    assert (first.position, first.label, str(first.accuracy)) == (
-        1,
+    assert (first.label, first.value, first.detail) == (
         "Gemini 4 Argon",
-        "65.40",
+        65.4,
+        "65.40% Accuracy",
     )
-    assert first.model_url.startswith("https://www.vals.ai/models/")
 
     def handler(request):
         assert str(request.url) == VALS_FINANCE_AGENT_URL
@@ -246,10 +259,7 @@ def test_parser_picks_leaderboard_next_to_sample_answer_tables():
     assert current.count("<table") == 2
     entries = parse_vals_finance_agent(current)
     assert len(entries) == 81
-    assert (entries[0].label, entries[0].accuracy) == (
-        "Gemini 4 Argon",
-        Decimal("65.40"),
-    )
+    assert (entries[0].label, entries[0].value) == ("Gemini 4 Argon", 65.4)
     assert entries[-1].label == "Command A+"
 
 
@@ -286,16 +296,15 @@ def test_parser_enforces_row_bounds_and_uniqueness(monkeypatch):
         parse_vals_finance_agent(duplicated)
 
 
-def test_first_run_adopts_renames_creates_and_reports():
+def test_first_run_adopts_creates_and_keeps_reviewer_notes():
     session = _session()
     _seed_production(session)
-    stats = ValsFinanceAgentSyncService(session).sync(parse_vals_finance_agent(HTML))
+    stats = _sync(session, parse_vals_finance_agent(HTML))
 
     assert stats.fetched == 78
     assert stats.matched == 78
     assert stats.adopted == 69
     assert stats.created == 9  # Muse Spark 1.3 and the eight newly indexed models
-    assert stats.renamed == ["Muse Spark 1.3 -> Muse Spark 1.3 Max"]
     assert stats.unreviewed == []
     assert stats.missing_papers == [] and stats.missing_upstream == []
     rows = _rows(session)
@@ -306,17 +315,37 @@ def test_first_run_adopts_renames_creates_and_reports():
     assert rows["MiMo-V2.5"].is_open and rows["MiMo-V2.5"].metrics == {
         METRIC_NAME: 36.73
     }
-    adopted = rows["Gemini 4 Argon"].methodology
-    assert adopted.startswith(MANAGED_METHODOLOGY_PREFIX)
-    assert adopted.endswith("Hand-reviewed notes for Gemini 4 Argon.")
-
-    again = ValsFinanceAgentSyncService(session).sync(parse_vals_finance_agent(HTML))
-    assert (again.adopted, again.created, again.changed, again.renamed) == (
-        0,
-        0,
-        0,
-        [],
+    assert rows["Gemini 4 Argon"].methodology == (
+        f'{BOARD.managed_prefix} Official leaderboard entry "Gemini 4 Argon": '
+        f"65.40% Accuracy, listed at {VALS_FINANCE_AGENT_URL}. "
+        "Hand-reviewed notes for Gemini 4 Argon."
     )
+
+    again = _sync(session, parse_vals_finance_agent(HTML))
+    assert (again.adopted, again.created, again.changed) == (0, 0, 0)
+    assert rows["Gemini 4 Argon"].methodology.endswith(
+        "Hand-reviewed notes for Gemini 4 Argon."
+    )
+
+
+def test_rows_written_by_the_former_vals_service_are_unchanged():
+    session = _session()
+    entries = parse_vals_finance_agent(HTML)
+    _sync(session, entries)
+    row = _rows(session)["Gemini 4 Argon"]
+    # The head the dedicated Finance Agent service wrote, with reviewer notes.
+    legacy = (
+        "Managed by the Papers with Code Vals AI Finance Agent v2 live sync. "
+        'Official leaderboard entry "Gemini 4 Argon": 65.40% Accuracy, listed '
+        "at https://www.vals.ai/benchmarks/fabv2. Vals AI Finance Agent v2 "
+        "official leaderboard (accessed 2026-10-14)."
+    )
+    row.methodology = legacy
+    session.commit()
+
+    stats = _sync(session, entries)
+    assert stats.changed == 0
+    assert row.methodology == legacy
 
 
 def test_dated_deepseek_checkpoint_attaches_to_its_release_paper():
@@ -324,12 +353,9 @@ def test_dated_deepseek_checkpoint_attaches_to_its_release_paper():
     entries = parse_vals_finance_agent(HTML)
     flash = next(entry for entry in entries if entry.label == "DeepSeek V4.1 Flash")
     checkpoint = replace(
-        flash,
-        position=len(entries) + 1,
-        label="DeepSeek V4.1 Flash 1017",
-        accuracy=Decimal("54.10"),
+        flash, name="DeepSeek V4.1 Flash 1017", value=54.1, detail="54.10% Accuracy"
     )
-    stats = ValsFinanceAgentSyncService(session).sync([*entries, checkpoint])
+    stats = _sync(session, [*entries, checkpoint])
 
     assert stats.unreviewed == []
     rows = _rows(session)
@@ -340,28 +366,13 @@ def test_dated_deepseek_checkpoint_attaches_to_its_release_paper():
     assert row.metrics == {METRIC_NAME: 54.1}
 
 
-def test_rename_requires_a_matching_score():
-    session = _session()
-    _seed_production(session)
-    row = _rows(session)["Muse Spark 1.3"]
-    row.metrics = {METRIC_NAME: 50.0}
-    session.commit()
-    stats = ValsFinanceAgentSyncService(session).sync(parse_vals_finance_agent(HTML))
-    assert stats.renamed == []
-    rows = _rows(session)
-    # The unmatched row is adopted as plain "Muse Spark 1.3" and corrected to
-    # Vals' 58.90; "Muse Spark 1.3 Max" is created separately.
-    assert rows["Muse Spark 1.3"].metrics == {METRIC_NAME: 58.9}
-    assert rows["Muse Spark 1.3 Max"].metrics == {METRIC_NAME: 59.96}
-
-
 def test_managed_rows_dropped_upstream_are_reported_not_deleted():
     session = _session()
     _seed_production(session)
     entries = parse_vals_finance_agent(HTML)
-    ValsFinanceAgentSyncService(session).sync(entries)
+    _sync(session, entries)
     remaining = [entry for entry in entries if entry.label != "Command A+"]
-    stats = ValsFinanceAgentSyncService(session).sync(remaining)
+    stats = _sync(session, remaining)
     assert stats.missing_upstream == ["Command A+"]
     assert "Command A+" in _rows(session)
 
@@ -370,10 +381,10 @@ def test_dry_run_rolls_back_and_collapsed_selection_is_refused():
     session = _session()
     _seed_production(session)
     entries = parse_vals_finance_agent(HTML)
-    ValsFinanceAgentSyncService(session).sync(entries, commit=False)
-    assert "Muse Spark 1.3 Max" not in _rows(session)
+    _sync(session, entries, commit=False)
+    assert "Muse Spark 1.3" not in _rows(session)
     with pytest.raises(RuntimeError, match="refusing"):
-        ValsFinanceAgentSyncService(session).sync(entries[:10])
+        _sync(session, entries[:10])
 
 
 def test_unconfigured_leaderboard_is_refused():
@@ -381,7 +392,7 @@ def test_unconfigured_leaderboard_is_refused():
     session.query(TaskDatasetMetric).delete()
     session.commit()
     with pytest.raises(RuntimeError, match="not linked"):
-        ValsFinanceAgentSyncService(session).sync(parse_vals_finance_agent(HTML))
+        _sync(session, parse_vals_finance_agent(HTML))
 
 
 def test_dated_qwen_max_checkpoint_reuses_the_vals_index_mapping():
