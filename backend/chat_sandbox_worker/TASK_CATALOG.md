@@ -165,6 +165,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `cybersecurity` — Cybersecurity
 - `deep-research-agents` — Deep Research Agents
 - `deepfake-detection` — Deepfake Detection
+- `defect-detection` — Defect Detection
 - `depth-completion` — Depth Completion
 - `depth-estimation` — Depth estimation
 - `dialect-identification` — Dialect Identification
@@ -195,6 +196,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `few-shot-object-detection` — Few-Shot Object Detection
 - `few-shot-segmentation` — Few-Shot Segmentation
 - `finance` — Finance
+- `fine-grained-image-classification` — Fine-Grained Image Classification
 - `full-duplex-spoken-dialogue` — Full-Duplex Spoken Dialogue
 - `gaze-estimation` — Gaze Estimation
 - `generative-recommendation` — Generative Recommendation
@@ -211,10 +213,12 @@ This compact index contains every current task and subtask. Treat names and slug
 - `image-anomaly-detection` — Image Anomaly Detection
 - `image-captioning` — Image Captioning
 - `image-classification` — Image Classification
+- `image-colorization` — Image Colorization
 - `image-compression` — Image Compression
 - `image-dehazing` — Image Dehazing
 - `image-denoising` — Image Denoising
 - `image-editing` — Image editing
+- `image-forgery-detection` — Image Forgery Detection
 - `image-fusion` — Image Fusion
 - `image-generation` — Image generation
 - `image-inpainting` — Image Inpainting
@@ -246,6 +250,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `machine-unlearning` — Machine Unlearning
 - `materials-and-chemistry` — Materials & Chemistry
 - `math` — Mathematics
+- `medical-image-classification` — Medical Image Classification
 - `medical-image-segmentation` — Medical Image Segmentation
 - `medical-imaging` — Medical Imaging
 - `medical-question-answering` — Medical Question Answering
@@ -311,8 +316,10 @@ This compact index contains every current task and subtask. Treat names and slug
 - `sentiment-analysis` — Sentiment Analysis
 - `sequential-recommendation` — Sequential Recommendation
 - `session-based-recommendation` — Session-Based Recommendation
+- `sign-language-recognition` — Sign Language Recognition
 - `skeleton-based-action-recognition` — Skeleton-based Action Recognition
 - `sleep-stage-classification` — Sleep Stage Classification
+- `small-object-detection` — Small Object Detection
 - `sound-event-detection` — Sound Event Detection
 - `spatial-understanding` — Spatial Understanding
 - `speaker-diarization` — Speaker Diarization
@@ -365,6 +372,8 @@ This compact index contains every current task and subtask. Treat names and slug
 - `video-temporal-grounding` — Video Temporal Grounding
 - `video-understanding` — Video Understanding
 - `video-text-retrieval` — Video-Text Retrieval
+- `virtual-try-on` — Virtual Try-On
+- `visual-geo-localization` — Visual Geo-Localization
 - `visual-grounding` — Visual Grounding
 - `visual-place-recognition` — Visual Place Recognition
 - `visual-place-recognition-re-ranking` — Visual Place Recognition with Re-ranking
@@ -392,3 +401,4 @@ Frameworks are software libraries, inference engines, serving systems, and toolk
 - Graph Machine Learning / Graph Learning Libraries: `pytorch-geometric` PyTorch Geometric
 - Speech and Audio / Speech Toolkits: `nemo-speech` NVIDIA NeMo Speech, `speechbrain` SpeechBrain, `espnet` ESPnet
 - Time Series / Forecasting Libraries: `darts` Darts, `gluonts` GluonTS, `neuralforecast` NeuralForecast
+- Deep Learning / Deep Learning Frameworks: `pytorch` PyTorch, `jax` JAX, `tensorflow` TensorFlow
