@@ -205,19 +205,15 @@ class DatasetService:
     ):
         """Load one dataset's evaluations with the dataset-route error contract."""
         from backend.services.evaluation_service import EvaluationService
-        from backend.utils.exceptions import DatabaseError
 
-        try:
-            return EvaluationService(self.db).get_evaluations(
-                page=page,
-                page_size=page_size,
-                dataset_id=dataset_id,
-                is_open=is_open,
-                order_by=order_by,
-                order_dir=order_dir,
-            )
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return EvaluationService(self.db).get_evaluations(
+            page=page,
+            page_size=page_size,
+            dataset_id=dataset_id,
+            is_open=is_open,
+            order_by=order_by,
+            order_dir=order_dir,
+        )
 
     def list_task_summaries_by_dataset_identifier(self, identifier: str) -> list[Task]:
         """List task summaries while preserving numeric-ID and slug behavior."""

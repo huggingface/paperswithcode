@@ -9,6 +9,7 @@ from typing import Optional
 
 from sqlalchemy import Float, and_, case, cast, desc, func, or_, select
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.database.organizations_setup.organizations import BY_PWC_SLUG
 from backend.models.conferences import ConferenceTaskSummary
@@ -319,8 +320,8 @@ class OrganizationService:
                 ) in enumerate(rows, start=1)
             ]
             return Organizations(count=len(results), results=results)
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve organizations: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve organizations: {str(e)}") from e
 
     def search_organizations(self, query: str, limit: int) -> Organizations:
         """Match organizations by name or slug for typeahead search.
@@ -516,10 +517,8 @@ class OrganizationService:
     def get_organization(self, slug: str) -> Organization:
         try:
             return self._project_organization(self._get_organization_by_slug(slug))
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve organization: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve organization: {str(e)}") from e
 
     def get_organization_contributions(self, slug: str) -> OrganizationContributions:
         """Return daily eligible-paper counts for the trailing 365 days."""
@@ -558,12 +557,10 @@ class OrganizationService:
                 total_count=sum(item.paper_count for item in results),
                 results=results,
             )
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
+        except SQLAlchemyError as e:
             raise DatabaseError(
                 f"Failed to retrieve organization contributions: {str(e)}"
-            )
+            ) from e
 
     def get_organization_areas_with_tasks(
         self, slug: str
@@ -621,12 +618,10 @@ class OrganizationService:
                 total_paper_count=total_paper_count,
                 results=results,
             )
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
+        except SQLAlchemyError as e:
             raise DatabaseError(
                 f"Failed to retrieve organization areas with tasks: {str(e)}"
-            )
+            ) from e
 
     def get_organization_papers(
         self,
@@ -685,10 +680,10 @@ class OrganizationService:
                 include_resources=include_resources,
             )
 
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve organization papers: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                f"Failed to retrieve organization papers: {str(e)}"
+            ) from e
 
     @staticmethod
     def logo_url(db_org: DBOrganization) -> Optional[str]:

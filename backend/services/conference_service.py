@@ -7,6 +7,7 @@ from typing import Optional
 
 from sqlalchemy import asc, case, func
 from sqlalchemy.orm import Session, load_only
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.models.conferences import (
     Conference,
@@ -34,10 +35,6 @@ from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.slug_utils import slugify
 from backend.services.catalog_errors import CatalogConflictError, CatalogValidationError
 from backend.services.conference_deadline_service import series_of
-from backend.services.catalog_errors import (
-    CatalogNotFoundError,
-    CatalogPersistenceError,
-)
 
 
 class ConferenceService:
@@ -68,18 +65,10 @@ class ConferenceService:
         return result
 
     def lookup_conference(self, slug: str) -> Conference:
-        try:
-            return self.get_conference(slug)
-        except PaperNotFoundError as error:
-            raise CatalogNotFoundError(str(error)) from error
+        return self.get_conference(slug)
 
     def lookup_conference_papers(self, **kwargs) -> Papers:
-        try:
-            return self.get_conference_papers(**kwargs)
-        except PaperNotFoundError as error:
-            raise CatalogNotFoundError(str(error)) from error
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return self.get_conference_papers(**kwargs)
 
     def _get_conference_by_slug(self, slug: str) -> DBConference:
         conference = (
@@ -167,8 +156,8 @@ class ConferenceService:
                 for db_conf, paper_count in rows
             ]
             return Conferences(count=len(results), results=results)
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve conferences: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve conferences: {str(e)}") from e
 
     def _upcoming_tba_editions(
         self, *, tracked_series: set[str], exclude_ids
@@ -243,17 +232,17 @@ class ConferenceService:
                 for conf in tba_editions
             )
             return ConferenceDeadlines(count=len(results), results=results)
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve conference deadlines: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                f"Failed to retrieve conference deadlines: {str(e)}"
+            ) from e
 
     def get_conference(self, slug: str) -> Conference:
         try:
             conference = self._get_conference_by_slug(slug)
             return self._conference_to_api(conference)
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve conference: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve conference: {str(e)}") from e
 
     OUTSTANDING_AWARDS = ("outstanding", "honorable_mention")
     BEST_PAPER_FINALIST_AWARD = "best_paper_finalist"
@@ -360,12 +349,10 @@ class ConferenceService:
                 ),
                 results=results,
             )
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
+        except SQLAlchemyError as e:
             raise DatabaseError(
                 f"Failed to retrieve conference areas with tasks: {str(e)}"
-            )
+            ) from e
 
     def get_conference_papers(
         self,
@@ -486,7 +473,7 @@ class ConferenceService:
                     paper.conference_award = award_by_paper_id.get(int(paper.id))
 
             return result
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve conference papers: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                f"Failed to retrieve conference papers: {str(e)}"
+            ) from e

@@ -15,6 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc, asc, exists, or_, func, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.models.database import (
     Paper as DBPaper,
@@ -785,10 +786,8 @@ class PaperService:
             response.applied_filters = applied_filters
             return response
 
-        except (PaperNotFoundError, AmbiguousAuthorError, InvalidAuthorFilterError):
-            raise
-        except Exception as e:
-            raise DatabaseError(f"Error fetching papers: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Error fetching papers: {str(e)}") from e
 
     def _resolve_paper_feed_scope(
         self,
@@ -1122,9 +1121,7 @@ class PaperService:
                 )
                 for row in rows
             ]
-        except DatabaseError:
-            raise
-        except Exception as error:
+        except SQLAlchemyError as error:
             raise DatabaseError(str(error)) from error
 
     def _to_repository_trending_paper(
@@ -1451,8 +1448,8 @@ class PaperService:
                 include_resources=include_resources,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Error fetching trending papers: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Error fetching trending papers: {str(e)}") from e
 
     def apply_scoped_trending_order(self, query):
         """Order an existing ``DBPaper`` query by the active trending metric.
@@ -1766,8 +1763,8 @@ class PaperService:
 
             return self._convert_db_papers_to_summaries(db_papers)
 
-        except Exception as e:
-            raise DatabaseError(f"Error fetching recent papers: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Error fetching recent papers: {str(e)}") from e
 
     def get_paper_stats(self) -> Dict[str, Any]:
         """
@@ -1815,8 +1812,8 @@ class PaperService:
                 else None,
             }
 
-        except Exception as e:
-            raise DatabaseError(f"Error fetching paper statistics: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Error fetching paper statistics: {str(e)}") from e
 
     async def update_citation_counts(self, limit: int = 100) -> Dict[str, Any]:
         return await PaperCitationRefreshService(self.db).update_citation_counts(limit)

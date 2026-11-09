@@ -7,6 +7,7 @@ This service provides methods for retrieving metric definitions and their rankin
 from typing import Optional, Dict
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc, or_
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.models.database import Metric as DBMetric
 from backend.models.evaluations import (
@@ -16,7 +17,6 @@ from backend.models.evaluations import (
 from backend.services.catalog_errors import (
     CatalogConflictError,
     CatalogNotFoundError,
-    CatalogPersistenceError,
     CatalogValidationError,
 )
 from backend.utils.exceptions import DatabaseError
@@ -116,8 +116,8 @@ class MetricService:
                 results=metric_models,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve metrics: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve metrics: {str(e)}") from e
 
     def get_metric_by_name(self, name: str) -> Optional[Metric]:
         """
@@ -138,8 +138,8 @@ class MetricService:
                 return Metric.model_validate(metric)
             return None
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve metric '{name}': {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to retrieve metric '{name}': {str(e)}") from e
 
     def lookup_metric(self, name: str) -> Metric:
         metric = self.get_metric_by_name(name)
@@ -148,16 +148,10 @@ class MetricService:
         return metric
 
     def list_metrics(self, **kwargs) -> Metrics:
-        try:
-            return self.get_metrics(**kwargs)
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return self.get_metrics(**kwargs)
 
     def list_metric_directions(self) -> Dict[str, str]:
-        try:
-            return self.get_metric_directions()
-        except DatabaseError as error:
-            raise CatalogPersistenceError(str(error)) from error
+        return self.get_metric_directions()
 
     @staticmethod
     def validate_direction(direction: Optional[str]) -> None:
@@ -189,5 +183,7 @@ class MetricService:
 
             return directions
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to retrieve metric directions: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(
+                f"Failed to retrieve metric directions: {str(e)}"
+            ) from e

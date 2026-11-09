@@ -191,8 +191,8 @@ class RepositoryService:
                 results=api_repositories,
             )
 
-        except Exception as e:
-            raise DatabaseError(f"Failed to fetch repositories: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to fetch repositories: {str(e)}") from e
 
     def get_repository_by_id(self, repository_id: str) -> Repository:
         """
@@ -223,10 +223,8 @@ class RepositoryService:
 
         except ValueError:
             raise PaperNotFoundError(f"Invalid repository ID: {repository_id}")
-        except PaperNotFoundError:
-            raise
-        except Exception as e:
-            raise DatabaseError(f"Failed to fetch repository: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Failed to fetch repository: {str(e)}") from e
 
     def get_repositories_by_owner_and_name(
         self, owner: str, name: str
@@ -240,7 +238,7 @@ class RepositoryService:
             return [
                 self._db_repository_to_api(repository) for repository in repositories
             ]
-        except Exception as error:
+        except SQLAlchemyError as error:
             raise DatabaseError(f"Failed to fetch repositories: {error}") from error
 
     def get_repositories_for_paper(self, paper_id: str) -> List[Repository]:
@@ -610,10 +608,10 @@ class RepositoryService:
 
             return None
 
-        except Exception as e:
+        except SQLAlchemyError as e:
             raise DatabaseError(
                 f"Error fetching next repository group for stars update: {str(e)}"
-            )
+            ) from e
 
     def update_repository_stars_batch(
         self, repository_ids: List[int], num_stars: int
@@ -647,7 +645,7 @@ class RepositoryService:
 
         except Exception as e:
             self.db.rollback()
-            raise DatabaseError(f"Error updating repository stars: {str(e)}")
+            raise DatabaseError(f"Error updating repository stars: {str(e)}") from e
 
     def mark_repositories_as_processed(self, repository_ids: List[int]) -> int:
         """
@@ -678,7 +676,9 @@ class RepositoryService:
 
         except Exception as e:
             self.db.rollback()
-            raise DatabaseError(f"Error marking repositories as processed: {str(e)}")
+            raise DatabaseError(
+                f"Error marking repositories as processed: {str(e)}"
+            ) from e
 
     def populate_missing_owner_name(self, batch_size: int = 1000) -> Dict[str, int]:
         """
@@ -767,7 +767,7 @@ class RepositoryService:
 
         except Exception as e:
             self.db.rollback()
-            raise DatabaseError(f"Error populating owner/name fields: {str(e)}")
+            raise DatabaseError(f"Error populating owner/name fields: {str(e)}") from e
 
     def get_repository_star_history(
         self,
@@ -845,5 +845,5 @@ class RepositoryService:
             raise
         except ValueError:
             raise PaperNotFoundError(f"Invalid repository ID: {repository_id}")
-        except Exception as e:
-            raise DatabaseError(f"Error fetching star history: {str(e)}")
+        except SQLAlchemyError as e:
+            raise DatabaseError(f"Error fetching star history: {str(e)}") from e
