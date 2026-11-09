@@ -149,6 +149,9 @@ export const researchApi = {
     return apiRequest<Paper[]>(`/research/topics/${id}/papers?${params}`);
   },
   featuredTopics: () => apiRequest<TopicBubble[]>('/research/topics/featured'),
+  /** Catalog tasks, methods and benchmarks a topic with this text would duplicate. */
+  topicMatches: (text: string) =>
+    apiRequest<ResearchTopicSuggestion[]>(`/research/topic-matches?${new URLSearchParams({ text })}`),
   email: () => apiRequest<ResearchEmail>('/me/research-email'),
   setEmail: (enabled: boolean) => apiRequest<ResearchEmail>('/me/research-email', {
     method: 'PUT', body: JSON.stringify({ enabled }),

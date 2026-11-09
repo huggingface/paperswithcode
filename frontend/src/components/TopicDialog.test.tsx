@@ -111,6 +111,7 @@ describe("TopicDialog feed management", () => {
       { kind: "benchmark", entity_id: 12, name: "SWE-bench Verified", url: "/benchmark/swe-bench-verified", created_at: "" },
     ]);
     vi.spyOn(researchApi, "topics").mockResolvedValue([topic, other]);
+    vi.spyOn(researchApi, "topicMatches").mockResolvedValue([]);
     vi.spyOn(researchApi, "featuredTopics").mockResolvedValue([
       { id: 1, text: "real-time video generation", label: null, creator: null, followers: 4 },
       { id: 23, text: "OCR releases", label: null, followers: 5,
@@ -152,6 +153,24 @@ describe("TopicDialog feed management", () => {
     fireEvent.click(chip);
     fireEvent.click(screen.getByRole("button", { name: "Follow" }));
     await waitFor(() => expect(follow).toHaveBeenCalledWith(23));
+  });
+
+  it("offers following the catalog page instead of adding a topic named like it", async () => {
+    vi.mocked(researchApi.topicMatches).mockImplementation(async text => text === "harness engineering"
+      ? [{ kind: "task", entity_id: 9, name: "Harness Engineering", url: "/tasks/harness-engineering" }] : []);
+    const add = vi.spyOn(researchApi, "addTopic");
+    const follow = vi.spyOn(researchApi, "setFollow").mockResolvedValue(undefined);
+    renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Research topic" }), { target: { value: "Harness  engineering" } });
+    const hint = await screen.findByRole("status");
+    expect(hint).toHaveTextContent("already has a task page for “Harness engineering”");
+    expect(within(hint).getByRole("link", { name: "Open the Harness Engineering page" })).toHaveAttribute("href", "/tasks/harness-engineering");
+    // The topic itself cannot be saved; following the task can.
+    expect(screen.getByRole("button", { name: "Follow" })).toBeDisabled();
+    fireEvent.click(within(hint).getByRole("button", { name: "Harness Engineering" }));
+    fireEvent.click(screen.getByRole("button", { name: "Follow" }));
+    await waitFor(() => expect(follow).toHaveBeenCalledWith("task", "9", true));
+    expect(add).not.toHaveBeenCalled();
   });
 
   it("rewords a topic and makes it private in one save", async () => {

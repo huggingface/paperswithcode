@@ -10,10 +10,11 @@ import {
   TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion, type ResearchTopic,
 } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
+import { useDebounce } from '@/hooks/useDebounce';
 import { displayTaskName } from '@/lib/transform';
 import { catalogQueries, researchQueries } from '@/lib/api/queries';
 import {
-  stashPendingFollows, stashPendingTopic, stashPendingTopicFollows, topicPath, topicTitle, useFollowTopic,
+  isConflict, stashPendingFollows, stashPendingTopic, stashPendingTopicFollows, topicPath, topicTitle, useFollowTopic,
   useRemoveTopics, useReorderTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic,
   useSetTopicPublic, type FollowPick,
 } from '@/lib/researchTopic';
@@ -88,6 +89,9 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
   const setTopicPublic = useSetTopicPublic();
   const ownTopics = topics.data ?? [];
   const editing = ownTopics.find(topic => topic.id === editId);
+  // A topic named like a catalog task, method or benchmark would duplicate following it.
+  const lookup = useDebounce(trimmedDraft(draft ?? editing?.text ?? '').toLowerCase());
+  const lookupMatches = useQuery({ ...researchQueries.topicMatches(lookup), enabled: lookup.length >= 3 });
   // A stale order (a topic added or removed since) falls back to the saved one.
   const sameTopics = order?.length === ownTopics.length && order.every(topic => ownTopics.some(own => own.id === topic.id));
   const orderedTopics = order && sameTopics ? order : ownTopics;
@@ -103,13 +107,15 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
   const pendingTopicFollows = topicFollows.filter(id => popularTopics.some(topic => topic.id === id));
   const saved = editing?.text ?? '';
   const value = draft ?? saved;
-  const trimmed = value.trim().replace(/\s+/g, ' ');
+  const trimmed = trimmedDraft(value);
+  // Only matches for the text in the box count, not for what it said a moment ago.
+  const duplicates = lookup === trimmed.toLowerCase() ? lookupMatches.data ?? [] : [];
   // Saving the same text again restarts a backfill that gave up.
   const retry = editing?.status === 'failed' && trimmed === saved;
   const topicCount = ownTopics.length - pendingRemovals.length + pendingTopicFollows.length;
   const atLimit = topicCount >= TOPIC_LIMIT;
   // A reworded topic that is also unticked is only removed.
-  const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry)
+  const topicSavable = trimmed.length >= 3 && (trimmed !== saved || retry) && !duplicates.length
     && (editing ? !pendingRemovals.includes(editing.id) : !atLimit);
   // Set while a saved pop-up waits for fresh follows before opening afterSavePath; it stays disabled meanwhile.
   const [finishing, setFinishing] = useState(false);
@@ -242,6 +248,26 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
           }
         }} />
       <span className="research-topic-count">{value.length}/{TOPIC_MAX_LENGTH}</span>
+      {duplicates.length > 0 && <div className="topic-dialog-duplicate" role="status">
+        <p>
+          Papers with Code already has {duplicates.length > 1 ? 'pages' : `a ${duplicates[0].kind} page`} for
+          “{trimmed}”. Follow {duplicates.length > 1 ? 'one' : 'it'} instead of adding a topic:
+        </p>
+        <div className="topic-dialog-chips">
+          {duplicates.map(match => {
+            const id = String(match.entity_id);
+            const on = isSelected(match.kind, id);
+            return <span key={`${match.kind}:${id}`} className="topic-dialog-chip-wrap">
+              <button type="button" className="topic-dialog-chip" aria-pressed={on} disabled={saving}
+                onClick={() => toggle(match.kind, id, match.name)}>
+                {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}
+                {match.name}
+              </button>
+              <PageLink to={match.url} name={match.name} />
+            </span>;
+          })}
+        </div>
+      </div>}
       {editing && <div className="topic-dialog-editing">
         {editing.is_creator && <label className="topic-dialog-privacy">
           <Switch checked={editingPublic} disabled={saving} aria-label="Public topic"
@@ -307,7 +333,8 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
     {chips('Popular authors', 'author', suggested(suggestions.data?.authors))}
     {chips('Popular organizations', 'organization', suggested(suggestions.data?.organizations),
       { to: '/organizations', label: 'Browse organizations' })}
-    {(saveTopic.error || removeTopics.error || saveFollows.error || followTopic.error || reorderTopics.error
+    {isConflict(saveTopic.error) ? <p className="settings-token-error" role="alert">{saveTopic.error.message}.</p>
+      : (saveTopic.error || removeTopics.error || saveFollows.error || followTopic.error || reorderTopics.error
       || setTopicPublic.error) && <p className="settings-token-error" role="alert">
       Could not save your feed. Please try again.
     </p>}
@@ -352,3 +379,5 @@ function ChipImage({ kind, name, src }: { kind: 'author' | 'organization'; name:
   const initials = name.split(/\s+/).filter(Boolean).map(part => part[0]).slice(0, 2).join('').toUpperCase();
   return <span className="topic-dialog-chip-image is-author is-initials" aria-hidden="true">{initials}</span>;
 }
+
+const trimmedDraft = (text: string) => text.trim().replace(/\s+/g, ' ');

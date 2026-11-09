@@ -219,14 +219,47 @@ def test_accounts_follow_several_topics_up_to_the_limit(db, now, monkeypatch):
     assert db.query(ResearchTopicFollow).filter_by(hf_subject="alice").count() == 0
 
 
-def test_follow_topic_suggests_exact_catalog_names(db, now):
+def test_follow_topic_suggests_catalog_names(db, now):
     db.add(Task(name="Speech Recognition", slug="speech-recognition-topic-test"))
+    db.add(Task(name="Time-series forecasting", slug="time-series-topic-test"))
     db.flush()
     topics.follow_topic(db, "alice", "speech recognition", now)
     (view,) = topics.topic_views(db, "alice")
     assert [(s.kind, s.name) for s in view.suggestions] == [
         ("task", "Speech Recognition")
     ]
+    # Case, punctuation and hyphens do not matter; narrower phrasings do.
+    assert [s.name for s in topics.suggestions(db, "Time series forecasting.")] == [
+        "Time-series forecasting"
+    ]
+    assert topics.suggestions(db, "time series forecasting for retail") == []
+    assert topics.suggestions(db, "深度学习") == []
+
+
+def test_topic_api_refuses_catalog_names_and_lists_them(db, monkeypatch):
+    app = FastAPI()
+    app.include_router(research.router)
+    app.dependency_overrides[get_database_session] = lambda: db
+    app.dependency_overrides[require_user] = lambda: {"hf_subject": "alice"}
+    monkeypatch.setattr(research, "decode_request_session", lambda request: {})
+    db.add(Task(name="Harness Engineering", slug="harness-engineering-topic-test"))
+    db.flush()
+    client = TestClient(app)
+    refused = client.post("/me/topics", json={"text": "harness engineering"})
+    assert refused.status_code == 409
+    assert "follow Harness Engineering instead" in refused.json()["detail"]
+    agents = client.post("/me/topics", json={"text": "agent harnesses"}).json()
+    reword = client.put(
+        f"/me/topics/{agents['id']}", json={"text": "Harness-Engineering"}
+    )
+    assert reword.status_code == 409
+    matches = client.get(
+        "/research/topic-matches", params={"text": "harness  engineering"}
+    )
+    assert [(m["kind"], m["name"], m["url"]) for m in matches.json()] == [
+        ("task", "Harness Engineering", "/tasks/harness-engineering-topic-test")
+    ]
+    assert client.get("/research/topic-matches", params={"text": "agents"}).json() == []
 
 
 def test_judge_skips_current_verdicts_and_rejudges_changed_cards(db, now):

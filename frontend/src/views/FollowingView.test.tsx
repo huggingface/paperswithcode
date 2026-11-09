@@ -3,6 +3,7 @@ import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-li
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { researchApi, TOPIC_LIMIT } from '@/lib/api/research';
+import { ApiError } from '@/lib/apiTransport';
 import { catalogApi } from '@/lib/api/catalog';
 import { papersApi } from '@/lib/api/papers';
 import FollowingView from './FollowingView';
@@ -44,6 +45,7 @@ beforeEach(() => {
     reasons: ['Task'], scores: [] }]);
   vi.spyOn(researchApi, 'topics').mockResolvedValue([]);
   vi.spyOn(researchApi, 'featuredTopics').mockResolvedValue([]);
+  vi.spyOn(researchApi, 'topicMatches').mockResolvedValue([]);
 });
 const REWORD = 'Reword Real-time video generation';
 const topic = { id: 1, text: 'real-time video generation', label: null, set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
@@ -167,6 +169,16 @@ it('keeps a pre-sign-in topic and offers a retry when saving it fails', async ()
   fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
   await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull());
   expect(researchApi.addTopic).toHaveBeenCalledTimes(2);
+});
+
+it('explains and drops a pre-sign-in topic the server refuses', async () => {
+  sessionStorage.setItem('pwc:following-pending-topic', 'harness engineering');
+  const body = JSON.stringify({ detail: '“harness engineering” is already a task; follow Harness Engineering instead' });
+  vi.spyOn(researchApi, 'addTopic').mockRejectedValueOnce(new ApiError(new Response(body, { status: 409 }), body));
+  renderFeed();
+  expect(await screen.findByText(/follow Harness Engineering instead\./)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  expect(sessionStorage.getItem('pwc:following-pending-topic')).toBeNull();
 });
 
 it('drops a stashed guest topic once another topic is saved', async () => {

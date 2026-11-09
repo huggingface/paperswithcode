@@ -369,6 +369,11 @@ export const researchQueries = {
     queryFn: researchApi.featuredTopics,
     staleTime: TEN_MINUTES,
   }),
+  topicMatches: (text: string) => queryOptions({
+    queryKey: ["research-topic-matches", text],
+    queryFn: () => researchApi.topicMatches(text),
+    staleTime: TEN_MINUTES,
+  }),
   email: (subject: string | undefined) => queryOptions({
     queryKey: ["research-email", subject],
     queryFn: researchApi.email,
