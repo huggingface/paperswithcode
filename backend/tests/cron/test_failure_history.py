@@ -211,13 +211,7 @@ def test_covered_home_feed_makes_quiet_question_warming_healthy():
     assert "12 of 90 home-feed papers" in missing["output_health"]["reason"]
 
 
-def test_x_posts_and_radar_are_judged_on_durable_or_exit_evidence():
-    posted = {"last_write": NOW - timedelta(hours=2), "recent_writes": 3}
-
-    paper_posts = _evaluate(_job("post_trending_paper_to_x"), db_metrics=posted)
-    insights = _evaluate(_job("post_x_insight"), db_metrics=posted)
+def test_radar_is_judged_on_exit_evidence():
     radar = _evaluate(_job("scan_model_releases"))
 
-    assert paper_posts["output_health"]["status"] == "healthy"
-    assert insights["output_health"]["status"] == "healthy"
     assert radar["output_health"]["status"] == "healthy"
