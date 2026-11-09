@@ -10,6 +10,7 @@ import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, Monitor, Moon, Sun } from "lucide-react";
 import { useTheme } from "next-themes";
+import { useLocation } from "react-router-dom";
 
 import HfSignInButton from "@/components/HfSignInButton";
 import ResearchSettings from "@/components/ResearchSettings";
@@ -54,6 +55,14 @@ const SettingsView: React.FC = () => {
     isLoading: preferencesLoading,
   } = usePreferences();
   const { theme, setTheme } = useTheme();
+  const location = useLocation();
+  const closedSourceRow = React.useRef<HTMLDivElement>(null);
+  const highlightClosedSource = location.hash === "#closed-source-evals";
+  React.useEffect(() => {
+    if (!highlightClosedSource) return;
+    closedSourceRow.current?.scrollIntoView({ block: "center" });
+    closedSourceRow.current?.querySelector<HTMLElement>("#hide-closed-source-evals")?.focus();
+  }, [highlightClosedSource]);
   const selectedTheme = theme ?? "system";
   const chatEnabled = isChatEnabled();
   const [billingError, setBillingError] = React.useState("");
@@ -453,7 +462,11 @@ const SettingsView: React.FC = () => {
 
       <section className="settings-section">
         <h2 className="settings-section-title">Evaluations</h2>
-        <div className="settings-row">
+        <div
+          className={`settings-row${highlightClosedSource ? " settings-row-highlight" : ""}`}
+          id="closed-source-evals"
+          ref={closedSourceRow}
+        >
           <label className="settings-row-text" htmlFor="hide-closed-source-evals">
             <span className="settings-row-label">Hide closed-source models</span>
             <span className="settings-row-desc">

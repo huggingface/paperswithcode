@@ -303,6 +303,16 @@
   justify-content: space-between;
   gap: 24px;
 }
+.settings-row-highlight {
+  margin: -10px -12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  animation: settings-row-highlight 2.4s ease-out;
+}
+@keyframes settings-row-highlight {
+  0%, 40% { background: var(--accent-soft); box-shadow: 0 0 0 2px var(--accent); }
+  100% { background: transparent; box-shadow: 0 0 0 2px transparent; }
+}
 .settings-row-text {
   display: flex;
   flex-direction: column;

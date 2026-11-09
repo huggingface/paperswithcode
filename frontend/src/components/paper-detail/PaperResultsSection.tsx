@@ -1,3 +1,4 @@
+import { EyeOff } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Icon } from "@/components/Icon";
@@ -20,6 +21,44 @@ export interface EvaluationTaskGroup {
   rows: Evaluation[];
 }
 
+export const CLOSED_SOURCE_SETTING_HREF = "/settings#closed-source-evals";
+
+function HiddenClosedSourceEvalsNotice({
+  count,
+  everyResultHidden,
+  onShow,
+}: {
+  count: number;
+  everyResultHidden: boolean;
+  onShow: () => void;
+}) {
+  const results = count === 1 ? "result" : "results";
+  return (
+    <div className="hidden-evals-notice" role="note">
+      <EyeOff className="hidden-evals-notice-icon" aria-hidden="true" />
+      <div className="hidden-evals-notice-body">
+        <p className="hidden-evals-notice-title">
+          {everyResultHidden
+            ? `No evals shown for this paper: all ${count} ${results} are from closed-source models.`
+            : `${count} closed-source ${results} hidden.`}
+        </p>
+        <p className="hidden-evals-notice-desc">
+          You turned on <strong>Hide closed-source models</strong> in your settings.
+          Turn it off to see closed-source results here and on every leaderboard.
+        </p>
+        <div className="hidden-evals-notice-actions">
+          <button type="button" className="hidden-evals-notice-show" onClick={onShow}>
+            Show closed-source results
+          </button>
+          <Link to={CLOSED_SOURCE_SETTING_HREF} className="hidden-evals-notice-link">
+            Change in Settings →
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function PaperResultsSection({
   canCopyBadge,
   canEdit,
@@ -30,6 +69,7 @@ export function PaperResultsSection({
   onCopyBadge,
   onEdit,
   onRefresh,
+  onShowClosedSourceEvals,
   paper,
   visibleEvaluationCount,
 }: {
@@ -42,6 +82,7 @@ export function PaperResultsSection({
   onCopyBadge: () => void;
   onEdit: () => void;
   onRefresh: () => void;
+  onShowClosedSourceEvals: () => void;
   paper: Paper;
   visibleEvaluationCount: number;
 }) {
@@ -80,6 +121,13 @@ export function PaperResultsSection({
           </span>
         }
       />
+      {!evaluationsLoading && hiddenClosedSourceCount > 0 && (
+        <HiddenClosedSourceEvalsNotice
+          count={hiddenClosedSourceCount}
+          everyResultHidden={evaluationsByTask.length === 0}
+          onShow={onShowClosedSourceEvals}
+        />
+      )}
       {evaluationsLoading ? (
         <Skeleton className="h-32 w-full" />
       ) : evaluationsByTask.length > 0 ? (
@@ -175,16 +223,9 @@ export function PaperResultsSection({
             </table>
           </div>
         ))
-      ) : (
+      ) : hiddenClosedSourceCount > 0 ? null : (
         <p style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-faint)" }}>
-          {hiddenClosedSourceCount > 0 ? (
-            <>
-              No evals shown for this paper. Turn off "Hide closed-source models" in your{" "}
-              <Link to="/settings">settings</Link> to see them.
-            </>
-          ) : (
-            "No benchmark results recorded yet."
-          )}
+          No benchmark results recorded yet.
         </p>
       )}
     </>
