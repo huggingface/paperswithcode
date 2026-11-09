@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { Icon } from "@/components/Icon";
-import { papersApi } from "@/lib/api/papers";
+import { paperQueries } from "@/lib/api/queries";
 import type { Paper } from "@/lib/api/papers.types";
 import { isChatEnabled } from "@/lib/apiUrl";
 import { resetReaderSession } from "@/lib/paperReader";
@@ -30,8 +30,7 @@ export function PaperSuggestedQuestions({
   // The detail response carries stored questions, so they render with the
   // page; only papers with none stored yet ask for them to be generated.
   const { data } = useQuery({
-    queryKey: ["paper-suggested-questions", paper.id],
-    queryFn: () => papersApi.suggestedQuestions(String(paper.id)),
+    ...paperQueries.suggestedQuestions(String(paper.id)),
     enabled: enabled && Array.isArray(stored) && stored.length === 0,
     // Empty means generation was skipped or failed and nothing was stored.
     staleTime: (query) => (query.state.data?.questions.length ? Infinity : 0),

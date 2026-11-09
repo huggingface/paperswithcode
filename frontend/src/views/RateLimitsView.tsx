@@ -1,12 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { accountApi } from "@/lib/api/account";
+import { accountQueries } from "@/lib/api/queries";
 
 const RateLimitsView = () => {
-  const query = useQuery({
-    queryKey: ["submission-rate-limit-policy"],
-    queryFn: () => accountApi.getRateLimitPolicy(),
-  });
+  const query = useQuery(accountQueries.rateLimitPolicy());
   const policy = query.data;
   return (
     <div className="page" style={{ maxWidth: 760 }}>

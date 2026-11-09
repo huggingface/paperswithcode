@@ -26,7 +26,8 @@ vi.mock("@/hooks/useDebounce", () => ({ useDebounce: (value: string) => value })
 vi.mock("@/hooks/useIntersectionObserver", () => ({
   useIntersectionObserver: () => ({ targetRef: { current: null }, isIntersecting: false }),
 }));
-vi.mock("@tanstack/react-query", () => ({
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...await importOriginal<object>(),
   useQuery: () => ({ data: [] }),
 }));
 vi.mock("@/components/Icon", () => ({ Icon: () => <span /> }));

@@ -4,11 +4,12 @@ import HfSignInButton from "@/components/HfSignInButton";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/authContext";
 import { paperEditsApi } from "@/lib/api/paperEdits";
+import { paperEditQueries } from "@/lib/api/queries";
 
 export default function AuthorizePaperEditView() {
   const { authorizationId = "" } = useParams();
   const { user, isLoading } = useAuth();
-  const query = useQuery({ queryKey: ["paper-edit-authorization", authorizationId], queryFn: () => paperEditsApi.authorization(authorizationId), retry: false });
+  const query = useQuery({ ...paperEditQueries.authorization(authorizationId), retry: false });
   const approval = useMutation({ mutationFn: () => paperEditsApi.approve(authorizationId) });
   const grant = query.data;
   return <main className="mx-auto max-w-xl space-y-5 px-6 py-12">

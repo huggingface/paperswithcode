@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Building2, FlaskConical, ListChecks, Mail, Trophy, User, type LucideIcon } from 'lucide-react';
 import { researchApi, type FollowKind, type ResearchFollow } from '@/lib/api/research';
-import { researchQueryKeys } from '@/lib/api/queryKeys';
+import { researchQueries } from '@/lib/api/queries';
 import { useAuth } from '@/lib/authContext';
 import { useResearchFollows, useSetFollow, type FollowChange } from '@/lib/researchTopic';
 import { hfLoginUrl } from '@/lib/apiUrl';
@@ -28,7 +28,7 @@ function FollowList({ follows }: { follows: ResearchFollow[] }) {
   const [unfollowed, setUnfollowed] = useState<ResearchFollow[]>([]);
   const change = useSetFollow<FollowChange & { row: ResearchFollow }>({ onChanged: ({ row, follow }) => {
     // Update the cached list in the same render as `unfollowed` so a row never flips state late.
-    client.setQueryData<ResearchFollow[]>(researchQueryKeys.follows(user?.hf_subject), current => follow
+    client.setQueryData<ResearchFollow[]>(researchQueries.follows(user?.hf_subject).queryKey, current => follow
       ? [...(current ?? []), row]
       : (current ?? []).filter(f => followKey(f) !== followKey(row)));
     setUnfollowed(current => [
@@ -80,8 +80,9 @@ export default function ResearchSettings() {
   const { user } = useAuth();
   const client = useQueryClient();
   const follows = useResearchFollows();
-  const emailKey = researchQueryKeys.email(user?.hf_subject);
-  const email = useQuery({ queryKey: emailKey, queryFn: researchApi.email, enabled: !!user });
+  const emailQuery = researchQueries.email(user?.hf_subject);
+  const emailKey = emailQuery.queryKey;
+  const email = useQuery({ ...emailQuery, enabled: !!user });
   const update = useMutation({ mutationFn: researchApi.setEmail, onSuccess: data => client.setQueryData(emailKey, data) });
   const showAsFollower = useMutation({
     mutationFn: async (show: boolean) => {

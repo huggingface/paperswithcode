@@ -1,16 +1,15 @@
-import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/queryInvalidation";
+import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/api/cacheSync";
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
-import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
+import { catalogKeys, catalogQueries } from "@/lib/api/queries";
 import { useToast } from "@/hooks/use-toast";
 import { PaperEditDialogShell } from "./PaperEditDialogShell";
 import { SuggestOrganizationForm } from "./SuggestOrganizationForm";
 import { usePaperSectionEdit, type PaperSectionEditorProps } from "./usePaperSectionEdit";
-import { catalogQueryKeys } from "@/lib/api/queryKeys";
 
 interface Props extends PaperSectionEditorProps {
   initialOrganizationIds: number[];
@@ -30,10 +29,8 @@ export const EditOrganizationsDialog = ({
   const [suggestionUnsent, setSuggestionUnsent] = useState(false);
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const organizations = useQuery({
-    queryKey: [...catalogQueryKeys.organizations, "curation"],
-    queryFn: () => catalogApi.organizations(false),
-  });
+  // Curators pick from the live list, so read it fresh each time the dialog opens.
+  const organizations = useQuery({ ...catalogQueries.organizations(), staleTime: 0 });
   const displayedOrganizations = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
     if (!normalizedQuery) return organizations.data?.results ?? [];
@@ -144,7 +141,7 @@ export const EditOrganizationsDialog = ({
             toast({ title: "Organization added", description: `Added "${name}" to this paper.` });
             invalidatePaperDetails(queryClient, [paperId]);
             invalidatePaperFeeds(queryClient);
-            void queryClient.invalidateQueries({ queryKey: catalogQueryKeys.organizations });
+            void queryClient.invalidateQueries({ queryKey: catalogKeys.organizations });
           }}
           onUnsentChange={setSuggestionUnsent}
         />

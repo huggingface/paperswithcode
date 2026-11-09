@@ -3,10 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import type { Task } from "@/lib/api/catalog.types";
-import type { LeaderboardMetric, MetricDirections } from "@/lib/api/evaluations.types";
-import { catalogApi } from "@/lib/api/catalog";
-import { evaluationsApi } from "@/lib/api/evaluations";
+import { catalogQueries, evaluationQueries } from "@/lib/api/queries";
 import { usePreferences } from "@/lib/preferences";
 import { formatMetricValue } from "@/lib/utils";
 import { deriveLeaderboardPresentation, resolveLeaderboardTask } from "@/lib/leaderboardPresentation";
@@ -24,7 +21,7 @@ import { safeExternalHref } from "@/lib/safeExternalHref";
 import { slugify } from "@/lib/slug";
 import { isNotFound } from "@/lib/apiErrors";
 import NotFound from "@/pages/NotFound";
-import { catalogQueryKeys, evaluationQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+
 
 function extractSourcePaperRouteId(paperUrl?: string | null): string | null {
   if (!paperUrl) return null;
@@ -74,21 +71,11 @@ const BenchmarkDetailView: React.FC = () => {
 
   // Fetching the dataset with `include_paper=true` collapses the previous
   // dataset → paper waterfall into a single round trip.
-  const datasetQ = useQuery({
-    queryKey: [
-      ...catalogQueryKeys.dataset(datasetSlug),
-      "with-paper",
-      taskSlugFromQuery,
-      preferences.hide_closed_source_evals ? "open" : "all",
-    ],
-    queryFn: () => catalogApi.getDatasetBySlug(datasetSlug!, {
-      include_paper: true,
-      task: taskSlugFromQuery,
-      is_open: preferences.hide_closed_source_evals ? true : undefined,
-    }),
-    enabled: !!datasetSlug,
-    staleTime: TEN_MINUTES,
-  });
+  const datasetQ = useQuery(catalogQueries.datasetPage(datasetSlug, {
+    include_paper: true,
+    task: taskSlugFromQuery,
+    is_open: preferences.hide_closed_source_evals ? true : undefined,
+  }));
 
   // Fetch every evaluation on this dataset once. Metric switching is purely
   // a UI concern (column choice, sort key, SOTA computation), so we must not
@@ -96,25 +83,9 @@ const BenchmarkDetailView: React.FC = () => {
   // `best_metric` column, which would drop rows whose primary metric is
   // different from the tab the user clicked (e.g. an F1-primary row that
   // also carries Recall/Precision values).
-  const evalsQ = useQuery({
-    queryKey: evaluationQueryKeys.byDataset(datasetQ.data?.id),
-    queryFn: () => evaluationsApi.byDataset(datasetQ.data!.id),
-    enabled: !!datasetQ.data?.id,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const datasetTasksQ = useQuery<Task[]>({
-    queryKey: [...catalogQueryKeys.datasetTasks, datasetQ.data?.id],
-    queryFn: () => catalogApi.datasetTasks(datasetQ.data!.id),
-    enabled: !!datasetQ.data?.id,
-    staleTime: TEN_MINUTES,
-  });
-
-  const directionsQ = useQuery<MetricDirections>({
-    queryKey: ["metric-directions"],
-    queryFn: () => catalogApi.metricDirections(),
-    staleTime: 60 * 60 * 1000,
-  });
+  const evalsQ = useQuery(evaluationQueries.byDataset(datasetQ.data?.id));
+  const datasetTasksQ = useQuery(catalogQueries.datasetTasks(datasetQ.data?.id));
+  const directionsQ = useQuery(catalogQueries.metricDirections());
 
   const currentTaskId = resolveLeaderboardTask(
     datasetTasksQ.data || [],
@@ -124,19 +95,12 @@ const BenchmarkDetailView: React.FC = () => {
   );
 
   const benchmarkTrendsQ = useQuery({
-    queryKey: [
-      ...catalogQueryKeys.taskBenchmarkTrends,
-      currentTaskId,
-      preferences.hide_closed_source_evals ? true : undefined,
-    ],
-    queryFn: () =>
-      catalogApi.trendingBenchmarks(currentTaskId!, {
-        limit: 100,
-        min_recent_papers: 0,
-        is_open: preferences.hide_closed_source_evals ? true : undefined,
-      }),
-    enabled: !!currentTaskId && !!datasetQ.data?.id,
-    staleTime: TEN_MINUTES,
+    ...catalogQueries.taskBenchmarkTrends(currentTaskId ?? undefined, {
+      limit: 100,
+      min_recent_papers: 0,
+      is_open: preferences.hide_closed_source_evals ? true : undefined,
+    }),
+    enabled: !!datasetQ.data?.id,
   });
 
   const benchmarkTrend = useMemo(
@@ -150,12 +114,7 @@ const BenchmarkDetailView: React.FC = () => {
   // Configured metrics for the current leaderboard — the canonical column
   // set rendered in the table. Missing for legacy/unconfigured (task,
   // dataset) pairs, in which case we fall back to a data-union below.
-  const leaderboardMetricsQ = useQuery<LeaderboardMetric[]>({
-    queryKey: ["leaderboard-metrics", datasetQ.data?.id, currentTaskId],
-    queryFn: () => catalogApi.leaderboardMetrics(datasetQ.data!.id, currentTaskId!),
-    enabled: !!datasetQ.data?.id && !!currentTaskId,
-    staleTime: TEN_MINUTES,
-  });
+  const leaderboardMetricsQ = useQuery(catalogQueries.leaderboardMetrics(datasetQ.data?.id, currentTaskId ?? undefined));
 
   const model = deriveLeaderboardPresentation({
     evaluations: evalsQ.data || [],
@@ -198,12 +157,7 @@ const BenchmarkDetailView: React.FC = () => {
     node.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [highlightEvalId, evalsQ.data]);
 
-  const areaQ = useQuery({
-    queryKey: catalogQueryKeys.area(primaryTask?.area_id),
-    queryFn: () => catalogApi.getArea(primaryTask!.area_id!),
-    enabled: !!primaryTask?.area_id,
-    staleTime: TEN_MINUTES,
-  });
+  const areaQ = useQuery(catalogQueries.area(primaryTask?.area_id));
 
   if (datasetQ.isLoading) {
     return (

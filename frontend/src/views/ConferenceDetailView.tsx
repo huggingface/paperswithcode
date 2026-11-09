@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { AreaDirectoryFooter, AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
 import MarkdownText from "@/components/MarkdownText";
-import { catalogApi } from "@/lib/api/catalog";
+import { catalogQueries } from "@/lib/api/queries";
 import { isNotFound } from "@/lib/apiErrors";
 import { sortAreas } from "@/lib/areas";
 import { chipColors, hueFromSlug } from "@/lib/colors";
@@ -15,17 +15,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import NotFound from "@/pages/NotFound";
-import { TEN_MINUTES } from "@/lib/api/queryKeys";
+
 
 const ConferenceDetailView: React.FC = () => {
   const { confSlug } = useParams<{ confSlug: string }>();
 
-  const taxonomyQ = useQuery({
-    queryKey: ["conference-areas-with-tasks", confSlug],
-    queryFn: () => catalogApi.conferenceAreasWithTasks(confSlug!),
-    enabled: !!confSlug,
-    staleTime: TEN_MINUTES,
-  });
+  const taxonomyQ = useQuery(catalogQueries.conferenceAreasWithTasks(confSlug));
 
   const visibleAreas = useMemo(() => sortAreas(taxonomyQ.data?.results ?? []), [taxonomyQ.data]);
 

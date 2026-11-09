@@ -2,7 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import type { Conference } from "@/lib/api/catalog.types";
-import { catalogApi } from "@/lib/api/catalog";
+import { catalogQueries } from "@/lib/api/queries";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -19,7 +19,7 @@ import {
   nextUpcomingDeadline,
   urgencyColor,
 } from "@/lib/deadlines";
-import { TEN_MINUTES } from "@/lib/api/queryKeys";
+
 
 const Toggle: React.FC<{
   id: string;
@@ -206,11 +206,7 @@ const AiDeadlinesView: React.FC = () => {
   // Single fixed reference time so countdowns/sorting are stable per render.
   const now = useMemo(() => Date.now(), []);
 
-  const deadlinesQ = useQuery({
-    queryKey: ["conference-deadlines"],
-    queryFn: () => catalogApi.conferenceDeadlines(),
-    staleTime: TEN_MINUTES,
-  });
+  const deadlinesQ = useQuery(catalogQueries.conferenceDeadlines());
 
   const toggleDomain = (tag: string) => {
     setSelectedDomains((prev) => {

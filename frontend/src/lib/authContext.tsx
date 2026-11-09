@@ -15,7 +15,7 @@ import posthog from "posthog-js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { authApi, type AuthUser } from "./api/auth";
-import { authQueryKeys } from "./api/queryKeys";
+import { authQueries } from "./api/queries";
 import { authUrl } from "./apiUrl";
 
 export type { AuthUser } from "./api/auth";
@@ -42,11 +42,7 @@ function consumeSignupMarker(): boolean {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const queryClient = useQueryClient();
-  const query = useQuery({
-    queryKey: authQueryKeys.me,
-    queryFn: () => authApi.getCurrentUser(),
-    staleTime: Infinity,
-  });
+  const query = useQuery(authQueries.me());
   const user = query.data ?? null;
   const previousUserRef = React.useRef<AuthUser | null>(null);
   const { refetch } = query;
@@ -69,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
     await authApi.logout();
-    queryClient.setQueryData(authQueryKeys.me, null);
+    queryClient.setQueryData(authQueries.me().queryKey, null);
   }, [queryClient]);
 
   React.useEffect(() => {
@@ -88,13 +84,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Drop the signed-out user's cached data (bookmarks, follows, sessions).
   React.useEffect(() => {
     if (previousUserRef.current && !user) {
-      void queryClient.resetQueries({ predicate: (cached) => cached.queryKey[0] !== authQueryKeys.me[0] });
+      void queryClient.resetQueries({ predicate: (cached) => cached.queryKey[0] !== authQueries.me().queryKey[0] });
     }
     previousUserRef.current = user;
   }, [queryClient, user]);
 
   React.useEffect(() => {
-    const handler = () => queryClient.setQueryData(authQueryKeys.me, null);
+    const handler = () => queryClient.setQueryData(authQueries.me().queryKey, null);
     window.addEventListener(AUTH_STALE_EVENT, handler);
     return () => window.removeEventListener(AUTH_STALE_EVENT, handler);
   }, [queryClient]);

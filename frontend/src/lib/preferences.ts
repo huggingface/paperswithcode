@@ -11,7 +11,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { accountApi, type UserPreferences } from "./api/account";
-import { accountQueryKeys } from "./api/queryKeys";
+import { accountQueries } from "./api/queries";
 import { useAuth } from "./authContext";
 
 const DEFAULT_PREFERENCES: UserPreferences = {
@@ -21,13 +21,8 @@ const DEFAULT_PREFERENCES: UserPreferences = {
 export function usePreferences() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
-  const queryKey = accountQueryKeys.preferences;
-  const query = useQuery({
-    queryKey,
-    queryFn: () => accountApi.getPreferences(),
-    enabled: Boolean(user),
-    staleTime: Infinity,
-  });
+  const { queryKey } = accountQueries.preferences();
+  const query = useQuery({ ...accountQueries.preferences(), enabled: Boolean(user) });
   const preferences = query.data ?? DEFAULT_PREFERENCES;
 
   const update = useMutation({

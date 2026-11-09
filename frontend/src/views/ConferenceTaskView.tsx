@@ -4,17 +4,16 @@ import { useQuery } from "@tanstack/react-query";
 
 import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
 import MarkdownText from "@/components/MarkdownText";
-import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { isNotFound } from "@/lib/apiErrors";
 import { CONFERENCE_LISTINGS } from "@/lib/conferenceListings";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
+
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import NotFound from "@/pages/NotFound";
-import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 
 // Award announcements, keyed by `${conference}/${listing}`.
 const AWARD_ANNOUNCEMENTS: Record<string, string> = {
@@ -37,22 +36,12 @@ const ConferenceTaskView: React.FC = () => {
   const listing = CONFERENCE_LISTINGS.find((candidate) => candidate.slug === taskSlug);
   const isAwardListing = !!listing?.award;
 
-  const conferenceQ = useQuery({
-    queryKey: ["conference", confSlug],
-    queryFn: () => catalogApi.getConference(confSlug!),
-    enabled: !!confSlug,
-    staleTime: TEN_MINUTES,
-  });
+  const conferenceQ = useQuery(catalogQueries.conference(confSlug));
 
-  const taskQ = useQuery({
-    queryKey: catalogQueryKeys.task(taskSlug),
-    queryFn: () => catalogApi.getTask(taskSlug!),
-    enabled: !!taskSlug && !listing,
-    staleTime: TEN_MINUTES,
-  });
+  const taskQ = useQuery({ ...catalogQueries.task(taskSlug), enabled: !listing });
 
   const papersQ = usePaperFeedQuery(
-    [...paperQueryKeys.feeds.conference, confSlug, taskSlug, feed.filters],
+    paperFeedKeys.conference(confSlug, taskSlug, feed.filters),
     (page) =>
       papersApi.forConference(confSlug!, {
         ...feed.filters,

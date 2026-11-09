@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import { catalogApi } from "@/lib/api/catalog";
+
 import { chipColors, hueFromSlug } from "@/lib/colors";
 import { displayTaskName } from "@/lib/transform";
 import { slugify } from "@/lib/slug";
@@ -13,7 +13,7 @@ import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 import { TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
 import { useHashScrollOnReady } from "@/hooks/useHashScrollOnReady";
 import { sortAreas } from "@/lib/areas";
-import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+import { catalogQueries } from "@/lib/api/queries";
 
 /**
  * Browse page: render the backend areas verbatim, each with their tasks.
@@ -23,21 +23,9 @@ import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
  * round-trip, so this view can render the returned taxonomy directly.
  */
 const TagsIndexView: React.FC = () => {
-  const taxonomyQ = useQuery({
-    queryKey: ["areas-with-tasks"],
-    queryFn: () => catalogApi.areasWithTasks(),
-    staleTime: TEN_MINUTES,
-  });
-  const trendingQ = useQuery({
-    queryKey: ["trending-tasks-directory"],
-    queryFn: () => catalogApi.trendingTasks({ limit: 12, min_recent_papers: 10 }),
-    staleTime: TEN_MINUTES,
-  });
-  const areasQ = useQuery({
-    queryKey: catalogQueryKeys.areas,
-    queryFn: () => catalogApi.listAreas({ page_size: 50, ordering: "name" }),
-    staleTime: TEN_MINUTES,
-  });
+  const taxonomyQ = useQuery(catalogQueries.areasWithTasks());
+  const trendingQ = useQuery(catalogQueries.trendingTasks({ limit: 12, min_recent_papers: 10 }));
+  const areasQ = useQuery(catalogQueries.areas());
 
   const trendingItems = useMemo(() => {
     const areaNames = new Map((areasQ.data?.results ?? []).map((area) => [area.id, area.name]));

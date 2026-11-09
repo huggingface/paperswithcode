@@ -16,7 +16,7 @@ const row: Evaluation = {
   task_name: "Task", dataset_name: "Benchmark", metrics: { Accuracy: 88 },
   uses_additional_data: false, is_open: true, created_at: "", updated_at: "",
 };
-const keys = [["paper", "42"], ["evaluations", "paper", "42"], ["dataset-evals", "100"]];
+const keys = [["paper", "42"], ["paper-evals", "42"], ["dataset-evals", "100"]];
 function setup(mode: "direct" | "pending" = "direct") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 300_000 } } });
   keys.forEach(key => client.setQueryData(key, [row]));

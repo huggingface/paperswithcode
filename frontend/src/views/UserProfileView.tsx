@@ -2,14 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { Navigate, useParams } from "react-router-dom";
 
 import { ContributionGraphContent } from "@/components/OrganizationContributionGraph";
-import { profilesApi } from "@/lib/api/profiles";
+import { profileQueries } from "@/lib/api/queries";
 
 const UserProfileView = () => {
   const { username = "" } = useParams();
-  const query = useQuery({
-    queryKey: ["user-profile", username.toLowerCase()],
-    queryFn: () => profilesApi.get(username),
-  });
+  const query = useQuery(profileQueries.user(username));
   if (query.isLoading) return <div className="page">Loading profile…</div>;
   if (!query.data) return <div className="page"><h1>Profile not found</h1></div>;
   if (query.data.redirected_from_alias) {

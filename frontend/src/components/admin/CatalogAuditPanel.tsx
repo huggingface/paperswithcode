@@ -9,18 +9,18 @@ import { paperEditsApi } from "@/lib/api/paperEdits";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { catalogApi } from "@/lib/api/catalog";
-import { adminQueryKeys } from "@/lib/api/queryKeys";
+import { adminKeys } from "@/lib/api/queries";
 
 export const CatalogAuditPanel = () => {
   const queryClient = useQueryClient();
   const query = useInfiniteQuery({
-    queryKey: adminQueryKeys.catalogAudit,
+    queryKey: adminKeys.catalogAudit,
     queryFn: ({ pageParam }) => catalogApi.audit(pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
   });
   const events = query.data?.pages.flatMap((page) => page.events) ?? [];
-  const refresh = () => queryClient.invalidateQueries({ queryKey: adminQueryKeys.catalogAudit });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: adminKeys.catalogAudit });
   const acknowledge = useMutation({
     mutationFn: () => catalogApi.acknowledgeAudit(),
     onSuccess: refresh,

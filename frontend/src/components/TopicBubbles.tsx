@@ -1,18 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
-import { researchApi } from '@/lib/api/research';
-import { researchQueryKeys, TEN_MINUTES } from '@/lib/api/queryKeys';
+import { researchQueries } from '@/lib/api/queries';
 import { topicPath, topicTitle } from '@/lib/researchTopic';
 
 /** Popular public topics, each with its creator's Hugging Face avatar, and with `onAddTopic` a last bubble that
  * opens the topic pop-up; hidden while loading, and when there is nothing to show. */
 export default function TopicBubbles({ onAddTopic }: { onAddTopic?: () => void }) {
-  const bubbles = useQuery({
-    queryKey: researchQueryKeys.featuredTopics,
-    queryFn: researchApi.featuredTopics,
-    staleTime: TEN_MINUTES,
-  });
+  const bubbles = useQuery(researchQueries.featuredTopics());
   if (bubbles.isPending || (!bubbles.data?.length && !onAddTopic)) return null;
   return <nav className="topic-bubbles" aria-label="Popular topics">
     {bubbles.data?.map(topic => <Link key={topic.id} className="topic-bubble" to={topicPath(topic)}

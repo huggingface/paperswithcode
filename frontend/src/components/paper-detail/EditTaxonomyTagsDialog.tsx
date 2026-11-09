@@ -10,8 +10,8 @@ import { catalogApi } from "@/lib/api/catalog";
 import type { Method, Task } from "@/lib/api/catalog.types";
 import { papersApi } from "@/lib/api/papers";
 import type { Paper } from "@/lib/api/papers.types";
+import { patchPaperCaches } from "@/lib/api/cacheSync";
 import type { PendingEditOf } from "@/lib/pendingEdits";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { PaperEditDialogShell } from "./PaperEditDialogShell";
 import { SuggestTaxonomyDialog } from "./SuggestTaxonomyDialog";
 import { usePaperSectionEdit, type PaperSectionEditorProps } from "./usePaperSectionEdit";
@@ -123,16 +123,8 @@ function TaxonomyTagsEditor<Item extends Task | Method>({
     },
     toPendingPayload: (items: Item[]) => tagKind.toPendingPayload(tagIds(items)),
     applyDirect: (items) => tagKind.applyDirect(paperId, tagIds(items)),
-    applyOptimistic: patchPaper && (async (items) => {
-      const keys = [...new Set([paperId, arxivId].filter((id): id is string => Boolean(id)))]
-        .flatMap((id) => [paperQueryKeys.detail(id), paperQueryKeys.arxiv(id)]);
-      await Promise.all(keys.map((queryKey) => queryClient.cancelQueries({ queryKey })));
-      const snapshots = keys.map((key) => ({ key, data: queryClient.getQueryData<Paper>(key) }));
-      snapshots.forEach(({ key, data }) => {
-        if (data) queryClient.setQueryData<Paper>(key, patchPaper(data, items));
-      });
-      return () => snapshots.forEach(({ key, data }) => queryClient.setQueryData(key, data));
-    }),
+    applyOptimistic: patchPaper && ((items) =>
+      patchPaperCaches(queryClient, [paperId, arxivId], (paper) => patchPaper(paper, items))),
     onSaved: (items, { direct }) => {
       if (!direct) return;
       toast({

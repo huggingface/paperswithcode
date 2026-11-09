@@ -1,12 +1,12 @@
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { papersApi } from "@/lib/api/papers";
+import { paperQueries } from "@/lib/api/queries";
 import type { Paper, PaperReferenceQuery } from "@/lib/api/papers.types";
 import { normalizePaperRouteId } from "@/lib/utils";
 
 export const paperPreviewQueryKey = (routeId: string) =>
-  paperQueryKeys.preview(normalizePaperRouteId(routeId));
+  paperQueries.summary(normalizePaperRouteId(routeId)).queryKey;
 
 export const paperRouteId = (paper: Paper): string => paper.arxiv_id ?? paper.id;
 
@@ -20,7 +20,7 @@ export interface PaperPreviewCache {
   warm(routeIds: string[]): void;
 }
 
-// Preview cards read the ["paper-preview", routeId] query, so seeding it here
+// Preview cards read the paper summary query, so seeding it here
 // means hovering never shows a loading state for a card we already fetched.
 export function createPaperPreviewCache(queryClient: QueryClient, api: Pick<typeof papersApi, "lookup"> = papersApi): PaperPreviewCache {
   const requested = new Set<string>();

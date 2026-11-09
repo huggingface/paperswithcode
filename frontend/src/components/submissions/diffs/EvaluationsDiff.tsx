@@ -2,22 +2,16 @@ import React from "react";
 import { useQueries } from "@tanstack/react-query";
 
 import { cn } from "@/lib/utils";
-import { catalogApi } from "@/lib/api/catalog";
+import { catalogQueries } from "@/lib/api/queries";
 import type { EvaluationSnapshot, PendingEditOf } from "@/lib/pendingEdits";
 import { EmptyInline, Field } from "./shared";
-import { catalogQueryKeys } from "@/lib/api/queryKeys";
 
 function useCatalogNames(
-  kind: "task" | "dataset",
   ids: number[],
-  fetchEntity: (id: string) => Promise<{ id: string; name: string }>,
+  entity: typeof catalogQueries.task | typeof catalogQueries.dataset,
 ): Map<number, string> {
   return useQueries({
-    queries: ids.map((id) => ({
-      queryKey: catalogQueryKeys[kind](String(id)),
-      queryFn: () => fetchEntity(String(id)),
-      staleTime: 5 * 60 * 1000,
-    })),
+    queries: ids.map((id) => entity(String(id))),
     combine: (results) => new Map(
       results.flatMap(({ data }) => (data ? [[Number(data.id), data.name] as const] : [])),
     ),
@@ -41,8 +35,8 @@ export function EvaluationsDiff({ edit }: { edit: PendingEditOf<"evaluations"> }
     return { taskIds: ids("task_id"), datasetIds: ids("dataset_id") };
   }, [currentEvaluations, operations]);
 
-  const taskNames = useCatalogNames("task", taskIds, (id) => catalogApi.getTask(id));
-  const datasetNames = useCatalogNames("dataset", datasetIds, (id) => catalogApi.getDataset(id));
+  const taskNames = useCatalogNames(taskIds, catalogQueries.task);
+  const datasetNames = useCatalogNames(datasetIds, catalogQueries.dataset);
 
   const currentById = new Map(
     currentEvaluations

@@ -1,4 +1,3 @@
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
 /**
  * Bookmark hooks for the signed-in HF user.
  *
@@ -24,7 +23,9 @@ import {
   SAVED_PAPERS_AUTHORIZED_PARAM,
   savedPapersAuthorizationUrl,
 } from "@/lib/savedPapersAuth";
-import { accountQueryKeys } from "@/lib/api/queryKeys";
+import { accountQueries, paperQueries } from "@/lib/api/queries";
+
+const bookmarkIdsKey = accountQueries.bookmarkIds().queryKey;
 
 const PENDING_BOOKMARK_KEY = "pwc:pending-bookmark";
 
@@ -36,12 +37,7 @@ function authorizeSavedPapers(pending: ToggleArgs) {
 export function useBookmarkIds() {
   const { user } = useAuth();
 
-  const query = useQuery<BookmarkIdsResponse, Error>({
-    queryKey: accountQueryKeys.bookmarkIds,
-    queryFn: () => accountApi.getBookmarkIds(),
-    enabled: !!user,
-    staleTime: 60 * 1000,
-  });
+  const query = useQuery({ ...accountQueries.bookmarkIds(), enabled: !!user, staleTime: 60 * 1000 });
 
   const idSet = React.useMemo(
     () => new Set<number>(query.data?.paper_ids ?? []),
@@ -75,21 +71,21 @@ export function useToggleBookmark() {
         }
       },
       onMutate: async ({ paperId, isBookmarked }) => {
-        await queryClient.cancelQueries({ queryKey: accountQueryKeys.bookmarkIds });
-        const previous = queryClient.getQueryData<BookmarkIdsResponse>(accountQueryKeys.bookmarkIds);
+        await queryClient.cancelQueries({ queryKey: bookmarkIdsKey });
+        const previous = queryClient.getQueryData<BookmarkIdsResponse>(bookmarkIdsKey);
         const numericId = typeof paperId === "string" ? Number(paperId) : paperId;
         const currentIds = previous?.paper_ids ?? [];
         const nextIds = isBookmarked
           ? currentIds.filter((id) => id !== numericId)
           : [numericId, ...currentIds.filter((id) => id !== numericId)];
-        queryClient.setQueryData<BookmarkIdsResponse>(accountQueryKeys.bookmarkIds, {
+        queryClient.setQueryData<BookmarkIdsResponse>(bookmarkIdsKey, {
           paper_ids: nextIds,
         });
         return { previous };
       },
       onError: (_err, _vars, context) => {
         if (context?.previous) {
-          queryClient.setQueryData(accountQueryKeys.bookmarkIds, context.previous);
+          queryClient.setQueryData(bookmarkIdsKey, context.previous);
         }
         if (
           _err instanceof ApiError &&
@@ -99,8 +95,8 @@ export function useToggleBookmark() {
         }
       },
       onSettled: () => {
-        queryClient.invalidateQueries({ queryKey: accountQueryKeys.bookmarkIds });
-        queryClient.invalidateQueries({ queryKey: [...paperQueryKeys.feeds.saved] });
+        queryClient.invalidateQueries({ queryKey: bookmarkIdsKey });
+        queryClient.invalidateQueries({ queryKey: paperQueries.saved().queryKey });
       },
     },
   );

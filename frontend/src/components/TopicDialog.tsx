@@ -3,12 +3,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, Check, Plus } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
-import { catalogApi } from '@/lib/api/catalog';
+
 import { hfLoginUrl } from '@/lib/apiUrl';
-import { researchApi, TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion } from '@/lib/api/research';
+import { TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion } from '@/lib/api/research';
 import { useAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
-import { researchQueryKeys, TEN_MINUTES } from '@/lib/api/queryKeys';
+import { catalogQueries, researchQueries } from '@/lib/api/queries';
 import {
   stashPendingFollows, stashPendingTopic, topicTitle, useRemoveTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic,
   type FollowPick,
@@ -46,22 +46,10 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
   const client = useQueryClient();
   const topics = useResearchTopics();
   const follows = useResearchFollows();
-  const tasks = useQuery({
-    queryKey: ['trending-tasks-follow'],
-    queryFn: () => catalogApi.trendingTasks({ limit: SUGGESTIONS_PER_GROUP, level: 0 }),
-    staleTime: TEN_MINUTES,
-  });
-  const methods = useQuery({
-    queryKey: ['trending-methods-follow'],
-    queryFn: () => catalogApi.trendingMethods({ limit: SUGGESTIONS_PER_GROUP }),
-    staleTime: TEN_MINUTES,
-  });
+  const tasks = useQuery(catalogQueries.trendingTasks({ limit: SUGGESTIONS_PER_GROUP, level: 0 }));
+  const methods = useQuery(catalogQueries.trendingMethods({ limit: SUGGESTIONS_PER_GROUP }));
   // Popular authors and the directory's top organizations, with faces and logos.
-  const suggestions = useQuery({
-    queryKey: ['research-follow-suggestions'],
-    queryFn: researchApi.followSuggestions,
-    staleTime: TEN_MINUTES,
-  });
+  const suggestions = useQuery(researchQueries.followSuggestions());
   const suggested = (items: FollowSuggestion[] = []) =>
     items.map(item => ({ id: String(item.entity_id), name: item.name, image: item.image_url }));
   const [draft, setDraft] = useState<string | null>(null);
@@ -125,8 +113,8 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
         // with the intro and reopen this pop-up.
         setFinishing(true);
         await Promise.all([
-          client.refetchQueries({ queryKey: researchQueryKeys.follows(user.hf_subject) }),
-          client.refetchQueries({ queryKey: researchQueryKeys.topics(user.hf_subject) }),
+          client.refetchQueries({ queryKey: researchQueries.follows(user.hf_subject).queryKey }),
+          client.refetchQueries({ queryKey: researchQueries.topics(user.hf_subject).queryKey }),
         ]);
         if (!mounted.current) return;
         onDone();

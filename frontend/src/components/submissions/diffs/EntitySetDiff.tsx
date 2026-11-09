@@ -2,23 +2,20 @@ import React from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 
 import { cn } from "@/lib/utils";
-import type { Method, Task } from "@/lib/api/catalog.types";
-import { catalogApi } from "@/lib/api/catalog";
+import { catalogQueries } from "@/lib/api/queries";
 import type { NamedItem } from "@/lib/pendingEdits";
 import { DiffColumn, EmptyInline } from "./shared";
-import { catalogQueryKeys } from "@/lib/api/queryKeys";
 
 export function EntitySetDiff({
   currentItems,
   proposedIds,
-  queryPrefix,
-  fetchEntity,
+  entity,
   knownNames,
 }: {
   currentItems: NamedItem[];
   proposedIds: number[];
-  queryPrefix: "task" | "method" | "organization";
-  fetchEntity?: (id: string) => Promise<Task | Method>;
+  /** Looks up names the edit doesn't carry. */
+  entity?: typeof catalogQueries.task | typeof catalogQueries.method;
   knownNames?: Map<number, string>;
 }) {
   const ids = React.useMemo(
@@ -27,11 +24,7 @@ export function EntitySetDiff({
   );
 
   const entityQueries = useQueries({
-    queries: fetchEntity ? ids.map((id) => ({
-      queryKey: catalogQueryKeys[queryPrefix](String(id)),
-      queryFn: () => fetchEntity(String(id)),
-      staleTime: 5 * 60 * 1000,
-    })) : [],
+    queries: entity ? ids.map((id) => entity(String(id))) : [],
   });
 
   const namesById = React.useMemo(() => {
@@ -87,11 +80,7 @@ export function OrganizationSetDiff({
   currentItems: NamedItem[];
   proposedIds: number[];
 }) {
-  const organizations = useQuery({
-    queryKey: [...catalogQueryKeys.organizations, "submission-diff"],
-    queryFn: () => catalogApi.organizations(),
-    staleTime: 5 * 60 * 1000,
-  });
+  const organizations = useQuery(catalogQueries.organizations());
   const names = new Map(currentItems.map((item) => [item.id, item.name]));
   organizations.data?.results.forEach((organization) => {
     names.set(Number(organization.id), organization.name);
@@ -101,7 +90,6 @@ export function OrganizationSetDiff({
     <EntitySetDiff
       currentItems={currentItems}
       proposedIds={proposedIds}
-      queryPrefix="organization"
       knownNames={names}
     />
   );

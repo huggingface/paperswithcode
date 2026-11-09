@@ -10,7 +10,7 @@ import {
   type PendingEditType,
   type PendingPaperEdit,
 } from "@/lib/pendingEdits";
-import { refreshPaperQueries } from "@/lib/queryInvalidation";
+import { refreshPaperQueries } from "@/lib/api/cacheSync";
 import { reportSubmission } from "@/lib/submissionOutcome";
 
 /** `direct` applies immediately (admin path); `pending` submits an edit for review. */

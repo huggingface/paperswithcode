@@ -7,7 +7,7 @@ import { WebPaperViewer } from "@/components/pdf/WebPaperViewer";
 import { ArtifactWorkspace } from "@/components/chat/ArtifactWorkspace";
 import { ArtifactPanelProvider, useArtifactPanel } from "@/components/chat/useArtifactPanel";
 import type { PdfToolbarResources } from "@/components/pdf/PdfToolbar";
-import { usePaper } from "@/hooks/usePapers";
+import { paperQueries } from "@/lib/api/queries";
 import type { Paper } from "@/lib/api/papers.types";
 import { assetUrl, isPaperReaderChatEnabled } from "@/lib/apiUrl";
 import { chatApi } from "@/lib/api/chat";
@@ -18,7 +18,6 @@ import { normalizePaperRouteId } from "@/lib/utils";
 import { ChatExperience } from "@/views/ChatView";
 import { PdfCitationContext, type PdfCitationTarget } from "@/components/chat/PdfCitationContext";
 import { citationBoxes, type PdfHighlight } from "@/components/pdf/pdfCitations";
-import { getPaperLayout } from "@/lib/api/papers";
 
 const DEFAULT_RATIO = 66;
 const CHAT_TRANSITION_MS = 240;
@@ -109,7 +108,7 @@ export function readerToolbarResources(paper: Paper | undefined): PdfToolbarReso
 // Keyed by routeId, so another paper starts from its own stored reader state.
 function PaperReaderExperience({ routeId }: { routeId: string }) {
   const navigate = useNavigate();
-  const query = usePaper(routeId, Boolean(routeId));
+  const query = useQuery(paperQueries.detail(routeId));
   const availabilityQuery = useQuery({
     queryKey: ["chatAvailability"],
     queryFn: () => chatApi.getAvailability(),
@@ -323,10 +322,8 @@ function PaperReaderExperience({ routeId }: { routeId: string }) {
 
   const citationsEnabled = availabilityQuery.data?.paper_reader_citations_enabled === true && Boolean(pdfUrl);
   const layoutQuery = useQuery({
-    queryKey: ["paper-layout", canonicalRoute],
-    queryFn: () => getPaperLayout(canonicalRoute),
+    ...paperQueries.layout(canonicalRoute),
     enabled: citationsEnabled && Boolean(canonicalRoute),
-    staleTime: 5 * 60_000,
   });
   const layout = layoutQuery.data;
   const citationTarget = useMemo<PdfCitationTarget | null>(() => citationsEnabled ? {

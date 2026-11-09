@@ -1,26 +1,22 @@
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { researchApi, type FollowKind, type ResearchTopic } from '@/lib/api/research';
-import { researchQueryKeys } from '@/lib/api/queryKeys';
+import { paperFeedKeys, researchKeys, researchQueries } from '@/lib/api/queries';
 import { useOptionalAuth } from '@/lib/authContext';
 
 /** Refreshes what a follow or topic change affects. */
 function invalidateResearch(client: QueryClient, subject: string | undefined, { follows }: { follows: boolean }) {
   return Promise.all([
-    follows && client.invalidateQueries({ queryKey: researchQueryKeys.follows(subject) }),
-    client.invalidateQueries({ queryKey: researchQueryKeys.feed(subject) }),
+    follows && client.invalidateQueries({ queryKey: researchQueries.follows(subject).queryKey }),
+    client.invalidateQueries({ queryKey: paperFeedKeys.following(subject) }),
     // Following something turns the weekly email on by default.
-    client.invalidateQueries({ queryKey: researchQueryKeys.email(subject) }),
+    client.invalidateQueries({ queryKey: researchQueries.email(subject).queryKey }),
   ]);
 }
 
 /** What the signed-in account follows. */
 export function useResearchFollows(enabled = true) {
   const user = useOptionalAuth()?.user;
-  return useQuery({
-    queryKey: researchQueryKeys.follows(user?.hf_subject),
-    queryFn: researchApi.follows,
-    enabled: enabled && !!user,
-  });
+  return useQuery({ ...researchQueries.follows(user?.hf_subject), enabled: enabled && !!user });
 }
 
 export interface FollowChange {
@@ -80,7 +76,7 @@ export function useFollowTopic() {
 export function useReorderTopics() {
   const user = useOptionalAuth()?.user;
   const client = useQueryClient();
-  const key = researchQueryKeys.topics(user?.hf_subject);
+  const key = researchQueries.topics(user?.hf_subject).queryKey;
   return useMutation({
     mutationFn: (topics: ResearchTopic[]) => researchApi.reorderTopics(topics.map(topic => topic.id)),
     onMutate: async topics => {
@@ -98,7 +94,7 @@ export function useSetTopicPublic() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: ({ id, isPublic }: { id: number; isPublic: boolean }) => researchApi.setTopicPublic(id, isPublic),
-    onSuccess: () => client.invalidateQueries({ queryKey: researchQueryKeys.topics(user?.hf_subject) }),
+    onSuccess: () => client.invalidateQueries({ queryKey: researchQueries.topics(user?.hf_subject).queryKey }),
   });
 }
 
@@ -124,8 +120,7 @@ export const isTopicBuilding = (topic: ResearchTopic) => topic.status === 'pendi
 export function useResearchTopics(enabled = true, pollMs = 5000) {
   const user = useOptionalAuth()?.user;
   return useQuery({
-    queryKey: researchQueryKeys.topics(user?.hf_subject),
-    queryFn: researchApi.topics,
+    ...researchQueries.topics(user?.hf_subject),
     enabled: enabled && !!user,
     refetchInterval: query => query.state.data?.some(isTopicBuilding) ? pollMs : false,
   });
@@ -141,8 +136,8 @@ export interface TopicSave {
 function refreshTopics(client: QueryClient, subject: string | undefined) {
   void invalidateResearch(client, subject, { follows: false });
   // Topic pages show whether you follow them and their follower count.
-  void client.invalidateQueries({ queryKey: researchQueryKeys.publicTopics });
-  return client.invalidateQueries({ queryKey: researchQueryKeys.topics(subject) });
+  void client.invalidateQueries({ queryKey: researchKeys.publicTopics });
+  return client.invalidateQueries({ queryKey: researchQueries.topics(subject).queryKey });
 }
 
 /** Saves one of the signed-in account's topics and refreshes what depends on it. */
