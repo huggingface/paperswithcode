@@ -25,6 +25,7 @@ export function PaperResultsSection({
   canEdit,
   evaluationsByTask,
   evaluationsLoading,
+  hiddenClosedSourceCount,
   isAdmin,
   onCopyBadge,
   onEdit,
@@ -36,6 +37,7 @@ export function PaperResultsSection({
   canEdit: boolean;
   evaluationsByTask: EvaluationTaskGroup[];
   evaluationsLoading: boolean;
+  hiddenClosedSourceCount: number;
   isAdmin: boolean;
   onCopyBadge: () => void;
   onEdit: () => void;
@@ -175,7 +177,14 @@ export function PaperResultsSection({
         ))
       ) : (
         <p style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-faint)" }}>
-          No benchmark results recorded yet.
+          {hiddenClosedSourceCount > 0 ? (
+            <>
+              No evals shown for this paper. Turn off "Hide closed-source models" in your{" "}
+              <Link to="/settings">settings</Link> to see them.
+            </>
+          ) : (
+            "No benchmark results recorded yet."
+          )}
         </p>
       )}
     </>
