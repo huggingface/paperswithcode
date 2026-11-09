@@ -201,7 +201,12 @@ def queue_release_signals(
             ),
         )
         .order_by(
-            ModelReleaseSignal.published.desc().nullslast(),
+            # Leaderboard signals have no publication date; without the
+            # fallback they sort after every dated signal and never run.
+            func.coalesce(
+                ModelReleaseSignal.published,
+                func.date(ModelReleaseSignal.first_seen_at),
+            ).desc(),
             ModelReleaseSignal.first_seen_at,
         )
         .limit(budget)

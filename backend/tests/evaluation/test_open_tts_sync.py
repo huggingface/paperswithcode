@@ -666,3 +666,22 @@ def test_cron_syncs_both_open_tts_views(monkeypatch):
         tts.DATASET_SLUG,
         tts.ALL_LANGUAGE_DATASET_SLUG,
     }
+
+
+def test_parser_keeps_the_best_rank_of_a_model_listed_twice():
+    payload = _payload()
+    # Upstream lists one repository under two voices.
+    payload["data"][9][1] = payload["data"][4][1].replace("model-5 (variant)", "Mira")
+
+    entries = parse_open_tts_leaderboard(payload)
+
+    assert len(entries) == 14
+    assert [e.rank for e in entries if e.model_id == "org/model-5"] == [5]
+
+    payload["data"][9][0] = 5
+    try:
+        parse_open_tts_leaderboard(payload)
+    except ValueError as exc:
+        assert "duplicate ranks" in str(exc)
+    else:
+        raise AssertionError("duplicate rank was accepted")

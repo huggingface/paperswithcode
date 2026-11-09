@@ -452,7 +452,44 @@ def test_ambiguous_titles_are_not_matched(monkeypatch):
         ("Kimi K3.1 Pro: Advancing Open Intelligence", "Kimi K3.1", False),
         ("Evaluating GPT-6.1 Terra on Long Tasks", "GPT-6.1 Terra", False),
         ("GPT-6.1 Terra Is Not Robust", "GPT-6.1 Terra", False),
+        ("Introducing GPT-6 Sol and Luna", "GPT-6 Sol", True),
+        ("Introducing GPT-6 Sol and Luna", "GPT-6", False),
     ],
 )
 def test_title_announces_model(title, name, announces):
     assert title_announces_model(title, name) is announces
+
+
+def test_effort_settings_match_their_base_model():
+    session = _session()
+    session.add(
+        Paper(
+            id=2101,
+            title="Introducing GPT-6 Sol and Luna",
+            source="external",
+            source_url="https://openai.com/index/gpt-6-sol-and-luna",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.commit()
+    matcher = matching.LeaderboardModelMatcher(
+        session,
+        provider="test-board",
+        leaderboard_name="Test",
+        leaderboard_url="https://example.com/board",
+    )
+
+    matched = matcher.match(
+        [
+            matching.LeaderboardModel("GPT-6 Sol (max)", "OpenAI"),
+            matching.LeaderboardModel("GPT-6 Sol (high)", "OpenAI"),
+            matching.LeaderboardModel("GPT-6 Sol (Mini)", "OpenAI"),
+        ]
+    )
+
+    # Settings share the base name, so the board keeps the best one.
+    assert {name: (m.paper_id, m.model_name) for name, m in matched.items()} == {
+        "GPT-6 Sol (max)": (2101, "GPT-6 Sol"),
+        "GPT-6 Sol (high)": (2101, "GPT-6 Sol"),
+    }

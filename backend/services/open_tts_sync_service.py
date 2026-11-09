@@ -240,8 +240,7 @@ def parse_open_tts_leaderboard(
         )
 
     indexes = {name: headers.index(name) for name in required}
-    entries: list[OpenTtsEntry] = []
-    model_ids: set[str] = set()
+    entries_by_model: dict[str, OpenTtsEntry] = {}
     ranks: set[int] = set()
     for row in rows:
         if not isinstance(row, list) or len(row) != len(headers):
@@ -269,30 +268,32 @@ def parse_open_tts_leaderboard(
             or not 0 < rtfx < 1_000_000
         ):
             raise ValueError(f"Open TTS row is outside accepted bounds for {model_id}")
-        key = model_id.casefold()
-        if key in model_ids or rank in ranks:
-            raise ValueError("Open TTS response contains duplicate models or ranks")
-        model_ids.add(key)
+        if rank in ranks:
+            raise ValueError("Open TTS response contains duplicate ranks")
         ranks.add(rank)
         license_name = html.unescape(
             _TAG_RE.sub("", str(row[indexes["License"]]))
         ).strip()
-        entries.append(
-            OpenTtsEntry(
-                model_id=model_id,
-                model_name=model_name,
-                rank=rank,
-                wer=wer,
-                rtfx=rtfx,
-                is_open=license_name.casefold() not in {"proprietary", "closed"},
-            )
+        entry = OpenTtsEntry(
+            model_id=model_id,
+            model_name=model_name,
+            rank=rank,
+            wer=wer,
+            rtfx=rtfx,
+            is_open=license_name.casefold() not in {"proprietary", "closed"},
         )
-    if len(entries) < min_ranked_entries:
+        # Upstream can list one model twice under different voices; keep
+        # its best-ranked row.
+        key = model_id.casefold()
+        if key not in entries_by_model or rank < entries_by_model[key].rank:
+            entries_by_model[key] = entry
+    entries = list(entries_by_model.values())
+    if len(ranks) < min_ranked_entries:
         raise ValueError(
-            f"Open TTS returned {len(entries)} ranked rows; expected at least "
+            f"Open TTS returned {len(ranks)} ranked rows; expected at least "
             f"{min_ranked_entries}"
         )
-    if ranks != set(range(1, len(entries) + 1)):
+    if ranks != set(range(1, len(ranks) + 1)):
         raise ValueError("Open TTS ranks must be contiguous and start at one")
     return sorted(entries, key=lambda entry: entry.rank)
 
