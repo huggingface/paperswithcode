@@ -59,6 +59,10 @@ export class ApiError extends Error {
   }
 }
 
+/** True when a request failed because the resource does not exist. */
+export const isNotFound = (error: unknown): boolean =>
+  error instanceof ApiError && error.status === 404;
+
 /** User-facing failure text, with an operation-specific fallback for unknown errors. */
 export function getApiErrorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError) return error.displayMessage || fallback;

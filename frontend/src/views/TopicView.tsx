@@ -11,7 +11,7 @@ import { readHomepagePaperDateRange, withHomepagePaperDateRange } from '@/lib/pa
 import { researchKeys, researchQueries } from '@/lib/api/queries';
 import { hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
-import { ApiError } from '@/lib/apiTransport';
+import { ApiError, isNotFound } from '@/lib/apiTransport';
 import {
   readPendingTopicFollow, stashPendingTopicFollow, topicPath, topicTitle, useFollowTopic, useRemoveTopics,
 } from '@/lib/researchTopic';
@@ -36,7 +36,7 @@ export default function TopicView() {
   const topic = useQuery({
     ...researchQueries.publicTopic(topicId, subject),
     enabled: Number.isInteger(topicId) && topicId > 0,
-    retry: (count, error) => !(error instanceof ApiError && error.status === 404) && count < 2,
+    retry: (count, error) => !isNotFound(error) && count < 2,
   });
   const papers = usePaperFeedQuery(
     researchKeys.topicPapers(topicId, order, dateRange, subject),

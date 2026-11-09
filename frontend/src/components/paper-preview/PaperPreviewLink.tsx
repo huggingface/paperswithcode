@@ -16,7 +16,7 @@ import {
   paperToPreviewData,
   type PaperPreviewData,
 } from "@/components/paper-preview/paperPreviewData";
-import { ApiError } from "@/lib/apiTransport";
+import { isNotFound } from "@/lib/apiTransport";
 import { normalizePaperRouteId } from "@/lib/utils";
 
 interface PaperPreviewLinkProps {
@@ -65,10 +65,7 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
     (query.data
       ? paperToPreviewData(query.data, normalizedRouteId)
       : undefined);
-  const notIndexed =
-    query.error instanceof ApiError &&
-    query.error.status === 404 &&
-    ARXIV_ROUTE_ID.test(normalizedRouteId);
+  const notIndexed = isNotFound(query.error) && ARXIV_ROUTE_ID.test(normalizedRouteId);
 
   const link = (
     <Link

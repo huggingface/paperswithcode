@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
 import MarkdownText from "@/components/MarkdownText";
 import { papersApi } from "@/lib/api/papers";
-import { isNotFound } from "@/lib/apiErrors";
+import { isNotFound } from "@/lib/apiTransport";
 import { CONFERENCE_LISTINGS } from "@/lib/conferenceListings";
 
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";

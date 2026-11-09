@@ -18,7 +18,7 @@ import type {
   TrendingBenchmark,
 } from "@/lib/api/catalog.types";
 import { papersApi } from "@/lib/api/papers";
-import { isNotFound } from "@/lib/apiErrors";
+import { isNotFound } from "@/lib/apiTransport";
 import { assetUrl } from "@/lib/apiUrl";
 import { formatStarCount } from "@/lib/frameworks";
 
