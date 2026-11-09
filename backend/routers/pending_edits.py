@@ -70,6 +70,7 @@ EditType = Literal[
     "new_external_paper",
 ]
 StatusLiteral = Literal["pending", "approved", "rejected"]
+StatusFilter = Literal["pending", "approved", "rejected", "all"]
 
 
 router = APIRouter()
@@ -146,11 +147,20 @@ class PendingEditSubmitRequest(BaseModel):
     )
 
 
+class PendingEditPaper(BaseModel):
+    title: str
+    arxiv_id: Optional[str] = None
+
+
 class PendingEditResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     paper_id: Optional[int]
+    paper: Optional[PendingEditPaper] = Field(
+        default=None,
+        description="Title and arXiv ID of the edited paper; set on list responses.",
+    )
     hf_username: str
     hf_subject: Optional[str] = None
     is_author: bool
@@ -176,6 +186,9 @@ class PendingEditResponse(BaseModel):
 class PendingEditListResponse(BaseModel):
     count: int
     results: List[PendingEditResponse]
+    status_counts: Dict[str, int] = Field(
+        description="Rows per status under the same filters, ignoring `status`.",
+    )
 
 
 class PendingEditReviewRequest(BaseModel):
@@ -281,10 +294,10 @@ def submit_pending_paper_edit(
     tags=["pending_edits"],
 )
 def list_pending_paper_edits(
-    status_filter: Optional[StatusLiteral] = Query(
+    status_filter: StatusFilter = Query(
         default="pending",
         alias="status",
-        description="Filter by row status (default: pending)",
+        description="Filter by row status, or `all` (default: pending)",
     ),
     edit_type: Optional[EditType] = Query(default=None),
     paper_id: Optional[int] = Query(default=None, ge=1),
@@ -296,20 +309,32 @@ def list_pending_paper_edits(
     db: Session = Depends(get_database_session),
 ) -> PendingEditListResponse:
     service = PendingEditService(db)
+    filters = dict(
+        edit_type=edit_type,
+        paper_id=paper_id,
+        reviewed_by_kind=reviewed_by_kind,
+        hf_username=hf_username,
+    )
     try:
         rows, total = service.list_edits(
-            status=status_filter,
-            edit_type=edit_type,
-            paper_id=paper_id,
-            reviewed_by_kind=reviewed_by_kind,
-            hf_username=hf_username,
+            status=None if status_filter == "all" else status_filter,
             limit=limit,
             offset=offset,
+            **filters,
         )
+        status_counts = service.status_counts(**filters)
     except PendingEditError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    papers = {
+        paper_id: PendingEditPaper(title=title, arxiv_id=arxiv_id)
+        for paper_id, (title, arxiv_id) in service.paper_refs(rows).items()
+    }
+    results = [
+        _to_response(row).model_copy(update={"paper": papers.get(row.paper_id)})
+        for row in rows
+    ]
     return PendingEditListResponse(
-        count=total, results=[_to_response(row) for row in rows]
+        count=total, results=results, status_counts=status_counts
     )
 
 
