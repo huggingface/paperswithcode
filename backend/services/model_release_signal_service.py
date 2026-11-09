@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import unicodedata
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from urllib.parse import urlsplit
@@ -332,6 +333,22 @@ def _names_match(token: str, name: str, *, account: bool) -> bool:
     return account or token[len(name) :] in _CORPORATE_SUFFIXES
 
 
+def is_english_text(text: str) -> bool:
+    """Whether ``text`` is written in Latin script, our proxy for English.
+
+    Model names and stray symbols ("λ", "×") are tolerated; a headline or
+    summary written in Korean, Japanese, Chinese, Cyrillic, etc. is not.
+    """
+    letters = [char for char in text if char.isalpha()]
+    if not letters:
+        return True
+    foreign = sum(
+        not unicodedata.name(char, "").startswith(("LATIN", "GREEK"))
+        for char in letters
+    )
+    return foreign / len(letters) <= 0.1
+
+
 def is_first_party_source(
     url: str, *, publisher_names: list[str], lead_url: str | None
 ) -> bool:
@@ -506,6 +523,11 @@ class ReleaseSignalResolutionService:
             raise ValueError(
                 "An external paper's source_url must be the publisher's own "
                 "announcement, model card, or repository, not a news or mirror page"
+            )
+        if not is_english_text(f"{external.title} {external.abstract}"):
+            raise ValueError(
+                "External papers must be in English; resolve with the lab's "
+                "English announcement or model card, or reject the release"
             )
         if external.date_published > date.today() + timedelta(days=1):
             raise ValueError("External paper date_published is in the future")

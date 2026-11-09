@@ -423,6 +423,45 @@ def test_external_paper_from_news_page_is_refused(db, fake_external):
     assert fake_external.created == []
 
 
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Kimi K3.1 Pro: Advancing Open Intelligence", True),
+        ("λ-Mixer: scaling 10× faster with α-entmax", True),
+        ("Café-Bench: résumé parsing", True),
+        (
+            "AI 에이전트를 위한 멀티모달 의사결정 모델 ‘Kanana-2-v-decide’ 오픈소스 공개",
+            False,
+        ),
+        ("PLaMo 3 を公開しました", False),
+        ("通义千问 Qwen4 发布", False),
+        ("", True),
+    ],
+)
+def test_is_english_text(text, expected):
+    assert signals.is_english_text(text) is expected
+
+
+def test_non_english_external_paper_is_refused(db, fake_external):
+    row = _signal_row(db)
+    source = "https://www.kimi.com/blog/kimi-k3-1-pro"
+    with pytest.raises(ValueError, match="must be in English"):
+        signals.ReleaseSignalResolutionService(db).apply(
+            row.id,
+            _accept(
+                source,
+                external_paper={
+                    "source_url": source,
+                    "title": "Kimi K3.1 Pro 오픈소스 공개",
+                    "abstract": "안녕하세요, 오늘 Kimi K3.1 Pro를 공개합니다.",
+                    "date_published": "2026-10-23",
+                },
+            ),
+            commit=False,
+        )
+    assert fake_external.created == []
+
+
 def test_duplicate_release_resolves_to_the_indexed_paper(db, fake_external):
     row = _signal_row(db, "Hunyuan Hy3")
     _paper(db, 102554, "Hy3", "https://huggingface.co/tencent/Hy3")
