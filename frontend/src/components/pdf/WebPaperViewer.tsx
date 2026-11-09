@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import MarkdownText from "@/components/MarkdownText";
 import { ReaderToolbar, type PdfToolbarResources } from "@/components/pdf/PdfToolbar";
 import { usePdfSelection } from "@/hooks/usePdfSelection";
-import { getPaperWebMarkdown, getPaperWebPage } from "@/lib/api/papers";
+import { paperQueries } from "@/lib/api/queries";
 import { ApiError } from "@/lib/apiTransport";
 import type { PaperSelectionDraft } from "@/lib/chat";
 import { framesOriginalPage, sameWebPage, webPaperBody } from "@/lib/paperReader";
@@ -53,10 +53,8 @@ export function WebPaperViewer({
   const documentRef = useRef<HTMLElement>(null);
   const knownFrameable = framesOriginalPage(sourceUrl);
   const pageQuery = useQuery({
-    queryKey: ["paperWebPage", paperId],
-    queryFn: () => getPaperWebPage(paperId),
+    ...paperQueries.webPage(paperId),
     enabled: !knownFrameable,
-    staleTime: 5 * 60_000,
     // Without an answer the page is read as Markdown.
     retry: false,
   });
@@ -65,9 +63,7 @@ export function WebPaperViewer({
   const [view, setView] = useState<"original" | "text">("original");
   const showOriginal = frameable && view === "original";
   const query = useQuery({
-    queryKey: ["paperWebMarkdown", paperId],
-    queryFn: () => getPaperWebMarkdown(paperId),
-    staleTime: 5 * 60_000,
+    ...paperQueries.webMarkdown(paperId),
     // The first read may still be preparing the page; 4xx answers are final.
     retry: (count, error) => count < 2 && !(error instanceof ApiError && error.status < 500),
     retryDelay: 3000,

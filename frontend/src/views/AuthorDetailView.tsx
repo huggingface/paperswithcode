@@ -11,19 +11,16 @@ import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { papersApi } from "@/lib/api/papers";
 import { isNotFound } from "@/lib/apiErrors";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
+import { paperFeedKeys, paperQueries } from "@/lib/api/queries";
 import { transformPaperForCard } from "@/lib/transform";
 import NotFound from "@/pages/NotFound";
 
 const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
   const feed = usePaperFeedParams();
   const { searchParams } = feed;
-  const author = useQuery({
-    queryKey: ["author", authorId],
-    queryFn: () => papersApi.getAuthor(authorId),
-  });
+  const author = useQuery(paperQueries.author(authorId));
   const papers = usePaperFeedQuery(
-    [...paperQueryKeys.feeds.infinite, { author: authorId, ...feed.filters }],
+    paperFeedKeys.list({ author: authorId, ...feed.filters }),
     (page) => papersApi.list({ ...feed.filters, author: authorId, page, page_size: 12 }),
   );
 

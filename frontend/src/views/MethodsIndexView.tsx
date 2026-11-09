@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Flame } from "lucide-react";
 
 import type { MethodIndexEntry } from "@/lib/api/catalog.types";
-import { catalogApi } from "@/lib/api/catalog";
+
 import { sortAreas } from "@/lib/areas";
 import { slugify } from "@/lib/slug";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -12,31 +12,19 @@ import { AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
 import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 import { TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
 import { useHashScrollOnReady } from "@/hooks/useHashScrollOnReady";
-import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+import { catalogQueries } from "@/lib/api/queries";
 
 /**
  * Methods index — methods grouped by `area_id`, sorted by trend score desc
  * within each area. Backend areas are the single source of grouping truth.
  */
 const MethodsIndexView: React.FC = () => {
-  const areasQ = useQuery({
-    queryKey: catalogQueryKeys.areas,
-    queryFn: () => catalogApi.listAreas({ page_size: 50, ordering: "name" }),
-    staleTime: TEN_MINUTES,
-  });
+  const areasQ = useQuery(catalogQueries.areas());
 
   // Use the compact directory projection so card rendering does not download
   // method descriptions, citations, image metadata, or other detail fields.
-  const methodsQ = useQuery({
-    queryKey: ["methods-all"],
-    queryFn: async () => (await catalogApi.methodIndex()).results,
-    staleTime: TEN_MINUTES,
-  });
-  const trendingQ = useQuery({
-    queryKey: ["trending-methods-directory"],
-    queryFn: () => catalogApi.trendingMethods({ limit: 12 }),
-    staleTime: TEN_MINUTES,
-  });
+  const methodsQ = useQuery({ ...catalogQueries.methodIndex(), select: (index) => index.results });
+  const trendingQ = useQuery(catalogQueries.trendingMethods({ limit: 12 }));
 
   const trendingItems = useMemo(() => {
     const areaNames = new Map((areasQ.data?.results ?? []).map((area) => [area.id, area.name]));

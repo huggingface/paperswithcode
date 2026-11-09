@@ -13,7 +13,7 @@ const toast = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast }) }));
 const task = { id: "7", name: "Classification", slug: "classification", level: 0 };
 const original = { id: "42", arxiv_id: "2401.00001", tasks: [task] };
-const keys = [["paper", "42"], ["paper", "2401.00001"], ["paper-arxiv", "2401.00001"]];
+const keys = [["paper", "42"], ["paper", "2401.00001"], ["paper-summary", "2401.00001"]];
 function setup(mode: "direct" | "pending" = "direct") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 300_000 } } });
   keys.forEach(key => client.setQueryData(key, original));

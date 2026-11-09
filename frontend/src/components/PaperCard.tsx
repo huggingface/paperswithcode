@@ -8,11 +8,9 @@ import { Icon } from "@/components/Icon";
 import LatexTitle, { LatexText } from "@/components/LatexTitle";
 import { PaperPreview } from "@/components/PaperPreview";
 import { SotaBadges } from "@/components/SotaBadges";
-import { papersApi } from "@/lib/api/papers";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
+import { paperQueries } from "@/lib/api/queries";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import type { PaperCardProps } from "@/lib/transform";
-import { TEN_MINUTES } from "@/lib/api/queryKeys";
 
 // Official multi-color Hugging Face logo. Kept as a standalone component
 // because the shared `Icon` renders single-color `currentColor` paths, while
@@ -116,11 +114,7 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
   const queryClient = useQueryClient();
   const paperHref = `/paper/${paper.id}`;
   const prefetchPaper = React.useCallback(() => {
-    queryClient.prefetchQuery({
-      queryKey: paperQueryKeys.detail(paper.id),
-      queryFn: () => papersApi.get(paper.id, true),
-      staleTime: TEN_MINUTES,
-    });
+    void queryClient.prefetchQuery(paperQueries.detail(paper.id));
   }, [paper.id, queryClient]);
   const visibleAuthors = paper.authors.slice(0, 3).map((name, index) => {
     const authorId = paper.authorIds?.[index];

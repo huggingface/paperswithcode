@@ -1,4 +1,3 @@
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
 /**
  * Global ⌘K search overlay.
  *
@@ -11,8 +10,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import LatexTitle from "@/components/LatexTitle";
-import { catalogApi } from "@/lib/api/catalog";
-import { papersApi } from "@/lib/api/papers";
+import { catalogQueries, ONE_MINUTE, paperQueries } from "@/lib/api/queries";
 import { isChatEnabled } from "@/lib/apiUrl";
 import { useDebounce } from "@/hooks/useDebounce";
 import { chipColors, hueFromSlug } from "@/lib/colors";
@@ -56,56 +54,16 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 
-  const papersQ = useQuery({
-    queryKey: [...paperQueryKeys.feeds.searchOverlay, debouncedQuery],
-    queryFn: () => papersApi.search(debouncedQuery, 1, PAPER_PAGE_SIZE),
-    enabled: open && canSearch,
-    staleTime: 60_000,
-    retry: false,
-  });
-
-  const tasksQ = useQuery({
-    queryKey: ["search-tasks", debouncedQuery],
-    queryFn: () => catalogApi.listTasks({ q: debouncedQuery, page_size: 6 }),
-    enabled: open && canSearch,
-    staleTime: 60_000,
-    retry: false,
-  });
-
-  const methodsQ = useQuery({
-    queryKey: ["search-methods", debouncedQuery],
-    queryFn: () => catalogApi.listMethods({ q: debouncedQuery, page_size: 6 }),
-    enabled: open && canSearch,
-    staleTime: 60_000,
-    retry: false,
-  });
-
-  const benchmarksQ = useQuery({
-    queryKey: ["search-benchmarks", debouncedQuery],
-    queryFn: () =>
-      catalogApi.listDatasets({
-        q: debouncedQuery,
-        page_size: 6,
-      }),
-    enabled: open && canSearch,
-    staleTime: 60_000,
-    retry: false,
-  });
-
-  const authorsQ = useQuery({
-    queryKey: ["search-authors", debouncedQuery],
-    queryFn: () => papersApi.searchAuthors(debouncedQuery, ENTITY_PAGE_SIZE),
-    enabled: open && canSearch,
-    staleTime: 60_000,
-    retry: false,
-  });
-
+  // Every source shares these options; results stay fresh for a minute of typing.
+  const search = { enabled: open && canSearch, staleTime: ONE_MINUTE, retry: false } as const;
+  const papersQ = useQuery({ ...paperQueries.search(debouncedQuery, PAPER_PAGE_SIZE), ...search });
+  const tasksQ = useQuery({ ...catalogQueries.taskList({ q: debouncedQuery, page_size: 6 }), ...search });
+  const methodsQ = useQuery({ ...catalogQueries.methodList({ q: debouncedQuery, page_size: 6 }), ...search });
+  const benchmarksQ = useQuery({ ...catalogQueries.datasetList({ q: debouncedQuery, page_size: 6 }), ...search });
+  const authorsQ = useQuery({ ...paperQueries.authorSearch(debouncedQuery, ENTITY_PAGE_SIZE), ...search });
   const organizationsQ = useQuery({
-    queryKey: ["search-organizations", debouncedQuery],
-    queryFn: () => catalogApi.searchOrganizations(debouncedQuery, ENTITY_PAGE_SIZE),
-    enabled: open && canSearch,
-    staleTime: 60_000,
-    retry: false,
+    ...catalogQueries.organizationSearch(debouncedQuery, ENTITY_PAGE_SIZE),
+    ...search,
   });
 
   if (!open) return null;

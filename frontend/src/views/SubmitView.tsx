@@ -22,7 +22,7 @@ import { papersApi } from "@/lib/api/papers";
 import { getApiErrorMessage } from "@/lib/apiTransport";
 import { hfLoginUrl } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
-import { invalidatePaperFeeds } from "@/lib/queryInvalidation";
+import { invalidatePaperFeeds } from "@/lib/api/cacheSync";
 
 const SUBMIT_DRAFT_KEY = "pwc:paper-submit-draft";
 

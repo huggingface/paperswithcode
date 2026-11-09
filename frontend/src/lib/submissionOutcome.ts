@@ -2,7 +2,7 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import type { useToast } from "@/hooks/use-toast";
 import type { PendingPaperEdit } from "@/lib/pendingEdits";
-import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/queryInvalidation";
+import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/api/cacheSync";
 
 interface SubmissionOutcome {
   toast: ReturnType<typeof useToast>["toast"];

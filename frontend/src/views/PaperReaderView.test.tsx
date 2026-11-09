@@ -11,13 +11,7 @@ const mocks = vi.hoisted(() => ({
   paper: {} as Record<string, unknown>,
 }));
 
-vi.mock("@/hooks/usePapers", () => ({
-  usePaper: () => ({
-    data: mocks.paper,
-    isLoading: false,
-    error: null,
-  }),
-}));
+
 
 const arxivPaper = {
       id: "42",
@@ -105,6 +99,8 @@ import type { Paper } from "@/lib/api/papers.types";
 
 function renderReader(route = "/pdf/1706.03762") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  // The reader shows whichever paper the test set up, under any route ID.
+  client.setQueryDefaults(["paper"], { initialData: () => mocks.paper });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[route]}>

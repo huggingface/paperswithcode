@@ -17,12 +17,11 @@ import type {
   Task,
   TrendingBenchmark,
 } from "@/lib/api/catalog.types";
-import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { isNotFound } from "@/lib/apiErrors";
 import { assetUrl } from "@/lib/apiUrl";
 import { formatStarCount } from "@/lib/frameworks";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
+
 import { usePreferences } from "@/lib/preferences";
 import { slugify } from "@/lib/slug";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
@@ -31,7 +30,7 @@ import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import NotFound from "@/pages/NotFound";
-import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 
 const SUBTASK_BENCH_PREVIEW = 3;
 
@@ -206,12 +205,7 @@ const TagBrowseView: React.FC = () => {
   // chain, sister tasks, visible children, this task's benchmarks, and a short
   // benchmark preview per child. This replaces the previous fan-out of six+
   // independent task/dataset queries on initial load (see Speed plan §1).
-  const pageQ = useQuery({
-    queryKey: [...catalogQueryKeys.taskPage, taskSlug, bestModelIsOpen],
-    queryFn: () => catalogApi.taskPage(taskSlug!, { is_open: bestModelIsOpen }),
-    enabled: !!taskSlug,
-    staleTime: TEN_MINUTES,
-  });
+  const pageQ = useQuery(catalogQueries.taskPage(taskSlug, { is_open: bestModelIsOpen }));
 
   useEffect(() => {
     const canonicalSlug = pageQ.data?.task.slug;
@@ -221,17 +215,11 @@ const TagBrowseView: React.FC = () => {
     navigate(`/tasks/${canonicalSlug}${query ? `?${query}` : ""}`, { replace: true });
   }, [navigate, pageQ.data?.task.slug, searchParams, taskSlug]);
 
-  const benchmarkTrendsQ = useQuery({
-    queryKey: [...catalogQueryKeys.taskBenchmarkTrends, taskSlug, bestModelIsOpen],
-    queryFn: () =>
-      catalogApi.trendingBenchmarks(taskSlug!, {
-        limit: 100,
-        min_recent_papers: 0,
-        is_open: bestModelIsOpen,
-      }),
-    enabled: !!taskSlug,
-    staleTime: TEN_MINUTES,
-  });
+  const benchmarkTrendsQ = useQuery(catalogQueries.taskBenchmarkTrends(taskSlug, {
+    limit: 100,
+    min_recent_papers: 0,
+    is_open: bestModelIsOpen,
+  }));
 
   // Subtasks (child tasks). Classic LM is the historical catch-all, so keep it
   // after the capability-oriented subtasks.
@@ -253,7 +241,7 @@ const TagBrowseView: React.FC = () => {
   // The papers endpoint resolves slugs itself, so start the feed in parallel
   // with the task-page shell instead of waiting for its task id.
   const papersQ = usePaperFeedQuery(
-    [...paperQueryKeys.feeds.task, taskSlug, feed.filters],
+    paperFeedKeys.task(taskSlug, feed.filters),
     // Cards show only the leading repository; highly cited papers can
     // otherwise carry hundreds of community implementations each.
     (page) => papersApi.forTask(taskSlug!, { ...feed.filters, page, page_size: 20, repository_limit: 1 }),

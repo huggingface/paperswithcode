@@ -257,7 +257,7 @@ it.each(["tasks", "organizations"] as const)("invalidates route details and feed
   const paper = { id: "42", arxiv_id: "2401.00001", title: "Cached paper" };
   client.setQueryData(["paper-summary", "42"], paper);
   client.setQueryData(["paper", paper.arxiv_id], paper);
-  client.setQueryData(["paper-preview", paper.arxiv_id], paper);
+  client.setQueryData(["paper-summary", paper.arxiv_id], paper);
   client.setQueryData(["organization-papers-infinite", "nvidia"], [paper]);
   const submission = { ...externalPaperSubmission, paper_id: 42, edit_type, proposed_payload: edit_type === "tasks" ? { task_ids: [1] } : { organization_ids: [1] } };
   listPendingPaperEdits.mockResolvedValue({ count: 1, results: [submission] });
@@ -265,7 +265,7 @@ it.each(["tasks", "organizations"] as const)("invalidates route details and feed
   renderDashboard(client);
   await userEvent.setup().click(await screen.findByRole("button", { name: "Approve" }));
   await waitFor(() => expect(client.getQueryState(["paper", paper.arxiv_id])?.isInvalidated).toBe(true));
-  expect(client.getQueryState(["paper-preview", paper.arxiv_id])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["paper-summary", paper.arxiv_id])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["organization-papers-infinite", "nvidia"])?.isInvalidated).toBe(true);
 });
 

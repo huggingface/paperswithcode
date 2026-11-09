@@ -21,7 +21,6 @@ import { useQuery } from "@tanstack/react-query";
 import { StatusBadge } from "@/components/cron/StatusBadge";
 import { Badge } from "@/components/ui/badge";
 import {
-  operationsApi,
   type CronHealthAxis,
   type CronJobHealth,
   type CronJobStatus,
@@ -32,7 +31,7 @@ import {
   type PaperMarkdownJobProfile,
 } from "@/lib/api/operations";
 import { formatCronDate, formatUsd, toneClass, type Tone } from "@/lib/cronStatus";
-import { adminQueryKeys } from "@/lib/api/queryKeys";
+import { adminQueries } from "@/lib/api/queries";
 
 function formatDuration(duration: number | null): string {
   if (duration == null) return "N/A";
@@ -425,8 +424,7 @@ export function CronJobCard({
   const hasDbMetrics = Boolean(job.db_metrics && Object.keys(job.db_metrics).length);
   const hasRemoteJobs = job.job_name === "paper_markdown_backfill";
   const paperMarkdownJobs = useQuery({
-    queryKey: adminQueryKeys.paperMarkdownJobs,
-    queryFn: () => operationsApi.getPaperMarkdownJobs(),
+    ...adminQueries.paperMarkdownJobs(),
     enabled: hasRemoteJobs,
     refetchInterval: autoRefresh ? 30000 : false,
     retry: false,

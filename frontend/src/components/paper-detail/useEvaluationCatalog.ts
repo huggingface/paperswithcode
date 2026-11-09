@@ -4,13 +4,14 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import type { SearchableSelectOption } from "@/components/ui/searchable-select";
 import { catalogApi } from "@/lib/api/catalog";
 import type { Dataset, Task } from "@/lib/api/catalog.types";
+import { catalogQueries } from "@/lib/api/queries";
 import type { Evaluation, LeaderboardMetric } from "@/lib/api/evaluations.types";
 import type { EditableEvaluationRow } from "@/lib/evaluationOperations";
 
 const SEARCH_PAGE_SIZE = 100;
 
-const taskKey = (id: string) => ["eval-edit", "task", id] as const;
-const datasetKey = (id: string) => ["eval-edit", "dataset", id] as const;
+const taskKey = (id: string) => catalogQueries.task(id).queryKey;
+const datasetKey = (id: string) => catalogQueries.dataset(id).queryKey;
 
 function byId<T extends { id: string }>(...lists: Array<Array<T | undefined>>): Map<string, T> {
   return new Map(lists.flat().flatMap((item) => (item ? [[item.id, item] as const] : [])));
@@ -52,30 +53,21 @@ export function useEvaluationCatalog(rows: EditableEvaluationRow[], initialEvalu
   )), [initialEvaluations]);
 
   const pickedTasks = useQueries({
-    queries: taskIds.filter((id) => !storedTasks.has(id)).map((id) => ({
-      queryKey: taskKey(id),
-      queryFn: () => catalogApi.getTask(id),
-      staleTime: Infinity,
-    })),
+    queries: taskIds.filter((id) => !storedTasks.has(id)).map((id) => ({ ...catalogQueries.task(id), staleTime: Infinity })),
     combine: (results) => results.map((result) => result.data),
   });
   // Task dataset lists say which stored datasets support a harness.
   const taskDatasets = useQueries({
     queries: taskIds.map((taskId) => ({
-      queryKey: ["eval-edit", "task-datasets", taskId],
-      queryFn: async () =>
-        (await catalogApi.listDatasets({ task_id: Number(taskId), page_size: SEARCH_PAGE_SIZE })).results,
+      ...catalogQueries.datasetList({ task_id: Number(taskId), page_size: SEARCH_PAGE_SIZE }),
+      select: (page: { results: Dataset[] }) => page.results,
     })),
   });
   const listedDatasets = byId(...taskDatasets.map((result) => result.data ?? []));
   const pickedDatasets = useQueries({
     queries: datasetIds
       .filter((id) => !storedDatasets.has(id) && !listedDatasets.has(id))
-      .map((id) => ({
-        queryKey: datasetKey(id),
-        queryFn: () => catalogApi.getDataset(id),
-        staleTime: Infinity,
-      })),
+      .map((id) => ({ ...catalogQueries.dataset(id), staleTime: Infinity })),
     combine: (results) => ({
       data: results.map((result) => result.data),
       loaded: results.every((result) => result.isSuccess),
@@ -84,10 +76,8 @@ export function useEvaluationCatalog(rows: EditableEvaluationRow[], initialEvalu
   const metricQueries = useQueries({
     queries: leaderboards.map((leaderboard) => {
       const [taskId, datasetId] = leaderboard.split(":");
-      return {
-        queryKey: ["eval-edit", "leaderboard-metrics", taskId, datasetId],
-        queryFn: () => catalogApi.leaderboardMetrics(datasetId, taskId),
-      };
+      // Editors pick metrics from the live configuration.
+      return { ...catalogQueries.leaderboardMetrics(datasetId, taskId), staleTime: 0 };
     }),
   });
 

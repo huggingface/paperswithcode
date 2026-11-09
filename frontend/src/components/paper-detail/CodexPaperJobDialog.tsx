@@ -18,7 +18,7 @@ import {
   type CodexPaperJob,
   type CodexPaperJobKind,
 } from "@/lib/api/codex";
-import { adminQueryKeys } from "@/lib/api/queryKeys";
+import { adminQueries } from "@/lib/api/queries";
 
 const JOB_COPY = {
   "add-evals": {
@@ -127,9 +127,7 @@ export function CodexPaperJobDialog({
   const completedJobId = useRef<string | null>(null);
 
   const jobQuery = useQuery({
-    queryKey: adminQueryKeys.codexPaperJob(kind, jobId),
-    queryFn: () => codexApi.getPaperJob(kind, jobId!),
-    enabled: jobId !== null,
+    ...adminQueries.codexPaperJob(kind, jobId),
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       if (status === "awaiting_markdown") return 60_000;
@@ -138,7 +136,7 @@ export function CodexPaperJobDialog({
     retry: false,
   });
   const showJob = (next: CodexPaperJob) => {
-    queryClient.setQueryData(adminQueryKeys.codexPaperJob(kind, next.id), next);
+    queryClient.setQueryData(adminQueries.codexPaperJob(kind, next.id).queryKey, next);
     setJobId(next.id);
   };
   const start = useMutation({

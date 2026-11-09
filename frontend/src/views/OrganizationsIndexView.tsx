@@ -4,9 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { Organization } from "@/lib/api/catalog.types";
-import { catalogApi } from "@/lib/api/catalog";
+
 import "./Organizations.css";
-import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+import { catalogQueries } from "@/lib/api/queries";
 
 type SortMode = "trending" | "papers" | "name";
 
@@ -39,11 +39,7 @@ const OrganizationsIndexView: React.FC = () => {
   const [params, setParams] = useSearchParams();
   const sort = parseSort(params.get("sort"));
   const query = params.get("q") ?? "";
-  const organizationsQ = useQuery({
-    queryKey: [...catalogQueryKeys.organizations, "featured"],
-    queryFn: () => catalogApi.organizationIndex(),
-    staleTime: TEN_MINUTES,
-  });
+  const organizationsQ = useQuery(catalogQueries.organizationIndex());
 
   const setView = (next: { sort?: SortMode; query?: string }) => {
     const updated = new URLSearchParams(params);

@@ -17,7 +17,6 @@ import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
 import { completedScrollHeight, isCompletionKey, useChatCompletion } from "@/components/chat/useChatCompletion";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import { chatApi } from "@/lib/api/chat";
-import { catalogApi } from "@/lib/api/catalog";
 import {
   CANONICAL_CHAT_URL,
   isChatEnabled,
@@ -35,8 +34,7 @@ import { usePaperFeedQuery } from "@/hooks/usePapers";
 import type { Paper } from "@/lib/api/papers.types";
 import type { PaginatedResponse } from "@/lib/api/shared.types";
 import { papersApi } from "@/lib/api/papers";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
-import { catalogQueryKeys, researchQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -350,20 +348,12 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   };
 
   // Sidebar: top tasks by paper count.
-  const topTasks = useQuery({
-    queryKey: catalogQueryKeys.topTasksSidebar,
-    queryFn: () => catalogApi.topTasks(8),
-    staleTime: TEN_MINUTES,
-  });
+  const topTasks = useQuery(catalogQueries.topTasks(8));
 
   // Sidebar: tasks whose share of recent papers is rising vs their baseline.
   // Independent of Top Domains; overlapping entries appear in both sections
   // so neither list misrepresents its own signal.
-  const trendingTasks = useQuery({
-    queryKey: ["trending-tasks-sidebar"],
-    queryFn: () => catalogApi.trendingTasks({ limit: 8, level: 0, min_recent_papers: 10 }),
-    staleTime: TEN_MINUTES,
-  });
+  const trendingTasks = useQuery(catalogQueries.trendingTasks({ limit: 8, level: 0, min_recent_papers: 10 }));
 
   const topicOnly = following && searchParams.get("only") === "topic";
   const topicParam = following ? Number(searchParams.get("topic") ?? NaN) : NaN;
@@ -378,8 +368,8 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   // Following pages by offset; the public feeds by page number.
   const infinite = usePaperFeedQuery<FeedPage>(
     following
-      ? [...paperQueryKeys.feeds.following, user?.hf_subject, followingFilters]
-      : [...paperQueryKeys.feeds.trending, dateFilters],
+      ? paperFeedKeys.following(user?.hf_subject, followingFilters)
+      : paperFeedKeys.trending(dateFilters),
     async (page) => {
       if (following) {
         const entries = await researchApi.following(page, followingFilters);
@@ -409,7 +399,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   useEffect(() => {
     const now = buildingIds ? buildingIds.split(",") : [];
     if (wasBuilding.current.some(id => !now.includes(id))) {
-      void queryClient.invalidateQueries({ queryKey: researchQueryKeys.feed(user?.hf_subject) });
+      void queryClient.invalidateQueries({ queryKey: paperFeedKeys.following(user?.hf_subject) });
     }
     wasBuilding.current = now;
   }, [buildingIds, queryClient, user?.hf_subject]);

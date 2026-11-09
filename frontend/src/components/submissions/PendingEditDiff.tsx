@@ -1,6 +1,6 @@
 import type React from "react";
 
-import { catalogApi } from "@/lib/api/catalog";
+import { catalogQueries } from "@/lib/api/queries";
 import type { PendingPaperEdit } from "@/lib/pendingEdits";
 import { EntitySetDiff, OrganizationSetDiff } from "./diffs/EntitySetDiff";
 import { EvaluationsDiff } from "./diffs/EvaluationsDiff";
@@ -22,15 +22,13 @@ function EditContent({ edit }: { edit: PendingPaperEdit }): React.ReactElement {
       return <EntitySetDiff
         currentItems={edit.current_payload?.tasks ?? []}
         proposedIds={edit.proposed_payload.task_ids}
-        queryPrefix="task"
-        fetchEntity={(id) => catalogApi.getTask(id)}
+        entity={catalogQueries.task}
       />;
     case "methods":
       return <EntitySetDiff
         currentItems={edit.current_payload?.methods ?? []}
         proposedIds={edit.proposed_payload.method_ids}
-        queryPrefix="method"
-        fetchEntity={(id) => catalogApi.getMethod(id)}
+        entity={catalogQueries.method}
       />;
     case "organizations":
       return <OrganizationSetDiff

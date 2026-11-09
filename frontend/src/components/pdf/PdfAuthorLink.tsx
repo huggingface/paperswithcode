@@ -4,7 +4,7 @@ import { Link } from "react-router-dom";
 
 import { AuthorAvatar } from "@/components/AuthorAvatar";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { papersApi } from "@/lib/api/papers";
+import { paperQueries } from "@/lib/api/queries";
 
 const isCoarsePointer = (): boolean =>
   typeof window.matchMedia === "function" &&
@@ -27,13 +27,7 @@ export interface PdfAuthorLinkTarget extends PdfPaperAuthor {
 export function PdfAuthorLink({ id, name, avatarUrl, box: [x0, y0, x1, y1] }: PdfAuthorLinkTarget) {
   const [open, setOpen] = useState(false);
   const href = `/authors/${encodeURIComponent(id)}`;
-  const author = useQuery({
-    queryKey: ["author", id],
-    queryFn: () => papersApi.getAuthor(id),
-    enabled: open,
-    staleTime: 5 * 60 * 1000,
-    retry: false,
-  });
+  const author = useQuery({ ...paperQueries.author(id), enabled: open, retry: false });
   const paperCount = author.data?.paper_count;
   const handle = author.data?.hf_username;
   return <div

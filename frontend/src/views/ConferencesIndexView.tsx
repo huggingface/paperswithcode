@@ -3,12 +3,12 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import type { Conference } from "@/lib/api/catalog.types";
-import { catalogApi } from "@/lib/api/catalog";
+import { catalogQueries } from "@/lib/api/queries";
 import { formatDateRange } from "@/lib/deadlines";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
 import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
-import { TEN_MINUTES } from "@/lib/api/queryKeys";
+
 
 const resolveConferenceYear = (conf: Conference): number => {
   if (conf.year != null) return conf.year;
@@ -28,11 +28,7 @@ const compareByStartDate = (a: Conference, b: Conference) => {
 };
 
 const ConferencesIndexView: React.FC = () => {
-  const conferencesQ = useQuery({
-    queryKey: ["conferences"],
-    queryFn: () => catalogApi.conferences(),
-    staleTime: TEN_MINUTES,
-  });
+  const conferencesQ = useQuery(catalogQueries.conferences());
 
   const groupedByYear = useMemo(() => {
     if (!conferencesQ.data?.results) return null;

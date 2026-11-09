@@ -12,7 +12,7 @@ import {
   toDirectEvaluationOperations,
   type EditableEvaluationRow,
 } from "@/lib/evaluationOperations";
-import { evaluationChange, refreshEvaluationQueries } from "@/lib/evaluationQueryInvalidation";
+import { evaluationChange, refreshEvaluationQueries } from "@/lib/api/cacheSync";
 import type { PendingEvaluationOperation } from "@/lib/pendingEdits";
 import { useToast } from "@/hooks/use-toast";
 import { EvaluationRowsTable, type EditableField } from "./EvaluationRowsTable";

@@ -1,6 +1,9 @@
-import { evaluationChange, refreshEvaluationQueries } from "@/lib/evaluationQueryInvalidation";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
-import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/queryInvalidation";
+import {
+  evaluationChange,
+  invalidatePaperDetails,
+  invalidatePaperFeeds,
+  refreshEvaluationQueries,
+} from "@/lib/api/cacheSync";
 import React from "react";
 import "./SubmissionsDashboard.css";
 import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,12 +26,11 @@ import {
   type PendingEditType,
   type PendingPaperEdit,
 } from "@/lib/pendingEdits";
-import { papersApi } from "@/lib/api/papers";
 import type { Paper } from "@/lib/api/papers.types";
 import { catalogApi } from "@/lib/api/catalog";
 import { submissionsApi } from "@/lib/api/submissions";
 import { cn } from "@/lib/utils";
-import { submissionQueryKeys } from "@/lib/api/queryKeys";
+import { paperQueries, submissionKeys } from "@/lib/api/queries";
 
 const PAGE_SIZE = 25;
 const STATUS_FILTERS: Array<PendingEditStatus | "all"> = ["pending", "approved", "rejected", "all"];
@@ -147,7 +149,7 @@ function SubmissionCard({
 
   const invalidateAfterReview = React.useCallback(
     (reviewed: PendingPaperEdit) => {
-      queryClient.invalidateQueries({ queryKey: submissionQueryKeys.pendingEdits });
+      queryClient.invalidateQueries({ queryKey: submissionKeys.pendingEdits });
       if (reviewed.paper_id != null && reviewed.edit_type !== "evaluations") {
         invalidatePaperDetails(queryClient, [String(reviewed.paper_id), paper?.arxiv_id]);
       }
@@ -206,7 +208,7 @@ function SubmissionCard({
   const revertMutation = useMutation<unknown, unknown, void>({
     mutationFn: () => catalogApi.rollbackEvent(submission.catalog_event_id as string),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: submissionQueryKeys.pendingEdits });
+      queryClient.invalidateQueries({ queryKey: submissionKeys.pendingEdits });
       if (submission.paper_id != null) {
         invalidatePaperDetails(queryClient, [String(submission.paper_id), paper?.arxiv_id]);
         invalidatePaperFeeds(queryClient);
@@ -230,7 +232,7 @@ function SubmissionCard({
     mutationFn: (suspend) =>
       submissionsApi.revertAutoApproved(submission.hf_subject as string, { suspend }),
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: submissionQueryKeys.pendingEdits });
+      queryClient.invalidateQueries({ queryKey: submissionKeys.pendingEdits });
       invalidatePaperFeeds(queryClient);
       toast({
         title: `Reverted ${result.reverted} edits by @${submission.hf_username}`,
@@ -423,7 +425,7 @@ export default function SubmissionsDashboard() {
   const [autoOnly, setAutoOnly] = React.useState(false);
 
   const countsQuery = useQuery({
-    queryKey: [...submissionQueryKeys.pendingEdits, "counts", editType, autoOnly],
+    queryKey: submissionKeys.counts(editType, autoOnly),
     queryFn: async () => {
       const edit_type = editType === "all" ? undefined : editType;
       const pages = await Promise.all(
@@ -445,7 +447,7 @@ export default function SubmissionsDashboard() {
   });
 
   const listQuery = useInfiniteQuery({
-    queryKey: [...submissionQueryKeys.pendingEdits, { status, editType, autoOnly }],
+    queryKey: submissionKeys.list({ status, editType, autoOnly }),
     queryFn: ({ pageParam }) =>
       fetchSubmissionPage(status === "all" ? COUNT_STATUSES : [status], editType, autoOnly, pageParam),
     initialPageParam: {} as StatusOffsets,
@@ -469,24 +471,20 @@ export default function SubmissionsDashboard() {
     [submissions],
   );
 
-  const paperQueries = useQueries({
-    queries: paperIds.map((paperId) => ({
-      queryKey: paperQueryKeys.summary(String(paperId)),
-      queryFn: () => papersApi.get(String(paperId), false),
-        staleTime: 5 * 60 * 1000,
-    })),
+  const paperSummaries = useQueries({
+    queries: paperIds.map((paperId) => paperQueries.summary(String(paperId))),
   });
 
   const papersById = React.useMemo(() => {
     const map = new Map<number, Paper>();
-    paperQueries.forEach((query) => {
+    paperSummaries.forEach((query) => {
       const paper = query.data;
       if (!paper) return;
       const id = Number(paper.id);
       if (Number.isFinite(id)) map.set(id, paper);
     });
     return map;
-  }, [paperQueries]);
+  }, [paperSummaries]);
 
   React.useEffect(() => {
     if (!listQuery.error) return;

@@ -1,4 +1,4 @@
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
+
 /**
  * Saved papers view (`/saved`).
  *
@@ -19,8 +19,7 @@ import { TagChip } from "@/components/Chips";
 import HfSignInButton from "@/components/HfSignInButton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { accountApi } from "@/lib/api/account";
-import type { SavedPapersResponse } from "@/lib/api/account.types";
+import { paperQueries } from "@/lib/api/queries";
 import { ApiError } from "@/lib/apiTransport";
 import { transformPaperForCard } from "@/lib/transform";
 import { useAuth } from "@/lib/authContext";
@@ -29,12 +28,7 @@ import { savedPapersAuthorizationUrl } from "@/lib/savedPapersAuth";
 const SavedPapersView: React.FC = () => {
   const { user, isLoading: isAuthLoading } = useAuth();
 
-  const query = useQuery<SavedPapersResponse, Error>({
-    queryKey: [...paperQueryKeys.feeds.saved],
-    queryFn: () => accountApi.getBookmarks(),
-    enabled: !!user,
-    staleTime: 30 * 1000,
-  });
+  const query = useQuery({ ...paperQueries.saved(), enabled: !!user, staleTime: 30 * 1000 });
   const bucketAuthorizationRequired =
     query.error instanceof ApiError &&
     query.error.code === "saved_papers_bucket_authorization_required";

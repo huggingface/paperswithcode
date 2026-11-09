@@ -1,20 +1,17 @@
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { useToast } from "@/hooks/use-toast";
-import { useEvaluationsByPaper } from "@/hooks/useEvaluations";
 import { useHuggingFaceRepos } from "@/hooks/useHuggingFaceRepos";
-import { usePaper } from "@/hooks/usePapers";
 import { evaluationsApi } from "@/lib/api/evaluations";
 import { papersApi } from "@/lib/api/papers";
+import { evaluationQueries, paperQueries } from "@/lib/api/queries";
 import { formatPageTitle } from "@/lib/latexPlainText";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { usePreferences } from "@/lib/preferences";
 import { normalizePaperRouteId, stripArxivVersion } from "@/lib/utils";
 import { buildPaperDetailPresentation } from "@/lib/paperDetailPresentation";
-import { TEN_MINUTES } from "@/lib/api/queryKeys";
 
 const PAPER_SECTION_IDS = ["tldr", "abstract", "tasks", "methods", "results"] as const;
 export type PaperSectionId = (typeof PAPER_SECTION_IDS)[number];
@@ -65,7 +62,7 @@ export function usePaperDetailPageModel(
   const navigate = useNavigate();
   const { toast } = useToast();
   const { preferences } = usePreferences();
-  const paperQuery = usePaper(arxivId, Boolean(arxivId));
+  const paperQuery = useQuery(paperQueries.detail(arxivId));
   const paper = paperQuery.data;
   const [secondaryQueriesEnabled, setSecondaryQueriesEnabled] = useState(false);
 
@@ -89,18 +86,18 @@ export function usePaperDetailPageModel(
   const hfQuery = useHuggingFaceRepos(
     secondaryQueriesEnabled ? paper?.arxiv_id : undefined,
   );
-  const evaluationsQuery = useEvaluationsByPaper(paper?.id, secondaryReady);
+  const evaluationsQuery = useQuery({
+    ...evaluationQueries.byPaper(paper?.id),
+    enabled: secondaryReady,
+    refetchOnMount: "always",
+  });
   const versionsQuery = useQuery({
-    queryKey: [...paperQueryKeys.feeds.versions, paper?.arxiv_id],
-    queryFn: () => papersApi.versions(stripArxivVersion(paper!.arxiv_id!)),
-    enabled: secondaryReady && Boolean(paper?.arxiv_id),
-    staleTime: TEN_MINUTES,
+    ...paperQueries.versions(paper?.arxiv_id ? stripArxivVersion(paper.arxiv_id) : undefined),
+    enabled: secondaryReady,
   });
   const relatedQuery = useQuery({
-    queryKey: [...paperQueryKeys.feeds.related, paper?.id],
-    queryFn: () => papersApi.related(paper!.arxiv_id || paper!.id, 4),
+    ...paperQueries.related(paper?.arxiv_id || paper?.id),
     enabled: secondaryReady,
-    staleTime: TEN_MINUTES,
   });
 
   useEffect(() => {

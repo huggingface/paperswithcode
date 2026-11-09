@@ -8,7 +8,7 @@ import { usePaperFeedQuery } from "@/hooks/usePapers";
 import { papersApi } from "@/lib/api/papers";
 import { formatPageTitle } from "@/lib/latexPlainText";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
+import { paperFeedKeys } from "@/lib/api/queries";
 import { transformPaperForCard } from "@/lib/transform";
 
 import "@/views/AstraForRoboticsView.css";
@@ -135,7 +135,7 @@ const XPostList: React.FC<{ posts: readonly XPost[]; label: string }> = ({ posts
 const AstraForRoboticsView: React.FC = () => {
   const feed = usePaperFeedParams();
   const papersQ = usePaperFeedQuery(
-    [...paperQueryKeys.feeds.infinite, { task: TASK_SLUG, method: METHOD_SLUG, ...feed.filters }],
+    paperFeedKeys.list({ task: TASK_SLUG, method: METHOD_SLUG, ...feed.filters }),
     (page) =>
       papersApi.list({ ...feed.filters, task: TASK_SLUG, method: METHOD_SLUG, page, page_size: 12 }),
   );

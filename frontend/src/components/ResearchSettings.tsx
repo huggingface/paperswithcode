@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Mail } from 'lucide-react';
 import { researchApi } from '@/lib/api/research';
-import { researchQueryKeys } from '@/lib/api/queryKeys';
+import { researchQueries } from '@/lib/api/queries';
 import { useAuth } from '@/lib/authContext';
 import { useResearchFollows, useResearchTopics } from '@/lib/researchTopic';
 import { hfLoginUrl } from '@/lib/apiUrl';
@@ -14,8 +14,9 @@ export default function ResearchSettings() {
   const client = useQueryClient();
   const follows = useResearchFollows();
   const topics = useResearchTopics();
-  const emailKey = researchQueryKeys.email(user?.hf_subject);
-  const email = useQuery({ queryKey: emailKey, queryFn: researchApi.email, enabled: !!user });
+  const emailQuery = researchQueries.email(user?.hf_subject);
+  const emailKey = emailQuery.queryKey;
+  const email = useQuery({ ...emailQuery, enabled: !!user });
   const update = useMutation({ mutationFn: researchApi.setEmail, onSuccess: data => client.setQueryData(emailKey, data) });
   const showAsFollower = useMutation({
     mutationFn: async (show: boolean) => {

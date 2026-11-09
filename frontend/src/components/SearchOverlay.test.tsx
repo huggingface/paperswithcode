@@ -23,7 +23,7 @@ vi.mock("@/lib/api/catalog", () => ({
     searchOrganizations: (...args: unknown[]) => searchOrganizations(...args),
   },
 }));
-vi.mock("@/lib/apiUrl", () => ({ isChatEnabled: () => true }));
+vi.mock("@/lib/apiUrl", async (importOriginal) => ({ ...await importOriginal<object>(), isChatEnabled: () => true }));
 vi.mock("@/hooks/useDebounce", () => ({ useDebounce: (value: string) => value }));
 
 const Location = () => <div data-testid="location">{useLocation().pathname}{useLocation().search}</div>;

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { TEN_MINUTES } from '@/lib/api/queryKeys';
+import { TEN_MINUTES } from '@/lib/api/queries';
 import { stripArxivVersion } from '@/lib/utils';
 
 export interface HuggingFaceRepoCounts {

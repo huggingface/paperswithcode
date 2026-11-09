@@ -8,7 +8,7 @@ import { PaperSuggestedQuestions } from "./PaperSuggestedQuestions";
 
 const mocks = vi.hoisted(() => ({ suggestedQuestions: vi.fn(), chatEnabled: vi.fn() }));
 vi.mock("@/lib/api/papers", () => ({ papersApi: { suggestedQuestions: mocks.suggestedQuestions } }));
-vi.mock("@/lib/apiUrl", () => ({ isChatEnabled: mocks.chatEnabled }));
+vi.mock("@/lib/apiUrl", async (importOriginal) => ({ ...(await importOriginal<object>()), isChatEnabled: mocks.chatEnabled }));
 
 const paper = {
   id: "42",

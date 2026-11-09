@@ -4,7 +4,6 @@ import { Link, useSearchParams } from "react-router-dom";
 import { TagChip } from "@/components/Chips";
 import { Icon } from "@/components/Icon";
 import { PaperFeedList, PaperFeedToolbar } from "@/components/PaperFeed";
-import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
@@ -16,10 +15,10 @@ import { useQuery } from "@tanstack/react-query";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 import { isNotFound } from "@/lib/apiErrors";
 import { formatStarCount } from "@/lib/frameworks";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
+
 import { queryCenteredExcerpt } from "@/lib/paperSearchPresentation";
 import { isChatEnabled } from "@/lib/apiUrl";
-import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 
 const SEARCH_SORTS = [
   ["relevance", "relevance"],
@@ -77,7 +76,7 @@ const PapersListView: React.FC = () => {
     repository,
   };
   const regularInfinite = usePaperFeedQuery(
-    [...paperQueryKeys.feeds.infinite, listFilters],
+    paperFeedKeys.list(listFilters),
     (page) => papersApi.list({ ...listFilters, page, page_size: 20 }),
     { enabled: !isSearchMode },
   );
@@ -91,18 +90,13 @@ const PapersListView: React.FC = () => {
     has_hf_artifacts: feed.hasHfArtifacts,
   };
   const searchInfinite = usePaperFeedQuery(
-    [...paperQueryKeys.feeds.search, searchFilters],
+    paperFeedKeys.search(searchFilters),
     (page) => papersApi.searchFeed({ ...searchFilters, page, page_size: 20, mode: "hybrid" }),
     { enabled: isSearchMode && searchFilters.q.length > 0 },
   );
   const infinite = isSearchMode ? searchInfinite : regularInfinite;
 
-  const topTasks = useQuery({
-    queryKey: catalogQueryKeys.topTasksSidebar,
-    queryFn: () => catalogApi.topTasks(8),
-    enabled: !isRepositoryFeed && !isSearchMode,
-    staleTime: TEN_MINUTES,
-  });
+  const topTasks = useQuery({ ...catalogQueries.topTasks(8), enabled: !isRepositoryFeed && !isSearchMode });
 
   const cards = useMemo(() => {
     const all = infinite.data?.pages.flatMap((p) => p.results) || [];

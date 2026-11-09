@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { Icon } from "@/components/Icon";
-import { catalogApi } from "@/lib/api/catalog";
+import { catalogQueries } from "@/lib/api/queries";
 import type { Framework, FrameworkPlatform } from "@/lib/api/catalog.types";
 import { chipColors, hueFromSlug } from "@/lib/colors";
 import { PLATFORM_LABELS } from "@/lib/frameworks";
@@ -137,10 +137,7 @@ export const FrameworkCard: React.FC<{ framework: Framework }> = ({ framework })
 };
 
 const FrameworksIndexView: React.FC = () => {
-  const catalogQuery = useQuery({
-    queryKey: ["framework-catalog"],
-    queryFn: () => catalogApi.frameworkCatalog(),
-  });
+  const catalogQuery = useQuery(catalogQueries.frameworkCatalog());
   const domains = catalogQuery.data?.domains ?? [];
   const totalFrameworks = domains.reduce(
     (sum, domain) =>

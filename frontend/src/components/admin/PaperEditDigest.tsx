@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { paperEditsApi } from "@/lib/api/paperEdits";
+import { paperEditQueries } from "@/lib/api/queries";
 
 export function PaperEditDigest() {
   const [day, setDay] = useState(() => new Date().toISOString().slice(0, 10));
   const [page, setPage] = useState(1);
-  const query = useQuery({ queryKey: ["paper-edit-digest", day, page], queryFn: () => paperEditsApi.digest(day, page), enabled: Boolean(day) });
+  const query = useQuery(paperEditQueries.digest(day, page));
   return <section className="space-y-3 rounded border p-4">
     <h2 className="text-lg font-semibold">Daily paper edits</h2>
     <label className="flex items-center gap-2">UTC date <input type="date" value={day} onChange={e => { setDay(e.target.value); setPage(1); }} /></label>

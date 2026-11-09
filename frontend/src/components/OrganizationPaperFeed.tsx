@@ -14,14 +14,13 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
 import { usePaperFeedQuery } from "@/hooks/usePapers";
-import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
+import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 import { isNotFound } from "@/lib/apiErrors";
-import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { isLongOrganizationName, organizationShortName } from "@/lib/organizationNames";
 import NotFound from "@/pages/NotFound";
-import { catalogQueryKeys, TEN_MINUTES } from "@/lib/api/queryKeys";
+
 
 export const OrganizationPaperFeed: React.FC<{
   organizationSlug: string;
@@ -31,18 +30,10 @@ export const OrganizationPaperFeed: React.FC<{
   const feed = usePaperFeedParams({ defaultToLastMonth: true });
   const { searchParams } = feed;
   const [logoFailed, setLogoFailed] = useState(false);
-  const organizationQ = useQuery({
-    queryKey: catalogQueryKeys.organization(organizationSlug),
-    queryFn: () => catalogApi.getOrganization(organizationSlug),
-    staleTime: TEN_MINUTES,
-  });
-  const taxonomyQ = useQuery({
-    queryKey: ["organization-areas-with-tasks", organizationSlug],
-    queryFn: () => catalogApi.organizationAreasWithTasks(organizationSlug),
-    staleTime: TEN_MINUTES,
-  });
+  const organizationQ = useQuery(catalogQueries.organization(organizationSlug));
+  const taxonomyQ = useQuery(catalogQueries.organizationAreasWithTasks(organizationSlug));
   const papersQ = usePaperFeedQuery(
-    [...paperQueryKeys.feeds.organization, organizationSlug, taskSlug, feed.filters],
+    paperFeedKeys.organization(organizationSlug, taskSlug, feed.filters),
     (page) =>
       papersApi.forOrganization(organizationSlug, { ...feed.filters, task: taskSlug, page, page_size: 12 }),
     { enabled: !!organizationSlug },

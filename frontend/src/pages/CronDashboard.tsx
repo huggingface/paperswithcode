@@ -23,7 +23,7 @@ import { formatCronDate, formatMicroUsd as usd, toneClass, type Tone } from "@/l
 import { useAuth } from "@/lib/authContext";
 import { isStagingEnvironment } from "@/lib/apiUrl";
 import "./CronDashboard.css";
-import { adminQueryKeys } from "@/lib/api/queryKeys";
+import { adminKeys, adminQueries } from "@/lib/api/queries";
 
 const categoryTones: Record<string, Tone> = {
   hourly: "running",
@@ -137,19 +137,18 @@ const CronDashboard = () => {
   const { user } = useAuth();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: adminQueryKeys.cronStatus,
-    queryFn: () => operationsApi.getCronStatus(),
+    ...adminQueries.cronStatus(),
     refetchInterval: (query) => cronStatusRefetchInterval(query.state.data, autoRefresh),
     retry: false,
   });
   const chatSpendQuery = useQuery({
-    queryKey: adminQueryKeys.chatSandboxSpend(chatEnvironment),
+    queryKey: adminKeys.chatSandboxSpend(chatEnvironment),
     queryFn: () => chatApi.getSandboxSpend(chatEnvironment || undefined),
     refetchInterval: autoRefresh ? 30000 : false,
     retry: false,
   });
   const webSearchBudgetQuery = useQuery({
-    queryKey: adminQueryKeys.chatWebSearchBudget,
+    queryKey: adminKeys.chatWebSearchBudget,
     queryFn: () => chatApi.getWebSearchBudget(),
     enabled: staging,
     refetchInterval: autoRefresh ? 30000 : false,
@@ -159,16 +158,16 @@ const CronDashboard = () => {
   const refresh = useMutation({
     mutationFn: () => Promise.all([
       // Cancel an in-flight auto refresh so it cannot absorb the forced fetch.
-      queryClient.cancelQueries({ queryKey: adminQueryKeys.cronStatus }).then(() =>
+      queryClient.cancelQueries({ queryKey: adminKeys.cronStatus }).then(() =>
         queryClient.fetchQuery({
-          queryKey: adminQueryKeys.cronStatus,
+          queryKey: adminKeys.cronStatus,
           queryFn: () => operationsApi.getCronStatus(true),
           retry: false,
         })),
       queryClient.refetchQueries({
-        queryKey: adminQueryKeys.all,
+        queryKey: adminKeys.all,
         type: "active",
-        predicate: (query) => query.queryKey[1] !== adminQueryKeys.cronStatus[1],
+        predicate: (query) => query.queryKey[1] !== adminKeys.cronStatus[1],
       }),
     ]),
   });
