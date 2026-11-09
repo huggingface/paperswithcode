@@ -2,8 +2,11 @@
 -- Umbrella method for the field mapped by the survey site
 -- https://continuous-lm.github.io/ (Tang, Lee, Eijkelboom, Kim, 2026). There is no
 -- single introducing paper: embedding, simplex, bit and latent-space variants appeared
--- in parallel in 2022, so source_paper_id stays NULL and the survey is the source.
--- The narrower Gaussian-diffusion method stays at continuous-diffusion-language-model.
+-- in parallel in 2022, so source_paper_id stays NULL (no reference backfill, no
+-- Introduced banner). source_url links the field survey's local paper page
+-- instead (an external paper whose PDF is hosted on alphaXiv).
+-- It replaces the narrower continuous-diffusion-language-model method (removed in
+-- remove_continuous_diffusion_language_model_method.sql).
 --
 -- Paper links: every arXiv paper on https://continuous-lm.github.io/map/ plus papers
 -- reviewed from keyword matches and local citers of seminal continuous LM papers.
@@ -18,19 +21,21 @@ VALUES (
     'continuous-language-model',
     'Continuous Language Model',
     'Continuous Diffusion and Flow Language Model',
-    'Continuous language models generate text by transforming noise into continuous representations of tokens (vocabulary embeddings, simplex or one-hot vectors, bits, or autoencoder latents) and decoding the result into tokens, instead of predicting one token at a time or corrupting tokens directly like discrete [Diffusion Language Models](/methods/diffusion-language-model-dlm). They are trained with Gaussian [diffusion](/methods/continuous-diffusion-language-model) or [Flow Matching](/methods/flow-matching), and their deterministic trajectories allow few-step distillation and gradient-based guidance.',
+    'Continuous language models generate text by transforming noise into continuous representations of tokens (vocabulary embeddings, simplex or one-hot vectors, bits, or autoencoder latents) and decoding the result into tokens, instead of predicting one token at a time or corrupting tokens directly like discrete [Diffusion Language Models](/methods/diffusion-language-model-dlm). They are trained with Gaussian [diffusion](/methods/diffusion) or [Flow Matching](/methods/flow-matching), and their deterministic trajectories allow few-step distillation and gradient-based guidance.',
     'continuous language model, continuous diffusion and flow language model, continuous flow language model, flow matching language model, flow map language model, continuous text diffusion, embedding diffusion language model, simplex diffusion language model, latent diffusion language model',
     (SELECT id FROM areas WHERE name IN ('Language', 'Natural Language Processing')
      ORDER BY CASE name WHEN 'Language' THEN 0 ELSE 1 END LIMIT 1),
     NULL,
     NULL,
-    'https://continuous-lm.github.io/',
+    (SELECT '/paper/' || id FROM papers WHERE source = 'external'
+     AND source_url = 'https://www.alphaxiv.org/abs/2611.continuous-diffusion-flow-language-models.pdf'
+     ORDER BY id DESC LIMIT 1),
     'A Survey on Continuous Diffusion and Flow Language Models',
     NULL,
     NULL,
     '[Flow Map Language Models: One-step Language Modeling via Continuous Denoising](/paper/2602.16813)',
     'judge',
-    ARRAY['Continuous Flow Language Model', 'Flow Language Model', 'Flow Map Language Model']
+    ARRAY['Continuous Diffusion Language Model', 'Continuous Flow Language Model', 'Flow Language Model', 'Flow Map Language Model']
 )
 ON CONFLICT (slug) DO UPDATE SET
     name = EXCLUDED.name,
@@ -55,7 +60,8 @@ CROSS JOIN methods m
 WHERE m.slug = 'continuous-language-model'
   AND p.is_latest_version
   AND (
-      p.arxiv_id IN (
+      p.source_url = 'https://www.alphaxiv.org/abs/2611.continuous-diffusion-flow-language-models.pdf'
+      OR p.arxiv_id IN (
         '2205.14217', -- Diffusion-lm improves controllable text generation
         '2208.00638', -- Composable Text Controls in Latent Space with ODEs
         '2208.04202', -- Analog bits: Generating discrete data using diffusion models with self-condition
