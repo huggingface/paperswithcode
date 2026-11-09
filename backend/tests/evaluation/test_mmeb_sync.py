@@ -36,6 +36,7 @@ from backend.services.mmeb_sync_service import (
     MMEB_CONFIG_URL,
     MmebEntry,
     MmebSyncService,
+    _lab,
     fetch_mmeb_leaderboard,
     parse_mmeb_leaderboard,
 )
@@ -328,3 +329,20 @@ def test_unknown_models_match_announcements_or_become_radar_signals():
 
     assert (second.created, second.updated, second.deleted) == (0, 2, 0)
     assert session.query(Evaluation).count() == 2
+
+
+@pytest.mark.parametrize(
+    ("url", "lab"),
+    [
+        ("https://huggingface.co/ghost-lab/Ghost-Embed", "ghost-lab"),
+        ("https://huggingface.co/spaces/ghost-lab/demo", "ghost-lab"),
+        ("https://huggingface.co/blog/ghost-lab/ghost-embed", "ghost-lab"),
+        ("https://huggingface.co/papers/2611.01234", ""),
+        ("https://github.com/ghost-lab/ghost-embed", "ghost-lab"),
+        ("https://arxiv.org/abs/2611.01234", ""),
+        ("https://docs.octen.ai/embed", "docs.octen.ai"),
+        ("", ""),
+    ],
+)
+def test_lab_reads_the_publisher_from_a_model_link(url, lab):
+    assert _lab(url) == lab

@@ -114,7 +114,9 @@ def vendor_label_model(label: str, lab: str = "") -> LeaderboardModel:
     name = _SETTINGS.sub("", label).strip() or label
     vendor, _, rest = name.partition(" ")
     if rest and vendor.casefold() in _VENDORS:
-        lab, name = lab or vendor, rest
+        # A known family's canonical lab wins, so "Google Gemini ..." and a
+        # bare "Gemini ..." from another board share one radar signal.
+        lab, name = lab or family_lab(rest) or vendor, rest
     return LeaderboardModel(name, lab or family_lab(name) or vendor)
 
 

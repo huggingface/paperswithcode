@@ -716,9 +716,14 @@ def test_vals_index_maps_the_open_mistral_large_4_release():
     ("label", "lab", "expected"),
     [
         ("OpenAI GPT-6.1 Sol (Reasoning Low)", "", ("GPT-6.1 Sol", "OpenAI")),
-        ("Google Gemini 3.7 Flash (Thinking High)", "", ("Gemini 3.7 Flash", "Google")),
+        (
+            "Google Gemini 3.7 Flash (Thinking High)",
+            "",
+            ("Gemini 3.7 Flash", "Google DeepMind"),
+        ),
         ("Qwen3.8 27B", "", ("Qwen3.8 27B", "Alibaba")),
         ("NovaOCR-3", "nova-lab", ("NovaOCR-3", "nova-lab")),
+        ("Google Veo-Doc 2", "", ("Veo-Doc 2", "Google")),
     ],
 )
 def test_vendor_label_model(label, lab, expected):
