@@ -10,9 +10,13 @@ configured as production or staging. SQLite and mocked tests are unaffected.
 from __future__ import annotations
 
 import os
+import re
+import sqlite3
 
 import psycopg2
 import pytest
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 TEST_DATABASE_OPT_IN = "PWC_TEST_DATABASE"
 LIVE_ENVIRONMENTS = {"production", "staging"}
@@ -52,6 +56,19 @@ def pytest_configure(config):
     # time, so this also covers engines built from ``db_manager``.
     psycopg2.connect = guarded_connect
     config.add_cleanup(lambda: setattr(psycopg2, "connect", real_connect))
+
+
+@event.listens_for(Engine, "connect")
+def _sqlite_regexp_replace(dbapi_connection, _record):
+    """Give SQLite test engines PostgreSQL's ``regexp_replace`` (``g`` flag only)."""
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        dbapi_connection.create_function(
+            "regexp_replace",
+            4,
+            lambda value, pattern, replacement, _flags: None
+            if value is None
+            else re.sub(pattern, replacement, value),
+        )
 
 
 @pytest.fixture(autouse=True)

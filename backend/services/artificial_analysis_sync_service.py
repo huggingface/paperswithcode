@@ -562,6 +562,19 @@ class ArtificialAnalysisPaperDiscoveryService:
                     if entry.slug not in result.papers
                 ],
             )
+            # Frontier API models have no Hub repo or release row, only the
+            # lab's launch page in the catalog.
+            resolved_releases.update(
+                identity_service.bind_release_pages(
+                    "artificial-analysis",
+                    [
+                        (entry.slug, entry.name)
+                        for entry in leaderboard.entries
+                        if entry.slug not in result.papers
+                        and entry.slug not in resolved_releases
+                    ],
+                )
+            )
             for entry in leaderboard.entries:
                 if entry.slug in result.papers:
                     continue
