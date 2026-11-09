@@ -188,7 +188,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `sync_physics_iq_verified`
 
 - **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.
-- **Proof:** Diff the README table against managed rows (label, track, score at README precision, ± SD, date added); confirm `physics_iq_verified_unreviewed` warnings are either mapped or covered by the exclusion rules, `missing_papers` is empty, and `missing_upstream` rows were investigated (they are never deleted automatically); verify ranks on both metrics.
+- **Proof:** Diff the README table against managed rows (label, track, score at README precision, ± SD, date added); confirm `sync_physics_iq_verified_unreviewed` warnings become radar signals, get an identity, or are covered by the exclusion rules; reviewer notes beneath each managed head survived, `missing_papers` is empty, and `missing_upstream` rows were investigated (they are never deleted automatically); verify ranks on both metrics.
 
 ## `sync_frontiercode`
 

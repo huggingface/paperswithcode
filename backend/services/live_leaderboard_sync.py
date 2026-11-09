@@ -17,6 +17,7 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -35,6 +36,7 @@ from backend.services.leaderboard_sync_catalog import (
     ModelIdentity,
     resolve_identity_papers,
     resolve_leaderboard,
+    score_matches,
 )
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
@@ -44,10 +46,15 @@ class LeaderboardEntry:
     """One official leaderboard row, already on the board's metric scale."""
 
     name: str
-    value: float
+    # A Decimal keeps the precision the board publishes (65.40, not 65.4).
+    value: float | Decimal
     detail: str
     harness: str | None = None
     lab: str = ""
+    # Where this entry's result is reported, when not the board page itself.
+    source_url: str | None = None
+    # When the board added this entry; otherwise the day the sync creates it.
+    evaluated_on: date | None = None
 
     @property
     def label(self) -> str:
@@ -56,7 +63,12 @@ class LeaderboardEntry:
 
 @dataclass(frozen=True)
 class LiveLeaderboard:
-    """Static configuration of one synced board."""
+    """Static configuration of one synced board.
+
+    Several boards may share a benchmark when each publishes its own metric
+    (Physics-IQ Verified's I2V and V2V tracks): a board only reads and writes
+    rows that carry its metric.
+    """
 
     source: str
     provider: str
@@ -87,7 +99,8 @@ class LiveLeaderboard:
         protocol = f" {re.escape(self.protocol)}" if self.protocol else ""
         return re.compile(
             f"{re.escape(self.managed_prefix)} Official leaderboard entry "
-            rf".*?, listed at \S+\.{protocol}(?: (?P<notes>.*))?$",
+            # Physics-IQ Verified heads before 2026-11-09 end "reported at".
+            rf".*?, (?:listed|reported) at \S+\.{protocol}(?: (?P<notes>.*))?$",
             re.DOTALL,
         )
 
@@ -215,16 +228,25 @@ class LiveLeaderboardSyncService:
         self,
         entries: list[LeaderboardEntry],
         *,
-        evaluated_on: date | None = None,
         commit: bool = True,
     ) -> LiveSyncStats:
         board = self.board
         fetched = len(entries)
         entries = [e for e in entries if e.name not in board.excluded]
         reviewed = [e for e in entries if e.name in board.identities]
-        if len(reviewed) < board.min_selected:
+        # Several labels (settings, prompt variants) can name one model, so
+        # the floor counts the distinct models the board would publish.
+        reviewed_models = {
+            (
+                board.identities[e.name].paper_key,
+                board.identities[e.name].model_name,
+                e.harness,
+            )
+            for e in reviewed
+        }
+        if len(reviewed_models) < board.min_selected:
             raise RuntimeError(
-                f"{board.source} has only {len(reviewed)} reviewed entries; "
+                f"{board.source} has only {len(reviewed_models)} reviewed models; "
                 "refusing to update the managed leaderboard"
             )
         stats = LiveSyncStats(fetched=fetched, excluded=fetched - len(entries))
@@ -293,15 +315,17 @@ class LiveLeaderboardSyncService:
                 if key not in best or entry.value > best[key][4].value:
                     best[key] = item
 
-            rows = (
-                self.db.query(Evaluation)
+            rows = [
+                row
+                for row in self.db.query(Evaluation)
                 .filter(
                     Evaluation.task_id == task.id,
                     Evaluation.dataset_id == dataset.id,
                 )
                 .order_by(Evaluation.id)
                 .all()
-            )
+                if board.metric in (row.metrics or {})
+            ]
             rows_by_identity: dict[tuple[int, str, str | None], Evaluation] = {}
             unmanaged_by_model: dict[tuple[int, str], Evaluation] = {}
             for row in rows:
@@ -331,6 +355,7 @@ class LiveLeaderboardSyncService:
                     fallback = unmanaged_by_model.get((paper_id, model_name))
                     if fallback is not None and id(fallback) not in published:
                         row = fallback
+                source_url = entry.source_url or board.url
                 if row is None:
                     row = Evaluation(
                         paper_id=paper_id,
@@ -340,36 +365,45 @@ class LiveLeaderboardSyncService:
                         harness=entry.harness,
                         is_open=is_open,
                         hf_model_url=hf_model_url,
-                        external_source_url=board.url,
-                        source_url=board.url,
+                        external_source_url=source_url,
+                        source_url=source_url,
                         external=True,
                         uses_additional_data=False,
                         # The leaderboard's year column reads this date.
-                        evaluated_on=now.date(),
+                        evaluated_on=entry.evaluated_on or now.date(),
                     )
                     self.db.add(row)
                     rows_by_identity[key] = row
                     stats.created += 1
-                    notes = ""
+                    notes, managed = "", False
                 elif not (row.methodology or "").startswith(board.managed_prefix):
                     # A hand-imported row for the same model becomes managed;
                     # its reviewer methodology stays as notes beneath the head.
-                    notes = (row.methodology or "").strip()
-                    row.external_source_url = board.url
-                    row.source_url = board.url
+                    notes, managed = (row.methodology or "").strip(), False
+                    row.external_source_url = source_url
+                    row.source_url = source_url
                     row.harness = entry.harness
                     stats.adopted += 1
                 else:
-                    notes = self._managed_notes(row)
-                    current = ((row.metrics or {}).get(board.metric), row.methodology)
-                    if current != (entry.value, self._methodology(entry, notes)):
-                        stats.changed += 1
+                    notes, managed = self._managed_notes(row), True
+                stored = (row.metrics or {}).get(board.metric)
+                listed = (
+                    entry.value
+                    if isinstance(entry.value, Decimal)
+                    else Decimal(str(entry.value))
+                )
+                # A reviewer may have stored the unrounded value (48.23) the
+                # board lists at lower precision (48.2); that is not a revision.
+                value = stored if score_matches(stored, listed) else float(entry.value)
+                methodology = self._methodology(entry, notes)
+                if managed and (stored, row.methodology) != (value, methodology):
+                    stats.changed += 1
                 # Other metrics a hand-imported row carries stay untouched.
-                row.metrics = {**(row.metrics or {}), board.metric: entry.value}
-                row.methodology = self._methodology(entry, notes)
+                row.metrics = {**(row.metrics or {}), board.metric: value}
+                row.methodology = methodology
                 row.best_metric = board.metric
-                if evaluated_on is not None:
-                    row.evaluated_on = evaluated_on
+                if entry.evaluated_on is not None:
+                    row.evaluated_on = entry.evaluated_on
                 row.updated_at = now
                 if paper_id not in linked_paper_ids:
                     self.db.add(

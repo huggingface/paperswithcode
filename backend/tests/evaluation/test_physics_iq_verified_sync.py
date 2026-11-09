@@ -1,4 +1,4 @@
-"""Parsing, import-policy, and adoption tests for the Physics-IQ Verified sync."""
+"""Parsing, import-policy, and adoption tests for the Physics-IQ Verified boards."""
 
 from datetime import date
 from pathlib import Path
@@ -14,25 +14,37 @@ from backend.models.database import (
     Base,
     Dataset,
     Evaluation,
+    HfArtifact,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
+    ModelReleaseSignal,
     Paper,
+    PaperHfArtifact,
     PaperTask,
     Task,
     TaskDataset,
     TaskDatasetMetric,
 )
+from backend.services.live_leaderboard_sync import (
+    LiveLeaderboardSyncService,
+    LiveSyncStats,
+)
 from backend.services.physics_iq_verified_sync_service import (
-    MANAGED_METHODOLOGY_PREFIX,
+    BOARDS,
     METRIC_BY_TRACK,
     MODEL_IDENTITIES,
     PHYSICS_IQ_README_URL,
+    PHYSICS_IQ_URL,
     ModelIdentity,
-    PhysicsIqSyncService,
     exclusion_reason,
     fetch_physics_iq_leaderboard,
     parse_physics_iq_leaderboard,
-    select_entries,
+    split_boards,
 )
+
+MANAGED_METHODOLOGY_PREFIX = BOARDS["i2v"].managed_prefix
 
 
 @compiles(BigInteger, "sqlite")
@@ -115,6 +127,12 @@ def _session() -> Session:
             TaskDatasetMetric.__table__,
             Evaluation.__table__,
             PaperTask.__table__,
+            HfArtifact.__table__,
+            PaperHfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+            ModelReleaseSignal.__table__,
         ],
     )
     session = Session(engine)
@@ -171,6 +189,18 @@ def _seed_production(session: Session) -> None:
             )
         )
     session.commit()
+
+
+def _sync(session: Session, entries, *, commit: bool = True) -> LiveSyncStats:
+    """Publish both track boards, as the CRON job does, and sum their stats."""
+    total = LiveSyncStats()
+    for board, board_entries in split_boards(entries):
+        stats = LiveLeaderboardSyncService(session, board).sync(
+            board_entries, commit=commit
+        )
+        for name, value in stats.to_dict().items():
+            setattr(total, name, getattr(total, name) + value)
+    return total
 
 
 def _rows(session: Session) -> dict[tuple[str, str], Evaluation]:
@@ -242,23 +272,25 @@ def test_parser_enforces_row_bounds_and_uniqueness():
         parse_physics_iq_leaderboard(duplicate)
 
 
-def test_import_policy_selects_exactly_the_reviewed_rows():
-    selection = select_entries(parse_physics_iq_leaderboard(README))
+def test_import_policy_publishes_exactly_the_reviewed_rows():
+    entries = parse_physics_iq_leaderboard(README)
+    reasons = [exclusion_reason(entry) for entry in entries]
+    assert reasons.count("third_party_best_of_n") == 6
+    assert reasons.count("anonymous_manuscript") == 4
 
-    assert {
-        (identity.model_name, track) for identity, track in selection.entries
-    } == set(PRODUCTION_ROWS)
-    assert selection.excluded == {
-        "third_party_best_of_n": 6,
-        "anonymous_manuscript": 4,
-    }
-    # Odyssey-3's custom-prompt runs beat its best-practice-prompt runs.
-    assert selection.superseded == ["Odyssey-3 (bpp) [v2v]", "Odyssey-3 (bpp) [i2v]"]
-    assert selection.unreviewed == []
-    for (identity, track), entry in selection.entries.items():
-        assert float(entry.score) == pytest.approx(
-            PRODUCTION_ROWS[(identity.model_name, track)], abs=0.05
+    session = _session()
+    stats = _sync(session, entries)
+
+    assert stats.unreviewed == [] and stats.missing_papers == []
+    rows = _rows(session)
+    assert set(rows) == set(PRODUCTION_ROWS)
+    for key, row in rows.items():
+        assert row.metrics[row.best_metric] == pytest.approx(
+            PRODUCTION_ROWS[key], abs=0.05
         )
+    # Odyssey-3's custom-prompt runs beat its best-practice-prompt runs.
+    for track in ("i2v", "v2v"):
+        assert '"Odyssey-3 (custom prompts)"' in rows[("Odyssey-3", track)].methodology
 
 
 def test_exclusion_rules_keep_geophys_but_not_third_party_rerankers():
@@ -295,11 +327,11 @@ def test_best_single_generation_run_wins_per_model_and_track():
     readme = README.replace(
         "| 40.99 <small>± 0.84</small>", "| 50.10 <small>± 0.5</small>"
     )
-    selection = select_entries(parse_physics_iq_leaderboard(readme))
-    odyssey_i2v = selection.entries[(_identity("Odyssey-3"), "i2v")]
-    assert odyssey_i2v.label == "Odyssey-3 (bpp)"
-    assert str(odyssey_i2v.score) == "50.10"
-    assert "Odyssey-3 (custom prompts) [i2v]" in selection.superseded
+    session = _session()
+    _sync(session, parse_physics_iq_leaderboard(readme))
+    odyssey_i2v = _rows(session)[("Odyssey-3", "i2v")]
+    assert '"Odyssey-3 (bpp)": 50.10 ± 0.5 (i2v)' in odyssey_i2v.methodology
+    assert odyssey_i2v.metrics == {"Physics-IQ Verified Score (I2V)": 50.1}
 
 
 def test_first_run_adopts_existing_rows_without_changes():
@@ -307,7 +339,7 @@ def test_first_run_adopts_existing_rows_without_changes():
     _seed_production(session)
     entries = parse_physics_iq_leaderboard(README)
 
-    stats = PhysicsIqSyncService(session).sync(entries)
+    stats = _sync(session, entries)
 
     assert (stats.matched, stats.adopted, stats.created, stats.changed) == (
         33,
@@ -322,15 +354,16 @@ def test_first_run_adopts_existing_rows_without_changes():
     assert physis.metrics == {"Physics-IQ Verified Score (I2V)": 48.23}
     assert physis.methodology == (
         f"{MANAGED_METHODOLOGY_PREFIX} Official leaderboard entry "
-        '"Physis-Lang (Cosmos3 Super)" (i2v): 48.2 ± 1.4, added 2026-09-28, '
-        "reported at https://github.com/google-deepmind/physics-IQ-benchmark/pull/83. "
+        '"Physis-Lang (Cosmos3 Super)": 48.2 ± 1.4 (i2v), added 2026-09-28, '
+        "report https://github.com/google-deepmind/physics-IQ-benchmark/pull/83, "
+        f"listed at {PHYSICS_IQ_URL}. "
         "Hand-reviewed notes for Physis-Lang (Cosmos3 Super)."
     )
     assert physis.evaluated_on == date(2026, 9, 28)
     assert rows[("Odyssey-3", "i2v")].methodology.count("(custom prompts)") == 1
     assert physis.best_rank is not None
 
-    again = PhysicsIqSyncService(session).sync(entries)
+    again = _sync(session, entries)
     assert (again.matched, again.adopted, again.created, again.changed) == (
         33,
         0,
@@ -345,25 +378,25 @@ def test_first_run_adopts_existing_rows_without_changes():
 def test_leaderboard_revisions_update_value_and_methodology():
     session = _session()
     _seed_production(session)
-    PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(README))
+    _sync(session, parse_physics_iq_leaderboard(README))
     revised = README.replace(
         "| 37.3 <small>± 0.9</small> | 2026-09-04 |",
         "| 38.1 <small>± 0.7</small> | 2026-10-20 |",
     ).replace("| 31.83 <small>± 0.32</small>", "| 31.83 <small>± 0.40</small>")
 
-    stats = PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(revised))
+    stats = _sync(session, parse_physics_iq_leaderboard(revised))
 
     assert (stats.matched, stats.changed, stats.adopted, stats.created) == (33, 2, 0, 0)
     rows = _rows(session)
     nano = rows[("Cosmos3-Nano", "i2v")]
     assert nano.metrics == {"Physics-IQ Verified Score (I2V)": 38.1}
-    assert ": 38.1 ± 0.7, added 2026-10-20," in nano.methodology
+    assert ": 38.1 ± 0.7 (i2v), added 2026-10-20," in nano.methodology
     assert nano.methodology.endswith("Hand-reviewed notes for Cosmos3-Nano.")
     assert nano.evaluated_on == date(2026, 10, 20)
     assert rows[("Veo 3.1 Lite", "i2v")].metrics == {
         "Physics-IQ Verified Score (I2V)": 31.83
     }
-    assert ": 31.83 ± 0.40," in rows[("Veo 3.1 Lite", "i2v")].methodology
+    assert ": 31.83 ± 0.40 (i2v)," in rows[("Veo 3.1 Lite", "i2v")].methodology
     assert rows[("Cosmos3-Nano", "v2v")].metrics == {
         "Physics-IQ Verified Score (V2V)": 43.0
     }
@@ -394,7 +427,7 @@ def test_missing_mapped_rows_are_created_and_unmanaged_rows_untouched():
     session.add_all([manual, other_dataset])
     session.commit()
 
-    stats = PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(README))
+    stats = _sync(session, parse_physics_iq_leaderboard(README))
 
     assert (stats.matched, stats.created, stats.adopted) == (33, 1, 32)
     sora = _rows(session)[("Sora 2", "i2v")]
@@ -428,10 +461,10 @@ def test_unreviewed_models_and_missing_papers_are_reported_not_created():
         "| 45 | [P-Video]",
     )
 
-    stats = PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(readme))
+    stats = _sync(session, parse_physics_iq_leaderboard(readme))
 
-    assert stats.unreviewed == ["New Model [i2v]"]
-    assert stats.missing_papers == ["P-Video [i2v]"]
+    assert stats.unreviewed == ["New Model"]
+    assert stats.missing_papers == ["P-Video"]
     assert (stats.matched, stats.created) == (32, 0)
     assert session.query(Paper).count() == papers_before
     assert len(_rows(session)) == 32
@@ -440,23 +473,19 @@ def test_unreviewed_models_and_missing_papers_are_reported_not_created():
 def test_managed_rows_dropped_upstream_are_reported_not_deleted():
     session = _session()
     _seed_production(session)
-    PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(README))
+    _sync(session, parse_physics_iq_leaderboard(README))
     lines = [line for line in README.splitlines() if "[Sora 2]" not in line]
 
-    stats = PhysicsIqSyncService(session).sync(
-        parse_physics_iq_leaderboard("\n".join(lines))
-    )
+    stats = _sync(session, parse_physics_iq_leaderboard("\n".join(lines)))
 
-    assert stats.missing_upstream == ["Sora 2 [Physics-IQ Verified Score (I2V)]"]
+    assert stats.missing_upstream == ["Sora 2"]
     assert ("Sora 2", "i2v") in _rows(session)
 
 
 def test_dry_run_rolls_back_and_collapsed_selection_is_refused():
     session = _session()
     _seed_production(session)
-    stats = PhysicsIqSyncService(session).sync(
-        parse_physics_iq_leaderboard(README), commit=False
-    )
+    stats = _sync(session, parse_physics_iq_leaderboard(README), commit=False)
     assert stats.adopted == 33
     assert all(
         row.methodology.startswith("Hand-reviewed") for row in _rows(session).values()
@@ -470,19 +499,19 @@ def test_dry_run_rolls_back_and_collapsed_selection_is_refused():
         for line in lines
     )
     with pytest.raises(RuntimeError, match="refusing"):
-        PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(collapsed))
+        _sync(session, parse_physics_iq_leaderboard(collapsed))
 
 
-def test_adopting_a_stale_row_counts_as_a_change():
+def test_adopting_a_stale_row_corrects_its_score():
     session = _session()
     _seed_production(session)
     nano = _rows(session)[("Cosmos3-Nano", "i2v")]
     nano.metrics = {"Physics-IQ Verified Score (I2V)": 30.3}
     session.commit()
 
-    stats = PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(README))
+    stats = _sync(session, parse_physics_iq_leaderboard(README))
 
-    assert (stats.adopted, stats.changed) == (33, 1)
+    assert (stats.adopted, stats.changed) == (33, 0)
     assert _rows(session)[("Cosmos3-Nano", "i2v")].metrics == {
         "Physics-IQ Verified Score (I2V)": 37.3
     }
@@ -493,7 +522,7 @@ def test_unconfigured_leaderboard_is_refused():
     session.query(TaskDatasetMetric).delete()
     session.commit()
     with pytest.raises(RuntimeError, match="not linked"):
-        PhysicsIqSyncService(session).sync(parse_physics_iq_leaderboard(README))
+        _sync(session, parse_physics_iq_leaderboard(README))
 
 
 @pytest.mark.parametrize("track", ["v2v", "i2v"])
@@ -502,3 +531,28 @@ def test_prompt_upsampling_runs_resolve_to_the_cosmos_3_model(model, track):
     identity = MODEL_IDENTITIES[(f"{model} + Prompt Upsampling", track)]
     assert identity.model_name == model
     assert identity.paper_key == "2606.02800"
+
+
+def test_rows_written_by_the_former_physics_iq_service_keep_their_notes():
+    session = _session()
+    entries = parse_physics_iq_leaderboard(README)
+    _sync(session, entries)
+    physis = _rows(session)[("Physis-Lang (Cosmos3 Super)", "i2v")]
+    # The head the dedicated Physics-IQ service wrote, an unrounded reviewed
+    # score, and reviewer notes.
+    physis.methodology = (
+        f"{MANAGED_METHODOLOGY_PREFIX} Official leaderboard entry "
+        '"Physis-Lang (Cosmos3 Super)" (i2v): 48.2 ± 1.4, added 2026-09-28, '
+        "reported at https://github.com/google-deepmind/physics-IQ-benchmark/pull/83. "
+        "Mean ± SD over four runs."
+    )
+    physis.metrics = {"Physics-IQ Verified Score (I2V)": 48.23}
+    session.commit()
+
+    stats = _sync(session, entries)
+    assert stats.changed == 1
+    assert physis.methodology.endswith(
+        f"listed at {PHYSICS_IQ_URL}. Mean ± SD over four runs."
+    )
+    assert physis.metrics == {"Physics-IQ Verified Score (I2V)": 48.23}
+    assert _sync(session, entries).changed == 0

@@ -1,6 +1,7 @@
 """Parsing and adoption tests for the Vals AI Finance Agent v2 board."""
 
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -231,7 +232,7 @@ def test_parse_and_fetch_the_leaderboard_table():
     first = entries[0]
     assert (first.label, first.value, first.detail) == (
         "Gemini 4 Argon",
-        65.4,
+        Decimal("65.40"),
         "65.40% Accuracy",
     )
 
@@ -259,7 +260,10 @@ def test_parser_picks_leaderboard_next_to_sample_answer_tables():
     assert current.count("<table") == 2
     entries = parse_vals_finance_agent(current)
     assert len(entries) == 81
-    assert (entries[0].label, entries[0].value) == ("Gemini 4 Argon", 65.4)
+    assert (entries[0].label, entries[0].value) == (
+        "Gemini 4 Argon",
+        Decimal("65.40"),
+    )
     assert entries[-1].label == "Command A+"
 
 

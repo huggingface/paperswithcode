@@ -1,5 +1,6 @@
 """Parsing and adoption tests for the Surge AI Chartography board."""
 
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -227,7 +228,7 @@ def test_parse_and_fetch_the_leaderboard_block():
     first = entries[0]
     assert (first.label, first.value, first.detail) == (
         "Gemini 4 Argon",
-        71.6,
+        Decimal("71.6"),
         "71.6% Pass@1 (High reasoning)",
     )
     by_label = {entry.label: entry for entry in entries}

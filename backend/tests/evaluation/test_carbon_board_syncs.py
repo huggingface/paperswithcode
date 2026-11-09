@@ -2,6 +2,7 @@
 
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -646,7 +647,7 @@ def test_family_lab(name, lab):
 
 def test_sync_refuses_a_collapsed_board_without_writing():
     session = _session()
-    with pytest.raises(RuntimeError, match="only 1 reviewed entries"):
+    with pytest.raises(RuntimeError, match="only 1 reviewed models"):
         LiveLeaderboardSyncService(session, _board()).sync(
             [_entry("Opus 5.5 (xhigh)", 3.61)]
         )
@@ -787,3 +788,39 @@ def test_sync_appends_the_board_model_name_suffix():
 )
 def test_link_owner(url, owner):
     assert link_owner(url) == owner
+
+
+def test_sync_keeps_an_unrounded_score_at_the_published_precision():
+    session = _session()
+    service = LiveLeaderboardSyncService(session, _board())
+    sol = [_entry("Sol 5.6 (xhigh)", 4.7)]
+    service.sync([_entry("Opus 5.5 (xhigh)", 3.61), *sol])
+    opus = _rows(session)["Claude Opus 5.5 (mini-SWE-agent)"]
+    opus.metrics = {METRIC: 3.614}
+    session.commit()
+
+    # 3.614 is 3.61 at the board's two decimals: kept, not a revision.
+    listed = LeaderboardEntry(
+        "Opus 5.5 (xhigh)", Decimal("3.61"), "3.61% resolved", "mini-SWE-agent"
+    )
+    assert service.sync([listed, *sol]).changed == 0
+    assert opus.metrics == {METRIC: 3.614}
+    # A trailing zero is still precision: 3.614 is not 3.60.
+    revised = LeaderboardEntry(
+        "Opus 5.5 (xhigh)", Decimal("3.60"), "3.60% resolved", "mini-SWE-agent"
+    )
+    assert service.sync([revised, *sol]).changed == 1
+    assert opus.metrics == {METRIC: 3.6}
+
+
+def test_collapse_floor_counts_distinct_models_not_labels():
+    session = _session()
+    # Two labels name GPT-5.6 Sol, so three labels are only two models.
+    board = _board(min_selected=3)
+    entries = [
+        _entry("Opus 5.5 (xhigh)", 3.61),
+        _entry("Sol 5.6 (high)", 3.1),
+        _entry("Sol 5.6 (xhigh)", 4.7),
+    ]
+    with pytest.raises(RuntimeError, match="only 2 reviewed models"):
+        LiveLeaderboardSyncService(session, board).sync(entries)

@@ -276,7 +276,7 @@ def parse_surge_chartography(html: str) -> list[LeaderboardEntry]:
         entries.append(
             LeaderboardEntry(
                 label,
-                float(value),
+                value,
                 f"{value}% Pass@1 ({configuration})",
                 lab=lab[:200],
             )
