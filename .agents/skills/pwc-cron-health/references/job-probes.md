@@ -278,20 +278,6 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Correctness:** `remaining` should reach 0 after a few runs and stay near 0; a persistent `failed` count with `suggested_questions_failed` warnings means OpenAI errors (key, quota, or model name).
 - **Dashboard evidence:** `visible_missing` of `visible_papers` = the top 90 trending latest papers of the past week (an approximation of the home feed's three pages) without a `paper_suggested_questions` row. Zero is healthy even with no recent writes; more than 5 degrades. The task/method part of the cohort needs the probe above.
 
-## `post_trending_paper_to_x`
-
-- **Effect:** Prints a JSON summary (`paper_id`, `text`, `url`, `post_id`, `reply_id`, `errors`) and inserts one `paper_x_posts` row per post. Posts at most one paper per run: the top `trending_score` arXiv paper from the last 14 days with a TL;DR that was never posted. Exits 0 with an `x_trending_post_skipped` warning (dry run) when the `X_POST_*` OAuth 1.0a keys are unset, and 1 only when candidates existed but none could be fetched and rendered.
-- **Independent proof:** Open `https://x.com/i/status/<post_id>` and confirm the first-page image, title, TL;DR, and the paper link reply.
-- **Correctness:** `X HTTP 401` means bad keys, `403` a read-only app or a post over the account's length limit (`PWC_X_POST_MAX_CHARS`), `402` exhausted credits. A null `paper_id` without errors means every recent trending paper was already posted.
-- **Dashboard evidence:** latest `paper_x_posts.posted_at` and posts in 24 h. Six runs a day normally post several papers, so a day without a post degrades the job; confirm with `SELECT posted_at, paper_id FROM paper_x_posts ORDER BY posted_at DESC LIMIT 10` before blaming X.
-
-## `post_x_insight`
-
-- **Effect:** Prints a JSON summary (`kind`, `subject_key`, `text`, `template`, `url`, `post_id`, `reply_id`, `tried`) and inserts one `x_insight_posts` row per post. A null `kind` means no tried kind had anything new (healthy). An `x_insight_rewrite_rejected` warning means Luna changed a number and the template was posted instead.
-- **Independent proof:** Open `https://x.com/i/status/<post_id>`; check the numbers against the linked benchmark, method, or task page.
-- **Correctness:** Same X errors as `post_trending_paper_to_x` (shared `X_POST_*` keys and credits). A SOTA post must name a paper published in the last 45 days that leads a leaderboard with at least 5 entries.
-- **Dashboard evidence:** latest `x_insight_posts.posted_at` and posts in 72 h; a quiet run is healthy, so only three days without any insight degrade. Check `SELECT kind, max(posted_at), count(*) FROM x_insight_posts GROUP BY kind` for a kind that stopped posting.
-
 ## `scan_model_releases`
 
 - **Effect:** Prints a JSON report of recent model releases from official lab feeds, unmapped Artificial Analysis models, and web news, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It upserts each unindexed feed or web release into `model_release_signals` and queues at most 6 `resolve-model-paper` jobs (trigger `model-release-radar`) per UTC day, logged as `model_release_radar_queued`. Exit 1 only when every source failed.

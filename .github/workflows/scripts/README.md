@@ -37,8 +37,6 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-refresh-conference-deadlines.timer` | `*-*-* 07:40:00`<br>`*-*-* 19:40:00` | `refresh_conference_deadlines` | `backend/scripts/refresh_conference_deadlines.py` |
 | `pwc-cron-discover-x-threads.timer` | `*-*-* 08,20:22:00` | `discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | `pwc-cron-refresh-x-post-likes.timer` | `*-*-* *:35:00` | `refresh_x_post_likes` | `backend/scripts/refresh_x_post_likes.py` |
-| `pwc-cron-post-trending-paper-to-x.timer` | `*-*-* 00/8:13:00` | `post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
-| `pwc-cron-post-x-insight.timer` | `*-*-* 09,17:43:00` | `post_x_insight` | `backend/scripts/post_x_insight.py` |
 | `pwc-cron-warm-paper-suggested-questions.timer` | `*-*-* *:33:00` | `warm_paper_suggested_questions` | `backend/scripts/warm_paper_suggested_questions.py` |
 | `pwc-cron-sync-3d-arena.timer` | `*-*-* *:05:00` | `sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `pwc-cron-sync-mmteb-overall.timer` | `*-*-* *:07:00` | `sync_mmteb_overall` | `.github/workflows/scripts/hourly/sync_mmteb.py` overall |
@@ -291,8 +289,28 @@ run only fills newcomers once the backlog is done. Count the work with:
 uv run --env-file backend/keys.env python -m backend.scripts.warm_paper_suggested_questions --dry-run
 ```
 
+The Papers with Code X account (@paperswithcodee) is run by a writing agent
+outside this repository (a headless Claude Code session on the host). It does
+not touch the database; it calls `pwc-cron x_post_candidates list` for what is
+worth posting and `pwc-cron x_post_candidates record --kind K --subject-key S
+--post-id P [--reply-id R]` after each post. `list` prints one JSON object
+whose candidates carry a draft, the facts the agent may use, the page link,
+and a chart card as base64 PNG (or a page to screenshot): new SOTAs and new
+best open models on leaderboards with at least 5 entries, "What is X?"
+explainers for fast-rising methods, a weekly league of the labs holding the
+most first places, and the weekly and monthly trending roundups (see
+`backend/services/x_post_candidates.py`). Posted subjects go to
+`x_insight_posts`, so none is offered twice. Preview the candidates with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.x_post_candidates list | jq '.candidates[] | {kind, subject_key, draft}'
+```
+
+The two older posting scripts below are retired (no timer, no `pwc-cron`
+entry); their dry runs still work from a checkout.
+
 `post_trending_paper_to_x.py` posts at most one trending paper to the Papers
-with Code X account (@paperswithcodee) every eight hours (00:13, 08:13, 16:13
+with Code X account (@paperswithcodee) (00:13, 08:13, 16:13
 UTC), and only when one is worth it. It looks at the top ten `trending_score`
 arXiv papers from the last 14 days that have a TL;DR and were never posted,
 and keeps those with a clear SOTA (first on a Papers with Code leaderboard with

@@ -176,12 +176,10 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     "scan_model_releases": ("backend/services/model_release_radar_service.py",),
     "discover_x_threads": ("backend/services/x_thread_discovery_service.py",),
     "refresh_x_post_likes": ("backend/services/x_post_likes_service.py",),
-    "post_trending_paper_to_x": ("backend/services/x_trending_post_service.py",),
     "warm_paper_suggested_questions": (
         "backend/services/paper_suggested_questions_service.py",
         "backend/services/paper_suggested_questions_warm_service.py",
     ),
-    "post_x_insight": ("backend/services/x_insight_post_service.py",),
     "sweep_conference_deadlines": (
         "backend/services/conference_deadline_service.py",
         "backend/services/conference_deadline_sweep_service.py",
@@ -299,11 +297,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "scan_model_releases": ("backend/tests/test_model_release_radar_service.py",),
     "discover_x_threads": ("backend/tests/test_x_thread_discovery_service.py",),
     "refresh_x_post_likes": ("backend/tests/test_x_post_likes_service.py",),
-    "post_trending_paper_to_x": ("backend/tests/test_x_trending_post_service.py",),
     "warm_paper_suggested_questions": (
         "backend/tests/test_paper_suggested_questions_warm_service.py",
     ),
-    "post_x_insight": ("backend/tests/test_x_insight_post_service.py",),
     "sweep_conference_deadlines": (
         "backend/tests/test_conference_deadline_service.py",
     ),

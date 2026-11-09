@@ -629,23 +629,15 @@ COMMANDS: dict[str, Job] = {
             "report-only rolls back unless PWC_X_LIKES_APPLY=true"
         ),
     ),
-    "post_trending_paper_to_x": job(
+    "x_post_candidates": job(
         "-m",
-        "backend.scripts.post_trending_paper_to_x",
+        "backend.scripts.x_post_candidates",
         timeout="30m",
         idempotency=(
-            "post at most one never-posted trending paper per run; paper_x_posts "
-            "is written right after the post, so a paper is never posted twice"
+            "list is read-only; record inserts one x_insight_posts row per "
+            "posted subject, called once by the X agent after each post"
         ),
-    ),
-    "post_x_insight": job(
-        "-m",
-        "backend.scripts.post_x_insight",
-        timeout="30m",
-        idempotency=(
-            "post at most one insight per run; x_insight_posts is written right "
-            "after the post, so a subject is never posted twice"
-        ),
+        health_job="x_post_candidates",
     ),
     "link_abstract_mentions": job(
         "-m",

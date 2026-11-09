@@ -177,16 +177,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Refresh like counts of linked X posts in their first week",
     ),
     TimerSpec(
-        job="post_trending_paper_to_x",
-        on_calendar=("*-*-* 00/8:13:00",),
-        description="Post a trending paper to the Papers with Code X account every eight hours",
-    ),
-    TimerSpec(
-        job="post_x_insight",
-        on_calendar=("*-*-* 09,17:43:00",),
-        description="Post a SOTA, trend, or roundup insight to X twice daily",
-    ),
-    TimerSpec(
         job="link_abstract_mentions",
         on_calendar=("*-*-* *:51:00",),
         description="Link catalog names in new and changed paper abstracts",
