@@ -83,6 +83,10 @@ export function EditHfArtifactsDialog({
     toPendingPayload: (artifacts: HfArtifactsPayload) => artifacts,
     applyDirect: (artifacts) => papersApi.updateHfArtifacts(paperId, artifacts),
     onClose: () => onOpenChange(false),
+    removal: {
+      removes: (next) => BUCKET_CONFIG.some(({ key }) => initialArtifacts[key].some((url) => !next[key].includes(url))),
+      prompt: "Remove one or more Hugging Face artifact links?",
+    },
   });
 
   const getArtifactsForSubmission = (): HfArtifactsPayload | null => {
@@ -128,19 +132,7 @@ export function EditHfArtifactsDialog({
 
   const handleSave = () => {
     const next = getArtifactsForSubmission();
-    if (next === null) return;
-    const removes = (Object.keys(initialArtifacts) as ArtifactBucket[]).some(
-      (bucket) =>
-        initialArtifacts[bucket].some(
-          (url) => !next[bucket].includes(url),
-        ),
-    );
-    if (
-      submitMode === "direct" &&
-      removes &&
-      !window.confirm("Remove one or more Hugging Face artifact links?")
-    ) return;
-    save.mutate(next);
+    if (next !== null) save.submit(next);
   };
 
   const hasChange = useMemo(() => {

@@ -7,9 +7,8 @@ import type { PaperEditSection } from "@/lib/paperCuration";
 import { EditEvaluationsDialog } from "./EditEvaluationsDialog";
 import { EditHfArtifactsDialog } from "./EditHfArtifactsDialog";
 import { EditOrganizationsDialog } from "./EditOrganizationsDialog";
-import { EditProjectPagesDialog } from "./EditProjectPagesDialog";
-import { EditRepositoriesDialog } from "./EditRepositoriesDialog";
 import { EditSourceUrlDialog } from "./EditSourceUrlDialog";
+import { EditUrlListDialog } from "./EditUrlListDialog";
 import { EditTaxonomyTagsDialog } from "./EditTaxonomyTagsDialog";
 import { EditXThreadsDialog } from "./EditXThreadsDialog";
 
@@ -54,10 +53,10 @@ export function PaperDetailEditors({
     tasks: () => <EditTaxonomyTagsDialog {...shared} kind="task" initialItems={paper.tasks ?? []} />,
     methods: () => <EditTaxonomyTagsDialog {...shared} kind="method" initialItems={paper.methods ?? []} />,
     repositories: () => (
-      <EditRepositoriesDialog {...shared} initialRepositories={officialUrls(paper.repositories)} />
+      <EditUrlListDialog {...shared} kind="repositories" initialItems={officialUrls(paper.repositories)} />
     ),
     project_pages: () => (
-      <EditProjectPagesDialog {...shared} initialProjectPages={officialUrls(paper.project_pages)} />
+      <EditUrlListDialog {...shared} kind="project_pages" initialItems={officialUrls(paper.project_pages)} />
     ),
     evaluations: () => (
       <EditEvaluationsDialog

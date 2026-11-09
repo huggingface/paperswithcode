@@ -8,8 +8,7 @@ import { PaperDetailEditors } from "./PaperDetailEditors";
 vi.mock("./EditTaxonomyTagsDialog", () => ({
   EditTaxonomyTagsDialog: ({ kind }: { kind: string }) => <div>{kind === "task" ? "tasks" : "methods"} editor</div>,
 }));
-vi.mock("./EditRepositoriesDialog", () => ({ EditRepositoriesDialog: () => <div>repositories editor</div> }));
-vi.mock("./EditProjectPagesDialog", () => ({ EditProjectPagesDialog: () => <div>project_pages editor</div> }));
+vi.mock("./EditUrlListDialog", () => ({ EditUrlListDialog: ({ kind }: { kind: string }) => <div>{kind} editor</div> }));
 vi.mock("./EditEvaluationsDialog", () => ({ EditEvaluationsDialog: () => <div>evaluations editor</div> }));
 vi.mock("./EditSourceUrlDialog", () => ({ EditSourceUrlDialog: () => <div>source_url editor</div> }));
 vi.mock("./EditHfArtifactsDialog", () => ({ EditHfArtifactsDialog: () => <div>hf_artifacts editor</div> }));
