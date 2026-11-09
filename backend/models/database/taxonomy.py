@@ -1,11 +1,12 @@
 """Research area, task, and method taxonomy persistence models."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -152,6 +153,9 @@ class Method(Base):
     )
 
     introduced_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    # Optional first month of the usage trend (and of the reference backfill),
+    # for a method whose source or introduced year starts later than its field.
+    trend_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     source_paper_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("papers.id", ondelete="SET NULL"), nullable=True
     )

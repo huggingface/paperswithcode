@@ -33,6 +33,8 @@ def shift_month(value: date, months: int) -> date:
 
 def method_history_start(db: Session, method: Method) -> date | None:
     """Return the deterministic first month shared by backfills and the API."""
+    if method.trend_start_date:
+        return month_start(method.trend_start_date)
     if method.source_paper_id:
         source_date = (
             db.query(Paper.date_published)
