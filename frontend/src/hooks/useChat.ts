@@ -75,8 +75,7 @@ interface UseChatOptions {
  *
  * `ChatTurn` is the store: it owns the active turn and the transcript shown for
  * the selected conversation, which is either a projection of that turn or a
- * loaded transcript. View epochs keep a turn that has lost the selected
- * conversation from writing into the one that replaced it.
+ * loaded transcript, and which run of the stream loop may write into it.
  */
 export function useChat(options: UseChatOptions) {
   const [turn] = useState(() => new ChatTurn());
@@ -84,14 +83,6 @@ export function useChat(options: UseChatOptions) {
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
-  /* Ownership of the selected conversation. */
-  const abortRef = useRef<AbortController | null>(null);
-  // Bumped whenever the selected conversation starts showing another transcript.
-  const viewEpochRef = useRef(0);
-  // The view epoch the active turn started in.
-  const activeEpochRef = useRef<number | null>(null);
-  // Whether the selected conversation shows the active turn's projection.
-  const projectingRef = useRef(false);
   const selectedSessionRef = useRef(options.sessionId);
 
   /* Presentation of the active stream. */
@@ -128,7 +119,7 @@ export function useChat(options: UseChatOptions) {
   const teardownStream = useStableCallback(() => {
     const { timer } = workspaceStatusRef.current;
     if (timer !== null) window.clearTimeout(timer);
-    abortRef.current?.abort();
+    turn.controller?.abort();
     smoothedStreamRef.current = null;
     cancelPresentationFrame();
     turn.cancelCapacity();
@@ -139,12 +130,12 @@ export function useChat(options: UseChatOptions) {
     if (selectedSessionRef.current !== options.sessionId) {
       selectedSessionRef.current = options.sessionId;
       if (turn.sessionId !== options.sessionId) {
-        viewEpochRef.current += 1;
+        turn.detachView();
         latencyRef.current = null;
       }
     }
     const projection = turn.projectSession(options.sessionId);
-    projectingRef.current = projection !== null;
+    turn.projecting = projection !== null;
     if (projection) turn.present({ messages: projection });
   }, [options.sessionId, turn]);
   useEffect(() => {
@@ -177,11 +168,6 @@ export function useChat(options: UseChatOptions) {
     transitionLifecycle({ type: "event", event }, projectToVisible);
   };
 
-  const projectsActiveStream = () => (
-    activeEpochRef.current === viewEpochRef.current
-    || projectingRef.current
-  );
-
   /** Restore a transcript after a failed turn; it is shown only while the
    * turn's view epoch still owns the selected conversation. */
   const restoreTranscript = (
@@ -190,20 +176,20 @@ export function useChat(options: UseChatOptions) {
     sessionError: string,
     view: { disabledRequest?: { question: string; draft: ChatDraft } } = {},
   ) => {
-    const owned = viewEpochRef.current === epoch;
+    const owned = turn.ownsView(epoch);
     turn.restore(restored, { show: owned, view: { ...view, ...(owned ? { sessionError } : {}) } });
   };
 
   const commitPresentation = () => {
     cancelPresentationFrame();
     if (document.visibilityState === "hidden") return;
-    if (!projectingRef.current) return;
+    if (!turn.projecting) return;
     presentationDirtyRef.current = false;
     turn.present({ messages: turn.messages });
   };
 
   const schedulePresentation = () => {
-    if (!projectingRef.current || document.visibilityState === "hidden") return;
+    if (!turn.projecting || document.visibilityState === "hidden") return;
     if (presentationFrameRef.current !== null) return;
     const callback = () => {
       presentationFrameRef.current = null;
@@ -229,11 +215,11 @@ export function useChat(options: UseChatOptions) {
   });
 
   const clearWorkspaceStatus = (controller: AbortController) => {
-    if (abortRef.current !== controller) return;
+    if (!turn.isCurrent(controller)) return;
     const { state } = workspaceStatusRef.current;
     disarmWorkspaceStatus();
     if (state !== "shown") return;
-    transitionLifecycle({ type: "clear_workspace_status" }, projectsActiveStream());
+    transitionLifecycle({ type: "clear_workspace_status" }, turn.projectsActive);
   };
 
   const armWorkspaceStatus = (controller: AbortController, epoch: number) => {
@@ -243,12 +229,12 @@ export function useChat(options: UseChatOptions) {
       workspaceStatusRef.current = { ...workspaceStatusRef.current, timer: null };
       if (
         workspaceStatusRef.current.state !== "armed"
-        || abortRef.current !== controller
+        || !turn.isCurrent(controller)
         || controller.signal.aborted
-        || viewEpochRef.current !== epoch
+        || !turn.ownsView(epoch)
       ) return;
       workspaceStatusRef.current = { state: "shown", timer: null };
-      transitionLifecycle({ type: "workspace_status" }, projectsActiveStream());
+      transitionLifecycle({ type: "workspace_status" }, turn.projectsActive);
     }, WORKSPACE_STATUS_DELAY_MS);
     workspaceStatusRef.current = { state: "armed", timer };
   };
@@ -301,12 +287,8 @@ export function useChat(options: UseChatOptions) {
       stoppedProjectionRef.current = null;
     }
     if (
-      viewEpochRef.current !== epoch
-      && !(
-        activeEpochRef.current === epoch
-        && projectingRef.current
-        && optionsRef.current.sessionId === sessionId
-      )
+      !turn.ownsView(epoch)
+      && !(turn.projectsRun(epoch) && optionsRef.current.sessionId === sessionId)
     ) return null;
     turn.restore(restored, { sessionId, show: true });
     return restored;
@@ -332,11 +314,7 @@ export function useChat(options: UseChatOptions) {
     resumeSessionId?: string,
     configuration?: ChatTurnConfiguration,
   ) => {
-    const epoch = ++viewEpochRef.current;
-    activeEpochRef.current = epoch;
-    projectingRef.current = true;
-    const controller = new AbortController();
-    abortRef.current = controller;
+    const { controller, epoch } = turn.beginRun();
     const question = draft.text;
     promptRef.current = draft;
     turn.start(optimistic, request.session_id, configuration ?? {
@@ -368,8 +346,8 @@ export function useChat(options: UseChatOptions) {
           signal: controller.signal,
           getSessionId: () => turn.sessionId,
           onDisconnect: () => {
-            if (!controller.signal.aborted && abortRef.current === controller) {
-              applyEvent({ type: "compaction_status", state: "finished" }, projectsActiveStream());
+            if (!controller.signal.aborted && turn.isCurrent(controller)) {
+              applyEvent({ type: "compaction_status", state: "finished" }, turn.projectsActive);
             }
           },
           getAfterSequence: () => latestSequence,
@@ -386,15 +364,15 @@ export function useChat(options: UseChatOptions) {
           : null;
         if (smoothed) smoothedStreamRef.current = { controller, stream: smoothed };
         for await (const event of smoothed?.events ?? source) {
-          if (controller.signal.aborted || abortRef.current !== controller) break;
+          if (controller.signal.aborted || !turn.isCurrent(controller)) break;
           const traits = EVENT_TRAITS[event.type];
           if (event.type === "paper_artifact") optionsRef.current.onPaperArtifact?.(event, turn.sessionId);
           if (event.type === "stream_start") recordStreamStart(controller, event.request_id);
           if (traits.workspaceStatus === "arm") armWorkspaceStatus(controller, epoch);
           if (traits.workspaceStatus === "clear") clearWorkspaceStatus(controller);
-          if (turn.observe(event) && projectsActiveStream()) optionsRef.current.onInterrupted(draft);
+          if (turn.observe(event) && turn.projectsActive) optionsRef.current.onInterrupted(draft);
           if (traits.terminal) recordTerminal(controller, traits.terminal);
-          const projectsToVisibleConversation = projectsActiveStream();
+          const projectsToVisibleConversation = turn.projectsActive;
           const presentationProjects = projectsToVisibleConversation
             && !(smooth && document.visibilityState === "hidden");
           if (smooth && traits.presentation === "structural") commitPresentation();
@@ -410,51 +388,52 @@ export function useChat(options: UseChatOptions) {
           }
         }
       } catch (error) {
-        if (!controller.signal.aborted && abortRef.current === controller) {
-          const rejection = turn.reject(error, Boolean(resumeSessionId));
+        if (!controller.signal.aborted && turn.isCurrent(controller)) {
+          const outcome = turn.reject(error, Boolean(resumeSessionId));
           clearWorkspaceStatus(controller);
-          if (rejection === "completed") {
-            // The turn settled after the session load but before this reconnect.
-            // The canonical reload in `finally` replaces the active placeholder.
-          } else if (rejection === "disabled") {
-            restoreTranscript(original, epoch, "", { disabledRequest: { question, draft } });
-          } else if (rejection === "capacity") {
-            const retryAfterSeconds = error instanceof ChatStreamError ? error.retryAfterSeconds ?? 5 : 5;
-            turn.queueCapacity({
-              question,
-              draft,
-              request,
-              optimistic,
-              original,
-              edit,
-              retryAfterSeconds,
-              retryAt: Date.now() + retryAfterSeconds * 1_000,
-            });
-            restoreTranscript(original, epoch, "");
-          } else {
-            recordTerminal(controller, "network_error");
-            if (rejection === "draft") {
-              if (projectsActiveStream()) optionsRef.current.onInterrupted(draft);
-              restoreTranscript(original, epoch, error instanceof Error ? error.message : STREAM_FAILED);
-            }
-            if (rejection === "provider" && projectsActiveStream()) {
-              optionsRef.current.onInterrupted(draft);
-            }
-          }
-          if (
-            rejection !== "completed"
-            && !turn.admissionRejected
-            && viewEpochRef.current === epoch
-          ) {
-            applyEvent({
-              type: "error",
-              message: error instanceof Error ? error.message : STREAM_FAILED,
-              code: error instanceof ChatStreamError ? error.code : undefined,
-            });
+          const message = error instanceof Error ? error.message : STREAM_FAILED;
+          switch (outcome.kind) {
+            case "already_complete":
+              // The turn settled after the session load but before this reconnect.
+              // The canonical reload in `finally` replaces the active placeholder.
+              break;
+            case "admission_rejected":
+              if (outcome.reason === "disabled") {
+                restoreTranscript(original, epoch, "", { disabledRequest: { question, draft } });
+              } else if (outcome.reason === "capacity") {
+                const retryAfterSeconds = error instanceof ChatStreamError ? error.retryAfterSeconds ?? 5 : 5;
+                turn.queueCapacity({
+                  question,
+                  draft,
+                  request,
+                  optimistic,
+                  original,
+                  edit,
+                  retryAfterSeconds,
+                  retryAt: Date.now() + retryAfterSeconds * 1_000,
+                });
+                restoreTranscript(original, epoch, "");
+              } else {
+                recordTerminal(controller, "network_error");
+                if (turn.projectsActive) optionsRef.current.onInterrupted(draft);
+                restoreTranscript(original, epoch, message);
+              }
+              break;
+            case "transport_error":
+              recordTerminal(controller, "network_error");
+              if (outcome.provider && turn.projectsActive) optionsRef.current.onInterrupted(draft);
+              if (turn.ownsView(epoch)) {
+                applyEvent({
+                  type: "error",
+                  message,
+                  code: error instanceof ChatStreamError ? error.code : undefined,
+                });
+              }
+              break;
           }
         }
       } finally {
-        if (abortRef.current === controller) {
+        if (turn.isCurrent(controller)) {
           if (smoothedStreamRef.current?.controller === controller) {
             commitPresentation();
             smoothedStreamRef.current = null;
@@ -471,7 +450,7 @@ export function useChat(options: UseChatOptions) {
               optionsRef.current.onProviderTerminal?.();
             }
             const canonicalId = turn.sessionId;
-            const owned = viewEpochRef.current === epoch;
+            const owned = turn.ownsView(epoch);
             if (edit && !turn.sawStreamStart) {
               restoreTranscript(edit.snapshot, epoch, RESEND_FAILED);
             } else if (canonicalId) {
@@ -487,7 +466,7 @@ export function useChat(options: UseChatOptions) {
                   turn.present({ sessionError: RESEND_FAILED });
                 }
               } catch {
-                if (viewEpochRef.current === epoch) {
+                if (turn.ownsView(epoch)) {
                   transitionLifecycle({ type: "settle" });
                 }
               }
@@ -496,7 +475,7 @@ export function useChat(options: UseChatOptions) {
             }
             // Navigation can detach a finished turn while its reload is pending.
             // Notify its completion unless another turn has taken ownership.
-            if (!abortRef.current || abortRef.current === controller) {
+            if (!turn.running || turn.isCurrent(controller)) {
               optionsRef.current.onSettled(canonicalId);
             }
           }
@@ -618,8 +597,8 @@ export function useChat(options: UseChatOptions) {
   });
 
   const stop = useStableCallback(() => {
-    if (!abortRef.current) return;
-    const controller = abortRef.current;
+    const controller = turn.controller;
+    if (!controller) return;
     clearWorkspaceStatus(controller);
     recordTerminal(controller, "stopped");
     controller.abort();
@@ -629,33 +608,33 @@ export function useChat(options: UseChatOptions) {
     smoothedStreamRef.current = null;
     for (const event of accepted) applyEvent(event, false);
     commitPresentation();
-    abortRef.current = null;
+    turn.releaseRun();
     if (latencyRef.current?.controller === controller) {
       latencyRef.current = null;
     }
     turn.finish();
-    const visible = projectsActiveStream();
+    const visible = turn.projectsActive;
     const stopped = transitionLifecycle({ type: "stop" }, visible).messages;
     if (visible) optionsRef.current.onInterrupted(promptRef.current);
     const sessionId = turn.sessionId;
     if (sessionId) stoppedProjectionRef.current = { sessionId, messages: stopped };
     if (sessionId) void chatApi.cancelSession(sessionId).catch(() => undefined);
-    const epoch = ++viewEpochRef.current;
+    const epoch = turn.detachView();
     window.setTimeout(() => {
-      if (sessionId && visible && viewEpochRef.current === epoch) {
+      if (sessionId && visible && turn.ownsView(epoch)) {
         void reloadCanonical(sessionId, epoch)
         .catch(() => undefined)
         .finally(() => {
-          if (!abortRef.current) optionsRef.current.onSettled(sessionId);
+          if (!turn.running) optionsRef.current.onSettled(sessionId);
         });
-      } else if (!abortRef.current) {
+      } else if (!turn.running) {
         optionsRef.current.onSettled(sessionId);
       }
     }, 450);
   });
 
   const toggleBlock = useStableCallback((messageId: string, blockIndex: number) => {
-    if (projectingRef.current) {
+    if (turn.projecting) {
       turn.transition({ type: "toggle_block", messageId, blockIndex }, true);
     } else {
       turn.present({ messages: toggleChatBlock(turn.visibleMessages, messageId, blockIndex) });
@@ -664,25 +643,19 @@ export function useChat(options: UseChatOptions) {
 
   /** The selected conversation is about to show another transcript. */
   const detachView = () => {
-    viewEpochRef.current += 1;
+    turn.detachView();
     disarmWorkspaceStatus();
     cancelPresentationFrame();
     presentationDirtyRef.current = false;
     latencyRef.current = null;
   };
 
-  const abortStream = () => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    activeEpochRef.current = null;
-  };
-
   const reset = useStableCallback(() => {
     detachView();
-    abortStream();
+    turn.abortRun();
     smoothedStreamRef.current = null;
     stoppedProjectionRef.current = null;
-    projectingRef.current = false;
+    turn.projecting = false;
     turn.reset();
   });
 
@@ -699,15 +672,15 @@ export function useChat(options: UseChatOptions) {
       && sessionId !== undefined
       && sessionId === turn.sessionId
     ) {
-      projectingRef.current = true;
+      turn.projecting = true;
       turn.present({ messages: turn.messages, sessionError: "" });
       return;
     }
-    projectingRef.current = false;
+    turn.projecting = false;
     // A route change may replace the visible transcript while another chat is
     // still generating. Keep buffering that stream so it can be reattached if
     // the user returns, without projecting its events into this transcript.
-    if (!turn.busy) abortStream();
+    if (!turn.busy) turn.abortRun();
     if (resumeActive && sessionId && !turn.busy) {
       const lastUser = latestUserMessage(restored);
       if (lastUser) {

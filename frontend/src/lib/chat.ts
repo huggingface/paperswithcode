@@ -58,6 +58,16 @@ export interface ChatDraft {
 
 /* ---------- UI message model (also persisted for session history) ---------- */
 
+/** Setup progress of a streaming assistant message, before any block arrives. */
+export type ChatProgress = "workspace" | "preparing_workspace" | "starting_agent" | "connecting_model";
+
+export const CHAT_PROGRESS_LABELS: Readonly<Record<ChatProgress, string>> = {
+  workspace: "Preparing research workspace…",
+  preparing_workspace: "Preparing secure workspace…",
+  starting_agent: "Starting research agent…",
+  connecting_model: "Connecting to model…",
+};
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
@@ -74,7 +84,10 @@ export interface ChatMessage {
   error?: string;
   errorCode?: string;
   revision?: number;
+  /** User messages: the persisted generation status of this revision. */
   status?: string;
+  /** Streaming assistant messages: setup progress shown before any block arrives. */
+  progress?: ChatProgress;
   paperMentions?: PaperMentionDraft[];
   paperSelection?: PaperSelectionDraft;
 }

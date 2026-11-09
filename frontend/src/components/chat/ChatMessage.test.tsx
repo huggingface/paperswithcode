@@ -650,7 +650,7 @@ describe("AssistantMessage", () => {
       id: "assistant-1",
       role: "assistant",
       streaming: true,
-      status: "Preparing research workspace…",
+      progress: "workspace",
       blocks: [],
     });
 
@@ -664,7 +664,7 @@ describe("AssistantMessage", () => {
       id: "assistant-1",
       role: "assistant",
       streaming: true,
-      status: "Preparing research workspace…",
+      progress: "workspace",
       blocks: [{
         kind: "reasoning",
         text: "Checked the evidence.",

@@ -20,6 +20,7 @@ import { CheckIcon, Chevron, SearchIcon, Spinner } from "@/components/chat/icons
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
 import { authorsLine, excerpt, venueLine } from "@/components/chat/paperDisplay";
+import { CHAT_PROGRESS_LABELS } from "@/lib/chat";
 import type {
   AnswerBlock,
   AppBlock,
@@ -617,7 +618,7 @@ export const AssistantMessage: React.FC<{
       {!msg.compacting && isWaitingForAssistant(msg) && (
         <div className="chat-waiting" role="status" aria-live="polite">
           <span className="chat-thinking">
-            {(msg.blocks?.length ?? 0) === 0 ? (msg.status ?? "Thinking…") : "Thinking…"}
+            {(msg.blocks?.length ?? 0) === 0 ? (msg.progress ? CHAT_PROGRESS_LABELS[msg.progress] : "Thinking…") : "Thinking…"}
           </span>
         </div>
       )}
