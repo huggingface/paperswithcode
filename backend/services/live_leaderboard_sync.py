@@ -5,6 +5,10 @@ and declares a reviewed ``ModelIdentity`` map; this engine resolves papers,
 hands unreviewed names to the release radar, and creates or revises the rows
 it owns. Like every live sync it never creates papers and never deletes rows:
 a managed row that leaves the upstream board is only reported.
+
+A managed methodology is the sync's head followed by any reviewer notes. The
+engine rewrites the head on every run and keeps the notes; adopting a
+hand-imported row keeps its methodology as the notes.
 """
 
 from __future__ import annotations
@@ -62,7 +66,10 @@ class LiveLeaderboard:
     metric: str
     identities: dict[str, ModelIdentity]
     min_selected: int
-    protocol: str
+    # Board-wide evaluation setup appended to every managed head.
+    protocol: str = ""
+    # Appended to every catalog model name on the board, e.g. " (no tools)".
+    model_name_suffix: str = ""
     # Upstream names the board deliberately leaves out, with the reason.
     excluded: dict[str, str] = field(default_factory=dict)
     # Whether a hand-imported row for the same paper and model name becomes
@@ -73,6 +80,16 @@ class LiveLeaderboard:
     @property
     def managed_prefix(self) -> str:
         return managed_methodology_prefix(self.source)
+
+    @property
+    def managed_head(self) -> re.Pattern[str]:
+        """Match a managed methodology, capturing the reviewer notes after it."""
+        protocol = f" {re.escape(self.protocol)}" if self.protocol else ""
+        return re.compile(
+            f"{re.escape(self.managed_prefix)} Official leaderboard entry "
+            rf".*?, listed at \S+\.{protocol}(?: (?P<notes>.*))?$",
+            re.DOTALL,
+        )
 
 
 @dataclass
@@ -179,13 +196,20 @@ class LiveLeaderboardSyncService:
         self.db = db
         self.board = board
 
-    def _methodology(self, entry: LeaderboardEntry) -> str:
+    def _methodology(self, entry: LeaderboardEntry, notes: str) -> str:
         board = self.board
-        return (
+        parts = [
             f"{board.managed_prefix} Official leaderboard entry "
-            f'"{entry.label}": {entry.detail}, listed at {board.url}. '
-            f"{board.protocol}"
-        )
+            f'"{entry.label}": {entry.detail}, listed at {board.url}.',
+            board.protocol,
+            notes,
+        ]
+        return " ".join(part for part in parts if part)
+
+    def _managed_notes(self, row: Evaluation) -> str:
+        """Return the reviewer notes kept beneath a managed row's head."""
+        head = self.board.managed_head.match((row.methodology or "").strip())
+        return (head and head.group("notes")) or ""
 
     def sync(
         self,
@@ -230,7 +254,7 @@ class LiveLeaderboardSyncService:
                 selected.append(
                     (
                         paper_ids.get(identity.paper_key),
-                        identity.model_name,
+                        identity.model_name + board.model_name_suffix,
                         identity.is_open,
                         identity.hf_model_url,
                         entry,
@@ -243,7 +267,7 @@ class LiveLeaderboardSyncService:
                 selected.append(
                     (
                         match.paper_id,
-                        match.model_name,
+                        match.model_name + board.model_name_suffix,
                         match.is_open,
                         match.hf_model_url,
                         entry,
@@ -301,8 +325,6 @@ class LiveLeaderboardSyncService:
                 hf_model_url,
                 entry,
             ) in best.items():
-                metrics = {board.metric: entry.value}
-                methodology = self._methodology(entry)
                 # A hand-imported row may record the harness as "Not reported".
                 row = rows_by_identity.get(key)
                 if row is None and board.adopt_unmanaged:
@@ -326,16 +348,23 @@ class LiveLeaderboardSyncService:
                     self.db.add(row)
                     rows_by_identity[key] = row
                     stats.created += 1
+                    notes = ""
                 elif not (row.methodology or "").startswith(board.managed_prefix):
-                    # A hand-imported row for the same model becomes managed.
+                    # A hand-imported row for the same model becomes managed;
+                    # its reviewer methodology stays as notes beneath the head.
+                    notes = (row.methodology or "").strip()
                     row.external_source_url = board.url
                     row.source_url = board.url
                     row.harness = entry.harness
                     stats.adopted += 1
-                elif row.metrics != metrics or row.methodology != methodology:
-                    stats.changed += 1
-                row.metrics = metrics
-                row.methodology = methodology
+                else:
+                    notes = self._managed_notes(row)
+                    current = ((row.metrics or {}).get(board.metric), row.methodology)
+                    if current != (entry.value, self._methodology(entry, notes)):
+                        stats.changed += 1
+                # Other metrics a hand-imported row carries stay untouched.
+                row.metrics = {**(row.metrics or {}), board.metric: entry.value}
+                row.methodology = self._methodology(entry, notes)
                 row.best_metric = board.metric
                 if evaluated_on is not None:
                     row.evaluated_on = evaluated_on

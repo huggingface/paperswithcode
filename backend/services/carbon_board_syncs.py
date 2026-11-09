@@ -20,10 +20,9 @@ from typing import Any
 import httpx
 from bs4 import BeautifulSoup
 
+from backend.services import surge_chartography_sync_service as surge_chartography
+from backend.services import vals_finance_agent_sync_service as vals_finance_agent
 from backend.services.carbon_board_identities import IDENTITIES
-from backend.services.surge_chartography_sync_service import (
-    USER_AGENT as SURGE_USER_AGENT,
-)
 from backend.services.live_leaderboard_sync import (
     USER_AGENT,
     LeaderboardEntry,
@@ -619,6 +618,8 @@ CRITPT_SELF_REPORTED = {
 
 
 # --- Board registry -----------------------------------------------------------
+# Every board on the shared engine, including the ones defined in their own
+# modules (Vals AI Finance Agent v2, Surge AI Chartography).
 
 
 @dataclass(frozen=True)
@@ -717,7 +718,9 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             protocol="25 private research-level problems with programmatic answer checks (v1.1 answer keys); agents have coding tools and web search.",
         ),
         # Surge's Webflow host rejects non-browser user agents.
-        _fetching(RIEMANN_BENCH_URL, parse_riemann_bench, SURGE_USER_AGENT),
+        _fetching(
+            RIEMANN_BENCH_URL, parse_riemann_bench, surge_chartography.USER_AGENT
+        ),
     ),
     "sync_cwe_bench": BoardSync(
         LiveLeaderboard(
@@ -826,5 +829,11 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             protocol="All 70 Terminal-Bench-Science 0.1.0 tasks (life, physical, mathematical, engineering and earth science), run with the mini-swe-agent harness; pass@1 averaged over three repeats per task; independent evaluation by Artificial Analysis.",
         ),
         _fetching(TERMINAL_BENCH_SCIENCE_URL, parse_terminal_bench_science),
+    ),
+    "sync_vals_finance_agent": BoardSync(
+        vals_finance_agent.BOARD, vals_finance_agent.fetch_vals_finance_agent
+    ),
+    "sync_surge_chartography": BoardSync(
+        surge_chartography.BOARD, surge_chartography.fetch_surge_chartography
     ),
 }
