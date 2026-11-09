@@ -751,3 +751,29 @@ def test_method_trend_returns_more_than_ten_years_without_an_override():
     assert trend.history_months == 319
     assert trend.history[0].start_date == date(2000, 1, 1)
     assert trend.history[-1].start_date == date(2026, 7, 1)
+
+
+def test_method_trend_counts_every_paper_published_on_the_same_day():
+    db = _session()
+    db.add_all(
+        [
+            Method(id=10, name="Shared day", slug="shared-day", introduced_year=2026),
+            _paper(1, "Recent A", date(2026, 7, 20)),
+            _paper(2, "Recent B", date(2026, 7, 20)),
+            _paper(3, "Baseline", date(2026, 3, 2)),
+            PaperMethod(paper_id=1, method_id=10),
+            PaperMethod(paper_id=2, method_id=10),
+            PaperMethod(paper_id=3, method_id=10),
+        ]
+    )
+    db.commit()
+
+    trend = MethodTrendService(db).get_method_trend(
+        "shared-day", today=date(2026, 7, 29)
+    )
+
+    assert trend.recent_paper_count == 2
+    assert trend.baseline_paper_count == 1
+    by_month = {point.start_date: point.paper_count for point in trend.history}
+    assert by_month[date(2026, 7, 1)] == 2
+    assert by_month[date(2026, 3, 1)] == 1

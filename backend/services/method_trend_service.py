@@ -81,9 +81,10 @@ class MethodTrendService:
         query_start = min(history_start, baseline_start)
 
         # paper_methods is unique per (paper, method), so the join yields each
-        # paper once; no DISTINCT needed.
+        # paper once; no DISTINCT needed. Counting per day keeps popular
+        # methods from shipping tens of thousands of rows to Python.
         rows = (
-            self.db.query(DBPaper.date_published)
+            self.db.query(DBPaper.date_published, func.count())
             .join(PaperMethod, PaperMethod.paper_id == DBPaper.id)
             .filter(
                 PaperMethod.method_id == method.id,
@@ -91,6 +92,7 @@ class MethodTrendService:
                 DBPaper.date_published >= query_start,
                 DBPaper.date_published <= generated_on,
             )
+            .group_by(DBPaper.date_published)
             .all()
         )
         undated_count = (
@@ -107,13 +109,13 @@ class MethodTrendService:
         )
         counts: dict[date, int] = {}
         recent_count = baseline_count = 0
-        for (published_on,) in rows:
+        for published_on, day_count in rows:
             bucket = month_start(published_on)
-            counts[bucket] = counts.get(bucket, 0) + 1
+            counts[bucket] = counts.get(bucket, 0) + day_count
             if published_on > recent_start:
-                recent_count += 1
+                recent_count += day_count
             elif published_on > baseline_start:
-                baseline_count += 1
+                baseline_count += day_count
 
         if self.db.bind.dialect.name == "sqlite":
             catalog = {}
