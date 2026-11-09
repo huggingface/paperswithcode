@@ -1,12 +1,5 @@
 import type { ChatBlock, ChatEvent, ChatMessage } from "./chat";
 
-const WORKSPACE_STATUS = "Preparing research workspace…";
-const LIFECYCLE_STATUS = {
-  preparing_workspace: "Preparing secure workspace…",
-  starting_agent: "Starting research agent…",
-  connecting_model: "Connecting to model…",
-} as const;
-
 /** The visible projection of one turn. Turn status lives in `ChatTurn.phase`. */
 export interface ChatLifecycleState {
   messages: ChatMessage[];
@@ -87,13 +80,8 @@ export function findLastMatchingIndex<T>(
 }
 
 function withoutWorkspaceStatus(message: ChatMessage): ChatMessage {
-  if (
-    message.status !== WORKSPACE_STATUS
-    && !Object.values(LIFECYCLE_STATUS).includes(
-      message.status as (typeof LIFECYCLE_STATUS)[keyof typeof LIFECYCLE_STATUS],
-    )
-  ) return message;
-  const { status: _status, ...rest } = message;
+  if (message.progress === undefined) return message;
+  const { progress: _progress, ...rest } = message;
   return rest;
 }
 
@@ -142,7 +130,7 @@ function reduceEvent(
           message.role === "assistant"
           && message.streaming
           && (message.blocks?.length ?? 0) === 0
-            ? { ...message, status: LIFECYCLE_STATUS[event.phase] }
+            ? { ...message, progress: event.phase }
             : message
         )),
       };
@@ -479,7 +467,7 @@ export function chatLifecycleReducer(
           && message.streaming
           && (message.blocks?.length ?? 0) === 0
           && !message.error
-            ? { ...message, status: WORKSPACE_STATUS }
+            ? { ...message, progress: "workspace" }
             : message
         )),
       };

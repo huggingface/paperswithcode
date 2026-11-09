@@ -22,14 +22,14 @@ describe("chatLifecycleReducer", () => {
       event: { type: "lifecycle", phase: "preparing_workspace" },
     });
     expect(state.messages[0]).toMatchObject({
-      status: "Preparing secure workspace…",
+      progress: "preparing_workspace",
       blocks: [],
     });
     state = chatLifecycleReducer(state, {
       type: "event",
       event: { type: "reasoning_start" },
     });
-    expect(state.messages[0].status).toBeUndefined();
+    expect(state.messages[0].progress).toBeUndefined();
   });
 
   it("projects stream events and terminal completion without mutation", () => {

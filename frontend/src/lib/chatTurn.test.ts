@@ -9,7 +9,7 @@ describe("ChatTurn terminal ownership", () => {
       const rejected = new ChatTurn();
       for (const turn of [streamed, rejected]) turn.start([], "session-1");
       expect(streamed.observe({ type: "error", message: "Unavailable", code })).toBe(true);
-      expect(rejected.reject(new ChatStreamError("Unavailable", code), false)).toBe("provider");
+      expect(rejected.reject(new ChatStreamError("Unavailable", code), false)).toEqual({ kind: "transport_error", provider: true });
       for (const turn of [streamed, rejected]) {
         expect(turn.shouldRefreshProvider).toBe(true);
         expect(turn.streamFailed).toBe(true);
@@ -35,7 +35,7 @@ describe("ChatTurn terminal ownership", () => {
   it("does not treat a completed reconnect as a failed turn", () => {
     const turn = new ChatTurn();
     turn.start([], "session-1");
-    expect(turn.reject(new ChatStreamError("Idle", "chat_not_busy"), true)).toBe("completed");
+    expect(turn.reject(new ChatStreamError("Idle", "chat_not_busy"), true)).toEqual({ kind: "already_complete" });
     expect(turn.streamFailed).toBe(false);
     expect(turn.admissionRejected).toBe(false);
   });
@@ -45,19 +45,40 @@ describe("ChatTurn terminal ownership", () => {
     expect(turn.phase).toEqual({ status: "idle" });
     turn.start([], "session-1");
     turn.observe({ type: "stream_start", request_id: "request-1", session_id: "session-1" });
-    expect(turn.phase).toMatchObject({ status: "streaming", streamStart: { providerExecuted: true }, terminal: "pending" });
+    expect(turn.phase).toMatchObject({ status: "streaming", streamStart: { providerExecuted: true }, outcome: { kind: "pending" } });
     turn.observe({ type: "done" });
     turn.finish();
-    expect(turn.phase).toMatchObject({ status: "settled", terminal: "complete" });
+    expect(turn.phase).toMatchObject({ status: "settled", outcome: { kind: "complete" } });
     expect(turn.busy).toBe(false);
     expect(turn.sawTerminalEvent).toBe(true);
     expect(turn.streamFailed).toBe(false);
 
     turn.start([], "session-1");
     turn.observe({ type: "error", message: "Failed", code: "provider_error" });
-    expect(turn.phase).toMatchObject({ status: "streaming", terminal: "error" });
+    expect(turn.phase).toMatchObject({ status: "streaming", outcome: { kind: "error" } });
     expect(turn.streamFailed).toBe(true);
     expect(turn.shouldRefreshProvider).toBe(false);
+  });
+
+  it("lets only the current run write into the selected conversation", () => {
+    const turn = new ChatTurn();
+    const first = turn.beginRun();
+    expect(turn.isCurrent(first.controller)).toBe(true);
+    expect(turn.ownsView(first.epoch)).toBe(true);
+    expect(turn.projectsActive).toBe(true);
+
+    const second = turn.beginRun();
+    expect(turn.isCurrent(first.controller)).toBe(false);
+    expect(turn.ownsView(first.epoch)).toBe(false);
+
+    turn.detachView();
+    turn.projecting = false;
+    expect(turn.ownsView(second.epoch)).toBe(false);
+    expect(turn.projectsActive).toBe(false);
+
+    turn.abortRun();
+    expect(second.controller.signal.aborted).toBe(true);
+    expect(turn.running).toBe(false);
   });
 
   it("notifies subscribers only when the shown conversation changes", () => {

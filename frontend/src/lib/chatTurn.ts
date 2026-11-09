@@ -25,24 +25,24 @@ export interface PendingGeneration {
 }
 
 /** How a turn ended, as far as the browser observed it. */
-export type ChatTurnTerminal =
-  | "pending"
+export type ChatTurnOutcome =
+  | { kind: "pending" }
   /** `done` event. */
-  | "complete"
+  | { kind: "complete" }
   /** `error` event. */
-  | "error"
-  /** The request or stream failed in transport. */
-  | "transport_error"
-  /** The backend refused admission (disabled, capacity, or an invalid draft). */
-  | "admission_rejected"
+  | { kind: "error" }
   /** A reconnect found the turn had already settled. */
-  | "already_complete";
+  | { kind: "already_complete" }
+  /** The backend refused admission: chat disabled, no capacity, or an invalid draft. */
+  | { kind: "admission_rejected"; reason: "disabled" | "capacity" | "draft" }
+  /** The request or stream failed in transport; `provider` when the model provider failed. */
+  | { kind: "transport_error"; provider: boolean };
 
 interface ChatTurnProgress {
   /** Set by `stream_start`; replays without provider work report `providerExecuted: false`. */
   streamStart: { providerExecuted: boolean } | null;
   providerStatusChanged: boolean;
-  terminal: ChatTurnTerminal;
+  outcome: ChatTurnOutcome;
 }
 
 /** The single model of a turn's status. */
@@ -52,7 +52,12 @@ export type ChatTurnPhase =
   /** Finished streaming; the outcome stays readable until the next turn starts. */
   | ({ status: "settled" } & ChatTurnProgress);
 
-export type ChatRejection = "completed" | "disabled" | "capacity" | "draft" | "provider" | "network";
+/** One run of the stream loop. A run stays current until stopped, aborted, or replaced. */
+export interface ChatTurnRun {
+  controller: AbortController;
+  /** The view epoch the run started in. */
+  epoch: number;
+}
 
 /** What the selected conversation shows; React reads it through `useSyncExternalStore`. */
 export interface ChatTurnSnapshot {
@@ -69,6 +74,10 @@ type ChatView = Pick<ChatTurnSnapshot, "messages" | "sessionError" | "disabledRe
  * plus the transcript that conversation shows. The shown transcript is either a
  * projection of this turn or a loaded transcript; presentation snapshots must
  * never be fed back into the turn state during streaming.
+ *
+ * Ownership of the selected conversation is tracked with view epochs: the epoch
+ * is bumped whenever the conversation starts showing another transcript, so a
+ * run that lost the conversation stops writing into the one that replaced it.
  */
 export class ChatTurn {
   configuration: ChatTurnConfiguration | undefined;
@@ -78,6 +87,52 @@ export class ChatTurn {
   private view: ChatView = { messages: [], sessionError: "", disabledRequest: null };
   private snapshot: ChatTurnSnapshot = this.buildSnapshot();
   private readonly listeners = new Set<() => void>();
+  private viewEpoch = 0;
+  private activeEpoch: number | null = null;
+  private current: AbortController | null = null;
+  /** Whether the selected conversation shows the active turn's projection. */
+  projecting = false;
+
+  /* ---------- Run ownership ---------- */
+
+  /** Start a new run that owns the selected conversation. */
+  beginRun(): ChatTurnRun {
+    const epoch = ++this.viewEpoch;
+    this.activeEpoch = epoch;
+    this.projecting = true;
+    this.current = new AbortController();
+    return { controller: this.current, epoch };
+  }
+
+  /** The selected conversation starts showing another transcript. */
+  detachView() { return ++this.viewEpoch; }
+
+  /** Whether a run is still the current one. */
+  isCurrent(controller: AbortController) { return this.current === controller; }
+
+  /** Whether any run is current. */
+  get running() { return this.current !== null; }
+
+  get controller() { return this.current; }
+
+  /** Whether the selected conversation still shows what `epoch` showed. */
+  ownsView(epoch: number) { return this.viewEpoch === epoch; }
+
+  /** Whether the active run's events belong in the selected conversation. */
+  get projectsActive() { return this.activeEpoch === this.viewEpoch || this.projecting; }
+
+  /** Whether a run that started in `epoch` is still shown in the selected conversation. */
+  projectsRun(epoch: number) { return this.activeEpoch === epoch && this.projecting; }
+
+  /** Stop treating the current run as current, e.g. after the user stops it. */
+  releaseRun() { this.current = null; }
+
+  /** Abort the current run and forget which epoch it started in. */
+  abortRun() {
+    this.current?.abort();
+    this.current = null;
+    this.activeEpoch = null;
+  }
 
   /* ---------- External store ---------- */
 
@@ -115,20 +170,18 @@ export class ChatTurn {
   get busy() { return this._phase.status === "streaming"; }
   get pendingCapacity() { return this._pendingCapacity; }
   get sawStreamStart() { return this._phase.status !== "idle" && this._phase.streamStart !== null; }
+  get outcome(): ChatTurnOutcome {
+    return this._phase.status === "idle" ? { kind: "pending" } : this._phase.outcome;
+  }
   get sawTerminalEvent() {
-    return this._phase.status !== "idle"
-      && (this._phase.terminal === "complete" || this._phase.terminal === "error");
+    const { kind } = this.outcome;
+    return kind === "complete" || kind === "error";
   }
   get streamFailed() {
-    return this._phase.status !== "idle" && (
-      this._phase.terminal === "error"
-      || this._phase.terminal === "transport_error"
-      || this._phase.terminal === "admission_rejected"
-    );
+    const { kind } = this.outcome;
+    return kind === "error" || kind === "transport_error" || kind === "admission_rejected";
   }
-  get admissionRejected() {
-    return this._phase.status !== "idle" && this._phase.terminal === "admission_rejected";
-  }
+  get admissionRejected() { return this.outcome.kind === "admission_rejected"; }
   get shouldRefreshProvider() {
     if (this._phase.status === "idle") return false;
     return Boolean(this._phase.streamStart?.providerExecuted) || this._phase.providerStatusChanged;
@@ -174,7 +227,7 @@ export class ChatTurn {
   /** Begin a turn and show its optimistic transcript. */
   start(messages: ChatMessage[], sessionId: string | null, configuration?: ChatTurnConfiguration) {
     this.configuration = configuration;
-    this._phase = { status: "streaming", streamStart: null, providerStatusChanged: false, terminal: "pending" };
+    this._phase = { status: "streaming", streamStart: null, providerStatusChanged: false, outcome: { kind: "pending" } };
     this.view = { ...this.view, messages, sessionError: "" };
     this.transition({ type: "start", messages, sessionId });
   }
@@ -202,7 +255,7 @@ export class ChatTurn {
       this.progress({ streamStart: { providerExecuted: event.provider_execution !== false } });
     }
     if (event.type === "done" || event.type === "error") {
-      this.progress({ terminal: event.type === "done" ? "complete" : "error" });
+      this.progress({ outcome: { kind: event.type === "done" ? "complete" : "error" } });
     }
     if (event.type === "error" && chatErrorClass(event.code) === "provider") {
       this.progress({ providerStatusChanged: true });
@@ -211,21 +264,18 @@ export class ChatTurn {
     return false;
   }
 
-  reject(error: unknown, resumed: boolean): ChatRejection {
+  /** Record why the request or stream failed, and return that outcome. */
+  reject(error: unknown, resumed: boolean): Exclude<ChatTurnOutcome, { kind: "pending" | "complete" | "error" }> {
     const code = error instanceof ChatStreamError ? error.code : undefined;
     const errorClass = chatErrorClass(code);
-    const kind: ChatRejection = resumed && code === "chat_not_busy" ? "completed"
-      : code === "chat_temporarily_disabled" ? "disabled"
-      : code === "chat_capacity" ? "capacity"
-      : errorClass === "draft" ? "draft"
-      : errorClass === "provider" ? "provider" : "network";
-    this.progress({
-      terminal: kind === "completed" ? "already_complete"
-        : kind === "disabled" || kind === "capacity" || kind === "draft" ? "admission_rejected"
-        : "transport_error",
-      ...(kind === "provider" ? { providerStatusChanged: true } : {}),
-    });
-    return kind;
+    const outcome = resumed && code === "chat_not_busy" ? { kind: "already_complete" } as const
+      : code === "chat_temporarily_disabled" ? { kind: "admission_rejected", reason: "disabled" } as const
+      : code === "chat_capacity" ? { kind: "admission_rejected", reason: "capacity" } as const
+      : errorClass === "draft" ? { kind: "admission_rejected", reason: "draft" } as const
+      : { kind: "transport_error", provider: errorClass === "provider" } as const;
+    const provider = outcome.kind === "transport_error" && outcome.provider;
+    this.progress({ outcome, ...(provider ? { providerStatusChanged: true } : {}) });
+    return outcome;
   }
 
   /** Forget the turn and clear the selected conversation. */
