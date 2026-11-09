@@ -102,6 +102,10 @@ only to learn what was announced, never as a source.
    - `abstract`: the page's own summary or opening paragraphs, verbatim.
    - `date_published`: the first-party release date (the post date, or the
      model card's first commit), not a news date.
+   - English only. If the lab's announcement is not in English (a Korean,
+     Japanese, or Chinese blog post), use its English announcement or the
+     official model card instead; if no first-party English source exists,
+     reject the candidate.
 
 Always include `model_release` with the exact announced name, the lab as
 `publisher`, every name the lab and providers use as `aliases`, and `is_open`
@@ -109,7 +113,7 @@ true only when weights are downloadable today (a promise is not open). Add
 `predecessor_paper_id` when a candidate paper is the release's direct
 predecessor and the inspected sources say so.
 
-The backend refuses an external paper whose `source_url` host (or Hub/GitHub
+The backend refuses a non-English external paper title or abstract, and one whose `source_url` host (or Hub/GitHub
 organization) does not carry the publisher's or model's name, that reuses the
 news lead's host, or that duplicates an indexed paper's source, title, or model
 release. A refusal that names an existing paper means: resolve to it. Do not
