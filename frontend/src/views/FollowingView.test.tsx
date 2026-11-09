@@ -371,6 +371,14 @@ it('collapses a long row behind +N more, keeping selected bubbles visible', asyn
   fireEvent.click(within(row).getByRole('button', { name: '+2 more' }));
   expect(within(row).getByRole('link', { name: 'Task 13' })).toBeInTheDocument();
 });
+it('hides +N more when every bubble past the fold is selected', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue(Array.from({ length: 15 }, (_, i) => (
+    { kind: 'task' as const, entity_id: i + 1, name: `Task ${i + 1}`, url: `/tasks/task-${i + 1}`, created_at: `2026-10-${String(30 - i).padStart(2, '0')}` })));
+  renderFeed('/following?follow=task:13&follow=task:14&follow=task:15');
+  const row = await screen.findByRole('navigation', { name: 'Filter your feed' });
+  expect(await within(row).findByRole('link', { name: 'Task 13' })).toHaveAttribute('aria-current', 'true');
+  expect(within(row).queryByRole('button', { name: /more/ })).not.toBeInTheDocument();
+});
 it('filters the feed to one follow from its bubble', async () => {
   renderFeed('/following?follow=task:1');
   await waitFor(() => expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ follows: ['task:1'], topicIds: [] })));

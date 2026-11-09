@@ -80,6 +80,7 @@ export default function FollowBubbles({ topics, follows, active, hrefFor, onEdit
   const shown = collapsed
     ? bubbles.filter((bubble, index) => index < VISIBLE_BUBBLES || bubble.on)
     : bubbles;
+  const hidden = bubbles.length - shown.length;
   return <nav className="topic-bubbles follow-bubbles" aria-label="Filter your feed">
     {bubbles.length > 0 && <Link className={`topic-bubble ${all ? 'active' : ''}`} to={hrefFor(NO_FILTER)}
       aria-current={all ? 'true' : undefined}>
@@ -90,8 +91,8 @@ export default function FollowBubbles({ topics, follows, active, hrefFor, onEdit
       {bubble.mark}
       <span className="topic-bubble-name">{bubble.name}</span>
     </Link>)}
-    {collapsed && <button type="button" className="topic-bubble topic-bubble-more" onClick={() => setExpanded(true)}>
-      <span className="topic-bubble-name">+{bubbles.length - shown.length} more</span>
+    {hidden > 0 && <button type="button" className="topic-bubble topic-bubble-more" onClick={() => setExpanded(true)}>
+      <span className="topic-bubble-name">+{hidden} more</span>
     </button>}
     {onEdit && <button type="button" className="topic-bubble topic-bubble-add" onClick={onEdit}>
       <Pencil size={13} aria-hidden="true" />
