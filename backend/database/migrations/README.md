@@ -28,6 +28,7 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_organization_logo_sha256.sql` | Content-addressed immutable organization logo URLs |
 | `add_paper_organization_provenance.sql` + `run_add_paper_organization_provenance.py` | Authenticated HF-user provenance for manually curated paper/organization links |
 | `add_paper_relations.sql` + `run_add_paper_relations.py` | `paper_relations` table |
+| `add_paper_public_order_index.sql` | Partial `papers` index matching the public trending order and `eligible_paper_filter()`, so method/task/homepage listings stop after 20 matches instead of sorting the 98% of papers without a trending score; run as `postgres` outside a transaction (no deploy needed) |
 | `add_paper_redirects.sql` | Shared redirects for papers merged into canonical ArXiv rows |
 | `add_pending_paper_edits.sql` + `run_add_pending_paper_edits.py` | pending edit queue |
 | `add_security_hardening_submissions.sql` | Stable-subject submission provenance, applied/result review audit fields, idempotency/rate-limit indexes, user profiles/aliases, and suspension state |
