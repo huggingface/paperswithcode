@@ -102,6 +102,8 @@ const newOrganizationPayload = suggestionBase.extend({
 const base = z.object({
   id: z.number(),
   paper_id: z.number().nullable(),
+  /** The edited paper's title and arXiv ID; set on list responses. */
+  paper: z.object({ title: z.string(), arxiv_id: z.string().nullish() }).nullish(),
   hf_username: z.string(),
   hf_subject: z.string().nullish(),
   is_author: z.boolean(),
@@ -272,11 +274,14 @@ export const EDIT_TYPE_META: Record<PendingEditType, EditTypeMeta> = {
 export interface PendingPaperEditsResponse {
   count: number;
   results: PendingPaperEdit[];
+  /** Rows per status under the same filters, ignoring the status filter. */
+  status_counts: Record<PendingEditStatus, number>;
 }
 
 const responseSchema = z.object({
   count: z.number(),
   results: z.array(pendingPaperEditSchema),
+  status_counts: z.object({ pending: z.number(), approved: z.number(), rejected: z.number() }),
 });
 
 export class PendingEditPayloadError extends Error {

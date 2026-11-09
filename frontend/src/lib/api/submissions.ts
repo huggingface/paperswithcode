@@ -23,7 +23,7 @@ export class SubmissionsApi {
   }
 
   list(params?: {
-    status?: PendingEditStatus;
+    status?: PendingEditStatus | "all";
     edit_type?: PendingEditType;
     paper_id?: number;
     reviewed_by_kind?: "human" | "codex" | "auto";

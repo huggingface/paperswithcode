@@ -9,7 +9,7 @@ from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
-from sqlalchemy import desc, text
+from sqlalchemy import desc, func, text
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
@@ -378,13 +378,72 @@ class PendingEditService:
             raise PendingEditError(
                 f"Unsupported status: {status}. Allowed: {sorted(STATUSES)}"
             )
+        query = self._filtered(
+            edit_type=edit_type,
+            paper_id=paper_id,
+            reviewed_by_kind=reviewed_by_kind,
+            hf_username=hf_username,
+        )
+        if status:
+            query = query.filter(PendingPaperEdit.status == status)
+        total = query.count()
+        rows = (
+            query.order_by(desc(PendingPaperEdit.created_at), desc(PendingPaperEdit.id))
+            .offset(offset)
+            .limit(limit)
+            .all()
+        )
+        return rows, total
+
+    def status_counts(
+        self,
+        *,
+        edit_type: Optional[str] = None,
+        paper_id: Optional[int] = None,
+        reviewed_by_kind: Optional[str] = None,
+        hf_username: Optional[str] = None,
+    ) -> dict[str, int]:
+        """Rows per status under the same filters as `list_edits`."""
+        query = self._filtered(
+            edit_type=edit_type,
+            paper_id=paper_id,
+            reviewed_by_kind=reviewed_by_kind,
+            hf_username=hf_username,
+        )
+        counts = dict(
+            query.with_entities(PendingPaperEdit.status, func.count())
+            .group_by(PendingPaperEdit.status)
+            .all()
+        )
+        return {status: counts.get(status, 0) for status in sorted(STATUSES)}
+
+    def paper_refs(
+        self, rows: list[PendingPaperEdit]
+    ) -> dict[int, tuple[str, Optional[str]]]:
+        """Title and arXiv ID of each paper the rows edit, in one query."""
+        paper_ids = {row.paper_id for row in rows if row.paper_id is not None}
+        if not paper_ids:
+            return {}
+        papers = (
+            self.db.query(Paper.id, Paper.title, Paper.arxiv_id)
+            .filter(Paper.id.in_(paper_ids))
+            .all()
+        )
+        return {paper_id: (title, arxiv_id) for paper_id, title, arxiv_id in papers}
+
+    def _filtered(
+        self,
+        *,
+        edit_type: Optional[str],
+        paper_id: Optional[int],
+        reviewed_by_kind: Optional[str],
+        hf_username: Optional[str],
+    ):
         if edit_type is not None and edit_type not in EDIT_TYPES:
             raise PendingEditError(
                 f"Unsupported edit_type: {edit_type}. Allowed: {sorted(EDIT_TYPES)}"
             )
         query = self.db.query(PendingPaperEdit)
-        if status:
-            query = query.filter(PendingPaperEdit.status == status)
         if edit_type:
             query = query.filter(PendingPaperEdit.edit_type == edit_type)
         if paper_id is not None:
@@ -393,14 +452,7 @@ class PendingEditService:
             query = query.filter(PendingPaperEdit.reviewed_by_kind == reviewed_by_kind)
         if hf_username:
             query = query.filter(PendingPaperEdit.hf_username.ilike(hf_username))
-        total = query.count()
-        rows = (
-            query.order_by(desc(PendingPaperEdit.created_at))
-            .offset(offset)
-            .limit(limit)
-            .all()
-        )
-        return rows, total
+        return query
 
     def get(self, edit_id: int) -> PendingPaperEdit:
         row = self.db.get(PendingPaperEdit, edit_id)
