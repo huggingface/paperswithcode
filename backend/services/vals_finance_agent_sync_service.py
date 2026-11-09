@@ -460,7 +460,7 @@ def parse_vals_finance_agent(html: str) -> list[LeaderboardEntry]:
         if label in seen:
             raise ValueError(f"Vals AI lists {label!r} twice")
         seen.add(label)
-        entries.append(LeaderboardEntry(label, float(value), f"{value}% Accuracy"))
+        entries.append(LeaderboardEntry(label, value, f"{value}% Accuracy"))
     if not MIN_EXPECTED_ROWS <= len(entries) <= MAX_EXPECTED_ROWS:
         raise ValueError(
             f"Vals AI Finance Agent v2 has {len(entries)} rows; expected "

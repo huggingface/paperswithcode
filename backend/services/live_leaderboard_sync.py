@@ -46,7 +46,8 @@ class LeaderboardEntry:
     """One official leaderboard row, already on the board's metric scale."""
 
     name: str
-    value: float
+    # A Decimal keeps the precision the board publishes (65.40, not 65.4).
+    value: float | Decimal
     detail: str
     harness: str | None = None
     lab: str = ""
@@ -233,9 +234,19 @@ class LiveLeaderboardSyncService:
         fetched = len(entries)
         entries = [e for e in entries if e.name not in board.excluded]
         reviewed = [e for e in entries if e.name in board.identities]
-        if len(reviewed) < board.min_selected:
+        # Several labels (settings, prompt variants) can name one model, so
+        # the floor counts the distinct models the board would publish.
+        reviewed_models = {
+            (
+                board.identities[e.name].paper_key,
+                board.identities[e.name].model_name,
+                e.harness,
+            )
+            for e in reviewed
+        }
+        if len(reviewed_models) < board.min_selected:
             raise RuntimeError(
-                f"{board.source} has only {len(reviewed)} reviewed entries; "
+                f"{board.source} has only {len(reviewed_models)} reviewed models; "
                 "refusing to update the managed leaderboard"
             )
         stats = LiveSyncStats(fetched=fetched, excluded=fetched - len(entries))
@@ -376,13 +387,14 @@ class LiveLeaderboardSyncService:
                 else:
                     notes, managed = self._managed_notes(row), True
                 stored = (row.metrics or {}).get(board.metric)
+                listed = (
+                    entry.value
+                    if isinstance(entry.value, Decimal)
+                    else Decimal(str(entry.value))
+                )
                 # A reviewer may have stored the unrounded value (48.23) the
                 # board lists at lower precision (48.2); that is not a revision.
-                value = (
-                    stored
-                    if score_matches(stored, Decimal(str(entry.value)))
-                    else entry.value
-                )
+                value = stored if score_matches(stored, listed) else float(entry.value)
                 methodology = self._methodology(entry, notes)
                 if managed and (stored, row.methodology) != (value, methodology):
                     stats.changed += 1

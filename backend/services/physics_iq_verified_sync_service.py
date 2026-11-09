@@ -48,7 +48,7 @@ TABLE_HEADER = (
 MIN_EXPECTED_ROWS = 30
 MAX_EXPECTED_ROWS = 300
 # Refuse to touch a track when its reviewed subset collapses.
-MIN_SELECTED_BY_TRACK = {"i2v": 20, "v2v": 6}
+MIN_SELECTED_BY_TRACK = {"i2v": 20, "v2v": 5}
 
 
 _COSMOS_3 = "2606.02800"
@@ -357,7 +357,7 @@ def fetch_physics_iq_leaderboard(
 def _leaderboard_entry(entry: PhysicsIqEntry) -> LeaderboardEntry:
     return LeaderboardEntry(
         entry.label,
-        float(entry.score),
+        entry.score,
         f"{entry.score_text} ({entry.track}), added "
         f"{entry.date_added.isoformat()}, report {entry.report_url}",
         source_url=entry.report_url,
