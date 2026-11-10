@@ -241,7 +241,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -1116,3 +1115,11 @@ UPDATE methods SET image_credit = '[Gaussian Error Linear Units (GELUs)](/paper/
 UPDATE methods SET image_credit = '[Searching for Activation Functions](/paper/1710.05941)' WHERE slug = 'silu';
 UPDATE methods SET image_credit = '[Group Normalization](/paper/1803.08494)' WHERE slug = 'group-normalization';
 UPDATE methods SET image_credit = '[Group Normalization](/paper/1803.08494)' WHERE slug = 'instance-normalization';
+
+-- Source evidence protects each Introduced link from automated removal.
+INSERT INTO paper_method_evidence (paper_id, method_id, evidence_type)
+SELECT source_paper_id, id, 'source' FROM methods
+WHERE slug IN ('zero', 'mixed-precision-training', 'ring-attention', 'gelu', 'group-normalization', 'instance-normalization')
+  AND source_paper_id IS NOT NULL
+ON CONFLICT (paper_id, method_id, evidence_type) DO UPDATE SET
+    last_seen_at = now();
