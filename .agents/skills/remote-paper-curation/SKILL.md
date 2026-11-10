@@ -64,6 +64,19 @@ report questionable existing links separately.
 If context includes `retry_feedback`, address its exact rejection before apply.
 Re-read current rows and sources; a prior proposal is not evidence.
 
+When context has `promoted_benchmark`, this add-evals job re-checks the paper
+for that one new benchmark only. Submit evaluations and `evaluation_removals`
+only for `promoted_benchmark.dataset_id`, and report every other benchmark the
+paper mentions as `not_applicable` with detail `outside the promoted benchmark`;
+the server rejects rows on any other dataset.
+
+`context.paper.removed_leaderboards` lists the task/dataset boards where a row
+of this paper was deleted, usually by a curator after author feedback. Never
+propose a new row there or remove the row that survived: the server skips such
+new rows (`evaluations_skipped_removed`) and rejects such removals. Report the benchmark as `not_applicable`
+with detail `removed by a curator`. Updating this paper's existing row there is
+still allowed.
+
 Choose the workflow from the context's job kind. For `enrich-paper`, submit
 only the `enrich` payload; keep `evaluations`, `evaluation_removals`,
 `validation_evidence`, and `benchmark_gaps` as empty arrays. Benchmark discovery

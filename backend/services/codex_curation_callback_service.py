@@ -18,6 +18,7 @@ from backend.models.database import (
     BenchmarkCurationCandidate,
     Dataset,
     Evaluation,
+    EvaluationBadgeTombstone,
     HfArtifact,
     Method,
     Metric,
@@ -60,6 +61,7 @@ from backend.services.autonomous_policy import AutonomousPolicy
 from backend.services.catalog_errors import CatalogValidationError
 from backend.services.codex_add_evals_service import (
     BENCHMARK_GAP_KINDS,
+    NEW_BENCHMARK_POLICY_PREFIX,
     CodexPaperJobService,
     codex_paper_job_service,
 )
@@ -126,6 +128,14 @@ def _proposal_identity(values: dict[str, Any]) -> _ProposalIdentity:
     return _ProposalIdentity(
         *(values.get(field) for field in _ProposalIdentity._fields)
     )
+
+
+def promoted_dataset_id(row) -> int | None:
+    """The one benchmark a new-benchmark re-check may write, else None."""
+    version = getattr(row, "policy_version", None) or ""
+    if not version.startswith(NEW_BENCHMARK_POLICY_PREFIX):
+        return None
+    return int(version.removeprefix(NEW_BENCHMARK_POLICY_PREFIX))
 
 
 def _evaluation_harness_clause(harness: str | None):
@@ -501,8 +511,22 @@ class CodexCurationCallbackService:
                 token=settings.hf_token or None,
             )
         )
+        promoted = promoted_dataset_id(row)
+        promoted_dataset = (
+            self.db.get(Dataset, promoted) if promoted is not None else None
+        )
         return {
             "job": self.job_service.serialize(row, settings).model_dump(mode="json"),
+            # A new-benchmark re-check may write only this benchmark's rows.
+            "promoted_benchmark": (
+                {
+                    "dataset_id": promoted,
+                    "name": getattr(promoted_dataset, "name", None),
+                    "slug": getattr(promoted_dataset, "slug", None),
+                }
+                if promoted is not None
+                else None
+            ),
             "source_candidate": source_candidate,
             "retry_feedback": self._retry_feedback(row),
             "paper": {
@@ -575,6 +599,16 @@ class CodexCurationCallbackService:
                 "evaluations": [
                     self._evaluation_state(item)
                     for item in getattr(paper, "evaluations", [])
+                ],
+                "removed_leaderboards": [
+                    {
+                        "task_id": task_id,
+                        "dataset_id": dataset_id,
+                        "removed_evaluation_id": evaluation_id,
+                    }
+                    for (task_id, dataset_id), evaluation_id in sorted(
+                        self._removed_leaderboards(paper.id).items()
+                    )
                 ],
             },
         }
@@ -842,16 +876,26 @@ class CodexCurationCallbackService:
             removed = 0
             skipped_duplicates: list[dict[str, Any]] = []
             organization_links = None
+            skipped_removed: list[dict[str, Any]] = []
             if row.kind == "add-evals":
-                created, updated, skipped_duplicates = self._apply_evaluations(body)
-                removed = self._apply_evaluation_removals(row, body)
+                removed_leaderboards = self._removed_leaderboards(row.paper_id)
+                created, updated, skipped_duplicates, skipped_removed = (
+                    self._apply_evaluations(
+                        body, removed_leaderboards=removed_leaderboards
+                    )
+                )
+                removed = self._apply_evaluation_removals(
+                    row, body, removed_leaderboards=removed_leaderboards
+                )
             else:
                 organization_links = self._apply_enrichment(row, body)
 
             if hasattr(self.db, "flush"):
                 self.db.flush()
             after_state = self._mutation_projection(row, body)
-            self._verify_after_state(row, body, after_state, skipped_duplicates)
+            self._verify_after_state(
+                row, body, after_state, [*skipped_duplicates, *skipped_removed]
+            )
 
             before_evaluations = {
                 int(item["id"]): item for item in before_state.get("evaluations", [])
@@ -925,6 +969,8 @@ class CodexCurationCallbackService:
                 row.mutation_result["evaluations_skipped_duplicates"] = (
                     skipped_duplicates
                 )
+            if skipped_removed:
+                row.mutation_result["evaluations_skipped_removed"] = skipped_removed
             if organization_links:
                 row.mutation_result["organizations"] = organization_links
             if row.kind == "add-evals":
@@ -1323,6 +1369,7 @@ class CodexCurationCallbackService:
                     raise CodexCurationEvaluationPaperMismatchError(
                         "Evaluation removal does not match job paper"
                     )
+            self._validate_promotion_scope(row, body)
             self._validate_already_present_outcomes(row, body)
             return
         if body.benchmark_gaps:
@@ -1335,6 +1382,59 @@ class CodexCurationCallbackService:
             )
         if body.enrich is None:
             raise CodexCurationEnrichmentRequiredError("Enrichment payload is required")
+
+    def _validate_promotion_scope(self, row, body: ApplyMutationRequest) -> None:
+        """Keep a new-benchmark re-check on the benchmark it was queued for.
+
+        The re-check reads the whole paper, so without this it re-adds results
+        for every other board the paper reports, including rows a curator
+        removed after author feedback.
+        """
+        promoted = promoted_dataset_id(row)
+        if promoted is None:
+            return
+        datasets = {item.dataset_id for item in body.evaluations} | {
+            self.db.get(Evaluation, removal.evaluation_id).dataset_id
+            for removal in body.evaluation_removals
+        }
+        outside = sorted(datasets - {promoted})
+        if outside:
+            raise ValueError(
+                f"This job re-checks only benchmark dataset {promoted} "
+                "(context.promoted_benchmark). Drop every evaluation and "
+                f"evaluation_removal on datasets {outside}; report those "
+                "benchmarks as not_applicable outcomes with detail "
+                "'outside the promoted benchmark'."
+            )
+
+    def _removed_leaderboards(self, paper_id: int) -> dict[tuple[int, int], int]:
+        """(task_id, dataset_id) boards where a row of this paper was deleted.
+
+        Deletion leaves an ``evaluation_badge_tombstones`` row (DB trigger),
+        whether a curator removed an incompatible result or a curation job
+        superseded it. Automated curation never creates rows there again.
+        """
+        rows = (
+            self.db.query(
+                EvaluationBadgeTombstone.task_id,
+                EvaluationBadgeTombstone.dataset_id,
+                func.max(EvaluationBadgeTombstone.evaluation_id),
+            )
+            .filter(
+                EvaluationBadgeTombstone.paper_id == paper_id,
+                EvaluationBadgeTombstone.task_id.isnot(None),
+                EvaluationBadgeTombstone.dataset_id.isnot(None),
+            )
+            .group_by(
+                EvaluationBadgeTombstone.task_id,
+                EvaluationBadgeTombstone.dataset_id,
+            )
+            .all()
+        )
+        return {
+            (int(task_id), int(dataset_id)): int(evaluation_id)
+            for task_id, dataset_id, evaluation_id in rows
+        }
 
     @staticmethod
     def _model_identity_key(value: str) -> str:
@@ -2170,11 +2270,16 @@ class CodexCurationCallbackService:
         )
 
     def _apply_evaluations(
-        self, body: ApplyMutationRequest
-    ) -> tuple[int, int, list[dict[str, Any]]]:
+        self,
+        body: ApplyMutationRequest,
+        *,
+        removed_leaderboards: dict[tuple[int, int], int] | None = None,
+    ) -> tuple[int, int, list[dict[str, Any]], list[dict[str, Any]]]:
         created = 0
         updated = 0
         skipped_duplicates: list[dict[str, Any]] = []
+        skipped_removed: list[dict[str, Any]] = []
+        removed_leaderboards = removed_leaderboards or {}
         for item in body.evaluations:
             query = self.db.query(Evaluation).filter(
                 Evaluation.paper_id == item.paper_id,
@@ -2193,6 +2298,18 @@ class CodexCurationCallbackService:
                 matches = [value] if value is not None else []
             existing = self._canonical_evaluation(matches) if matches else None
             values = item.model_dump()
+            removed_id = removed_leaderboards.get((item.task_id, item.dataset_id))
+            if existing is None and removed_id is not None:
+                # A row of this paper was deleted from this board; curators
+                # remove incompatible results and tell authors so. Never put
+                # one back automatically.
+                skipped_removed.append(
+                    {
+                        **_proposal_identity(values)._asdict(),
+                        "removed_evaluation_id": removed_id,
+                    }
+                )
+                continue
             if existing is None:
                 # The model may already be on the leaderboard from a twin paper
                 # (an external release page, an older arXiv version); one entry
@@ -2235,10 +2352,17 @@ class CodexCurationCallbackService:
                 for duplicate in matches:
                     if duplicate.id != existing.id:
                         self.db.delete(duplicate)
-        return created, updated, skipped_duplicates
+        return created, updated, skipped_duplicates, skipped_removed
 
-    def _apply_evaluation_removals(self, row, body: ApplyMutationRequest) -> int:
+    def _apply_evaluation_removals(
+        self,
+        row,
+        body: ApplyMutationRequest,
+        *,
+        removed_leaderboards: dict[tuple[int, int], int] | None = None,
+    ) -> int:
         removed = 0
+        removed_leaderboards = removed_leaderboards or {}
         for removal in body.evaluation_removals:
             existing = (
                 self.db.query(Evaluation)
@@ -2250,6 +2374,17 @@ class CodexCurationCallbackService:
                 .one()
             )
             self._reject_sync_managed(existing, "removed")
+            if (existing.task_id, existing.dataset_id) in removed_leaderboards:
+                # A curator already decided what survives on this board.
+                raise ValueError(
+                    f"Task {existing.task_id} / dataset {existing.dataset_id} had "
+                    "a row of this paper removed "
+                    "(context.paper.removed_leaderboards), so curation cannot "
+                    f"remove evaluation {existing.id} there. Drop that "
+                    "evaluation_removal and any new item for the benchmark, and "
+                    "report it as not_applicable with detail 'removed by a "
+                    "curator'."
+                )
             self.db.delete(existing)
             removed += 1
         return removed

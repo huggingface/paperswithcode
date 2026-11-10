@@ -122,6 +122,16 @@ def test_curator_bootstrap_allowlist_matches_service_bundle(monkeypatch):
     assert run_paper_curation.BOOTSTRAP_PATHS == set(CURATOR_BOOTSTRAP_PATHS)
 
 
+@pytest.fixture(autouse=True)
+def _no_removed_leaderboards(monkeypatch):
+    # These fake sessions do not model the tombstone aggregate query.
+    monkeypatch.setattr(
+        "backend.services.codex_curation_callback_service."
+        "CodexCurationCallbackService._removed_leaderboards",
+        lambda _self, _paper_id: {},
+    )
+
+
 @pytest.fixture
 def runner_module(monkeypatch):
     monkeypatch.setenv("PWC_CURATION_API_URL", "https://paperswithcode.co/api/v1")
