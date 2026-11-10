@@ -92,6 +92,7 @@ OPEN_RELEASE_BOARDS = 12
 OPEN_RELEASE_LIMIT = 4
 TRENDING_PAPER_LIMIT = 6
 TRENDING_FEED_DEPTH = 30
+HOMEPAGE_RANGE_DAYS = 30
 CONCEPT_LIMIT = 12
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 LEAGUE_ACTIVE_DAYS = 90
@@ -618,8 +619,15 @@ def trending_papers(
     """The top of the homepage's trending feed (arXiv and external papers
     alike) that the account never posted, for an explainer post with a
     screenshot of the paper page (alphaXiv style)."""
+    # The homepage ranks papers published in the last 30 days (its default
+    # "last month" range: today and the 29 days before it, UTC).
+    today = now.astimezone(UTC).date()
     feed = PaperService(db).get_papers(
-        page=1, page_size=TRENDING_FEED_DEPTH, order_by="trending"
+        page=1,
+        page_size=TRENDING_FEED_DEPTH,
+        order_by="trending",
+        start_date=today - timedelta(days=HOMEPAGE_RANGE_DAYS - 1),
+        end_date=today,
     )
     ranks = {int(item.id): rank for rank, item in enumerate(feed.results, 1)}
     posted = posted_paper_ids(db)
