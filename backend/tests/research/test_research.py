@@ -645,6 +645,34 @@ def test_feed_hydrates_standard_cards_in_ranked_order(db, now, monkeypatch):
     assert follows.feed_entries(db, "bob", now, 0, 2) == []
 
 
+def test_new_paper_count_counts_feed_papers_added_since(db, now, monkeypatch):
+    task = Task(name="New count task", slug="new-count-task")
+    db.add(task)
+    db.flush()
+    seen = now - timedelta(hours=6)
+    old = paper(db, now, "count-old", days=2, created_at=now - timedelta(days=1))
+    fresh = paper(db, now, "count-new", days=1, created_at=now - timedelta(hours=1))
+    other = paper(db, now, "count-other", days=1, created_at=now - timedelta(hours=1))
+    for row in [old, fresh]:
+        tagged(db, row, task)
+    follow(db, "task", task, now - timedelta(days=3))
+    assert follows.new_paper_count(db, "alice", now, seen) == 1
+    assert follows.new_paper_count(db, "alice", now, now - timedelta(days=2)) == 2
+    assert follows.new_paper_count(db, "bob", now, seen) == 0
+    assert other.id not in {old.id, fresh.id}
+    monkeypatch.setattr(follows, "NEW_COUNT_LIMIT", 1)
+    assert follows.new_paper_count(db, "alice", now, now - timedelta(days=2)) == 1
+
+    app = FastAPI()
+    app.include_router(research.router)
+    app.dependency_overrides[get_database_session] = lambda: db
+    app.dependency_overrides[require_user] = lambda: {"hf_subject": "alice"}
+    client = TestClient(app)
+    response = client.get("/me/following/new-count", params={"since": seen.isoformat()})
+    assert response.json() == {"count": 1}
+    assert client.get("/me/following/new-count").status_code == 422
+
+
 def test_feed_uses_home_feed_trending_order(db, now, monkeypatch):
     from backend.config import get_settings
 

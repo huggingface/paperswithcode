@@ -59,8 +59,8 @@
 @media (hover: hover) {
   .research-follow-btn.is-following:hover {
     filter: none;
-    border-color: var(--danger, #b42318);
-    color: var(--danger, #b42318);
+    border-color: hsl(var(--destructive));
+    color: hsl(var(--destructive));
   }
   .research-follow-btn.is-following:hover svg,
   .research-follow-btn.is-following:hover .research-follow-label {
@@ -86,7 +86,7 @@
   text-underline-offset: 2px;
 }
 .research-follow-hint.is-error {
-  color: var(--danger, #b42318);
+  color: hsl(var(--destructive));
 }
 .following-intro {
   max-width: 720px;
@@ -513,3 +513,48 @@
   font-size: 13px;
 }
 .topic-dialog-privacy { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-soft); }
+
+/* The follow invitation inside the trending feed, for guests and accounts without follows. */
+.home-follow-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 22px 24px;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--accent-soft);
+}
+.home-follow-card h2 { margin: 0; padding-right: 28px; color: var(--ink); font-size: 18px; font-weight: 600; }
+.home-follow-card p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.5; }
+.home-follow-card .home-follow-card-error { color: hsl(var(--destructive)); }
+.home-follow-card-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  padding: 4px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+.home-follow-card-close:hover { color: var(--ink); background: var(--bg-subtle); }
+.home-follow-card-close svg { width: 16px; height: 16px; }
+@media (max-width: 640px) {
+  .home-follow-card { padding: 18px 16px; }
+}
+
+/* "following · 12 new" on the home feed tab. */
+.feed-tab-count {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-text);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
+}
