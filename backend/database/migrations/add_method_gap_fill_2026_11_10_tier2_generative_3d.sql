@@ -50,7 +50,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -89,7 +88,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -127,7 +125,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -166,7 +163,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -204,7 +200,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -241,7 +236,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -279,7 +273,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -316,7 +309,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -354,7 +346,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -392,7 +383,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -431,7 +421,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -469,7 +458,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -507,7 +495,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -1672,3 +1659,11 @@ UPDATE methods SET image_credit = '[MVSNet: Depth Inference for Unstructured Mul
 UPDATE methods SET image_credit = '[Editing Models with Task Arithmetic](/paper/2212.04089)' WHERE slug = 'task-arithmetic';
 UPDATE methods SET image_credit = '[TIES-Merging: Resolving Interference When Merging Models](/paper/2306.01708)' WHERE slug = 'ties-merging';
 UPDATE methods SET image_credit = '[Language Models are Super Mario: Absorbing Abilities from Homologous Models as a Free Lunch](/paper/2311.03099)' WHERE slug = 'dare';
+
+-- Source evidence protects each Introduced link from automated removal.
+INSERT INTO paper_method_evidence (paper_id, method_id, evidence_type)
+SELECT source_paper_id, id, 'source' FROM methods
+WHERE slug IN ('dreambooth', 'textual-inversion', 'ip-adapter', 'latent-consistency-model', 'neus', 'instant-ngp', 'task-arithmetic', 'ties-merging', 'dare')
+  AND source_paper_id IS NOT NULL
+ON CONFLICT (paper_id, method_id, evidence_type) DO UPDATE SET
+    last_seen_at = now();
