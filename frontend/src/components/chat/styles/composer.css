@@ -186,13 +186,71 @@
 }
 .chat-send-on { background: var(--ink); cursor: pointer; }
 .chat-send-on:hover { background: color-mix(in oklch, var(--ink) 88%, var(--accent)); }
+.chat-composer-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+/* Voice input: a mic button that becomes a fixed-height recording pill, so the
+   composer keeps its size while dictating. */
+.chat-dictation-mic {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  color: var(--ink-soft);
+  background: transparent;
+  cursor: pointer;
+  flex: none;
+  transition: background 0.15s, color 0.15s;
+}
+.chat-dictation-mic:hover:not(:disabled) { background: var(--hairline); color: var(--ink); }
+.chat-dictation-mic:disabled { cursor: not-allowed; opacity: 0.55; }
+.chat-dictation-mic:focus-visible,
+.chat-dictation-icon:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chat-dictation-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 4px 0 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  color: var(--ink-soft);
+  flex: none;
+}
+.chat-dictation-starting { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.chat-dictation-wave { display: flex; align-items: center; gap: 2px; height: 18px; }
+.chat-dictation-wave > span {
+  width: 3px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--accent);
+  transform-origin: center;
+  transition: transform 80ms linear;
+}
+.chat-dictation-time { font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chat-dictation-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.chat-dictation-icon:hover:not(:disabled) { background: var(--hairline); color: var(--ink); }
+.chat-dictation-done { background: var(--ink); color: var(--bg-elevated); }
+.chat-dictation-done:hover:not(:disabled) { background: color-mix(in oklch, var(--ink) 88%, var(--accent)); color: var(--bg-elevated); }
+.chat-dictation-icon:disabled { cursor: default; opacity: 0.7; }
 @media (max-width: 900px) {
   .chat-composer-wrap { padding: 12px 16px 14px; }
   .chat-composer-foot { display: none; }
   .chat-composer-hint { display: none; }
+  .chat-dictation-wave { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .chat-paper-option { scroll-behavior: auto; }
+  .chat-dictation-wave > span { transition: none; }
 }
 @media (forced-colors: active) {
   .chat-paper-option.is-active,

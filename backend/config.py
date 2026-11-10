@@ -179,6 +179,21 @@ class Settings(BaseSettings, ChatSettings):
     openrouter_api_key: str = Field(default="", description="OpenRouter API key")
     openai_api_key: str = Field(default="", description="OpenAI API key")
 
+    # Voice dictation in chat composers (see backend/services/dictation_service.py)
+    dictation_enabled: bool = Field(default=False)
+    dictation_endpoint_url: str = Field(
+        default="",
+        description="HF Inference Endpoint serving Voxtral Realtime through vLLM",
+    )
+    dictation_voxtral_model: str = Field(
+        default="mistralai/Voxtral-Mini-4B-Realtime-2602"
+    )
+    dictation_voxtral_capacity: int = Field(default=2, ge=0)
+    dictation_openai_model: str = Field(default="gpt-4o-mini-transcribe")
+    dictation_session_seconds: int = Field(default=120, ge=10)
+    dictation_user_daily_seconds: int = Field(default=1800, ge=0)
+    dictation_openai_daily_seconds: int = Field(default=18000, ge=0)
+
     # Admin API configuration
     admin_api_token: str = Field(
         default="",

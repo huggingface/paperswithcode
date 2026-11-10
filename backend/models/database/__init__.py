@@ -87,6 +87,7 @@ from backend.models.database.chat_transcripts import (
     ChatPiPreparedFork,
     ChatHarnessAssignmentAudit,
 )
+from backend.models.database.dictation import DictationSession
 from backend.models.database.conferences import (
     Conference,
     ConferenceDeadline,
@@ -189,6 +190,7 @@ from backend.models.database.taxonomy import (
 
 
 __all__ = [
+    "DictationSession",
     "ResearchFollow",
     "ResearchSubscription",
     "ResearchSuppression",

@@ -12,10 +12,12 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { PaperFeedList, type PaperFeedCard } from "@/components/PaperFeed";
 import { McpShowcase } from "@/components/McpShowcase";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
+import { DictationButton } from "@/components/chat/DictationButton";
 import { ArrowUpIcon } from "@/components/chat/icons";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
 import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
 import { completedScrollHeight, isCompletionKey, useChatCompletion } from "@/components/chat/useChatCompletion";
+import { useComposerDictation } from "@/components/chat/useComposerDictation";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import { chatApi } from "@/lib/api/chat";
 import {
@@ -135,6 +137,22 @@ export const AskAssistant: React.FC = () => {
     enabled: paperMentionsEnabled,
     textareaRef: ref,
   });
+  // Enter or Send while dictating finishes the recording, then asks.
+  const sendAfterDictation = useRef(false);
+  const [sendQueued, setSendQueued] = useState(false);
+  const dictation = useComposerDictation({
+    draft,
+    onChange: setDraft,
+    textareaRef: ref,
+    onEnd: (cancelled) => {
+      if (sendAfterDictation.current && !cancelled) setSendQueued(true);
+      sendAfterDictation.current = false;
+    },
+  });
+  const sendAfterRecording = () => {
+    sendAfterDictation.current = true;
+    dictation.finish();
+  };
   const typedCompletion = useChatCompletion(draft, mentions.open);
   // Tab accepts the shown suggestion: the whole prompt in an empty box, or the
   // rest of what the visitor has started typing.
@@ -167,6 +185,14 @@ export const AskAssistant: React.FC = () => {
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
   }, [question, completion]);
+
+  useEffect(() => {
+    if (!sendQueued) return;
+    setSendQueued(false);
+    void submit();
+    // submit reads the draft rendered with the final transcript.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sendQueued]);
 
   const submit = async (nextDraft = draft) => {
     const q = nextDraft.text.trim();
@@ -220,6 +246,7 @@ export const AskAssistant: React.FC = () => {
               placeholder={placeholder}
               aria-label="Ask the assistant"
               disabled={launching}
+              readOnly={dictation.active}
               onChange={(event) => {
                 mentions.updateText(event.target.value, event.target.selectionStart);
                 typedCompletion.trackCaret(event.target);
@@ -237,6 +264,13 @@ export const AskAssistant: React.FC = () => {
                 if (!event.relatedTarget?.closest?.(".chat-paper-picker")) window.setTimeout(mentions.close, 0);
               }}
               onKeyDown={(event) => {
+                if (dictation.active) {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    if (dictation.phase === "recording") sendAfterRecording();
+                  }
+                  return;
+                }
                 if (mentions.keyDown(event)) return;
                 if (isCompletionKey(event) && completion) {
                   event.preventDefault();
@@ -260,11 +294,12 @@ export const AskAssistant: React.FC = () => {
               aria-describedby={mentions.message ? "ask-home-paper-mention-message" : undefined}
             />
           </div>
+          {!mirror && <DictationButton dictation={dictation} disabled={launching} />}
           <button
             type="button"
-            className={`chat-send${question.trim() ? " chat-send-on" : ""}`}
-            onClick={() => void submit()}
-            disabled={!question.trim() || launching}
+            className={`chat-send${question.trim() || dictation.phase === "recording" ? " chat-send-on" : ""}`}
+            onClick={() => (dictation.active ? sendAfterRecording() : void submit())}
+            disabled={launching || (dictation.active ? dictation.phase !== "recording" : !question.trim())}
             aria-label="Ask the assistant"
           >
             <ArrowUpIcon />
@@ -276,6 +311,9 @@ export const AskAssistant: React.FC = () => {
               Open this question on paperswithcode.co
             </a>
           </div>
+        )}
+        {dictation.error && (
+          <div className="chat-paper-mention-message" role="alert">{dictation.error}</div>
         )}
         {mentions.message && (
           <div id="ask-home-paper-mention-message" className="chat-paper-mention-message" role="alert">

@@ -20,6 +20,7 @@ from backend.cli_admin import (
     register_admin_commands,
 )
 from backend.cli_contributors import register_contributor_commands
+from backend.cli_dictation import register_dictation_commands
 from backend.cli_papers import (
     register_paper_commands,
     register_search_command,
@@ -205,6 +206,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     register_admin_commands(commands)
     register_contributor_commands(commands)
+    register_dictation_commands(commands)
     register_submission_commands(commands)
 
     autonomous = commands.add_parser(
