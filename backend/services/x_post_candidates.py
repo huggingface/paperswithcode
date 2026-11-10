@@ -351,17 +351,22 @@ def leaderboard_wins(
 # --- New open models --------------------------------------------------------
 
 
-def placement(board: Board, paper_id: int) -> dict[str, Any] | None:
+def placement(
+    board: Board, paper_id: int, eligible: set[int] | None = None
+) -> dict[str, Any] | None:
     """Where the paper's best open entry lands on this board.
 
-    `open_rank` counts distinct papers with a better open entry, so a paper's
-    own smaller variants don't push it down.
+    Only open entries count, and only those in `eligible` (evaluation ids)
+    when given. `open_rank` counts distinct papers with a better open entry,
+    so a paper's own smaller variants don't push it down.
     """
     mine = next(
         (
             row
             for row in board.rows
-            if row.paper_id == paper_id and row.evaluation_id in board.open_ids
+            if row.paper_id == paper_id
+            and row.evaluation_id in board.open_ids
+            and (eligible is None or row.evaluation_id in eligible)
         ),
         None,
     )
@@ -378,6 +383,7 @@ def placement(board: Board, paper_id: int) -> dict[str, Any] | None:
         (row for row in board.rows if row.evaluation_id not in board.open_ids), None
     )
     result: dict[str, Any] = {
+        "evaluation_id": mine.evaluation_id,
         "model": mine.model,
         "value": fmt(mine.value),
         "open_rank": len(open_ahead) + 1,
@@ -390,6 +396,20 @@ def placement(board: Board, paper_id: int) -> dict[str, Any] | None:
         result["best_closed_value"] = fmt(closed.value)
         result["ahead_of_best_closed"] = _beats(board, mine, closed)
     return result
+
+
+def board_sizes(db: Session, keys: set[tuple[int, str]]) -> dict[tuple[int, str], int]:
+    """Evaluation count per (dataset, metric), to visit a release's biggest
+    boards first."""
+    if not keys:
+        return {}
+    dataset_ids = {dataset_id for dataset_id, _ in keys}
+    rows = db.execute(
+        select(Evaluation.dataset_id, Evaluation.best_metric, func.count())
+        .where(Evaluation.dataset_id.in_(dataset_ids))
+        .group_by(Evaluation.dataset_id, Evaluation.best_metric)
+    ).all()
+    return {(d, m): n for d, m, n in rows if (d, m) in keys}
 
 
 def open_release_score(placements: list[dict[str, Any]]) -> float:
@@ -449,21 +469,34 @@ def open_releases(
     for evaluation, paper in rows:
         by_paper.setdefault(paper.id, []).append(evaluation)
         papers[paper.id] = paper
-    ranked = sorted(by_paper, key=lambda pid: -len(by_paper[pid]))[:OPEN_RELEASE_PAPERS]
+    unposted = [
+        pid
+        for pid in by_paper
+        if not recently_posted(db, "open_release", str(pid), now, ever=True)
+    ]
+    ranked = sorted(unposted, key=lambda pid: (-len(by_paper[pid]), pid))
+    keys = {(e.dataset_id, e.best_metric) for pid in ranked for e in by_paper[pid]}
+    sizes = board_sizes(db, keys)
     found: list[tuple[Candidate, Paper]] = []
-    for paper_id in ranked:
+    for paper_id in ranked[:OPEN_RELEASE_PAPERS]:
         paper = papers[paper_id]
-        if recently_posted(db, "open_release", str(paper_id), now, ever=True):
-            continue
         evaluations = by_paper[paper_id]
-        keys = list(dict.fromkeys((e.dataset_id, e.best_metric) for e in evaluations))
+        by_id = {e.id: e for e in evaluations}
+        paper_keys = sorted(
+            {
+                (e.dataset_id, e.best_metric)
+                for e in evaluations
+                if sizes.get((e.dataset_id, e.best_metric), 0) >= SOTA_MIN_ENTRIES
+            },
+            key=lambda key: (-sizes[key], key),
+        )
         placements = []
         best_board: tuple[Board, Dataset, dict[str, Any]] | None = None
-        for dataset_id, metric in keys[:OPEN_RELEASE_BOARDS]:
+        for dataset_id, metric in paper_keys[:OPEN_RELEASE_BOARDS]:
             board = load_board(db, dataset_id, metric)
             if len(board.rows) < SOTA_MIN_ENTRIES:
                 continue
-            place = placement(board, paper_id)
+            place = placement(board, paper_id, set(by_id))
             if place is None:
                 continue
             dataset = db.get(Dataset, dataset_id)
@@ -479,18 +512,22 @@ def open_releases(
             continue
         placements.sort(key=lambda p: (p["open_rank"], -p["entries"]))
         board, dataset, best = best_board
-        own = [e for e in evaluations if e.model_name == best["model"]] or evaluations
-        parameters = max((e.num_parameters or 0) for e in own)
+        own = by_id[best["evaluation_id"]]
         facts: dict[str, Any] = {
             "model": best["model"],
-            "hf_model_url": own[0].hf_model_url,
-            "parameters_b": round(parameters / 1e9, 1) if parameters else None,
+            "hf_model_url": own.hf_model_url,
+            "parameters_b": round(own.num_parameters / 1e9, 1)
+            if own.num_parameters
+            else None,
             "paper": paper.title,
             "paper_url": f"{SITE}/paper/{paper.id}",
             "published": str(paper.date_published),
             "placements": placements,
         }
+        mine = next(r for r in board.rows if r.evaluation_id == best["evaluation_id"])
         top = _distinct_models(board.rows, 6)
+        if mine not in top:
+            top = [*top[:5], mine]
         image = render_bar_card(
             f"{best['model']} on {dataset.name}",
             f"{best['metric']} ({'lower' if board.lower else 'higher'} is better)",
@@ -500,7 +537,7 @@ def open_releases(
                     + ("" if row.evaluation_id in board.open_ids else " (closed)"),
                     row.value,
                     fmt(row.value),
-                    row.paper_id == paper.id,
+                    row is mine,
                 )
                 for row in top
             ],

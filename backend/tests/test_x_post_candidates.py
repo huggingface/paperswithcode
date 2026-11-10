@@ -218,6 +218,7 @@ def test_placement_counts_open_papers_ahead_and_the_best_closed():
     assert place["best_closed_model"] == "GPT-6"
     assert place["ahead_of_best_closed"] is False
     assert placement(b, 10) is None  # closed entries never place
+    assert placement(b, 30, eligible={4})["model"] == "Mine 7B"
 
 
 def test_placement_open_winner_beats_closed():
