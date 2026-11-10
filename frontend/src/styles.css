@@ -339,8 +339,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
 }
 .icon-btn:hover { border-color: var(--hairline-strong); }
 /* Secondary header actions are quiet until hovered, so search reads as the one field. */
-.app-header .icon-btn,
-.app-header .header-feedback-link {
+.app-header .icon-btn {
   flex: none;
   border-color: transparent;
   background: transparent;
@@ -348,13 +347,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   transition: background 0.15s, color 0.15s;
 }
 .app-header .icon-btn:hover,
-.app-header .header-feedback-link:hover,
 .app-header .icon-btn.active {
   border-color: transparent;
   background: var(--bg-subtle);
   color: var(--ink);
 }
-.app-header .header-feedback-link { padding: 0 10px; }
 
 .hf-signin-btn {
   display: inline-flex;
@@ -673,8 +670,7 @@ html { scroll-behavior: smooth; }
 
 @media (max-width: 980px) {
   .nav,
-.search-trigger,
-.app-header .header-feedback-link { display: none; }
+.search-trigger { display: none; }
   .mobile-menu-btn,
 .mobile-search-btn { display: inline-flex; }
 }

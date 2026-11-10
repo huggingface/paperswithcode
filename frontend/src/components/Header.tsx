@@ -35,8 +35,6 @@ interface HeaderProps {
   onOpenSearch: () => void;
 }
 
-const FEEDBACK_URL =
-  "https://github.com/huggingface/paperswithcode-feedback/issues";
 const GITHUB_URL = "https://github.com/huggingface/paperswithcode";
 const X_URL = "https://x.com/paperswithcodee";
 const CANONICAL_FOLLOWING_URL = "https://paperswithcode.co/following";
@@ -185,14 +183,6 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
           </nav>
           <div className="header-spacer"></div>
           <a
-            className="feedback-link header-feedback-link"
-            href={FEEDBACK_URL}
-            target="_blank"
-            rel="noreferrer"
-          >
-            Submit feedback
-          </a>
-          <a
             className="icon-btn header-github-btn"
             href={GITHUB_URL}
             target="_blank"
@@ -312,15 +302,6 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
                 </NavLink>
               );
             })}
-            <a
-              className="mobile-nav-link"
-              href={FEEDBACK_URL}
-              target="_blank"
-              rel="noreferrer"
-              onClick={closeMobile}
-            >
-              Submit feedback
-            </a>
             <a
               className="mobile-nav-link"
               href={GITHUB_URL}
