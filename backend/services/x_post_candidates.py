@@ -50,6 +50,7 @@ from backend.models.database import (
 )
 from backend.models.database import Method as DBMethod
 from backend.services.method_service import MethodService
+from backend.services.paper_service import PaperService
 from backend.services.x_insight_cards import Bar, render_bar_card
 from backend.services.x_insight_post_service import (
     ROUNDUP_CATCH_UP_DAYS,
@@ -65,7 +66,6 @@ from backend.services.x_insight_post_service import (
     top_papers,
 )
 from backend.services.x_trending_post_service import (
-    CANDIDATE_WINDOW_DAYS,
     Row,
     fmt,
     hf_org_x_handle,
@@ -91,6 +91,8 @@ OPEN_RELEASE_PAPERS = 25
 OPEN_RELEASE_BOARDS = 12
 OPEN_RELEASE_LIMIT = 4
 TRENDING_PAPER_LIMIT = 6
+TRENDING_FEED_DEPTH = 30
+HOMEPAGE_RANGE_DAYS = 7
 CONCEPT_LIMIT = 12
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 LEAGUE_ACTIVE_DAYS = 90
@@ -614,25 +616,26 @@ def trending_papers(
     now: datetime,
     fetch_org_handle: Callable[[str], str | None] = hf_org_x_handle,
 ) -> list[Candidate]:
-    """This week's top trending arXiv papers the account never posted, for an
-    explainer post with a screenshot of the paper page (alphaXiv style)."""
-    since = now.date() - timedelta(days=CANDIDATE_WINDOW_DAYS)
-    papers = db.scalars(
-        select(Paper)
-        .where(
-            Paper.is_latest_version,
-            Paper.source == "arxiv",
-            Paper.arxiv_id.is_not(None),
-            Paper.date_published >= since,
-            Paper.trending_score > 0,
-            func.length(func.trim(Paper.tldr)) > 0,
-            Paper.id.not_in(posted_paper_ids(db) or {0}),
-        )
-        .order_by(Paper.trending_score.desc(), Paper.id.desc())
-        .limit(TRENDING_PAPER_LIMIT)
-    ).all()
+    """The top of the homepage's trending feed (arXiv and external papers
+    alike) that the account never posted, for an explainer post with a
+    screenshot of the paper page (alphaXiv style)."""
+    # The homepage's trending tab (FeedView) ranks papers published in the
+    # last week by default: today and the 6 days before it, UTC.
+    today = now.astimezone(UTC).date()
+    feed = PaperService(db).get_papers(
+        page=1,
+        page_size=TRENDING_FEED_DEPTH,
+        order_by="trending",
+        start_date=today - timedelta(days=HOMEPAGE_RANGE_DAYS - 1),
+        end_date=today,
+    )
+    ranks = {int(item.id): rank for rank, item in enumerate(feed.results, 1)}
+    posted = posted_paper_ids(db)
+    wanted = [pid for pid in ranks if pid not in posted][:TRENDING_PAPER_LIMIT]
+    by_id = {p.id: p for p in db.scalars(select(Paper).where(Paper.id.in_(wanted)))}
+    papers = [by_id[pid] for pid in wanted if pid in by_id]
     candidates = []
-    for index, paper in enumerate(papers):
+    for paper in papers:
         authors = list(
             db.scalars(
                 select(Author.name)
@@ -645,6 +648,8 @@ def trending_papers(
         facts: dict[str, Any] = {
             "title": paper.title,
             "arxiv_id": paper.arxiv_id,
+            "source": paper.source,
+            "homepage_trending_rank": ranks[paper.id],
             "published": str(paper.date_published),
             "trending_score": round(float(paper.trending_score or 0), 1),
             "authors": authors[:12],
@@ -699,7 +704,7 @@ def trending_papers(
                 paper_url(paper),
                 facts,
                 screenshot_url=paper_url(paper),
-                score=30.0 - 2 * index,
+                score=32.0 - ranks[paper.id],
             )
         )
     return candidates
