@@ -79,8 +79,9 @@ def dictation_status(
 ) -> DictationStatusResponse:
     """Whether voice input is available, and which provider would serve it.
 
-    For signed-in users this also wakes the scale-to-zero speech endpoint, so
-    chat surfaces call it on mount to warm the model up before the first tap.
+    It does not wake the scale-to-zero speech endpoint unless no fallback can
+    serve: page views alone must not keep the GPU running. A mic tap
+    (``POST /sessions``) wakes it, and that session uses OpenAI meanwhile.
     """
 
     base = {"max_seconds": settings.dictation_session_seconds}

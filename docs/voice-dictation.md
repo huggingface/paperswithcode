@@ -5,11 +5,15 @@ streams speech into the message box as text.
 
 ## How it works
 
-1. On mount, chat surfaces call `GET /api/v1/dictation/status`. For signed-in
-   users this probes the speech endpoint's `/health`, which also wakes it from
-   scale-to-zero, and reports the provider a new session would use.
+1. On mount, chat surfaces call `GET /api/v1/dictation/status`, which reports
+   whether a signed-in user can dictate. It does not contact the speech
+   endpoint (unless the OpenAI fallback is exhausted), so page views never keep
+   the GPU awake.
 2. Tapping the mic opens the microphone, then `POST /api/v1/dictation/sessions`
-   issues a single-use ticket (valid 30 s; only its SHA-256 is stored).
+   probes the speech endpoint's `/health` (which wakes it from scale-to-zero),
+   picks a provider, and issues a single-use ticket (valid 30 s; only its
+   SHA-256 is stored). The first tap after an idle hour therefore uses OpenAI
+   while Voxtral spends about 2 minutes starting.
 3. The browser opens `wss://<site>/api/v1/dictation/ws?ticket=…`. nginx sends an
    `auth_request` to `/api/internal/dictation/authorize`, which consumes the
    ticket and answers with the upstream URL and its `Authorization` header in
