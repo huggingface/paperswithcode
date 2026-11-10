@@ -93,6 +93,7 @@ interface Resources {
   queue: string[];
   startedAt: number;
   timers: number[];
+  finishing: boolean;
   settled: boolean;
 }
 
@@ -135,7 +136,9 @@ export function useDictation({ onText, onEnd }: UseDictationOptions) {
 
   const finish = React.useCallback(() => {
     const current = resources.current;
-    if (!current || current.settled) return;
+    if (!current || current.settled || current.finishing) return;
+    current.finishing = true;
+    window.clearTimeout(current.timers[0]);
     if (!current.socket || current.socket.readyState !== WebSocket.OPEN || !current.protocol) {
       release({ cancelled: false });
       return;
@@ -153,10 +156,16 @@ export function useDictation({ onText, onEnd }: UseDictationOptions) {
   const start = React.useCallback(async () => {
     if (resources.current) return;
     // timers[0] is the elapsed-time tick; later entries are one-shot timeouts.
-    const current: Resources = { queue: [], startedAt: performance.now(), timers: [0], settled: false };
+    const current: Resources = {
+      queue: [], startedAt: performance.now(), timers: [0], finishing: false, settled: false,
+    };
     resources.current = current;
     setPhase("connecting");
     try {
+      // Create the audio context inside the tap's user gesture; Safari keeps a
+      // context created after an await suspended, which records silence.
+      const context = new AudioContext();
+      current.context = context;
       current.stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
@@ -173,8 +182,7 @@ export function useDictation({ onText, onEnd }: UseDictationOptions) {
       });
       current.protocol = protocol;
 
-      const context = new AudioContext();
-      current.context = context;
+      await context.resume();
       await context.audioWorklet.addModule(workletUrl);
       if (current.settled) return;
       const node = new AudioWorkletNode(context, "pwc-pcm-capture", {
@@ -196,9 +204,22 @@ export function useDictation({ onText, onEnd }: UseDictationOptions) {
         if (event.data.pcm && event.data.pcm.byteLength) send(protocol.audio(toBase64(event.data.pcm)));
         if (event.data.flushed) protocol.finish().forEach(send);
       };
+      const tick = () => {
+        if (current.settled || current.finishing) return;
+        const seconds = (performance.now() - current.startedAt) / 1000;
+        setElapsed(seconds);
+        if (seconds >= session.max_seconds) finish();
+        else current.timers[0] = window.setTimeout(tick, 250);
+      };
+      // Recording (and the session clock) starts once the relay accepts the
+      // socket; audio captured before then is queued, not lost.
       socket.onopen = () => {
         protocol.open().forEach((message) => socket.send(message));
         current.queue.splice(0).forEach((message) => socket.send(message));
+        if (current.settled || current.finishing) return;
+        current.startedAt = performance.now();
+        setPhase("recording");
+        tick();
       };
       socket.onmessage = (event) => {
         if (typeof event.data === "string") protocol.receive(event.data);
@@ -208,19 +229,8 @@ export function useDictation({ onText, onEnd }: UseDictationOptions) {
         release({ cancelled: false, error: event.code === 1000 ? undefined : "Voice input disconnected." });
       };
       current.stream.getTracks()[0]?.addEventListener("ended", () => {
-        if (!current.settled && resources.current === current) finish();
+        if (resources.current === current) finish();
       });
-
-      current.startedAt = performance.now();
-      setPhase("recording");
-      const tick = () => {
-        if (current.settled) return;
-        const seconds = (performance.now() - current.startedAt) / 1000;
-        setElapsed(seconds);
-        if (seconds >= session.max_seconds) finish();
-        else current.timers[0] = window.setTimeout(tick, 250);
-      };
-      tick();
     } catch (error) {
       release({ cancelled: false, error: dictationErrorMessage(error) });
     }

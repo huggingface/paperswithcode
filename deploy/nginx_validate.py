@@ -261,6 +261,7 @@ def _validate_dictation_relay(config: str, environment: str, backend: str) -> li
         "proxy_set_header Authorization $pwc_dictation_authorization;",
         'proxy_set_header Cookie "";',
         "proxy_ssl_verify on;",
+        "proxy_read_timeout 150s;",
         f"pwc_{environment}_dictation;",
     ):
         if requirement not in relay:
