@@ -14,7 +14,7 @@ import { ApiError } from "@/lib/apiTransport";
 import { dictationApi, type DictationSession } from "@/lib/api/dictation";
 import { getApiOrigin, isChatEnabled } from "@/lib/apiUrl";
 import { createProtocol, type DictationProtocol } from "@/lib/dictation/protocol";
-import workletUrl from "@/lib/dictation/pcmCapture.worklet.js?url";
+import workletSource from "@/lib/dictation/pcmCapture.worklet.js?raw";
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "finishing";
 
@@ -46,6 +46,14 @@ export function useDictationStatus() {
         : false;
     },
   });
+}
+
+// Load the worklet from a Blob URL: Vite inlines small `?url` assets as
+// data: URLs, which Safari does not accept in audioWorklet.addModule().
+let workletUrl: string | undefined;
+function pcmWorkletUrl(): string {
+  workletUrl ??= URL.createObjectURL(new Blob([workletSource], { type: "text/javascript" }));
+  return workletUrl;
 }
 
 function toBase64(buffer: ArrayBuffer): string {
@@ -183,7 +191,7 @@ export function useDictation({ onText, onEnd }: UseDictationOptions) {
       current.protocol = protocol;
 
       await context.resume();
-      await context.audioWorklet.addModule(workletUrl);
+      await context.audioWorklet.addModule(pcmWorkletUrl());
       if (current.settled) return;
       const node = new AudioWorkletNode(context, "pwc-pcm-capture", {
         processorOptions: { targetRate: session.sample_rate },

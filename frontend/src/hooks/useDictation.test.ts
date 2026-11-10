@@ -44,11 +44,13 @@ const node = () => ({ connect: (next: unknown) => next });
 
 class FakeAudioContext {
   static created = 0;
+  static last: FakeAudioContext;
   resume = vi.fn(async () => undefined);
   audioWorklet = { addModule: vi.fn(async () => undefined) };
   destination = {};
   constructor() {
     FakeAudioContext.created += 1;
+    FakeAudioContext.last = this;
   }
   createGain() {
     return { gain: { value: 1 }, connect: (next: unknown) => next };
@@ -71,6 +73,7 @@ class FakeWorkletNode {
 const track = { stop: vi.fn(), addEventListener: vi.fn() };
 
 beforeEach(() => {
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:pcm-worklet") });
   vi.stubGlobal("WebSocket", Object.assign(FakeSocket, { OPEN: 1, CONNECTING: 0 }));
   vi.stubGlobal("AudioContext", FakeAudioContext);
   vi.stubGlobal("AudioWorkletNode", FakeWorkletNode);
@@ -114,6 +117,8 @@ describe("useDictation", () => {
       return { getTracks: () => [track] };
     });
     await started();
+    // A Blob URL, not a data: URL, which Safari rejects in addModule().
+    expect(FakeAudioContext.last.audioWorklet.addModule).toHaveBeenCalledWith("blob:pcm-worklet");
   });
 
   it("stays connecting until the relay accepts the socket", async () => {
