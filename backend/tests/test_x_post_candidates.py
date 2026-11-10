@@ -118,6 +118,7 @@ def test_gather_adds_roundups_only_early_in_the_period(monkeypatch):
     calls = []
     monkeypatch.setattr(service, "leaderboard_wins", lambda db, now: [])
     monkeypatch.setattr(service, "open_releases", lambda db, now: [])
+    monkeypatch.setattr(service, "trending_papers", lambda db, now: [])
     monkeypatch.setattr(service, "lab_league", lambda db, now: None)
     monkeypatch.setattr(service, "concepts", lambda db, now: [])
     monkeypatch.setattr(
