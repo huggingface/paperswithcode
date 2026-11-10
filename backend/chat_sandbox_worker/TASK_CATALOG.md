@@ -170,6 +170,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `depth-estimation` — Depth estimation
 - `dialect-identification` — Dialect Identification
 - `dialogue-state-tracking` — Dialogue State Tracking
+- `disease-risk-prediction` — Disease Risk Prediction
 - `document-image-rectification` — Document Image Rectification
 - `document-layout-analysis` — Document Layout Analysis
 - `document-retrieval` — Document Retrieval
