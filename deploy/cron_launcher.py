@@ -425,6 +425,15 @@ COMMANDS: dict[str, Job] = {
             "from the validated Surge AI leaderboard; never creates papers"
         ),
     ),
+    "sync_swe_marathon": job(
+        "-m",
+        "scripts.hourly.sync_swe_marathon",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed SWE-Marathon v1.1 evaluation rows from the "
+            "validated swe-marathon.org results bundle; never creates papers"
+        ),
+    ),
     "sync_frontiercs_2": job(
         "-m",
         "scripts.hourly.sync_frontiercs_2",

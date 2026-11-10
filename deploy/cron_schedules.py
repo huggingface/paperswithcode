@@ -258,6 +258,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync Surge AI Chartography leaderboard hourly",
     ),
     TimerSpec(
+        job="sync_swe_marathon",
+        on_calendar=("*-*-* *:26:00",),
+        description="Sync SWE-Marathon leaderboard from Abundant AI hourly",
+    ),
+    TimerSpec(
         job="sync_frontiercs_2",
         on_calendar=("*-*-* *:43:00",),
         description="Sync FrontierCS 2 leaderboard hourly",

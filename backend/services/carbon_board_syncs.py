@@ -21,6 +21,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from backend.services import surge_chartography_sync_service as surge_chartography
+from backend.services import swe_marathon_sync_service as swe_marathon
 from backend.services import vals_finance_agent_sync_service as vals_finance_agent
 from backend.services.carbon_board_identities import IDENTITIES
 from backend.services.live_leaderboard_sync import (
@@ -619,7 +620,7 @@ CRITPT_SELF_REPORTED = {
 
 # --- Board registry -----------------------------------------------------------
 # Every board on the shared engine, including the ones defined in their own
-# modules (Vals AI Finance Agent v2, Surge AI Chartography).
+# modules (Vals AI Finance Agent v2, Surge AI Chartography, SWE-Marathon).
 
 
 @dataclass(frozen=True)
@@ -836,4 +837,5 @@ BOARD_SYNCS: dict[str, BoardSync] = {
     "sync_surge_chartography": BoardSync(
         surge_chartography.BOARD, surge_chartography.fetch_surge_chartography
     ),
+    "sync_swe_marathon": BoardSync(swe_marathon.BOARD, swe_marathon.fetch_swe_marathon),
 }

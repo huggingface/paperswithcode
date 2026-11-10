@@ -395,10 +395,15 @@ def test_every_board_has_identities_and_a_configured_fetcher():
         "sync_terminal_bench_science",
         "sync_vals_finance_agent",
         "sync_surge_chartography",
+        "sync_swe_marathon",
     }
     for job, sync in boards.BOARD_SYNCS.items():
         assert len(sync.board.identities) >= sync.board.min_selected
-        if job not in ("sync_vals_finance_agent", "sync_surge_chartography"):
+        if job not in (
+            "sync_vals_finance_agent",
+            "sync_surge_chartography",
+            "sync_swe_marathon",
+        ):
             assert sync.board.identities is IDENTITIES[sync.board.dataset_slug]
 
 

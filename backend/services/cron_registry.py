@@ -1240,6 +1240,44 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_swe_marathon",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=26),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-swe-marathon.timer",
+        systemd_service="pwc-cron-sync-swe-marathon.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync SWE-Marathon Leaderboard (Abundant AI)",
+        category="hourly",
+        schedule="26 * * * * (hourly)",
+        script_path="hourly/sync_swe_marathon.py",
+        log_name="sync_swe_marathon",
+        process_patterns=("scripts.hourly.sync_swe_marathon",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_swe_marathon.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'swe-marathon'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Abundant AI SWE-Marathon live sync.%'
+        """,
+        workflow_file="cron-sync-swe-marathon.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_frontiercs_2",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=43),),
