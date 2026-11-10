@@ -292,6 +292,45 @@ def test_locally_defined_abbreviations_are_not_linked():
     assert links("attributions via IG are noisy") == [("IG", "method", 19)]
 
 
+ACRONYM_INDEX = build_index(
+    [
+        method(1, "Reinforcement Fine-Tuning", "Reinforcement Fine-Tuning (RFT)"),
+        method(2, "RLHF", "Reinforcement Learning from Human Feedback (RLHF)"),
+        method(3, "Supervised Fine-Tuning (SFT)"),
+        method(4, "Tiny Recursive Model", "Tiny Recursive Model (TRM)"),
+        method(5, "Vision Transformer", "Vision Transformer (ViT)"),
+    ]
+)
+
+
+def acronym_links(text):
+    return [(c.surface, c.entity_id) for c in find_candidates(text, ACRONYM_INDEX)]
+
+
+def test_abbreviation_redefined_with_overlapping_words_is_not_linked():
+    # "fine" and "tuning" overlap Reinforcement Fine-Tuning, but "rejection
+    # sampling" makes the expansion another method.
+    text = "we apply Rejection sampling Fine-Tuning (RFT). RFT uses samples"
+    assert acronym_links(text) == []
+    assert acronym_links("we train a Thinking Reward Model (TRM); TRM scores") == []
+    assert acronym_links("models trained with RFT") == [("RFT", 1)]
+    assert acronym_links("reinforcement learning from human feedback (RLHF)") == [
+        ("reinforcement learning from human feedback (RLHF)", 2)
+    ]
+
+
+def test_abbreviation_spelled_with_other_word_forms_keeps_its_link():
+    assert acronym_links("standard supervised finetuning (SFT); SFT is cheap") == [
+        ("SFT", 3),
+        ("SFT", 3),
+    ]
+    assert acronym_links("beats the Tiny Recursion Model (TRM) and TRM loops") == [
+        ("TRM", 4),
+        ("TRM", 4),
+    ]
+    assert acronym_links("a Visual Transformer (ViT) backbone") == [("ViT", 5)]
+
+
 def test_full_name_long_forms_and_bad_suffixes_do_not_match():
     assert links("visual representation alignment") == []
     assert links("Humanoid robots") == []

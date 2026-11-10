@@ -76,6 +76,7 @@ Matching rules:
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections import defaultdict
 import dataclasses
 from dataclasses import dataclass
@@ -557,7 +558,7 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                     start, end = expanded
                     candidates = [c for c in candidates if c.end <= start]
                 elif surface.rank == ABBREVIATION and not _shares_long_form(
-                    index, tokens[:i], surface
+                    index, tokens[:i], surface, masked[start:end]
                 ):
                     redefined.add(
                         (surface.entity.entity_type, surface.entity.entity_id)
@@ -679,11 +680,61 @@ def _expand_long_form(index, masked, before, start, end, surface):
     return None
 
 
-def _shares_long_form(index: MentionIndex, before: list[re.Match], surface) -> bool:
-    """``preference optimization (DPO)`` shortens DPO's own long form."""
-    words = {t.group().lower() for t in before[-4:]}
+# Words an expansion may add without naming something else: "Segment Anything
+# Foundation Model (SAM)", "iterative closest point algorithm (ICP)".
+_FILLER_WORDS = {
+    "a", "algorithm", "an", "and", "based", "by", "for", "foundation", "from",
+    "in", "like", "model", "models", "of", "on", "pre", "pretrained", "the",
+    "to", "trained",
+}  # fmt: skip
+
+
+_WORD_FORMS = {"visual": "vision"}
+
+
+def _plain_word(word: str) -> str:
+    word = unicodedata.normalize("NFKD", word).encode("ascii", "ignore").decode()
+    return _WORD_FORMS.get(word, word)
+
+
+def _same_word(word: str, form: tuple[str, ...]) -> bool:
+    """``quantizer``/``quantization``, ``grouped``/``group``, ``visual``/``vision``,
+    and joined spellings (``multilayer``, ``finetuning``) count as the same word."""
+    word = _plain_word(word)
+    form = tuple(_plain_word(w) for w in form)
+    stem = word[:-1] if len(word) > 4 and word.endswith("s") else word
+    return any(w[:4] == word[:4] or w.startswith(word) for w in form) or (
+        len(stem) > 4 and stem in "".join(form)
+    )
+
+
+def _shares_long_form(
+    index: MentionIndex, before: list[re.Match], surface, short: str
+) -> bool:
+    """``preference optimization (DPO)`` shortens DPO's own long form, but
+    ``Rejection sampling Fine-Tuning (RFT)`` is not ``Reinforcement Fine-Tuning``.
+
+    The written expansion starts at the nearest word with the abbreviation's
+    first letter. It shares a long form when each of its words is a form of a
+    long-form word, allowing one other word in expansions of three or more.
+    Without such a word, any shared word counts."""
     key = (surface.entity.entity_type, surface.entity.entity_id)
-    return any(words & set(form) for form in index.long_forms.get(key, ()))
+    forms = index.long_forms.get(key, ())
+    words = [t.group().lower() for t in before[-6:]]
+    first = short[:1].lower()
+    starts = [i for i, word in enumerate(words) if word.startswith(first)]
+    if not starts:
+        return any(set(words[-4:]) & set(form) for form in forms)
+    content = [
+        w
+        for w in words[starts[-1] :]
+        if w not in _FILLER_WORDS and len(w) > 1 and not any(c.isdigit() for c in w)
+    ]
+    for form in forms:
+        unmatched = sum(not _same_word(w, form) for w in content)
+        if unmatched == 0 or (unmatched == 1 and len(content) >= 3):
+            return True
+    return False
 
 
 def _defined_in_brackets(text_value: str, start: int, end: int) -> bool:
