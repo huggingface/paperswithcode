@@ -47,7 +47,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -83,7 +82,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -121,7 +119,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -159,7 +156,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -197,7 +193,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -235,7 +230,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -273,7 +267,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -311,7 +304,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -349,7 +341,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -387,7 +378,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
@@ -1097,3 +1087,11 @@ UPDATE methods SET image_credit = '[Continuous control with deep reinforcement l
 UPDATE methods SET image_credit = '[Addressing Function Approximation Error in Actor-Critic Methods](/paper/1802.09477)' WHERE slug = 'td3';
 UPDATE methods SET image_credit = '[Asynchronous Methods for Deep Reinforcement Learning](/paper/1602.01783)' WHERE slug = 'a3c';
 UPDATE methods SET image_credit = '[End to End Learning for Self-Driving Cars](/paper/1604.07316)' WHERE slug = 'behavior-cloning';
+
+-- Source evidence protects each Introduced link from automated removal.
+INSERT INTO paper_method_evidence (paper_id, method_id, evidence_type)
+SELECT source_paper_id, id, 'source' FROM methods
+WHERE slug IN ('a3c', 'trpo', 'ddpg', 'td3')
+  AND source_paper_id IS NOT NULL
+ON CONFLICT (paper_id, method_id, evidence_type) DO UPDATE SET
+    last_seen_at = now();
