@@ -63,6 +63,16 @@ def _score_evidence(**overrides):
     }
 
 
+@pytest.fixture(autouse=True)
+def _no_removed_leaderboards(monkeypatch):
+    # These fake sessions do not model the tombstone aggregate query.
+    monkeypatch.setattr(
+        "backend.services.codex_curation_callback_service."
+        "CodexCurationCallbackService._removed_leaderboards",
+        lambda _self, _paper_id: {},
+    )
+
+
 class _ResultQuery:
     def __init__(self, result):
         self.result = result
@@ -243,7 +253,9 @@ def test_context_projection_preserves_the_worker_payload():
         "organizations": [],
         "method_exclusions": [],
         "evaluations": [vars(_stored_evaluation())],
+        "removed_leaderboards": [],
     }
+    assert result["promoted_benchmark"] is None
 
 
 def test_context_reports_a_missing_scoped_paper():
