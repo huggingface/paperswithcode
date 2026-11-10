@@ -67,12 +67,17 @@ from backend.services.x_trending_post_service import (
 KINDS = (
     "new_sota",
     "open_sota",
+    "open_release",
     "concept",
     "lab_league",
     "top_papers_week",
     "top_papers_month",
 )
 SOTA_LIMIT = 8
+OPEN_RELEASE_DAYS = 21
+OPEN_RELEASE_PAPERS = 25
+OPEN_RELEASE_BOARDS = 12
+OPEN_RELEASE_LIMIT = 4
 CONCEPT_LIMIT = 12
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 LEAGUE_ACTIVE_DAYS = 90
@@ -249,6 +254,8 @@ def leaderboard_wins(
         if win is None:
             continue
         kind, mine, beaten = win
+        if kind == "new_sota" and mine.evaluation_id not in board.open_ids:
+            continue  # the account posts open-model results only
         subject = f"{dataset.id}:{metric}:{paper.id}"
         if kind == "new_sota" and sota_posted(db, subject):
             continue
@@ -339,6 +346,190 @@ def leaderboard_wins(
             )
             candidate.draft = open_sota_text(candidate.facts, credit)
     return [candidate for candidate, _ in found[:SOTA_LIMIT]]
+
+
+# --- New open models --------------------------------------------------------
+
+
+def placement(board: Board, paper_id: int) -> dict[str, Any] | None:
+    """Where the paper's best open entry lands on this board.
+
+    `open_rank` counts distinct papers with a better open entry, so a paper's
+    own smaller variants don't push it down.
+    """
+    mine = next(
+        (
+            row
+            for row in board.rows
+            if row.paper_id == paper_id and row.evaluation_id in board.open_ids
+        ),
+        None,
+    )
+    if mine is None:
+        return None
+    index = board.rows.index(mine)
+    ahead = board.rows[:index]
+    open_ahead = {
+        row.paper_id
+        for row in ahead
+        if row.evaluation_id in board.open_ids and row.paper_id != paper_id
+    }
+    closed = next(
+        (row for row in board.rows if row.evaluation_id not in board.open_ids), None
+    )
+    result: dict[str, Any] = {
+        "model": mine.model,
+        "value": fmt(mine.value),
+        "open_rank": len(open_ahead) + 1,
+        "overall_rank": len({row.paper_id for row in ahead if row.paper_id != paper_id})
+        + 1,
+        "entries": len(board.rows),
+    }
+    if closed is not None:
+        result["best_closed_model"] = closed.model
+        result["best_closed_value"] = fmt(closed.value)
+        result["ahead_of_best_closed"] = _beats(board, mine, closed)
+    return result
+
+
+def open_release_score(placements: list[dict[str, Any]]) -> float:
+    """Leaderboards led among open models count fully, second or third place
+    among open models counts a little, anything lower not at all."""
+    weights = {1: 1.0, 2: 0.3, 3: 0.3}
+    return sum(p["entries"] * weights.get(p["open_rank"], 0.0) for p in placements)
+
+
+def open_release_text(facts: dict[str, Any], credit: str | None) -> str:
+    size = f", {facts['parameters_b']}B" if facts.get("parameters_b") else ""
+    lines = [f"New open-weights model: {facts['model']}{size}."]
+    firsts = list(
+        dict.fromkeys(
+            p["benchmark"] for p in facts["placements"] if p["open_rank"] == 1
+        )
+    )
+    if firsts:
+        lines.append(f"Best open model on {', '.join(firsts[:3])}.")
+    beats = [p for p in facts["placements"] if p.get("ahead_of_best_closed")]
+    if beats:
+        p = beats[0]
+        lines.append(
+            f"On {p['benchmark']} it beats every closed model, "
+            f"{p['value']} to {p['best_closed_model']}'s {p['best_closed_value']}."
+        )
+    if credit:
+        lines.append(f"Congrats {credit}!")
+    return "\n\n".join(lines)
+
+
+def open_releases(
+    db: Session,
+    *,
+    now: datetime,
+    fetch_org_handle: Callable[[str], str | None] = hf_org_x_handle,
+) -> list[Candidate]:
+    """New open-weights models and where they land across leaderboards.
+
+    A model qualifies through evaluations flagged open that link a Hugging
+    Face model, on a paper published in the last `OPEN_RELEASE_DAYS`.
+    """
+    published_after = now.date() - timedelta(days=OPEN_RELEASE_DAYS)
+    rows = db.execute(
+        select(Evaluation, Paper)
+        .join(Paper, Paper.id == Evaluation.paper_id)
+        .where(
+            Evaluation.is_open,
+            Evaluation.hf_model_url.is_not(None),
+            Evaluation.best_metric.is_not(None),
+            Paper.is_latest_version,
+            Paper.date_published >= published_after,
+        )
+    ).all()
+    by_paper: dict[int, list[Evaluation]] = {}
+    papers: dict[int, Paper] = {}
+    for evaluation, paper in rows:
+        by_paper.setdefault(paper.id, []).append(evaluation)
+        papers[paper.id] = paper
+    ranked = sorted(by_paper, key=lambda pid: -len(by_paper[pid]))[:OPEN_RELEASE_PAPERS]
+    found: list[tuple[Candidate, Paper]] = []
+    for paper_id in ranked:
+        paper = papers[paper_id]
+        if recently_posted(db, "open_release", str(paper_id), now, ever=True):
+            continue
+        evaluations = by_paper[paper_id]
+        keys = list(dict.fromkeys((e.dataset_id, e.best_metric) for e in evaluations))
+        placements = []
+        best_board: tuple[Board, Dataset, dict[str, Any]] | None = None
+        for dataset_id, metric in keys[:OPEN_RELEASE_BOARDS]:
+            board = load_board(db, dataset_id, metric)
+            if len(board.rows) < SOTA_MIN_ENTRIES:
+                continue
+            place = placement(board, paper_id)
+            if place is None:
+                continue
+            dataset = db.get(Dataset, dataset_id)
+            place = {"benchmark": dataset.name, "metric": metric, **place}
+            placements.append(place)
+            if best_board is None or (place["open_rank"], -place["entries"]) < (
+                best_board[2]["open_rank"],
+                -best_board[2]["entries"],
+            ):
+                best_board = (board, dataset, place)
+        score = open_release_score(placements)
+        if not score or best_board is None:
+            continue
+        placements.sort(key=lambda p: (p["open_rank"], -p["entries"]))
+        board, dataset, best = best_board
+        own = [e for e in evaluations if e.model_name == best["model"]] or evaluations
+        parameters = max((e.num_parameters or 0) for e in own)
+        facts: dict[str, Any] = {
+            "model": best["model"],
+            "hf_model_url": own[0].hf_model_url,
+            "parameters_b": round(parameters / 1e9, 1) if parameters else None,
+            "paper": paper.title,
+            "paper_url": f"{SITE}/paper/{paper.id}",
+            "published": str(paper.date_published),
+            "placements": placements,
+        }
+        top = _distinct_models(board.rows, 6)
+        image = render_bar_card(
+            f"{best['model']} on {dataset.name}",
+            f"{best['metric']} ({'lower' if board.lower else 'higher'} is better)",
+            [
+                Bar(
+                    row.model
+                    + ("" if row.evaluation_id in board.open_ids else " (closed)"),
+                    row.value,
+                    fmt(row.value),
+                    row.paper_id == paper.id,
+                )
+                for row in top
+            ],
+            lower_is_better=board.lower,
+            eyebrow="New open-weights model",
+        )
+        found.append(
+            (
+                Candidate(
+                    "open_release",
+                    str(paper.id),
+                    "",
+                    f"{SITE}/paper/{paper.id}",
+                    facts,
+                    image,
+                    score=score,
+                ),
+                paper,
+            )
+        )
+    found.sort(key=lambda item: -item[0].score)
+    for candidate, paper in found[:OPEN_RELEASE_LIMIT]:
+        handles, organization = sota_credit(db, paper, fetch_org_handle)
+        candidate.facts["verified_x_handles"] = [f"@{h}" for h in handles]
+        candidate.facts["organization"] = organization
+        candidate.facts["x_threads"] = x_threads(db, paper.id)
+        credit = f"@{handles[0]}" if handles else organization
+        candidate.draft = open_release_text(candidate.facts, credit)
+    return [candidate for candidate, _ in found[:OPEN_RELEASE_LIMIT]]
 
 
 def x_threads(db: Session, paper_id: int) -> list[dict[str, Any]]:
@@ -508,6 +699,7 @@ def gather(db: Session, *, now: datetime | None = None) -> list[Candidate]:
     """Every candidate for this run, best first within each kind."""
     now = now or datetime.now(UTC)
     candidates = leaderboard_wins(db, now=now)
+    candidates.extend(open_releases(db, now=now))
     if now.day <= ROUNDUP_CATCH_UP_DAYS:
         candidates.append(_roundup(db, "month", now))
     if now.weekday() < ROUNDUP_CATCH_UP_DAYS:
