@@ -338,7 +338,7 @@ def test_curation_markdown_availability_requires_semantic_body(
             return Handle(canonical.encode())
 
     monkeypatch.setattr(
-        "backend.services.hf_daily_curation_service.HfFileSystem", Filesystem
+        "backend.services.hf_daily_curation_service.BucketFileSystem", Filesystem
     )
     paper = SimpleNamespace(arxiv_id="2608.00042v2", title="Ready Paper")
     settings = SimpleNamespace(

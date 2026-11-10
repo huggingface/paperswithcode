@@ -54,7 +54,7 @@ def test_read_paper_layout_slims_blocks_and_caches(monkeypatch):
             sidecar
         ).encode()
     }
-    monkeypatch.setattr(paper_layout_service, "HfFileSystem", _FakeFileSystem)
+    monkeypatch.setattr(paper_layout_service, "BucketFileSystem", _FakeFileSystem)
     paper_layout_service._cache.clear()
 
     layout = read_paper_layout(

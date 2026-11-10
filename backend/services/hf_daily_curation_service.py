@@ -10,7 +10,6 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
-from huggingface_hub import HfFileSystem
 from huggingface_hub.errors import HfHubHTTPError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -23,12 +22,19 @@ from backend.models.database import (
     PaperCurationSchedulerState,
     PaperCurationWorkflow,
 )
+from backend.scripts.generate_missing_paper_markdown import (
+    validate_canonical_markdown,
+)
+from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.codex_add_evals_service import (
     EXTERNAL_PAPER_POLICY_VERSION,
     CodexPaperJobService,
     codex_paper_job_service,
     deferred_workflows_for_release,
     operator_retryable,
+)
+from backend.services.codex_curation_callback_service import (
+    CodexCurationCallbackService,
 )
 from backend.services.curation_priority_service import (
     DAILY_PRIORITY,
@@ -38,14 +44,8 @@ from backend.services.curation_priority_service import (
     pending_daily_papers,
     pending_x_trending_papers,
 )
-from backend.services.benchmark_gap_service import BenchmarkGapService
-from backend.services.codex_curation_callback_service import (
-    CodexCurationCallbackService,
-)
-from backend.scripts.generate_missing_paper_markdown import (
-    validate_canonical_markdown,
-)
 from backend.services.external_page_markdown_service import web_markdown_pending
+from backend.services.hf_bucket_filesystem import BucketFileSystem
 from backend.utils.hf_daily_papers import fetch_hf_daily_papers
 from backend.utils.urls import get_paper_route_identifier
 from jobs.curation_failure_codes import AWAITING_MARKDOWN
@@ -99,7 +99,7 @@ def paper_markdown_available(paper: Paper, settings: Settings) -> bool:
     key = f"{arxiv_id[:4]}/{arxiv_id}.md"
     path = f"hf://buckets/{settings.paper_markdown_hf_bucket_id}/{key}"
     try:
-        filesystem = HfFileSystem(token=settings.hf_token)
+        filesystem = BucketFileSystem(token=settings.hf_token)
         with filesystem.open(path, "rb", block_size=0) as handle:
             raw = handle.read(64 * 1024 * 1024 + 1)
         if len(raw) > 64 * 1024 * 1024:

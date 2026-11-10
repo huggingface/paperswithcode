@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import pymupdf
-from huggingface_hub import HfApi, HfFileSystem, Volume
+from huggingface_hub import HfApi, Volume
 from huggingface_hub.errors import HfHubHTTPError
 from sqlalchemy import exists, or_, select
 
@@ -34,8 +34,11 @@ from backend.services.external_page_markdown_service import (
     prepare_external_page_markdown,
     record_page_framing,
     retry_due,
+)
+from backend.services.external_page_markdown_service import (
     status_key as external_page_status_key,
 )
+from backend.services.hf_bucket_filesystem import BucketFileSystem
 from backend.services.paper_markdown_budget_service import (
     paper_markdown_budget_snapshot,
 )
@@ -326,7 +329,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
         self.paid_authorization_required = False
         self.stalled_scheduling_jobs = 0
         self.api = HfApi(token=self.settings.hf_token or None)
-        self.filesystem = HfFileSystem(token=self.settings.hf_token or None)
+        self.filesystem = BucketFileSystem(token=self.settings.hf_token or None)
 
     @property
     def mode(self) -> str:

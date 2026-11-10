@@ -12,10 +12,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from huggingface_hub import HfApi, HfFileSystem
+from huggingface_hub import HfApi
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 
 from backend.config import Settings, get_settings
+from backend.services.hf_bucket_filesystem import BucketFileSystem
 from backend.services.paper_markdown_budget_service import (
     PAPER_MARKDOWN_GPU_HOURLY_RATE_USD,
     paper_markdown_budget_snapshot,
@@ -258,7 +259,7 @@ def _failure_cause(
 
 
 def _read_progress(
-    filesystem: HfFileSystem,
+    filesystem: BucketFileSystem,
     settings: Settings,
     run_id: str | None,
     shard_id: str | None,
@@ -322,7 +323,7 @@ def _read_progress(
 
 
 def _read_progress_batch(
-    filesystem: HfFileSystem,
+    filesystem: BucketFileSystem,
     settings: Settings,
     jobs: list[Any],
 ) -> tuple[list[dict[str, Any] | None], int]:
@@ -361,7 +362,7 @@ def _fetch(settings: Settings) -> dict[str, Any]:
         }
 
     api = HfApi(token=settings.hf_token)
-    filesystem = HfFileSystem(token=settings.hf_token)
+    filesystem = BucketFileSystem(token=settings.hf_token)
     remote_jobs = list(
         api.list_jobs(
             status=_JOB_STAGES,

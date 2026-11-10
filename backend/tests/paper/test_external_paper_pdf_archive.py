@@ -44,7 +44,7 @@ class FakeBucket:
                 pass
 
         monkeypatch.setattr(service, "HfApi", Api)
-        monkeypatch.setattr(service, "HfFileSystem", FileSystem)
+        monkeypatch.setattr(service, "BucketFileSystem", FileSystem)
         return self
 
 
