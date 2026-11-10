@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Sparkles, X } from 'lucide-react';
 import { researchQueries } from '@/lib/api/queries';
@@ -24,18 +24,29 @@ export default function HomeFollowCard({ onBuild }: { onBuild: () => void }) {
   const user = useOptionalAuth()?.user;
   const navigate = useNavigate();
   const featured = useQuery(researchQueries.featuredTopics());
+  const client = useQueryClient();
   const followTopics = useFollowTopics();
+  // Set while a follow waits for fresh topics before opening Following.
+  const [finishing, setFinishing] = useState(false);
   const [dismissed, setDismissed] = useState(readDismissed);
   if (dismissed) return null;
 
   const follow = (id: number) => {
-    const path = `/following?topic=${id}`;
     if (!user) {
+      // Following saves the stashed pick after sign-in, so it cannot filter to the topic on arrival.
       stashPendingTopicFollows([id]);
-      window.location.href = hfLoginUrl(path);
+      window.location.href = hfLoginUrl('/following');
       return;
     }
-    followTopics.mutate([id], { onSuccess: () => navigate(path) });
+    setFinishing(true);
+    followTopics.mutateAsync([id])
+      // Let Following see the new topic, or it would drop the filter and greet an "empty" account
+      // with the intro and the Edit feed pop-up.
+      .then(() => Promise.all([
+        client.refetchQueries({ queryKey: researchQueries.topics(user.hf_subject).queryKey }),
+        client.refetchQueries({ queryKey: researchQueries.follows(user.hf_subject).queryKey }),
+      ]))
+      .then(() => navigate(`/following?topic=${id}`), () => setFinishing(false));
   };
   const dismiss = () => {
     try {
@@ -62,7 +73,7 @@ export default function HomeFollowCard({ onBuild }: { onBuild: () => void }) {
         type="button"
         className="topic-dialog-chip"
         aria-pressed="false"
-        disabled={followTopics.isPending}
+        disabled={finishing}
         onClick={() => follow(topic.id)}
       >
         <Plus aria-hidden="true" />{topicTitle(topic)}

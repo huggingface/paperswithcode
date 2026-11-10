@@ -560,7 +560,7 @@ it('invites guests to follow a popular topic after the sixth trending paper', as
   expect(items.indexOf(card)).toBe(6);
   fireEvent.click(await within(card).findByRole('button', { name: /speculative decoding/i }));
   expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBe('[13]');
-  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following?topic=13');
+  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
   expect(researchApi.follows).not.toHaveBeenCalled();
 });
 it('follows a popular topic from the trending card and opens it on Following', async () => {
@@ -577,6 +577,9 @@ it('follows a popular topic from the trending card and opens it on Following', a
   await waitFor(() => expect(researchApi.followTopic).toHaveBeenCalledWith(13));
   expect(await screen.findByText('A paper')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /^following/ })).toHaveClass('active');
+  // The new topic's bubble stays selected, and the empty-account pop-up does not open.
+  expect(screen.getByRole('link', { name: /speculative decoding/i })).toHaveAttribute('aria-current', 'true');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
 it('keeps the trending card dismissed', async () => {
   auth.user = null;
