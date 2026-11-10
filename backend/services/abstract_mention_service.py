@@ -680,21 +680,22 @@ def _expand_long_form(index, masked, before, start, end, surface):
     return None
 
 
-# Words an expansion may add without naming something else ("Segment Anything
-# Foundation Model (SAM)", "iterative closest point algorithm (ICP)"). They never
-# start an expansion either, so "during preference optimization (DPO)" still
-# shortens Direct Preference Optimization.
-_FILLER_WORDS = {
-    "a", "about", "after", "algorithm", "also", "an", "and", "are", "as", "at",
-    "based", "be", "before", "between", "both", "but", "by", "called", "can",
-    "different", "do", "does", "during", "each", "either", "for", "foundation",
-    "from", "has", "have", "how", "if", "in", "into", "is", "it", "its", "like",
-    "many", "may", "model", "models", "more", "most", "named", "new", "not",
-    "novel", "of", "on", "or", "other", "our", "over", "pre", "pretrained",
-    "propose", "proposed", "such", "termed", "than", "that", "the", "their",
-    "these", "this", "through", "to", "trained", "two", "under", "use", "used",
-    "using", "via", "we", "what", "when", "where", "which", "while", "with",
-    "within", "without",
+# Function words never start an expansion, so "during preference optimization
+# (DPO)" still shortens Direct Preference Optimization.
+_FUNCTION_WORDS = {
+    "a", "about", "after", "also", "an", "and", "are", "as", "at", "be",
+    "before", "between", "both", "but", "by", "called", "can", "do", "does",
+    "during", "each", "either", "for", "from", "has", "have", "how", "if", "in",
+    "into", "is", "it", "its", "may", "named", "not", "of", "on", "or", "our",
+    "such", "termed", "than", "that", "the", "their", "these", "this",
+    "through", "to", "under", "using", "via", "we", "what", "when", "where",
+    "which", "while", "with", "within", "without",
+}  # fmt: skip
+# Words an expansion may add without naming something else: "Segment Anything
+# Foundation Model (SAM)", "iterative closest point algorithm (ICP)".
+_IGNORED_WORDS = _FUNCTION_WORDS | {
+    "algorithm", "based", "foundation", "like", "model", "models", "pre",
+    "pretrained", "trained",
 }  # fmt: skip
 
 
@@ -734,14 +735,14 @@ def _shares_long_form(
     starts = [
         i
         for i, word in enumerate(words)
-        if word.startswith(first) and word not in _FILLER_WORDS
+        if word.startswith(first) and word not in _FUNCTION_WORDS
     ]
     if not starts:
         return any(set(words[-4:]) & set(form) for form in forms)
     content = [
         w
         for w in words[starts[-1] :]
-        if w not in _FILLER_WORDS and len(w) > 1 and not any(c.isdigit() for c in w)
+        if w not in _IGNORED_WORDS and len(w) > 1 and not any(c.isdigit() for c in w)
     ]
     for form in forms:
         unmatched = sum(not _same_word(w, form) for w in content)

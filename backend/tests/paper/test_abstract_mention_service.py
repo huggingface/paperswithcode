@@ -300,6 +300,7 @@ ACRONYM_INDEX = build_index(
         method(4, "Tiny Recursive Model", "Tiny Recursive Model (TRM)"),
         method(5, "Vision Transformer", "Vision Transformer (ViT)"),
         method(6, "Direct Preference Optimization (DPO)"),
+        method(7, "Model Predictive Control", "Model Predictive Control (MPC)"),
     ]
 )
 
@@ -336,6 +337,11 @@ def test_function_word_does_not_start_an_expansion():
     assert acronym_links("aligned during optimization (DPO); DPO helps") == [
         ("DPO", 6),
         ("DPO", 6),
+    ]
+    # "Model" is ignored when comparing words but can still start the expansion.
+    assert acronym_links("a Model Predictive Controller (MPC); MPC runs") == [
+        ("MPC", 7),
+        ("MPC", 7),
     ]
 
 
