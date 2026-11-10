@@ -36,7 +36,7 @@ VALUES (
     (SELECT id FROM areas WHERE name = 'Language' LIMIT 1),
     NULL,
     NULL,
-    'https://arxiv.org/abs/2308.01825',
+    '/paper/2308.01825',
     'Scaling Relationship on Learning Mathematical Reasoning with Large Language Models',
     NULL,
     NULL,
