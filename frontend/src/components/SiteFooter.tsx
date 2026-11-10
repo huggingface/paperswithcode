@@ -19,6 +19,9 @@ const SiteFooter = () => {
         >
           Feedback
         </a>
+        <a href="https://x.com/paperswithcodee" target="_blank" rel="noreferrer">
+          Follow us on X
+        </a>
       </div>
     </footer>
   );

@@ -217,4 +217,24 @@ describe("Header navigation", () => {
       "https://github.com/huggingface/paperswithcode",
     );
   });
+
+  it("links the X account from the header and mobile menu", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Header onOpenSearch={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Follow us on X" })).toHaveAttribute(
+      "href",
+      "https://x.com/paperswithcodee",
+    );
+    await user.click(screen.getByRole("button", { name: "Open menu" }));
+    const mobilePanel = document.querySelector(".mobile-nav-panel") as HTMLElement;
+    expect(within(mobilePanel).getByRole("link", { name: "Follow us on X" })).toHaveAttribute(
+      "href",
+      "https://x.com/paperswithcodee",
+    );
+  });
 });

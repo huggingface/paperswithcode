@@ -694,7 +694,8 @@ html { scroll-behavior: smooth; }
     font-size: 18px;
   }
   .header-bookmark-btn,
-  .header-github-btn {
+  .header-github-btn,
+  .header-x-btn {
     display: none;
   }
   .app-header .hf-signin-btn {
