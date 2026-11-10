@@ -71,6 +71,24 @@ function applyLatexAccent(accentCommand: string, letter: string): string | null 
   return LATEX_ACCENT_BY_COMMAND[accentCommand]?.[letter] ?? null;
 }
 
+/**
+ * Index of the `$` closing the inline math opened at `start`, or -1 when the
+ * `$` is a literal. A `$` followed by a digit is a price ("$8 per million
+ * tokens and $40") unless a closing `$` follows that is not preceded by
+ * whitespace or followed by a digit, with no whitespace-preceded `$` (another
+ * price) before it, as in pandoc's tex_math_dollars rule. This keeps math such
+ * as `$3 \times 3$` or `$10^{-3}$`.
+ */
+function inlineMathEnd(text: string, start: number): number {
+  const end = text.indexOf('$', start + 1);
+  if (end === -1 || !/\d/.test(text[start + 1] ?? '')) return end;
+  for (let j = end; j !== -1; j = text.indexOf('$', j + 1)) {
+    if (/\s/.test(text[j - 1])) return -1;
+    if (!/\d/.test(text[j + 1] ?? '')) return j;
+  }
+  return -1;
+}
+
 function tokenizeMathAndText(text: string): TextToken[] {
   const tokens: TextToken[] = [];
   let i = 0;
@@ -96,12 +114,13 @@ function tokenizeMathAndText(text: string): TextToken[] {
       continue;
     }
     if (text[i] === '$') {
-      flush();
-      const end = text.indexOf('$', i + 1);
+      const end = inlineMathEnd(text, i);
       if (end === -1) {
-        buf += text.slice(i);
-        break;
+        buf += '$';
+        i += 1;
+        continue;
       }
+      flush();
       tokens.push({ type: 'inline', content: text.slice(i + 1, end) });
       i = end + 1;
       continue;
