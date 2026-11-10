@@ -37,6 +37,7 @@ from backend.models.database import (
     Metric,
     Paper,
     PaperMethod,
+    PaperXPost,
     PaperXThread,
     Task,
     XInsightPost,
@@ -398,6 +399,28 @@ def placement(
     return result
 
 
+def subject_paper_id(subject_key: str) -> int | None:
+    """The paper an insight post was about: `open_release` keys are the paper
+    id, SOTA keys end with it (`[open:|task:]dataset:metric:paper`)."""
+    tail = subject_key.rsplit(":", 1)[-1]
+    return int(tail) if tail.isdigit() else None
+
+
+def posted_paper_ids(db: Session) -> set[int]:
+    """Papers the account already posted about in any form: a trending-paper
+    post, a SOTA or an open release. A new model is announced only once."""
+    ids = set(db.scalars(select(PaperXPost.paper_id)))
+    for kind, subject_key in db.execute(
+        select(XInsightPost.kind, XInsightPost.subject_key).where(
+            XInsightPost.kind.in_(("new_sota", "open_sota", "open_release"))
+        )
+    ):
+        paper_id = subject_paper_id(subject_key)
+        if paper_id is not None:
+            ids.add(paper_id)
+    return ids
+
+
 def board_sizes(db: Session, keys: set[tuple[int, str]]) -> dict[tuple[int, str], int]:
     """Result count per (dataset, metric), counted like `leaderboard_rows`
     (every evaluation carrying the metric), to visit the biggest boards first."""
@@ -469,11 +492,8 @@ def open_releases(
     for evaluation, paper in rows:
         by_paper.setdefault(paper.id, []).append(evaluation)
         papers[paper.id] = paper
-    unposted = [
-        pid
-        for pid in by_paper
-        if not recently_posted(db, "open_release", str(pid), now, ever=True)
-    ]
+    posted = posted_paper_ids(db)
+    unposted = [pid for pid in by_paper if pid not in posted]
     ranked = sorted(unposted, key=lambda pid: (-len(by_paper[pid]), pid))
     keys = {(e.dataset_id, e.best_metric) for pid in ranked for e in by_paper[pid]}
     sizes = board_sizes(db, keys)
