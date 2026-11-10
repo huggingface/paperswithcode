@@ -43,7 +43,9 @@ def _request(headers: dict[str, str] | None = None) -> Request:
 
 @pytest.fixture
 def db(monkeypatch):
-    monkeypatch.setattr(dictation_service, "probe_endpoint", lambda url, token: True)
+    monkeypatch.setattr(
+        dictation_service, "probe_endpoint", lambda url, token, *, wake: True
+    )
     engine = create_engine("sqlite://")
     DictationSession.__table__.create(engine)
     with Session(engine) as session:
@@ -109,7 +111,7 @@ def test_disabled_dictation_hides_every_route(db):
 
 
 def test_anonymous_status_does_not_wake_the_endpoint(db, monkeypatch):
-    def fail(*_args):
+    def fail(*_args, **_kwargs):
         raise AssertionError("anonymous visitors must not wake the GPU")
 
     monkeypatch.setattr(dictation_service, "probe_endpoint", fail)

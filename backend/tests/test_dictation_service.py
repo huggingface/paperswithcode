@@ -61,7 +61,7 @@ def _service(db, *, ready=True, clock=None, **overrides) -> DictationService:
     return DictationService(
         db,
         _settings(**overrides),
-        probe=lambda url, token: ready,
+        probe=lambda url, token, *, wake: ready,
         now=clock or Clock(),
     )
 
@@ -216,3 +216,50 @@ def test_last_session_of_the_day_is_shortened_to_the_allowance(db):
 def test_ticket_is_read_from_the_original_uri():
     assert ticket_from_uri("/api/v1/dictation/ws?ticket=abc-123") == "abc-123"
     assert ticket_from_uri("/api/v1/dictation/ws") == ""
+
+
+def test_status_does_not_wake_the_endpoint_but_a_tap_does(db):
+    calls = []
+
+    def probe(url, token, *, wake):
+        calls.append(wake)
+        return wake
+
+    service = DictationService(db, _settings(), probe=probe, now=Clock())
+    assert service.status("a").provider == OPENAI
+    assert calls == [False]
+    assert service.issue("a").provider == VOXTRAL
+    assert calls == [False, True]
+
+
+def test_status_wakes_the_endpoint_when_openai_cannot_serve(db):
+    calls = []
+
+    def probe(url, token, *, wake):
+        calls.append(wake)
+        return False
+
+    service = DictationService(
+        db, _settings(openai_api_key=""), probe=probe, now=Clock()
+    )
+    assert service.status("a").reason == "starting"
+    assert calls == [True]
+
+
+def test_probe_without_wake_sends_nothing_and_reuses_a_fresh_answer(monkeypatch):
+    from backend.services import dictation_service
+
+    sent = []
+
+    def fake_get(url, **_kwargs):
+        sent.append(url)
+        return type("Response", (), {"status_code": 200})()
+
+    monkeypatch.setattr(dictation_service.httpx, "get", fake_get)
+    monkeypatch.setattr(dictation_service, "_probe_cache", {})
+    url = "https://wake-test.example"
+    assert dictation_service.probe_endpoint(url, "t", wake=False) is False
+    assert sent == []
+    assert dictation_service.probe_endpoint(url, "t") is True
+    assert dictation_service.probe_endpoint(url, "t", wake=False) is True
+    assert sent == [f"{url}/health"]

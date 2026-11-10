@@ -105,13 +105,20 @@ _probe_cache: dict[str, tuple[float, bool]] = {}
 
 
 def probe_endpoint(
-    url: str, token: str, *, ttl_ready: float = 10, ttl_cold: float = 15
+    url: str,
+    token: str,
+    *,
+    wake: bool = True,
+    ttl_ready: float = 10,
+    ttl_cold: float = 15,
 ) -> bool:
     """Return whether the endpoint is serving, waking it if it scaled to zero.
 
     Any request to a scaled-to-zero HF endpoint starts it (and gets a 503), so
     the health probe doubles as the wake-up call. Results are cached briefly so
-    polling clients do not turn into a probe per request.
+    polling clients do not turn into a probe per request. With ``wake=False``
+    only a fresh cached answer counts and nothing is sent, so the endpoint is
+    not kept awake by callers who may never dictate.
     """
 
     now = time.monotonic()
@@ -119,6 +126,8 @@ def probe_endpoint(
         cached = _probe_cache.get(url)
         if cached and cached[0] > now:
             return cached[1]
+    if not wake:
+        return False
     try:
         response = httpx.get(
             f"{url.rstrip('/')}/health",
@@ -221,11 +230,11 @@ class DictationService:
 
     # -- provider choice ----------------------------------------------------
 
-    def _voxtral_ready(self) -> bool:
+    def _voxtral_ready(self, *, wake: bool) -> bool:
         url = self.settings.dictation_endpoint_url
-        return bool(url) and self._probe(url, self.settings.hf_token)
+        return bool(url) and self._probe(url, self.settings.hf_token, wake=wake)
 
-    def _choose(self, hf_subject: str, now: datetime) -> DictationStatus:
+    def _choose(self, hf_subject: str, now: datetime, *, wake: bool) -> DictationStatus:
         remaining = max(
             0,
             self.settings.dictation_user_daily_seconds
@@ -233,25 +242,28 @@ class DictationService:
         )
         if remaining <= 0:
             return DictationStatus(None, "daily_limit", 0)
-        voxtral_ready = self._voxtral_ready()
+        openai_left = (
+            self.settings.dictation_openai_daily_seconds - self._openai_used_today(now)
+        )
+        openai_ok = bool(self.settings.openai_api_key) and (
+            openai_left >= self.settings.dictation_session_seconds
+        )
+        # Without the OpenAI fallback, waking Voxtral is the only way to serve.
+        voxtral_ready = self._voxtral_ready(wake=wake or not openai_ok)
         if (
             voxtral_ready
             and self._live_count(now, provider=VOXTRAL)
             < self.settings.dictation_voxtral_capacity
         ):
             return DictationStatus(VOXTRAL, None, remaining)
-        openai_left = (
-            self.settings.dictation_openai_daily_seconds - self._openai_used_today(now)
-        )
-        if (
-            self.settings.openai_api_key
-            and openai_left >= self.settings.dictation_session_seconds
-        ):
+        if openai_ok:
             return DictationStatus(OPENAI, None, remaining)
         return DictationStatus(None, "busy" if voxtral_ready else "starting", remaining)
 
     def status(self, hf_subject: str) -> DictationStatus:
-        return self._choose(hf_subject, self._now())
+        """Report availability without waking the endpoint; a mic tap wakes it."""
+
+        return self._choose(hf_subject, self._now(), wake=False)
 
     # -- tickets ------------------------------------------------------------
 
@@ -270,7 +282,7 @@ class DictationService:
         )
         if self._live_count(now, hf_subject=hf_subject):
             raise DictationUnavailable("already_dictating")
-        choice = self._choose(hf_subject, now)
+        choice = self._choose(hf_subject, now, wake=True)
         if choice.provider is None:
             raise DictationUnavailable(choice.reason or "unavailable")
         self.db.execute(
