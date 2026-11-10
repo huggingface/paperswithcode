@@ -22,7 +22,11 @@
   align-items: flex-end;
   gap: 8px;
 }
-.ask-home-row > .chat-send { flex: none; margin: 0 2px 2px 0; }
+.ask-home-row > .chat-send,
+.ask-home-row > .chat-dictation-mic,
+.ask-home-row > .chat-dictation-pill { flex: none; margin: 0 2px 2px 0; }
+.ask-home-row > .chat-dictation-mic + .chat-send,
+.ask-home-row > .chat-dictation-pill + .chat-send { margin-left: -4px; }
 .ask-home-textarea-wrap { position: relative; flex: 1; min-width: 0; }
 .ask-home textarea {
   position: relative;

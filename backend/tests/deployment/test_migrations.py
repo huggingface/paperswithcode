@@ -77,6 +77,7 @@ def test_common_chat_migrations_support_isolated_production_schema():
         "add_chat_title_budget.sql",
         "add_chat_sandbox_egress_policy.sql",
         "add_chat_warm_assignment_race.sql",
+        "add_dictation_sessions.sql",
     )
 
     for name in migrations:

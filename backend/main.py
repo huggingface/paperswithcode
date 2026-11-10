@@ -533,6 +533,7 @@ def create_app() -> FastAPI:
         contributions,
         cron,
         datasets,
+        dictation,
         evaluations,
         external_resources,
         frameworks,
@@ -596,6 +597,8 @@ def create_app() -> FastAPI:
     app.include_router(stats.router, prefix="/api/v1", tags=["stats"])
     if settings.chat_enabled:
         app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
+        app.include_router(dictation.router, prefix="/api/v1")
+        app.include_router(dictation.internal_router, prefix="/api")
         from backend.chat_gateway_app import app as chat_gateway_app
 
         app.mount("/api/internal/chat-gateway", chat_gateway_app)

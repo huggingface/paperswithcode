@@ -244,6 +244,52 @@ def _validate_mcp_api_bridge(
     return failures
 
 
+DICTATION_WS_LOCATION = "location = /api/v1/dictation/ws"
+DICTATION_AUTH_LOCATION = "location = /_pwc_dictation_authorize"
+
+
+def _validate_dictation_relay(config: str, environment: str, backend: str) -> list[str]:
+    """The dictation relay must keep provider credentials and tickets server-side."""
+
+    failures: list[str] = []
+    relay = location_block(config, DICTATION_WS_LOCATION)
+    for requirement in (
+        "limit_except GET",
+        "auth_request /_pwc_dictation_authorize;",
+        "proxy_pass $pwc_dictation_upstream;",
+        "proxy_set_header Upgrade $http_upgrade;",
+        "proxy_set_header Authorization $pwc_dictation_authorization;",
+        'proxy_set_header Cookie "";',
+        "proxy_ssl_verify on;",
+        "proxy_read_timeout 150s;",
+        f"pwc_{environment}_dictation;",
+    ):
+        if requirement not in relay:
+            failures.append(f"{environment} dictation relay misses: {requirement}")
+    auth = location_block(config, DICTATION_AUTH_LOCATION)
+    for requirement in (
+        "internal;",
+        f"proxy_pass http://{backend}/api/internal/dictation/authorize;",
+        "proxy_set_header X-Original-URI $request_uri;",
+        'proxy_set_header X-PwC-Dictation-Relay "auth-request";',
+    ):
+        if requirement not in auth:
+            failures.append(f"{environment} dictation authorize misses: {requirement}")
+    public = location_block(config, "location ^~ /api/internal/dictation/")
+    if "return 404;" not in public:
+        failures.append(f"{environment} exposes the dictation authorize route")
+    log_format = config.split(f"log_format pwc_{environment}_dictation", 1)[-1].split(
+        ";", 1
+    )[0]
+    if (
+        f"log_format pwc_{environment}_dictation" not in config
+        or "$request"
+        in log_format.replace("$request_length", "").replace("$request_time", "")
+    ):
+        failures.append(f"{environment} dictation log format may record tickets")
+    return failures
+
+
 def validate(production: str, staging: str) -> list[str]:
     failures: list[str] = []
     if (
@@ -285,6 +331,7 @@ def validate(production: str, staging: str) -> list[str]:
         failures.extend(
             _validate_mcp_api_bridge(config, environment, port, backend, host)
         )
+        failures.extend(_validate_dictation_relay(config, environment, backend))
     access_block = location_block(staging, "location = /_staging_access_check")
     if (
         not access_block
@@ -418,7 +465,12 @@ def validate(production: str, staging: str) -> list[str]:
                 failures.append(
                     f"{environment} executor rendezvous misses: {requirement}"
                 )
-        if config.count("proxy_set_header Upgrade") != 1:
+        # Exactly two upgrade routes: the executor rendezvous above and the
+        # dictation relay checked by _validate_dictation_relay.
+        upgrades = config.count("proxy_set_header Upgrade")
+        if upgrades != 2 or "proxy_set_header Upgrade" not in location_block(
+            config, DICTATION_WS_LOCATION
+        ):
             failures.append(
                 f"{environment} exposes an unexpected WebSocket upgrade route"
             )
