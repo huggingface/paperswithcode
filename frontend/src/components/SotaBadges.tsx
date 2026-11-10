@@ -202,7 +202,13 @@ export const SotaBadges: React.FC<SotaBadgesProps> = ({ ranks, paperHref, wrap =
     return (
       <div className="paper-sota-stack">
         {groupedUnits.map((group) => (
-          <SotaLine key={group[0].rank} units={group} paperHref={paperHref} expandable />
+          // Keyed by paper too, so navigating to another paper starts collapsed.
+          <SotaLine
+            key={`${paperHref}-${group[0].rank}`}
+            units={group}
+            paperHref={paperHref}
+            expandable
+          />
         ))}
       </div>
     );
