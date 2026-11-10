@@ -399,17 +399,17 @@ def placement(
 
 
 def board_sizes(db: Session, keys: set[tuple[int, str]]) -> dict[tuple[int, str], int]:
-    """Evaluation count per (dataset, metric), to visit a release's biggest
-    boards first."""
-    if not keys:
-        return {}
-    dataset_ids = {dataset_id for dataset_id, _ in keys}
-    rows = db.execute(
-        select(Evaluation.dataset_id, Evaluation.best_metric, func.count())
-        .where(Evaluation.dataset_id.in_(dataset_ids))
-        .group_by(Evaluation.dataset_id, Evaluation.best_metric)
-    ).all()
-    return {(d, m): n for d, m, n in rows if (d, m) in keys}
+    """Result count per (dataset, metric), counted like `leaderboard_rows`
+    (every evaluation carrying the metric), to visit the biggest boards first."""
+    return {
+        (dataset_id, metric): db.scalar(
+            select(func.count()).where(
+                Evaluation.dataset_id == dataset_id,
+                Evaluation.metrics.has_key(metric),
+            )
+        )
+        for dataset_id, metric in keys
+    }
 
 
 def open_release_score(placements: list[dict[str, Any]]) -> float:
@@ -492,7 +492,9 @@ def open_releases(
         )
         placements = []
         best_board: tuple[Board, Dataset, dict[str, Any]] | None = None
-        for dataset_id, metric in paper_keys[:OPEN_RELEASE_BOARDS]:
+        for dataset_id, metric in paper_keys:
+            if len(placements) >= OPEN_RELEASE_BOARDS:
+                break
             board = load_board(db, dataset_id, metric)
             if len(board.rows) < SOTA_MIN_ENTRIES:
                 continue
