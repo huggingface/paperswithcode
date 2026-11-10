@@ -54,6 +54,7 @@ const NAV_LINKS: readonly HeaderNavLink[] = [
   { to: "/tasks", label: "Browse state-of-the-art", end: false },
   { to: "/methods", label: "Methods", end: false },
   { to: "/conferences", label: "Conferences", end: false },
+  { to: "/ai-deadlines", label: "AI Deadlines", end: false },
   { to: "/organizations", label: "Organizations", end: false },
   { to: "/submit", label: "Submit", end: false },
 ];
