@@ -326,6 +326,9 @@ a.paper-resource.is-link:focus-visible {
   font-size: 12px;
   line-height: 1.6;
 }
+.paper-sota--expanded {
+  white-space: normal;
+}
 .paper-sota-stack {
   margin-top: 16px;
   padding-top: 16px;
@@ -366,6 +369,13 @@ a.paper-resource.is-link:focus-visible {
   font-size: 11px;
   color: var(--ink-faint);
   cursor: pointer;
+}
+button.paper-sota-more {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: inherit;
+  white-space: pre;
 }
 .paper-sota-more:hover {
   color: var(--accent-text);

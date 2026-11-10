@@ -9,7 +9,7 @@ const SOTA_RANK_LABELS: Record<number, string> = { 1: "SOTA 🏆", 2: "#2", 3: "
 
 interface SotaBadgesProps {
   ranks: SotaRank[];
-  /** Paper detail href; the "+N more" suffix links to its results section. */
+  /** Paper detail href; on cards the "+N more" suffix links to it. */
   paperHref: string;
   /** When set, render one truncated line per rank group (SOTA / #2 / #3),
    *  stacked vertically. Used on the paper page. Cards keep a single line. */
@@ -29,11 +29,17 @@ interface SotaUnit {
 }
 
 /** A single truncated line of placements: fits as many units as the width
- *  allows, collapsing the overflow into a "· +N more" link to #results. */
-const SotaLine: React.FC<{ units: SotaUnit[]; paperHref: string }> = ({ units, paperHref }) => {
+ *  allows, collapsing the overflow into a "· +N more" suffix. On cards the
+ *  suffix links to the paper; with `expandable` it reveals the full list. */
+const SotaLine: React.FC<{ units: SotaUnit[]; paperHref: string; expandable?: boolean }> = ({
+  units,
+  paperHref,
+  expandable = false,
+}) => {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const measureRef = React.useRef<HTMLSpanElement>(null);
   const [visibleCount, setVisibleCount] = React.useState(units.length);
+  const [expanded, setExpanded] = React.useState(false);
 
   React.useLayoutEffect(() => {
     const container = containerRef.current;
@@ -82,11 +88,13 @@ const SotaLine: React.FC<{ units: SotaUnit[]; paperHref: string }> = ({ units, p
 
   if (units.length === 0) return null;
 
-  const shown = units.slice(0, Math.max(1, Math.min(visibleCount, units.length)));
+  const shown = expanded
+    ? units
+    : units.slice(0, Math.max(1, Math.min(visibleCount, units.length)));
   const moreCount = units.length - shown.length;
 
   return (
-    <div className="paper-sota" ref={containerRef}>
+    <div className={`paper-sota${expanded ? " paper-sota--expanded" : ""}`} ref={containerRef}>
       <span ref={measureRef} className="paper-sota-measure" aria-hidden="true" />
       {shown.map((u, i) => (
         <React.Fragment key={`${u.href || u.name}-${i}`}>
@@ -116,7 +124,23 @@ const SotaLine: React.FC<{ units: SotaUnit[]; paperHref: string }> = ({ units, p
           )}
         </React.Fragment>
       ))}
-      {moreCount > 0 && (
+      {expanded && (
+        <button type="button" className="paper-sota-more" onClick={() => setExpanded(false)}>
+          {" · show less"}
+        </button>
+      )}
+      {moreCount > 0 && expandable && (
+        <button
+          type="button"
+          className="paper-sota-more"
+          aria-expanded={false}
+          onClick={() => setExpanded(true)}
+        >
+          {" · +"}
+          {moreCount} more
+        </button>
+      )}
+      {moreCount > 0 && !expandable && (
         <Link
           to={`${paperHref}#results`}
           className="paper-sota-more"
@@ -178,7 +202,13 @@ export const SotaBadges: React.FC<SotaBadgesProps> = ({ ranks, paperHref, wrap =
     return (
       <div className="paper-sota-stack">
         {groupedUnits.map((group) => (
-          <SotaLine key={group[0].rank} units={group} paperHref={paperHref} />
+          // Keyed by paper too, so navigating to another paper starts collapsed.
+          <SotaLine
+            key={`${paperHref}-${group[0].rank}`}
+            units={group}
+            paperHref={paperHref}
+            expandable
+          />
         ))}
       </div>
     );
