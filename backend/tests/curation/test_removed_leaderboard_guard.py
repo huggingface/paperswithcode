@@ -39,6 +39,15 @@ class _Query:
         return list(self.rows)
 
 
+class _OneQuery(_Query):
+    def __init__(self, row):
+        super().__init__([row])
+
+    def one(self):
+        (row,) = self.rows
+        return row
+
+
 class _Database:
     def __init__(self, evaluations=()):
         self.evaluations = {row.id: row for row in evaluations}
@@ -186,15 +195,35 @@ def test_other_boards_are_still_created():
     assert removed == []
 
 
-def test_surviving_row_cannot_be_replaced_on_a_removed_board():
-    # Removing the survivor while the new row is skipped would empty the board.
-    service = _service([_stored(46100, LIBERO_PRO)])
-    body = ApplyMutationRequest(
-        evaluations=[_proposal()], evaluation_removals=[_removal(46100)]
+def test_surviving_row_cannot_be_removed_on_a_removed_board():
+    # With or without a replacement, a curator already chose the survivor.
+    survivor = _stored(46100, LIBERO_PRO)
+    survivor.methodology = None
+    service = _service([survivor])
+    service.db.query = lambda _model: _OneQuery(survivor)
+    body = ApplyMutationRequest(evaluation_removals=[_removal(46100)])
+
+    with pytest.raises(ValueError, match="cannot remove evaluation 46100"):
+        service._apply_evaluation_removals(
+            SimpleNamespace(paper_id=PAPER_ID),
+            body,
+            removed_leaderboards={(TASK_ID, LIBERO_PRO): 46540},
+        )
+    assert service.db.deleted == []
+
+
+def test_rows_on_other_boards_can_still_be_removed():
+    row = _stored(46101, PROMOTED)
+    row.methodology = None
+    service = _service([row])
+    service.db.query = lambda _model: _OneQuery(row)
+    body = ApplyMutationRequest(evaluation_removals=[_removal(46101)])
+
+    removed = service._apply_evaluation_removals(
+        SimpleNamespace(paper_id=PAPER_ID),
+        body,
+        removed_leaderboards={(TASK_ID, LIBERO_PRO): 46540},
     )
 
-    with pytest.raises(ValueError, match="Keep evaluation 46100"):
-        service._apply_evaluations(
-            body, removed_leaderboards={(TASK_ID, LIBERO_PRO): 46540}
-        )
-    assert service.evaluation_service.creates == []
+    assert removed == 1
+    assert service.db.deleted == [row]

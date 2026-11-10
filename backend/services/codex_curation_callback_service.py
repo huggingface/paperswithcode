@@ -878,13 +878,15 @@ class CodexCurationCallbackService:
             organization_links = None
             skipped_removed: list[dict[str, Any]] = []
             if row.kind == "add-evals":
+                removed_leaderboards = self._removed_leaderboards(row.paper_id)
                 created, updated, skipped_duplicates, skipped_removed = (
                     self._apply_evaluations(
-                        body,
-                        removed_leaderboards=self._removed_leaderboards(row.paper_id),
+                        body, removed_leaderboards=removed_leaderboards
                     )
                 )
-                removed = self._apply_evaluation_removals(row, body)
+                removed = self._apply_evaluation_removals(
+                    row, body, removed_leaderboards=removed_leaderboards
+                )
             else:
                 organization_links = self._apply_enrichment(row, body)
 
@@ -2300,9 +2302,7 @@ class CodexCurationCallbackService:
             if existing is None and removed_id is not None:
                 # A row of this paper was deleted from this board; curators
                 # remove incompatible results and tell authors so. Never put
-                # one back automatically, and never let the same proposal
-                # empty the board by removing what survived.
-                self._reject_replacing_on_removed_board(body, item)
+                # one back automatically.
                 skipped_removed.append(
                     {
                         **_proposal_identity(values)._asdict(),
@@ -2354,24 +2354,15 @@ class CodexCurationCallbackService:
                         self.db.delete(duplicate)
         return created, updated, skipped_duplicates, skipped_removed
 
-    def _reject_replacing_on_removed_board(self, body: ApplyMutationRequest, item):
-        for removal in body.evaluation_removals:
-            existing = self.db.get(Evaluation, removal.evaluation_id)
-            if existing is not None and (existing.task_id, existing.dataset_id) == (
-                item.task_id,
-                item.dataset_id,
-            ):
-                raise ValueError(
-                    f"Task {item.task_id} / dataset {item.dataset_id} had a row of "
-                    "this paper removed (context.paper.removed_leaderboards), so "
-                    "curation cannot add a replacement there. Keep evaluation "
-                    f"{existing.id}: drop its evaluation_removal and the new item, "
-                    "and report the benchmark as not_applicable with detail "
-                    "'removed by a curator'."
-                )
-
-    def _apply_evaluation_removals(self, row, body: ApplyMutationRequest) -> int:
+    def _apply_evaluation_removals(
+        self,
+        row,
+        body: ApplyMutationRequest,
+        *,
+        removed_leaderboards: dict[tuple[int, int], int] | None = None,
+    ) -> int:
         removed = 0
+        removed_leaderboards = removed_leaderboards or {}
         for removal in body.evaluation_removals:
             existing = (
                 self.db.query(Evaluation)
@@ -2383,6 +2374,17 @@ class CodexCurationCallbackService:
                 .one()
             )
             self._reject_sync_managed(existing, "removed")
+            if (existing.task_id, existing.dataset_id) in removed_leaderboards:
+                # A curator already decided what survives on this board.
+                raise ValueError(
+                    f"Task {existing.task_id} / dataset {existing.dataset_id} had "
+                    "a row of this paper removed "
+                    "(context.paper.removed_leaderboards), so curation cannot "
+                    f"remove evaluation {existing.id} there. Drop that "
+                    "evaluation_removal and any new item for the benchmark, and "
+                    "report it as not_applicable with detail 'removed by a "
+                    "curator'."
+                )
             self.db.delete(existing)
             removed += 1
         return removed

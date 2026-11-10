@@ -73,7 +73,7 @@ the server rejects rows on any other dataset.
 `context.paper.removed_leaderboards` lists the task/dataset boards where a row
 of this paper was deleted, usually by a curator after author feedback. Never
 propose a new row there or remove the row that survived: the server skips such
-rows (`evaluations_skipped_removed`). Report the benchmark as `not_applicable`
+new rows (`evaluations_skipped_removed`) and rejects such removals. Report the benchmark as `not_applicable`
 with detail `removed by a curator`. Updating this paper's existing row there is
 still allowed.
 
