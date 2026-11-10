@@ -680,12 +680,21 @@ def _expand_long_form(index, masked, before, start, end, surface):
     return None
 
 
-# Words an expansion may add without naming something else: "Segment Anything
-# Foundation Model (SAM)", "iterative closest point algorithm (ICP)".
+# Words an expansion may add without naming something else ("Segment Anything
+# Foundation Model (SAM)", "iterative closest point algorithm (ICP)"). They never
+# start an expansion either, so "during preference optimization (DPO)" still
+# shortens Direct Preference Optimization.
 _FILLER_WORDS = {
-    "a", "algorithm", "an", "and", "based", "by", "for", "foundation", "from",
-    "in", "like", "model", "models", "of", "on", "pre", "pretrained", "the",
-    "to", "trained",
+    "a", "about", "after", "algorithm", "also", "an", "and", "are", "as", "at",
+    "based", "be", "before", "between", "both", "but", "by", "called", "can",
+    "different", "do", "does", "during", "each", "either", "for", "foundation",
+    "from", "has", "have", "how", "if", "in", "into", "is", "it", "its", "like",
+    "many", "may", "model", "models", "more", "most", "named", "new", "not",
+    "novel", "of", "on", "or", "other", "our", "over", "pre", "pretrained",
+    "propose", "proposed", "such", "termed", "than", "that", "the", "their",
+    "these", "this", "through", "to", "trained", "two", "under", "use", "used",
+    "using", "via", "we", "what", "when", "where", "which", "while", "with",
+    "within", "without",
 }  # fmt: skip
 
 
@@ -714,15 +723,19 @@ def _shares_long_form(
     """``preference optimization (DPO)`` shortens DPO's own long form, but
     ``Rejection sampling Fine-Tuning (RFT)`` is not ``Reinforcement Fine-Tuning``.
 
-    The written expansion starts at the nearest word with the abbreviation's
-    first letter. It shares a long form when each of its words is a form of a
-    long-form word, allowing one other word in expansions of three or more.
-    Without such a word, any shared word counts."""
+    The written expansion starts at the nearest content word with the
+    abbreviation's first letter. It shares a long form when each of its words is
+    a form of a long-form word, allowing one other word in expansions of three
+    or more. Without such a word, any shared word counts."""
     key = (surface.entity.entity_type, surface.entity.entity_id)
     forms = index.long_forms.get(key, ())
     words = [t.group().lower() for t in before[-6:]]
     first = short[:1].lower()
-    starts = [i for i, word in enumerate(words) if word.startswith(first)]
+    starts = [
+        i
+        for i, word in enumerate(words)
+        if word.startswith(first) and word not in _FILLER_WORDS
+    ]
     if not starts:
         return any(set(words[-4:]) & set(form) for form in forms)
     content = [

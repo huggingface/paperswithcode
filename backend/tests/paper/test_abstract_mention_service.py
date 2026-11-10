@@ -299,6 +299,7 @@ ACRONYM_INDEX = build_index(
         method(3, "Supervised Fine-Tuning (SFT)"),
         method(4, "Tiny Recursive Model", "Tiny Recursive Model (TRM)"),
         method(5, "Vision Transformer", "Vision Transformer (ViT)"),
+        method(6, "Direct Preference Optimization (DPO)"),
     ]
 )
 
@@ -329,6 +330,13 @@ def test_abbreviation_spelled_with_other_word_forms_keeps_its_link():
         ("TRM", 4),
     ]
     assert acronym_links("a Visual Transformer (ViT) backbone") == [("ViT", 5)]
+
+
+def test_function_word_does_not_start_an_expansion():
+    assert acronym_links("aligned during optimization (DPO); DPO helps") == [
+        ("DPO", 6),
+        ("DPO", 6),
+    ]
 
 
 def test_full_name_long_forms_and_bad_suffixes_do_not_match():
