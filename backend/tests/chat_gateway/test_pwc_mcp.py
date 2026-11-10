@@ -163,7 +163,7 @@ def test_gateway_meters_before_dispatch_and_preserves_fence(
     import backend.chat_gateway_app as gateway
 
     events = []
-    capability = object()
+    capability = SimpleNamespace(scopes=["catalog"])
     fence = object()
 
     def scope(*args, **kwargs):
@@ -215,7 +215,9 @@ def test_gateway_denies_disabled_unknown_and_exhausted_calls(monkeypatch):
             )
         assert error.value.status_code == status
         settings.chat_pwc_mcp_enabled = True
-    monkeypatch.setattr(gateway, "_scope", lambda *args, **kw: object())
+    monkeypatch.setattr(
+        gateway, "_scope", lambda *args, **kw: SimpleNamespace(scopes=["catalog"])
+    )
 
     def exhausted(*args, **kwargs):
         raise gateway.CapabilityError("exhausted")
@@ -361,3 +363,41 @@ async def test_requests_carry_an_opaque_per_session_rate_limit_identity():
         await request_mcp(client, "tools/call", {}, endpoint_for("staging"), identity)
         await request_mcp(client, "tools/call", {}, endpoint_for("staging"))
     assert seen == [identity, None]
+
+
+def test_paper_turn_meters_catalog_searches_with_the_paper_allowance(monkeypatch):
+    from types import SimpleNamespace
+    import backend.chat_gateway_app as gateway
+
+    limits = []
+
+    class Meter:
+        def __init__(self, db):
+            pass
+
+        def meter_catalog(self, row, operation, maximum_searches):
+            limits.append(maximum_searches)
+
+    monkeypatch.setattr(gateway, "ChatCapabilityService", Meter)
+    settings = SimpleNamespace(
+        chat_pwc_mcp_enabled=True,
+        chat_max_direct_search_calls=4,
+        chat_latex_paper_max_direct_search_calls=8,
+    )
+    for scopes in (["catalog"], ["catalog", "paper"]):
+        monkeypatch.setattr(
+            gateway,
+            "_scope",
+            lambda *a, scopes=scopes, **k: SimpleNamespace(scopes=scopes),
+        )
+        gateway._authorize_pwc_mcp(
+            gateway.McpCatalogRequest(tool="search_papers", arguments={"query": "x"}),
+            "Bearer token",
+            "session",
+            "turn",
+            None,
+            SimpleNamespace(commit=lambda: None),
+            settings,
+        )
+
+    assert limits == [4, 8]
