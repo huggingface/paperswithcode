@@ -39,8 +39,12 @@ from backend.models.database import (
     Paper,
     PaperAuthor,
     PaperMethod,
+    PaperProjectPage,
+    PaperRepository,
     PaperXPost,
     PaperXThread,
+    ProjectPage,
+    Repository,
     Task,
     XInsightPost,
 )
@@ -61,8 +65,8 @@ from backend.services.x_insight_post_service import (
     top_papers,
 )
 from backend.services.x_trending_post_service import (
+    CANDIDATE_WINDOW_DAYS,
     Row,
-    candidate_papers,
     fmt,
     hf_org_x_handle,
     leaderboard_rows,
@@ -87,7 +91,6 @@ OPEN_RELEASE_PAPERS = 25
 OPEN_RELEASE_BOARDS = 12
 OPEN_RELEASE_LIMIT = 4
 TRENDING_PAPER_LIMIT = 6
-TRENDING_PAPER_POOL = 20
 CONCEPT_LIMIT = 12
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 LEAGUE_ACTIVE_DAYS = 90
@@ -613,12 +616,21 @@ def trending_papers(
 ) -> list[Candidate]:
     """This week's top trending arXiv papers the account never posted, for an
     explainer post with a screenshot of the paper page (alphaXiv style)."""
-    posted = posted_paper_ids(db)
-    papers = [
-        paper
-        for paper in candidate_papers(db, today=now.date(), limit=TRENDING_PAPER_POOL)
-        if paper.id not in posted
-    ][:TRENDING_PAPER_LIMIT]
+    since = now.date() - timedelta(days=CANDIDATE_WINDOW_DAYS)
+    papers = db.scalars(
+        select(Paper)
+        .where(
+            Paper.is_latest_version,
+            Paper.source == "arxiv",
+            Paper.arxiv_id.is_not(None),
+            Paper.date_published >= since,
+            Paper.trending_score > 0,
+            func.length(func.trim(Paper.tldr)) > 0,
+            Paper.id.not_in(posted_paper_ids(db) or {0}),
+        )
+        .order_by(Paper.trending_score.desc(), Paper.id.desc())
+        .limit(TRENDING_PAPER_LIMIT)
+    ).all()
     candidates = []
     for index, paper in enumerate(papers):
         authors = list(
@@ -644,8 +656,33 @@ def trending_papers(
             "x_threads": x_threads(db, paper.id),
             "tldr": paper.tldr,
             "abstract": paper.abstract,
-            "code": [repo.url for repo in paper.repositories][:2],
-            "project_pages": [page.url for page in paper.project_pages][:1],
+            "code": list(
+                db.scalars(
+                    select(Repository.url)
+                    .join(
+                        PaperRepository, PaperRepository.repository_id == Repository.id
+                    )
+                    .where(PaperRepository.paper_id == paper.id)
+                    .order_by(
+                        PaperRepository.is_official.desc(),
+                        Repository.num_stars.desc(),
+                        Repository.id,
+                    )
+                    .limit(2)
+                )
+            ),
+            "project_pages": list(
+                db.scalars(
+                    select(ProjectPage.url)
+                    .join(
+                        PaperProjectPage,
+                        PaperProjectPage.project_page_id == ProjectPage.id,
+                    )
+                    .where(PaperProjectPage.paper_id == paper.id)
+                    .order_by(ProjectPage.id)
+                    .limit(1)
+                )
+            ),
             "leaderboard_results": paper_results(db, paper.id),
             "paper_url": paper_url(paper),
         }
