@@ -27,8 +27,8 @@ def test_registry_covers_workflows_systemd_and_allowlist_exactly():
     summary = _dashboard_job_summary(
         [{"category": job.category, "status": "healthy"} for job in jobs]
     )
-    assert summary["total_jobs"] == 74
-    assert summary["scheduled_jobs"] == 73
+    assert summary["total_jobs"] == 75
+    assert summary["scheduled_jobs"] == 74
     assert summary["manual_jobs"] == 1
     assert len(by_id) == len(jobs), "duplicate dashboard job IDs"
 
@@ -121,6 +121,7 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "sync_physics_iq_verified" in job_ids
     assert "sync_vals_finance_agent" in job_ids
     assert "sync_surge_chartography" in job_ids
+    assert "sync_swe_marathon" in job_ids
     assert "sync_frontiercs_2" in job_ids
     assert "sync_vals_index" in job_ids
     assert "sync_swe_sweep" in job_ids
@@ -191,6 +192,7 @@ def test_registry_classifies_only_recurring_leaderboard_syncs():
         "sync_physics_iq_verified",
         "sync_vals_finance_agent",
         "sync_surge_chartography",
+        "sync_swe_marathon",
         "sync_frontiercs_2",
         "sync_vals_index",
         "sync_swe_sweep",

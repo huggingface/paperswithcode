@@ -49,6 +49,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-extractbench.timer` | `*-*-* *:32:00` | `sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
 | `pwc-cron-sync-vals-finance-agent.timer` | `*-*-* *:47:00` | `sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
 | `pwc-cron-sync-surge-chartography.timer` | `*-*-* *:38:00` | `sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
+| `pwc-cron-sync-swe-marathon.timer` | `*-*-* *:26:00` | `sync_swe_marathon` | `.github/workflows/scripts/hourly/sync_swe_marathon.py` |
 | `pwc-cron-sync-frontiercs-2.timer` | `*-*-* *:43:00` | `sync_frontiercs_2` | `.github/workflows/scripts/hourly/sync_frontiercs_2.py` |
 | `pwc-cron-sync-vals-index.timer` | `*-*-* *:03:00` | `sync_vals_index` | `.github/workflows/scripts/hourly/sync_vals_index.py` |
 | `pwc-cron-sync-swe-sweep.timer` | `*-*-* *:08:00` | `sync_swe_sweep` | `.github/workflows/scripts/hourly/sync_swe_sweep.py` |
@@ -505,6 +506,18 @@ unchanged), and adopts matching hand-imported rows, keeping their notes,
 `is_open`, `hf_model_url`, and `num_parameters`. Managed rows that drop off the
 leaderboard are reported, never deleted. The with-tools `chartography`
 benchmark is curated by hand and never touched.
+
+`sync_swe_marathon.py` keeps the `swe-marathon` benchmark on task
+`long-horizon-agents` equal to Abundant AI's v1.1 results. swe-marathon.org
+renders client-side, so the job reads the hashed `/assets/index-*.js` bundle
+the home page loads and decodes its embedded `{version:`v1.1`,tasks:...}`
+results. Resolution Rate is the share of a config's trials with reward 1 over
+all 20 tasks, as the site computes it; only complete runs (every task, the full
+trial count) count, and each model keeps its best reasoning effort per agent,
+named in the methodology rather than the row name. It fails on another results
+version, a pass count that disagrees with the trials, or a run count outside
+10–300. `adopt_unmanaged=False` keeps self-reported vendor rows (Kimi K3.1 Pro)
+beside Abundant AI's runs.
 
 `sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
 official `google-deepmind/physics-IQ-benchmark` README (the
