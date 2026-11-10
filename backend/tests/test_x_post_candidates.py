@@ -18,6 +18,7 @@ from backend.services.x_post_candidates import (
     placement,
     plain_text,
     sota_score,
+    subject_paper_id,
 )
 from backend.services.x_trending_post_service import Row
 
@@ -262,3 +263,11 @@ def test_open_release_text():
     assert "Best open model on GPQA." in text
     assert "beats every closed model, 88 to GPT-6's 87." in text
     assert text.endswith("Congrats @Alibaba_Qwen!")
+
+
+def test_subject_paper_id_reads_every_key_shape():
+    assert subject_paper_id("131917") == 131917
+    assert subject_paper_id("625:Accuracy:131917") == 131917
+    assert subject_paper_id("open:625:Accuracy:131917") == 131917
+    assert subject_paper_id("task:12:625:Accuracy:131917") == 131917
+    assert subject_paper_id("2026-W46") is None
