@@ -16,9 +16,9 @@ import time
 from collections import OrderedDict
 from typing import Any
 
-from huggingface_hub import HfFileSystem
 from huggingface_hub.errors import EntryNotFoundError
 
+from backend.services.hf_bucket_filesystem import BucketFileSystem
 from backend.services.paper_markdown_service import (
     normalize_markdown_paper_id,
     paper_markdown_bucket_key,
@@ -66,7 +66,7 @@ def read_paper_layout(
 
     path = f"hf://buckets/{bucket_id}/{_blocks_key(normalized, source)}"
     try:
-        with HfFileSystem(token=token).open(path, "rb", block_size=0) as handle:
+        with BucketFileSystem(token=token).open(path, "rb", block_size=0) as handle:
             raw = handle.read(BLOCKS_MAX_BYTES + 1)
     except (EntryNotFoundError, FileNotFoundError) as error:
         raise PaperLayoutNotFoundError(f"No layout for paper {normalized}") from error

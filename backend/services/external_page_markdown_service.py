@@ -21,7 +21,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import urljoin, urlsplit
 
 import httpx
-from huggingface_hub import HfApi, HfFileSystem
+from huggingface_hub import HfApi
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 
 from backend.scripts.generate_missing_paper_markdown import (
@@ -29,6 +29,7 @@ from backend.scripts.generate_missing_paper_markdown import (
     TITLE_STOP_WORDS,
     validate_canonical_markdown,
 )
+from backend.services.hf_bucket_filesystem import BucketFileSystem
 from backend.services.paper_markdown_service import (
     paper_markdown_bucket_key,
     paper_markdown_content_key,
@@ -234,7 +235,6 @@ def publish_paper_markdown(
         ],
         token=token,
     )
-    HfFileSystem(token=token).invalidate_cache(f"hf://buckets/{bucket_id}/external")
     return content_sha256
 
 
@@ -245,7 +245,7 @@ def status_key(paper_id: str) -> str:
 def read_status(paper_id: str, *, bucket_id: str, token: str | None) -> dict:
     path = f"hf://buckets/{bucket_id}/{status_key(paper_id)}"
     try:
-        with HfFileSystem(token=token).open(path, "rb", block_size=0) as handle:
+        with BucketFileSystem(token=token).open(path, "rb", block_size=0) as handle:
             payload = json.loads(handle.read(64 * 1024))
     except (EntryNotFoundError, FileNotFoundError):
         return {}
@@ -256,7 +256,7 @@ def web_markdown_ready(paper, *, bucket_id: str, token: str | None) -> bool:
     """Whether the page's Markdown exists for curation to read."""
     path = f"hf://buckets/{bucket_id}/{paper_markdown_bucket_key(str(paper.id), source='external')}"
     try:
-        return HfFileSystem(token=token).exists(path)
+        return BucketFileSystem(token=token).exists(path)
     except (HfHubHTTPError, OSError):
         return False
 
@@ -393,12 +393,12 @@ def _prepare(
         )
     # A concurrent request may have published while this one waited.
     alias = paper_markdown_bucket_key(paper_id, source="external")
-    if prior.get("status") == "succeeded" and HfFileSystem(token=token).exists(
+    if prior.get("status") == "succeeded" and BucketFileSystem(token=token).exists(
         f"hf://buckets/{bucket_id}/{alias}"
     ):
         return str(prior["markdown_sha256"])
     # Check before the paid scrape; a held lock costs no credit.
-    if HfFileSystem(token=token).exists(
+    if BucketFileSystem(token=token).exists(
         f"hf://buckets/{bucket_id}/{MARKDOWN_MIGRATION_LOCK_KEY}"
     ):
         raise ExternalPageMarkdownError("markdown_migration_locked", retryable=True)

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import re
 import hashlib
 import json
+import re
 import threading
 import time
 from collections import OrderedDict
@@ -15,9 +15,11 @@ from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from huggingface_hub import HfFileSystem, download_bucket_files
+from huggingface_hub import download_bucket_files
 from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 from PIL import Image
+
+from backend.services.hf_bucket_filesystem import BucketFileSystem
 
 _MODERN_ARXIV_ID = re.compile(r"^(?P<base>\d{4}\.\d{4,5})(?:v\d+)?$")
 _EXTERNAL_PAPER_ID = re.compile(r"^[1-9]\d{0,19}$")
@@ -251,7 +253,7 @@ def stream_external_paper_pdf(
 
     key = f"external/{normalized}/paper.pdf"
     path = f"hf://buckets/{bucket_id.strip()}/{key}"
-    filesystem = HfFileSystem(token=token)
+    filesystem = BucketFileSystem(token=token)
     try:
         size = int(filesystem.info(path)["size"])
         with filesystem.open(path, "rb", block_size=0) as handle:
@@ -293,7 +295,7 @@ def read_paper_asset(
     key = paper_asset_bucket_key(paper_id, filename, source=source)
     path = f"hf://buckets/{bucket_id.strip()}/{key}"
     try:
-        filesystem = HfFileSystem(token=token)
+        filesystem = BucketFileSystem(token=token)
         with filesystem.open(path, "rb", block_size=0) as handle:
             data = handle.read(max_bytes + 1)
     except (EntryNotFoundError, FileNotFoundError) as error:
@@ -392,7 +394,7 @@ def read_paper_markdown_bounded(
 
 
 def _read_markdown_manifest(
-    filesystem: HfFileSystem,
+    filesystem: BucketFileSystem,
     *,
     bucket_id: str,
     paper_id: str,
@@ -457,7 +459,7 @@ def _resolve_bounded_markdown_key(
     if cached is not None:
         return cached
 
-    filesystem = HfFileSystem(token=token)
+    filesystem = BucketFileSystem(token=token)
     try:
         manifest = _read_markdown_manifest(
             filesystem,
@@ -530,7 +532,7 @@ def read_paper_markdown_chunk(
     ):
         raise PaperMarkdownRangeError("Paper Markdown limit is invalid")
 
-    filesystem = HfFileSystem(token=token)
+    filesystem = BucketFileSystem(token=token)
     try:
         manifest = _read_markdown_manifest(
             filesystem,
@@ -672,7 +674,7 @@ def _read_paper_markdown_bytes(
     """Fetch one bounded public artifact and retain hot reads in-process."""
     path = f"hf://buckets/{bucket_id}/{bucket_key}"
     try:
-        filesystem = HfFileSystem(token=token)
+        filesystem = BucketFileSystem(token=token)
         with filesystem.open(path, "rb", block_size=0) as handle:
             raw = handle.read(max_bytes + 1)
     except (EntryNotFoundError, FileNotFoundError) as error:

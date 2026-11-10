@@ -100,7 +100,7 @@ def test_monitor_combines_hf_stage_with_compact_shard_progress(monkeypatch):
 
     monkeypatch.setattr(monitor, "get_settings", lambda: settings)
     monkeypatch.setattr(monitor, "HfApi", FakeApi)
-    monkeypatch.setattr(monitor, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(monitor, "BucketFileSystem", FakeFileSystem)
     monitor.clear_paper_markdown_job_monitor_cache()
 
     result = monitor.get_paper_markdown_job_monitor()
@@ -196,7 +196,7 @@ def test_monitor_reads_remote_progress_with_bounded_concurrency(monkeypatch):
 
     monkeypatch.setattr(monitor, "get_settings", lambda: settings)
     monkeypatch.setattr(monitor, "HfApi", FakeApi)
-    monkeypatch.setattr(monitor, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(monitor, "BucketFileSystem", FakeFileSystem)
     monitor.clear_paper_markdown_job_monitor_cache()
 
     result = monitor.get_paper_markdown_job_monitor()
@@ -255,7 +255,7 @@ def test_monitor_returns_unavailable_when_progress_reads_exceed_deadline(monkeyp
 
     monkeypatch.setattr(monitor, "get_settings", lambda: settings)
     monkeypatch.setattr(monitor, "HfApi", FakeApi)
-    monkeypatch.setattr(monitor, "HfFileSystem", SlowFileSystem)
+    monkeypatch.setattr(monitor, "BucketFileSystem", SlowFileSystem)
     monkeypatch.setattr(monitor, "_PROGRESS_READ_DEADLINE_SECONDS", 0.02, raising=False)
     monitor.clear_paper_markdown_job_monitor_cache()
 
@@ -433,7 +433,7 @@ def test_efficiency_metrics_exclude_active_shard_progress(monkeypatch):
 
     monkeypatch.setattr(monitor, "get_settings", lambda: settings)
     monkeypatch.setattr(monitor, "HfApi", FakeApi)
-    monkeypatch.setattr(monitor, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(monitor, "BucketFileSystem", FakeFileSystem)
     monkeypatch.setattr(monitor, "_coverage_history", lambda _now: {})
     monitor.clear_paper_markdown_job_monitor_cache()
 
@@ -607,7 +607,7 @@ def test_fresh_lane_runs_read_progress_without_hiding_live_failures(monkeypatch)
 
     monkeypatch.setattr(monitor, "get_settings", lambda: settings)
     monkeypatch.setattr(monitor, "HfApi", FakeApi)
-    monkeypatch.setattr(monitor, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(monitor, "BucketFileSystem", FakeFileSystem)
     monitor.clear_paper_markdown_job_monitor_cache()
 
     result = monitor.get_paper_markdown_job_monitor()

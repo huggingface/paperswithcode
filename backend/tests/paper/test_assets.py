@@ -57,7 +57,7 @@ def test_asset_reader_is_bounded_and_validates_image(monkeypatch):
             assert block_size == 0
             return TrackedFile(data)
 
-    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(paper_markdown_service, "BucketFileSystem", FakeFileSystem)
     actual, media_type = paper_markdown_service.read_paper_asset(
         "2607.24653",
         "0123456789abcdef.webp",
@@ -132,7 +132,7 @@ def test_public_external_pdf_route_streams_the_archived_private_object(monkeypat
             assert block_size == 0
             return TrackedFile(pdf)
 
-    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(paper_markdown_service, "BucketFileSystem", FakeFileSystem)
     monkeypatch.setattr(
         paper_assets,
         "get_settings",

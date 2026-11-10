@@ -72,7 +72,7 @@ def _install_versioned_filesystem(monkeypatch, files: dict[str, bytes]):
                 operations.append(("cache_type", cache_type))
             return TrackedFile(files[key])
 
-    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(paper_markdown_service, "BucketFileSystem", FakeFileSystem)
     paper_markdown_service._paper_markdown_chunk_cache.clear()
     return operations
 
@@ -289,7 +289,7 @@ def test_bounded_markdown_read_never_requests_the_full_object(monkeypatch):
             assert path == "hf://buckets/owner/content/1706/1706.03762.md"
             return TrackedFile(raw)
 
-    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(paper_markdown_service, "BucketFileSystem", FakeFileSystem)
     paper_markdown_service._read_paper_markdown_bytes.cache_clear()
 
     try:
@@ -325,7 +325,7 @@ def test_external_markdown_uses_paper_id_bucket_namespace(monkeypatch):
             assert path == "hf://buckets/owner/content/external/109743.md"
             return io.BytesIO(b"# External paper\n")
 
-    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(paper_markdown_service, "BucketFileSystem", FakeFileSystem)
     paper_markdown_service._read_paper_markdown_bytes.cache_clear()
     try:
         assert paper_markdown_service.read_paper_markdown_bounded(
@@ -354,7 +354,7 @@ def test_bounded_markdown_read_caches_the_public_artifact(monkeypatch):
             opens += 1
             return io.BytesIO(b"# Cached paper\n")
 
-    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(paper_markdown_service, "BucketFileSystem", FakeFileSystem)
     paper_markdown_service._read_paper_markdown_bytes.cache_clear()
 
     try:
@@ -439,7 +439,7 @@ def test_bounded_markdown_read_uses_stale_resolution_during_manifest_outage(
             assert path.endswith("/1706/1706.03762.md")
             return io.BytesIO(b"# Cached compatibility paper\n")
 
-    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(paper_markdown_service, "BucketFileSystem", FakeFileSystem)
     monkeypatch.setattr(paper_markdown_service.time, "monotonic", lambda: now)
     paper_markdown_service._paper_markdown_manifest_key_cache.clear()
     paper_markdown_service._read_paper_markdown_bytes.cache_clear()

@@ -14,9 +14,10 @@ from urllib.parse import urlsplit
 
 import fitz
 import httpx
-from huggingface_hub import HfApi, HfFileSystem
+from huggingface_hub import HfApi
 
 from backend.scripts.generate_missing_paper_markdown import download_external_pdf
+from backend.services.hf_bucket_filesystem import BucketFileSystem
 from backend.services.paper_markdown_service import PAPER_PDF_MAX_BYTES
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def archive_external_paper_pdf(
 ) -> bool:
     """Download and archive one PDF; return False when a copy already exists."""
     path = f"hf://buckets/{bucket_id}/external/{paper_id}/paper.pdf"
-    filesystem = HfFileSystem(token=token)
+    filesystem = BucketFileSystem(token=token)
     if filesystem.exists(path):
         return False
     data = download_external_pdf(
@@ -60,7 +61,6 @@ def archive_external_paper_pdf(
     HfApi(token=token).batch_bucket_files(
         bucket_id, add=[(data, f"external/{paper_id}/paper.pdf")], token=token
     )
-    filesystem.invalidate_cache(f"hf://buckets/{bucket_id}/external")
     return True
 
 

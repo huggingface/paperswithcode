@@ -207,7 +207,7 @@ class FakeBucket:
                 pass
 
         monkeypatch.setattr(service, "HfApi", Api)
-        monkeypatch.setattr(service, "HfFileSystem", FileSystem)
+        monkeypatch.setattr(service, "BucketFileSystem", FileSystem)
         return self
 
 
@@ -387,7 +387,7 @@ def test_bucket_errors_surface_as_retryable_storage_unavailable(monkeypatch, fai
         def fail(*args, **kwargs):
             raise OSError("bucket unreachable")
 
-        monkeypatch.setattr(service.HfFileSystem, failing, fail)
+        monkeypatch.setattr(service.BucketFileSystem, failing, fail)
 
     with pytest.raises(ExternalPageMarkdownError) as error:
         _prepare()
@@ -682,7 +682,7 @@ def test_web_markdown_pending_never_waits_on_unreadable_pages(
             checked.append(path)
             return exists
 
-    monkeypatch.setattr(service, "HfFileSystem", Filesystem)
+    monkeypatch.setattr(service, "BucketFileSystem", Filesystem)
     monkeypatch.setattr(service, "read_status", lambda *_a, **_kw: status)
     paper = SimpleNamespace(
         id=131370, source="external", source_url=source_url, conference_url_pdf=None

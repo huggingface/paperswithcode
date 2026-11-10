@@ -16,12 +16,13 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-from huggingface_hub import HfFileSystem, batch_bucket_files, download_bucket_files
+from huggingface_hub import batch_bucket_files, download_bucket_files
 from pdf2image import convert_from_bytes
 from PIL import Image, ImageDraw, ImageFont
 
 from backend.config import get_settings
 from backend.services.arxiv_service import ArxivPdfUnavailableError, ArxivService
+from backend.services.hf_bucket_filesystem import BucketFileSystem
 from backend.services.paper_markdown_service import stream_external_paper_pdf
 from backend.services.safe_outbound_http_service import (
     SafeOutboundHttpError,
@@ -376,7 +377,7 @@ class ThumbnailService:
         self.bucket_prefix = self.settings.thumbnail_hf_bucket_prefix.strip("/")
         self.hf_token = self.settings.hf_token or None
         self.hf_fs = (
-            HfFileSystem(token=self.hf_token)
+            BucketFileSystem(token=self.hf_token)
             if self.storage_backend == "hf_bucket"
             else None
         )
