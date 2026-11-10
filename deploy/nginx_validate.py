@@ -348,7 +348,7 @@ def validate(production: str, staging: str) -> list[str]:
             "v1/messages",
             "v1/responses",
             *(
-                ("artifact-prepare", "artifact-publish")
+                ("artifact-prepare", "artifact-publish", "paper")
                 if environment == "staging"
                 else ()
             ),
@@ -363,6 +363,18 @@ def validate(production: str, staging: str) -> list[str]:
                 failures.append(
                     f"{environment} chat gateway {endpoint} misses {backend}"
                 )
+        paper_block = location_block(
+            config, "location = /api/internal/chat-gateway/paper"
+        )
+        if environment == "production" and paper_block:
+            failures.append("production must not expose the paper gateway")
+        if paper_block and (
+            "limit_except POST { deny all; }" not in paper_block
+            or "proxy_read_timeout 140s;" not in paper_block
+        ):
+            failures.append(
+                f"{environment} paper gateway must be POST-only with a repair timeout"
+            )
         mcp_block = location_block(
             config, "location = /api/internal/chat-gateway/catalog-mcp"
         )
