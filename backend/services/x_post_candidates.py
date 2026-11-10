@@ -72,7 +72,7 @@ KINDS = (
     "top_papers_week",
     "top_papers_month",
 )
-SOTA_LIMIT = 4
+SOTA_LIMIT = 8
 CONCEPT_LIMIT = 12
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 LEAGUE_ACTIVE_DAYS = 90
@@ -158,6 +158,44 @@ def classify_win(
     return None
 
 
+def open_closed_facts(board: Board, mine: Row) -> dict[str, Any]:
+    """The best open and best closed entries on the board, for the open vs
+    closed story. `mine` counts, so an open winner is its own best open row."""
+    facts: dict[str, Any] = {}
+    for label, is_open in (("open", True), ("closed", False)):
+        best = next(
+            (
+                row
+                for row in board.rows
+                if (row.evaluation_id in board.open_ids) == is_open
+            ),
+            None,
+        )
+        if best is not None:
+            facts[f"best_{label}_model"] = best.model
+            facts[f"best_{label}_value"] = fmt(best.value)
+    return facts
+
+
+def sota_score(
+    kind: str, entries: int, *, model_is_open: bool, beats_closed: bool
+) -> float:
+    """Rank open-weights stories first: an open model ahead of every closed one,
+    then the best open model behind a closed leader, then closed firsts."""
+    if kind == "new_sota" and model_is_open and beats_closed:
+        return entries * 2.0
+    if kind == "open_sota":
+        return entries * 1.5
+    return float(entries)
+
+
+def open_beats_closed_line(facts: dict[str, Any]) -> str:
+    return (
+        f"Open weights, ahead of the best closed model, "
+        f"{facts['best_closed_model']} ({facts['best_closed_value']})."
+    )
+
+
 def open_sota_text(facts: dict[str, Any], credit: str) -> str:
     return (
         f"{facts['model']} is now the best open model on {facts['benchmark']} "
@@ -229,17 +267,28 @@ def leaderboard_wins(
             "paper_url": f"{SITE}/paper/{paper.id}",
             "leaderboard_entries": len(board.rows),
             "model_is_open": mine.evaluation_id in board.open_ids,
+            **open_closed_facts(board, mine),
         }
         top = _distinct_models(board.rows, 6)
         if mine not in top:
             top = [*top[:5], mine]
         unit = f"{metric} ({'lower' if board.lower else 'higher'} is better)"
+        labels = [
+            row.model + ("" if row.evaluation_id in board.open_ids else " (closed)")
+            for row in top
+        ]
+        score = sota_score(
+            kind,
+            len(board.rows),
+            model_is_open=facts["model_is_open"],
+            beats_closed="best_closed_model" in facts,
+        )
         if kind == "new_sota":
             facts["previous_model"] = beaten.model
             facts["previous_value"] = fmt(beaten.value)
             title, eyebrow = f"New SOTA on {dataset.name}", "New state of the art"
-            labels = [row.model for row in top]
-            score = float(len(board.rows))
+            if facts["model_is_open"]:
+                eyebrow = "Open-weights model, new state of the art"
         else:
             leader = board.rows[0]
             facts["previous_best_open_model"] = beaten.model
@@ -249,11 +298,6 @@ def leaderboard_wins(
             facts["overall_rank"] = board.rows.index(mine) + 1
             title = f"Best open model on {dataset.name}"
             eyebrow = "Open-weights state of the art"
-            labels = [
-                row.model + ("" if row.evaluation_id in board.open_ids else " (closed)")
-                for row in top
-            ]
-            score = len(board.rows) * 0.8
         image = render_bar_card(
             title,
             unit,
@@ -282,6 +326,11 @@ def leaderboard_wins(
             candidate.draft = sota_text(
                 candidate.facts, handles=handles, organization=organization
             )
+            if (
+                candidate.facts["model_is_open"]
+                and "best_closed_model" in candidate.facts
+            ):
+                candidate.draft += "\n\n" + open_beats_closed_line(candidate.facts)
         else:
             credit = (
                 f"@{handles[0]}"
