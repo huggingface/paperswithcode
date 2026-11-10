@@ -18,6 +18,7 @@ from backend.models.research import (
     FollowKind,
     FollowSuggestions,
     FollowView,
+    NewPaperCount,
     PublicTopicView,
     ResearchFeedEntry,
     SubscriptionUpdate,
@@ -357,6 +358,21 @@ def following(
         topic_only=topic_only,
         topic_ids=topic_id,
         follows=[parse_follow(value) for value in follow],
+    )
+
+
+@router.get("/me/following/new-count", response_model=NewPaperCount)
+def following_new_count(
+    since: datetime = Query(..., description="Count papers added after this time"),
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+):
+    """How many following-feed papers arrived since the last visit, at most 100."""
+    now = datetime.now(timezone.utc)
+    if since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    return NewPaperCount(
+        count=service.new_paper_count(db, user["hf_subject"], now, since)
     )
 
 

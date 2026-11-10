@@ -46,11 +46,12 @@ beforeEach(() => {
   vi.spyOn(researchApi, 'topics').mockResolvedValue([]);
   vi.spyOn(researchApi, 'featuredTopics').mockResolvedValue([]);
   vi.spyOn(researchApi, 'topicMatches').mockResolvedValue([]);
+  vi.spyOn(researchApi, 'followingNewCount').mockResolvedValue({ count: 0 });
 });
 const REWORD = 'Reword Real-time video generation';
 const topic = { id: 1, text: 'real-time video generation', label: null, set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
   judged: 10, total: 10, suggestions: [], is_public: true, is_creator: true };
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); sessionStorage.clear(); login.hfLoginUrl.mockClear(); });
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); sessionStorage.clear(); localStorage.clear(); login.hfLoginUrl.mockClear(); });
 it('renders following in the existing tab row with standard paper cards and thumbnails', async () => {
   const { container } = renderFeed();
   await screen.findByText('A paper');
@@ -542,4 +543,72 @@ it('keeps popular topics a visitor picked when following them fails, and retries
   await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull());
   expect(follow).toHaveBeenLastCalledWith(24);
   expect(follow).toHaveBeenCalledTimes(3);
+});
+
+// Lazy thumbnails below the first cards watch for visibility.
+beforeEach(() => vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} }));
+afterEach(() => vi.unstubAllGlobals());
+const trendingPapers = Array.from({ length: 8 }, (_, i) => ({ ...paper, id: String(i + 1), arxiv_id: `2610.1000${i}`, title: `Trending ${i + 1}` }));
+const featured = [{ id: 13, text: 'speculative decoding', label: null, creator: null, followers: 4 }];
+it('invites guests to follow a popular topic after the sixth trending paper', async () => {
+  auth.user = null;
+  vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
+  const { container } = renderFeed('/');
+  const card = await screen.findByRole('region', { name: 'Get a feed for your research' });
+  const items = [...container.querySelectorAll('.paper-list > *')];
+  expect(items.indexOf(card)).toBe(6);
+  fireEvent.click(await within(card).findByRole('button', { name: /speculative decoding/i }));
+  expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBe('[13]');
+  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
+  expect(researchApi.follows).not.toHaveBeenCalled();
+});
+it('follows a popular topic from the trending card and opens it on Following', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
+  vi.spyOn(researchApi, 'followTopic').mockImplementation(async () => {
+    vi.mocked(researchApi.topics).mockResolvedValue([{ ...topic, id: 13, text: 'speculative decoding', is_creator: false }]);
+    return undefined as never;
+  });
+  renderFeed('/');
+  const card = await screen.findByRole('region', { name: 'Get a feed for your research' });
+  fireEvent.click(await within(card).findByRole('button', { name: /speculative decoding/i }));
+  await waitFor(() => expect(researchApi.followTopic).toHaveBeenCalledWith(13));
+  expect(await screen.findByText('A paper')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^following/ })).toHaveClass('active');
+  // The new topic's bubble stays selected, and the empty-account pop-up does not open.
+  expect(screen.getByRole('link', { name: /speculative decoding/i })).toHaveAttribute('aria-current', 'true');
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+it('keeps the trending card dismissed', async () => {
+  auth.user = null;
+  vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
+  const view = renderFeed('/');
+  const card = await screen.findByRole('region', { name: 'Get a feed for your research' });
+  fireEvent.click(within(card).getByRole('button', { name: 'Dismiss' }));
+  expect(screen.queryByRole('region', { name: 'Get a feed for your research' })).not.toBeInTheDocument();
+  view.unmount();
+  renderFeed('/');
+  await screen.findByText('Trending 8');
+  expect(screen.queryByRole('region', { name: 'Get a feed for your research' })).not.toBeInTheDocument();
+});
+it('counts new following papers on the tab since the last visit, and not the invitation', async () => {
+  localStorage.setItem('pwc:following-last-seen', '2026-11-09T08:00:00.000Z');
+  vi.mocked(researchApi.followingNewCount).mockResolvedValue({ count: 12 });
+  vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
+  renderFeed('/');
+  const tab = await screen.findByRole('button', { name: 'following 12 new' });
+  expect(researchApi.followingNewCount).toHaveBeenCalledWith('2026-11-09T08:00:00.000Z');
+  expect(screen.queryByRole('region', { name: 'Get a feed for your research' })).not.toBeInTheDocument();
+  fireEvent.click(tab);
+  await screen.findByText('A paper');
+  expect(screen.getByRole('button', { name: 'following' })).toBeInTheDocument();
+  expect(localStorage.getItem('pwc:following-last-seen')).not.toBe('2026-11-09T08:00:00.000Z');
+});
+it('starts counting from the first homepage visit', async () => {
+  renderFeed('/');
+  await screen.findByText('No papers in this window.');
+  await waitFor(() => expect(localStorage.getItem('pwc:following-last-seen')).not.toBeNull());
+  expect(researchApi.followingNewCount).not.toHaveBeenCalled();
 });

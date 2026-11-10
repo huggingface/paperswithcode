@@ -146,3 +146,9 @@ class ResearchEntry(BaseModel):
 
 class ResearchFeedEntry(ResearchEntry):
     paper: Paper
+
+
+class NewPaperCount(BaseModel):
+    """Following-feed papers added since a time, capped at 100."""
+
+    count: int

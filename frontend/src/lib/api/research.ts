@@ -123,6 +123,9 @@ export const researchApi = {
     filters.follows?.forEach(follow => params.append('follow', follow));
     return apiRequest<ResearchEntry[]>(`/me/following?${params}`);
   },
+  /** Following-feed papers added after `since`, at most 100. */
+  followingNewCount: (since: string) =>
+    apiRequest<{ count: number }>(`/me/following/new-count?${new URLSearchParams({ since })}`),
   topics: () => apiRequest<ResearchTopic[]>('/me/topics'),
   addTopic: (text: string) => apiRequest<ResearchTopic>('/me/topics', {
     method: 'POST', body: JSON.stringify({ text }),

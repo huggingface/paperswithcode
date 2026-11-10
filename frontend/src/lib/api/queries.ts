@@ -364,6 +364,11 @@ export const researchQueries = {
     queryKey: ["research-public-topic", id, subject],
     queryFn: () => researchApi.publicTopic(id),
   }),
+  followingNewCount: (subject: string | undefined, since: string) => queryOptions({
+    queryKey: ["research-following-new-count", subject, since],
+    queryFn: () => researchApi.followingNewCount(since),
+    staleTime: 5 * 60 * 1000,
+  }),
   featuredTopics: () => queryOptions({
     queryKey: ["research-featured-topics"],
     queryFn: researchApi.featuredTopics,

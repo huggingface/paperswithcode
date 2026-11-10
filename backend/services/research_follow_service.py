@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from typing import NamedTuple
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, String, and_, column, exists, or_, select, text
+from sqlalchemy import Integer, String, and_, column, exists, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -352,6 +352,34 @@ JOIN papers p ON (source.arxiv_id IS NOT NULL AND p.arxiv_id=source.arxiv_id AND
 WHERE p.date_published BETWEEN :cutoff AND :today
 AND NOT EXISTS (SELECT 1 FROM papers old WHERE old.arxiv_id=p.arxiv_id AND old.date_published<:cutoff)
 """
+
+
+NEW_COUNT_LIMIT = 100
+
+
+def new_paper_count(db: Session, subject: str, now: datetime, since: datetime) -> int:
+    """Following-feed papers added to the catalog after ``since``, capped at NEW_COUNT_LIMIT."""
+    # A paper added after the last visit was published at most a few days before it,
+    # and the feed itself only reaches back 30 days.
+    cutoff = max(since - timedelta(days=7), now - timedelta(days=30)).date()
+    matches = (
+        text(MATCH_SQL)
+        .bindparams(
+            subject=subject,
+            today=now.date(),
+            cutoff=cutoff,
+            topic_threshold=TOPIC_THRESHOLD,
+        )
+        .columns(column("id", Integer))
+        .subquery("matches")
+    )
+    new_ids = (
+        select(DBPaper.id)
+        .where(DBPaper.id.in_(select(matches.c.id)), DBPaper.created_at > since)
+        .limit(NEW_COUNT_LIMIT)
+        .subquery()
+    )
+    return db.scalar(select(func.count()).select_from(new_ids))
 
 
 def matching_entries(
