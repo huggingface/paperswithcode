@@ -179,7 +179,6 @@ ON CONFLICT (slug) DO UPDATE SET
     source_url = EXCLUDED.source_url,
     source_title = EXCLUDED.source_title,
     code_snippet_url = EXCLUDED.code_snippet_url,
-    image_url = EXCLUDED.image_url,
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
