@@ -732,18 +732,22 @@ def _shares_long_form(
     forms = index.long_forms.get(key, ())
     words = [t.group().lower() for t in before[-6:]]
     first = short[:1].lower()
-    starts = [
-        i
+    expansions = [
+        [
+            w
+            for w in words[i:]
+            if w not in _IGNORED_WORDS
+            and len(w) > 1
+            and not any(c.isdigit() for c in w)
+        ]
         for i, word in enumerate(words)
         if word.startswith(first) and word not in _FUNCTION_WORDS
     ]
-    if not starts:
+    # The nearest start with something to compare: a trailing "Model" alone
+    # says nothing about which long form the abstract means.
+    content = next((found for found in reversed(expansions) if found), None)
+    if content is None:
         return any(set(words[-4:]) & set(form) for form in forms)
-    content = [
-        w
-        for w in words[starts[-1] :]
-        if w not in _IGNORED_WORDS and len(w) > 1 and not any(c.isdigit() for c in w)
-    ]
     for form in forms:
         unmatched = sum(not _same_word(w, form) for w in content)
         if unmatched == 0 or (unmatched == 1 and len(content) >= 3):

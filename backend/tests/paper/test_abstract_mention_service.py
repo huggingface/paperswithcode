@@ -301,6 +301,7 @@ ACRONYM_INDEX = build_index(
         method(5, "Vision Transformer", "Vision Transformer (ViT)"),
         method(6, "Direct Preference Optimization (DPO)"),
         method(7, "Model Predictive Control", "Model Predictive Control (MPC)"),
+        method(8, "Masked Language Model", "Masked Language Model (MLM)"),
     ]
 )
 
@@ -343,6 +344,8 @@ def test_function_word_does_not_start_an_expansion():
         ("MPC", 7),
         ("MPC", 7),
     ]
+    # A trailing "Model" alone does not make "Mamba Language Model" an MLM.
+    assert acronym_links("our Mamba Language Model (MLM); the MLM wins") == []
 
 
 def test_full_name_long_forms_and_bad_suffixes_do_not_match():
