@@ -32,13 +32,19 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
+    Author,
     Dataset,
     Evaluation,
     Metric,
     Paper,
+    PaperAuthor,
     PaperMethod,
+    PaperProjectPage,
+    PaperRepository,
     PaperXPost,
     PaperXThread,
+    ProjectPage,
+    Repository,
     Task,
     XInsightPost,
 )
@@ -59,16 +65,21 @@ from backend.services.x_insight_post_service import (
     top_papers,
 )
 from backend.services.x_trending_post_service import (
+    CANDIDATE_WINDOW_DAYS,
     Row,
     fmt,
     hf_org_x_handle,
     leaderboard_rows,
+    notable_handles,
+    paper_results,
+    paper_url,
 )
 
 KINDS = (
     "new_sota",
     "open_sota",
     "open_release",
+    "trending_paper",
     "concept",
     "lab_league",
     "top_papers_week",
@@ -79,6 +90,7 @@ OPEN_RELEASE_DAYS = 21
 OPEN_RELEASE_PAPERS = 25
 OPEN_RELEASE_BOARDS = 12
 OPEN_RELEASE_LIMIT = 4
+TRENDING_PAPER_LIMIT = 6
 CONCEPT_LIMIT = 12
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
 LEAGUE_ACTIVE_DAYS = 90
@@ -412,7 +424,9 @@ def posted_paper_ids(db: Session) -> set[int]:
     ids = set(db.scalars(select(PaperXPost.paper_id)))
     for kind, subject_key in db.execute(
         select(XInsightPost.kind, XInsightPost.subject_key).where(
-            XInsightPost.kind.in_(("new_sota", "open_sota", "open_release"))
+            XInsightPost.kind.in_(
+                ("new_sota", "open_sota", "open_release", "trending_paper")
+            )
         )
     ):
         paper_id = subject_paper_id(subject_key)
@@ -591,6 +605,106 @@ def open_releases(
     return [candidate for candidate, _ in found[:OPEN_RELEASE_LIMIT]]
 
 
+# --- Trending paper explainers ----------------------------------------------
+
+
+def trending_papers(
+    db: Session,
+    *,
+    now: datetime,
+    fetch_org_handle: Callable[[str], str | None] = hf_org_x_handle,
+) -> list[Candidate]:
+    """This week's top trending arXiv papers the account never posted, for an
+    explainer post with a screenshot of the paper page (alphaXiv style)."""
+    since = now.date() - timedelta(days=CANDIDATE_WINDOW_DAYS)
+    papers = db.scalars(
+        select(Paper)
+        .where(
+            Paper.is_latest_version,
+            Paper.source == "arxiv",
+            Paper.arxiv_id.is_not(None),
+            Paper.date_published >= since,
+            Paper.trending_score > 0,
+            func.length(func.trim(Paper.tldr)) > 0,
+            Paper.id.not_in(posted_paper_ids(db) or {0}),
+        )
+        .order_by(Paper.trending_score.desc(), Paper.id.desc())
+        .limit(TRENDING_PAPER_LIMIT)
+    ).all()
+    candidates = []
+    for index, paper in enumerate(papers):
+        authors = list(
+            db.scalars(
+                select(Author.name)
+                .join(PaperAuthor, PaperAuthor.author_id == Author.id)
+                .where(PaperAuthor.paper_id == paper.id)
+                .order_by(PaperAuthor.author_order)
+            )
+        )
+        organizations = [o.name for o in paper.organizations]
+        facts: dict[str, Any] = {
+            "title": paper.title,
+            "arxiv_id": paper.arxiv_id,
+            "published": str(paper.date_published),
+            "trending_score": round(float(paper.trending_score or 0), 1),
+            "authors": authors[:12],
+            "author_count": len(authors),
+            "organizations": organizations,
+            "verified_x_handles": [
+                f"@{h}" for h in notable_handles(db, paper, fetch_org_handle)
+            ],
+            "x_threads": x_threads(db, paper.id),
+            "tldr": paper.tldr,
+            "abstract": paper.abstract,
+            "code": list(
+                db.scalars(
+                    select(Repository.url)
+                    .join(
+                        PaperRepository, PaperRepository.repository_id == Repository.id
+                    )
+                    .where(PaperRepository.paper_id == paper.id)
+                    .order_by(
+                        PaperRepository.is_official.desc(),
+                        Repository.num_stars.desc(),
+                        Repository.id,
+                    )
+                    .limit(2)
+                )
+            ),
+            "project_pages": list(
+                db.scalars(
+                    select(ProjectPage.url)
+                    .join(
+                        PaperProjectPage,
+                        PaperProjectPage.project_page_id == ProjectPage.id,
+                    )
+                    .where(PaperProjectPage.paper_id == paper.id)
+                    .order_by(ProjectPage.id)
+                    .limit(1)
+                )
+            ),
+            "leaderboard_results": paper_results(db, paper.id),
+            "paper_url": paper_url(paper),
+        }
+        lead = organizations[0] if organizations else (authors[0] if authors else None)
+        draft = f"{lead} just released a new paper!" if lead else "New paper!"
+        draft += f'\n\n"{paper.title}"'
+        if paper.tldr:
+            draft += f"\n\n{paper.tldr}"
+        candidates.append(
+            Candidate(
+                "trending_paper",
+                str(paper.id),
+                draft,
+                paper_url(paper),
+                facts,
+                screenshot_url=paper_url(paper),
+                score=30.0 - 2 * index,
+            )
+        )
+    return candidates
+
+
 def x_threads(db: Session, paper_id: int) -> list[dict[str, Any]]:
     """The paper's reviewed X threads: quote-post candidates for the agent."""
     rows = db.execute(
@@ -759,6 +873,7 @@ def gather(db: Session, *, now: datetime | None = None) -> list[Candidate]:
     now = now or datetime.now(UTC)
     candidates = leaderboard_wins(db, now=now)
     candidates.extend(open_releases(db, now=now))
+    candidates.extend(trending_papers(db, now=now))
     if now.day <= ROUNDUP_CATCH_UP_DAYS:
         candidates.append(_roundup(db, "month", now))
     if now.weekday() < ROUNDUP_CATCH_UP_DAYS:
