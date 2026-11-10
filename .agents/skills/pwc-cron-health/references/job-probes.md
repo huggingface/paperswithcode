@@ -238,6 +238,13 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Pick a recently read post (`ORDER BY last_read_at DESC`), open it on X, and confirm its like count is close to `like_count`; then confirm the paper's `x_trending_component` is set after the next `calculate_paper_trending_scores` run.
 - **Correctness:** The JSON summary lists `syndication_reads`, `api_reads`, `api_reads_today`, `unread` and `api_error`. `api_error` with HTTP 401/402 means a bad token or exhausted X credits and exits 1; many `unread` with `api_reads_today` at the cap means syndication is failing and the cap is doing its job. The X part only affects rankings when `PWC_TRENDING_X_WEIGHT` in `/etc/paperswithcode/trending-cron.env` is above 0, and then it can only lift a paper: the score is the higher of the GitHub/HF score and 100 × weight × `x_trending_component`.
 
+## `import_openreview_reviews`
+
+- **Effect:** Logs in to OpenReview, pages through every ICLR 2027 submission with `details=replies` (200 per page, number order, committed per page), upserts public submissions into `openreview_submissions` and public replies into `openreview_notes` (`kind` = `official_review`, `meta_review`, `decision`, `official_comment`, …), sets `removed_at` on notes no longer shown publicly, then links unmatched submissions to the single latest-version paper with the same normalized title.
+- **Freshness metrics:** `last_write` (max `fetched_at`), `submissions`, `linked_papers`, `reviews`.
+- **Independent proof:** Pick a recent submission (`ORDER BY number DESC`), open `https://openreview.net/forum?id=<id>` and confirm the number of public official reviews and their ratings match `openreview_notes`.
+- **Trap:** Missing `PWC_OPENREVIEW_USERNAME`/`PASSWORD` in `production-cron.env` exits 1; a `ChallengeRequiredError` means the login was skipped or rejected. A password containing `$` must be single-quoted in env files loaded by `uv --env-file`. Rows readable only by the importing account must never appear: every stored note had `readers` including `everyone`.
+
 ## `link_google_scholar_profiles`
 
 - **Effect:** Checks Wikidata Scholar-ID candidates (P1960) for authors with 3+ papers: each new author once on Semantic Scholar (ORCID / S2 author ID on 15 sampled papers) into `author_google_scholar_candidates`, then spends the SerpAPI searches left this month (minus 10) reading Scholar profiles of S2-matched candidates, largest authors first, and upserts confirmed links into `author_google_scholar_profiles`; never deletes links.

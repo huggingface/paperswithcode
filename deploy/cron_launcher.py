@@ -610,6 +610,18 @@ COMMANDS: dict[str, Job] = {
             "release and queue at most 6 scoped resolution jobs per UTC day"
         ),
     ),
+    "import_openreview_reviews": job(
+        "-m",
+        "backend.scripts.import_openreview_reviews",
+        # About 150 pages of 200 submissions at ~7 s each, plus title linking.
+        timeout="1h",
+        idempotency=(
+            "re-read every public OpenReview submission of the configured "
+            "venues and upsert submissions and replies by OpenReview id; marks "
+            "notes no longer public as removed and links unmatched submissions "
+            "to papers by exact normalized title; never deletes rows"
+        ),
+    ),
     "discover_x_threads": job(
         "-m",
         "backend.scripts.discover_x_threads",

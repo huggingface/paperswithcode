@@ -2153,6 +2153,40 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
+        id="import_openreview_reviews",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(360, offset_minutes=17),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-import-openreview-reviews.timer",
+        systemd_service="pwc-cron-import-openreview-reviews.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="OpenReview Review Import",
+        category="hourly",
+        schedule="17 */6 * * * (every six hours)",
+        script_path="backend/scripts/import_openreview_reviews.py",
+        log_name="import_openreview_reviews",
+        process_patterns=("backend.scripts.import_openreview_reviews",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "import_openreview_reviews.lock"
+        ),
+        expected_runtime_minutes=20,
+        stale_after_minutes=900,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(fetched_at) AS last_write,
+                   count(*) AS submissions,
+                   count(paper_id) AS linked_papers,
+                   (SELECT count(*) FROM openreview_notes
+                    WHERE kind = 'official_review' AND removed_at IS NULL)
+                     AS reviews
+            FROM openreview_submissions
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="discover_x_threads",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(720, offset_minutes=502),),

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Import public OpenReview submissions and reviews every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:17:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-import-openreview-reviews.service
+
+[Install]
+WantedBy=timers.target

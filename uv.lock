@@ -1622,6 +1622,7 @@ dependencies = [
     { name = "langfuse" },
     { name = "modal" },
     { name = "openai" },
+    { name = "openreview-py" },
     { name = "pandas" },
     { name = "pdf2image" },
     { name = "pdfplumber" },
@@ -1642,11 +1643,6 @@ dependencies = [
     { name = "websockets" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "openreview-py" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
@@ -1663,6 +1659,7 @@ requires-dist = [
     { name = "langfuse", specifier = ">=4.14.2" },
     { name = "modal", specifier = ">=1.5.1" },
     { name = "openai", specifier = "==2.6.1" },
+    { name = "openreview-py", specifier = ">=2.3.0" },
     { name = "pandas", specifier = ">=2.3.2" },
     { name = "pdf2image", specifier = ">=1.17.0" },
     { name = "pdfplumber", specifier = ">=0.11.7" },
@@ -1682,9 +1679,6 @@ requires-dist = [
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },
     { name = "websockets", specifier = "==16.0" },
 ]
-
-[package.metadata.requires-dev]
-dev = [{ name = "openreview-py", specifier = ">=2.3.0" }]
 
 [[package]]
 name = "pdf2image"

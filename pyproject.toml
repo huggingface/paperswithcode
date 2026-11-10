@@ -21,6 +21,7 @@ dependencies = [
     "langfuse>=4.14.2",
     "modal>=1.5.1",
     "openai==2.6.1",
+    "openreview-py>=2.3.0",
     "pandas>=2.3.2",
     "pdf2image>=1.17.0",
     "pdfplumber>=0.11.7",
@@ -52,8 +53,3 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["backend", "cron", "url_extraction_agent", "latex_compiler_contract", "latex_compiler_space"]
-
-[dependency-groups]
-dev = [
-    "openreview-py>=2.3.0",
-]

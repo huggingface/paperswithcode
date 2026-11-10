@@ -35,6 +35,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sweep-conference-deadlines.timer` | `Sun *-*-* 02:35:00` | `sweep_conference_deadlines` | `backend/scripts/sweep_conference_deadlines.py` |
 | `pwc-cron-link-google-scholar-profiles.timer` | `Wed *-*-* 05:20:00` | `link_google_scholar_profiles` | `backend/scripts/link_google_scholar_profiles.py` |
 | `pwc-cron-refresh-conference-deadlines.timer` | `*-*-* 07:40:00`<br>`*-*-* 19:40:00` | `refresh_conference_deadlines` | `backend/scripts/refresh_conference_deadlines.py` |
+| `pwc-cron-import-openreview-reviews.timer` | `*-*-* 00/6:17:00` | `import_openreview_reviews` | `backend/scripts/import_openreview_reviews.py` |
 | `pwc-cron-discover-x-threads.timer` | `*-*-* 08,20:22:00` | `discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | `pwc-cron-refresh-x-post-likes.timer` | `*-*-* *:35:00` | `refresh_x_post_likes` | `backend/scripts/refresh_x_post_likes.py` |
 | `pwc-cron-warm-paper-suggested-questions.timer` | `*-*-* *:33:00` | `warm_paper_suggested_questions` | `backend/scripts/warm_paper_suggested_questions.py` |
@@ -557,6 +558,16 @@ Wikidata researchers share), and no other author claims the profile. Progress
 is kept in `author_google_scholar_candidates`; links are never deleted. Pass
 `--dry-run` to check Semantic Scholar and report without reading profiles or
 writing.
+
+`backend/scripts/import_openreview_reviews.py` (every six hours) imports
+the public OpenReview submissions and forum replies (reviews, meta-reviews,
+decisions, comments) of ICLR 2027 into `openreview_submissions` and
+`openreview_notes`. The API refuses anonymous clients, so it logs in with
+`PWC_OPENREVIEW_USERNAME` / `PWC_OPENREVIEW_PASSWORD`; only notes readable by
+`everyone` are stored, whatever that account can see. Notes a forum no longer
+shows publicly get `removed_at`; unmatched submissions are linked to the one
+latest-version paper with the same normalized title. Pass `--venue` (repeatable)
+for another venue and `--dry-run --max-pages N` to fetch without writing.
 
 `calculate_organization_trending_scores.py` runs after paper trending and
 organization sync. It upserts one raw snapshot per featured organization and UTC

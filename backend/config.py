@@ -163,6 +163,16 @@ class Settings(BaseSettings, ChatSettings):
             "(link_google_scholar_profiles)"
         ),
     )
+    openreview_username: str = Field(
+        default="",
+        description=(
+            "OpenReview account email; the API refuses anonymous clients "
+            "(import_openreview_reviews)"
+        ),
+    )
+    openreview_password: str = Field(
+        default="", description="OpenReview account password"
+    )
     semantic_scholar_api_key_2: str = Field(
         default="",
         description=(

@@ -141,6 +141,10 @@ from backend.models.database.operations import (
     MethodReferenceBackfillMonth,
     MethodKeywordBackfillRun,
 )
+from backend.models.database.openreview import (
+    OpenReviewNote,
+    OpenReviewSubmission,
+)
 from backend.models.database.organizations import (
     Organization,
     PaperOrganization,
@@ -272,6 +276,8 @@ __all__ = [
     "ConferenceDeadline",
     "ConferenceDeadlineSweep",
     "PaperConference",
+    "OpenReviewNote",
+    "OpenReviewSubmission",
     "TrendingModelCandidate",
     "TrendingModelCurationState",
     "ModelReleaseSignal",

@@ -167,6 +167,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Collect deadline research and check imminent deadlines daily",
     ),
     TimerSpec(
+        job="import_openreview_reviews",
+        on_calendar=("*-*-* 00/6:17:00",),
+        description="Import public OpenReview submissions and reviews every six hours",
+    ),
+    TimerSpec(
         job="discover_x_threads",
         on_calendar=("*-*-* 08,20:22:00",),
         description="Discover author X threads for trending papers twice daily",

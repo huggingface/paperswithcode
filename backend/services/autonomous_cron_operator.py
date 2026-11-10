@@ -175,6 +175,7 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     ),
     "scan_model_releases": ("backend/services/model_release_radar_service.py",),
     "discover_x_threads": ("backend/services/x_thread_discovery_service.py",),
+    "import_openreview_reviews": ("backend/services/openreview_import_service.py",),
     "refresh_x_post_likes": ("backend/services/x_post_likes_service.py",),
     "warm_paper_suggested_questions": (
         "backend/services/paper_suggested_questions_service.py",
@@ -296,6 +297,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     ),
     "scan_model_releases": ("backend/tests/test_model_release_radar_service.py",),
     "discover_x_threads": ("backend/tests/test_x_thread_discovery_service.py",),
+    "import_openreview_reviews": ("backend/tests/test_openreview_import_service.py",),
     "refresh_x_post_likes": ("backend/tests/test_x_post_likes_service.py",),
     "warm_paper_suggested_questions": (
         "backend/tests/test_paper_suggested_questions_warm_service.py",
