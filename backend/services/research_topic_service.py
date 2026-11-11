@@ -65,6 +65,8 @@ MAX_BACKFILL_ATTEMPTS = 5
 STALE_CLAIM = timedelta(minutes=30)
 RETRY_AFTER = timedelta(minutes=10)
 PREVIEW_DEPTH = 30
+# Saving waits on one embedding; search's tight budget left new topics empty.
+PREVIEW_EMBEDDING_TIMEOUT_MS = 5000
 LABEL_MIN_LENGTH = 60
 LABEL_MODEL = "gpt-6-luna"
 LABEL_TIMEOUT = 10
@@ -470,7 +472,7 @@ def save_preview(db: Session, topic: ResearchTopic, now: datetime) -> None:
     client = get_query_embedding_client(
         settings.hf_query_embedding_endpoint_url,
         settings.hf_token,
-        settings.query_embedding_timeout_ms,
+        max(settings.query_embedding_timeout_ms, PREVIEW_EMBEDDING_TIMEOUT_MS),
         settings.query_embedding_max_concurrency,
     )
     try:
