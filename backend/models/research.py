@@ -146,6 +146,8 @@ class ResearchEntry(BaseModel):
 
 class ResearchFeedEntry(ResearchEntry):
     paper: Paper
+    # When the paper joined the catalog; the feed marks papers added since the last visit.
+    added_at: datetime | None = None
 
 
 class NewPaperCount(BaseModel):

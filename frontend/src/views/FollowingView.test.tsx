@@ -606,6 +606,32 @@ it('counts new following papers on the tab since the last visit, and not the inv
   expect(screen.getByRole('button', { name: 'following' })).toBeInTheDocument();
   expect(localStorage.getItem('pwc:following-last-seen')).not.toBe('2026-11-09T08:00:00.000Z');
 });
+it('marks papers added since the last visit and lists only those on request', async () => {
+  localStorage.setItem('pwc:following-last-seen', '2026-11-09T08:00:00.000Z');
+  vi.mocked(researchApi.followingNewCount).mockResolvedValue({ count: 1 });
+  const entry = (id: string, title: string, added_at: string) => ({ paper: { ...paper, id, title }, paper_key: `paper:${id}`,
+    title, url: `/paper/${id}`, summary: '', published: paper.published, reasons: ['Task'], scores: [], added_at });
+  vi.mocked(researchApi.following).mockResolvedValue([
+    entry('1', 'Old paper', '2026-11-08T08:00:00Z'), entry('2', 'Fresh paper', '2026-11-10T08:00:00Z'),
+  ]);
+  const { container } = renderFeed();
+  await screen.findByText('Fresh paper');
+  const chips = [...container.querySelectorAll('.paper-card')].map(card => !!card.querySelector('.paper-new-chip'));
+  expect(chips).toEqual([false, true]);
+  const show = await screen.findByRole('link', { name: 'Show only new' });
+  expect(show.closest('[role="status"]')).toHaveTextContent('1 paper added since your last visit is marked New.');
+  // The tab drops its count once Following is open.
+  expect(screen.getByRole('button', { name: 'following' })).toBeInTheDocument();
+  fireEvent.click(show);
+  await waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0,
+    expect.objectContaining({ addedAfter: '2026-11-09T08:00:00.000Z' })));
+  expect(await screen.findByRole('link', { name: 'Show everything you follow' })).toBeInTheDocument();
+});
+it('names the selected bubbles when no new papers match them', async () => {
+  vi.mocked(researchApi.following).mockResolvedValue([]);
+  renderFeed('/following?new_since=2026-11-09T08:00:00.000Z&follow=task:1');
+  expect(await screen.findByText(/No papers matching the selected bubbles were added since/)).toBeInTheDocument();
+});
 it('starts counting from the first homepage visit', async () => {
   renderFeed('/');
   await screen.findByText('No papers in this window.');

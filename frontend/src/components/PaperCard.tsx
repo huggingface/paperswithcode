@@ -45,6 +45,8 @@ interface PaperCardComponentProps {
   highlightQuery?: string;
   /** Names of the followed entities that put this paper on the Following feed. */
   followReasons?: string[];
+  /** Marks a Following-feed paper added since the last visit. */
+  isNew?: boolean;
 }
 
 // "Agents", "Agents and Reasoning", "Agents, Reasoning and 2 more"
@@ -110,6 +112,7 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
   showInstitution = true,
   highlightQuery,
   followReasons,
+  isNew = false,
 }) => {
   const queryClient = useQueryClient();
   const paperHref = `/paper/${paper.id}`;
@@ -143,9 +146,10 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
       </Link>
       <div className="paper-body">
         <div className="paper-body-main">
-          {followReasons && followReasons.length > 0 && (
+          {(isNew || (followReasons && followReasons.length > 0)) && (
             <div className="paper-follow-reason">
-              Because you follow {formatFollowReasons(followReasons)}
+              {isNew && <span className="paper-new-chip">New</span>}
+              {followReasons && followReasons.length > 0 && <>Because you follow {formatFollowReasons(followReasons)}</>}
             </div>
           )}
           <h3 className="paper-title">

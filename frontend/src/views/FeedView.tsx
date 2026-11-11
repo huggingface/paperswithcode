@@ -361,8 +361,15 @@ function writeFollowingSeen() {
 }
 const FOLLOWING_PAGE_SIZE = 40;
 
+// "Nov 10, 14:05" in the reader's time zone.
+function formatSeenTime(iso: string): string {
+  const time = new Date(iso);
+  return Number.isNaN(time.getTime()) ? "your last visit"
+    : time.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 interface FeedPage {
-  results: { paper: Paper; reasons?: string[] }[];
+  results: { paper: Paper; reasons?: string[]; added_at?: string | null }[];
   next_page: number | null;
 }
 
@@ -389,6 +396,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     next.delete("only");
     next.delete("topic");
     next.delete("follow");
+    next.delete("new_since");
     const query = next.toString();
     navigate(query ? `${path}?${query}` : path);
   };
@@ -423,7 +431,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   } : NO_FILTER;
   const filtering = activeFilter.topicIds.length > 0 || activeFilter.follows.length > 0;
   const dateFilters = { start_date: dateRange.startDate, end_date: dateRange.endDate };
-  const followingFilters = { ...dateRange, topicOnly, ...activeFilter };
+  // `?new_since=<time>` lists only the papers added after it, newest first.
+  const newSince = following ? searchParams.get("new_since") ?? undefined : undefined;
+  const followingFilters = { ...dateRange, topicOnly, ...activeFilter, addedAfter: newSince };
   // Following pages by offset; the public feeds by page number.
   const infinite = usePaperFeedQuery<FeedPage>(
     following
@@ -476,11 +486,21 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   useEffect(() => {
     if (user && (following || (hasFeed && !followingSeen))) writeFollowingSeen();
   }, [user, following, hasFeed, followingSeen]);
+  // Read before this visit overwrites it, so Following can mark and list what arrived since.
   const newCount = useQuery({
     ...researchQueries.followingNewCount(user?.hf_subject, followingSeen ?? ""),
-    enabled: !following && !!user && hasFeed && !!followingSeen,
+    enabled: !!user && hasFeed && !!followingSeen,
   });
-  const newPapers = following ? 0 : newCount.data?.count ?? 0;
+  const newPapers = newCount.data?.count ?? 0;
+  const newSinceHref = (since: string | undefined) => {
+    const next = new URLSearchParams(searchParams);
+    for (const key of ["only", "topic", "follow", "new_since"]) next.delete(key);
+    if (since) next.set("new_since", since);
+    const query = next.toString();
+    return query ? `/following?${query}` : "/following";
+  };
+  const markNewSince = newSince ?? followingSeen;
+  const markNewAfter = following && markNewSince ? Date.parse(markNewSince) : NaN;
   // The pop-up opens on its own only when the intro first shows to a visitor who arrived without follows:
   // not after a removal, and not while saving what a guest picked before signing in, which may finish
   // before follows reload. It lives here rather than in the intro so it stays open once the first save lands.
@@ -535,9 +555,13 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   }, [user, followPendingTopics]);
   const cards = useMemo<PaperFeedCard[]>(
     () => infinite.data?.pages.flatMap((page) =>
-      page.results.map((entry) => ({ ...transformPaperForCard(entry.paper), followReasons: entry.reasons })),
+      page.results.map((entry) => ({
+        ...transformPaperForCard(entry.paper),
+        followReasons: entry.reasons,
+        isNew: !!entry.added_at && Date.parse(entry.added_at) > markNewAfter,
+      })),
     ) ?? [],
-    [infinite.data],
+    [infinite.data, markNewAfter],
   );
 
   const error = infinite.error;
@@ -619,14 +643,18 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 <div className="sort-options">
                   <button className={`sort-btn ${mode === "trending" ? "active" : ""}`} onClick={() => showTab("/")}>trending</button>
                   <button className={`sort-btn ${following ? "active" : ""}`} onClick={() => showTab("/following")}>
-                    following{newPapers > 0 && <span className="feed-tab-count">{newPapers >= 100 ? "99+" : newPapers} new</span>}
+                    following{!following && newPapers > 0 && <span className="feed-tab-count">{newPapers >= 100 ? "99+" : newPapers} new</span>}
                   </button>
                 </div>
               </div>
               <PaperDateFilter
                 startDate={dateRange.startDate}
                 endDate={dateRange.endDate}
-                onChange={(value) => setSearchParams(withHomepagePaperDateRange(searchParams, value))}
+                onChange={(value) => {
+                  const next = withHomepagePaperDateRange(searchParams, value);
+                  next.delete("new_since");
+                  setSearchParams(next);
+                }}
               />
             </div>
 
@@ -697,6 +725,16 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               />
             )}
 
+            {following && !showIntro && (newSince ? (
+              <div className="following-topic-note following-topic-filter" role="status">
+                Showing papers added since {formatSeenTime(newSince)}, newest first. <Link to={newSinceHref(undefined)}>Show everything you follow</Link>
+              </div>
+            ) : followingSeen && newPapers > 0 && (
+              <div className="following-topic-note following-topic-filter" role="status">
+                {newPapers === 1 ? "1 paper added since your last visit is" : `${newPapers >= 100 ? "99+" : newPapers} papers added since your last visit are`} marked New. <Link to={newSinceHref(followingSeen)}>Show only new</Link>
+              </div>
+            ))}
+
             {topicOnly && !filtering && (
               <div className="following-topic-note following-topic-filter" role="status">
                 Showing only papers about your topics. <Link to={filterHref(NO_FILTER)}>Show everything you follow</Link>
@@ -714,7 +752,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 rootMargin="400px"
                 cardHeader={showFollowCard ? (index) => index === FOLLOW_CARD_AFTER
                   && <HomeFollowCard onBuild={() => setEditingTopic(null)} /> : undefined}
-                empty={error ? null : filteredTopic ? <>No papers about this topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(filteredTopic.id)}>edit the topic</button>.</> : filtering ? <>No papers match the selected bubbles in this window. Widen the date range or pick more bubbles.</> : topicOnly ? <>No papers about your topics match these filters. Widen the date range or follow more topics.</> : following ? <>No papers from your topics or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}
+                empty={error ? null : newSince ? <>No papers {filtering || topicOnly ? "matching the selected bubbles" : "you follow"} were added since {formatSeenTime(newSince)}.</> : filteredTopic ? <>No papers about this topic match these filters. Widen the date range or <button type="button" className="link-button" onClick={() => setEditingTopic(filteredTopic.id)}>edit the topic</button>.</> : filtering ? <>No papers match the selected bubbles in this window. Widen the date range or pick more bubbles.</> : topicOnly ? <>No papers about your topics match these filters. Widen the date range or follow more topics.</> : following ? <>No papers from your topics or follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}
               />
             )}
           </div>
