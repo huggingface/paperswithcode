@@ -440,6 +440,47 @@ def apply_mutation(
         raise
 
 
+TRACE_FAILURE_STATUSES = frozenset({"preapply_failed", "finalize_failed"})
+
+
+def _record_trace_failure(
+    db: Session, row: PaperCurationJob, trace_status: str, error: Exception
+) -> None:
+    """Record a failed trace upload; trip the breaker on three failing jobs.
+
+    A runner retries a failed upload several times. Only the first failure of
+    a job counts, so one job's retries cannot pause the whole scheduled lane.
+    A successful upload resets the counter and the job's failed status.
+    """
+    logger.warning(
+        "curation trace upload failed job=%s stage=%s attempt=%s error=%s: %s",
+        row.id,
+        trace_status,
+        row.trace_attempt_count + 1,
+        type(error).__name__,
+        str(error)[:1_000],
+    )
+    first_failure = row.trace_status not in TRACE_FAILURE_STATUSES
+    row.trace_status = trace_status
+    row.trace_attempt_count += 1
+    state = db.get(PaperCurationSchedulerState, 1)
+    if (
+        first_failure
+        and state
+        and row.trigger != "admin"
+        and getattr(row, "runner", "codex") == "codex"
+    ):
+        state.consecutive_trace_failures += 1
+        if state.consecutive_trace_failures >= 3:
+            state.paused_at = datetime.now(UTC)
+            state.pause_condition = "trace_upload_failures"
+            state.pause_reason = "Three consecutive scheduled jobs failed trace uploads"
+            logger.error(
+                "paper curation dispatch paused condition=trace_upload_failures"
+            )
+    db.commit()
+
+
 @router.post("/{job_id}/trace/preapply")
 def store_preapply_trace(
     job_id: uuid.UUID,
@@ -463,23 +504,7 @@ def store_preapply_trace(
             url_candidates=body.url_candidates,
         )
     except (ValueError, RuntimeError, HfHubHTTPError, OSError) as error:
-        row.trace_status = "preapply_failed"
-        row.trace_attempt_count += 1
-        state = db.get(PaperCurationSchedulerState, 1)
-        if (
-            state
-            and row.trigger != "admin"
-            and getattr(row, "runner", "codex") == "codex"
-        ):
-            state.consecutive_trace_failures += 1
-            if state.consecutive_trace_failures >= 3:
-                state.paused_at = datetime.now(UTC)
-                state.pause_condition = "trace_upload_failures"
-                state.pause_reason = "Three consecutive scheduled trace uploads failed"
-                logger.error(
-                    "paper curation dispatch paused condition=trace_upload_failures"
-                )
-        db.commit()
+        _record_trace_failure(db, row, "preapply_failed", error)
         raise HTTPException(status_code=503, detail=str(error)) from error
 
 
@@ -496,23 +521,7 @@ def finalize_trace(
     try:
         return CurationTraceService(db, settings).finalize(row, body.model_dump())
     except (ValueError, RuntimeError, HfHubHTTPError, OSError) as error:
-        row.trace_status = "finalize_failed"
-        row.trace_attempt_count += 1
-        state = db.get(PaperCurationSchedulerState, 1)
-        if (
-            state
-            and row.trigger != "admin"
-            and getattr(row, "runner", "codex") == "codex"
-        ):
-            state.consecutive_trace_failures += 1
-            if state.consecutive_trace_failures >= 3:
-                state.paused_at = datetime.now(UTC)
-                state.pause_condition = "trace_upload_failures"
-                state.pause_reason = "Three consecutive scheduled trace uploads failed"
-                logger.error(
-                    "paper curation dispatch paused condition=trace_upload_failures"
-                )
-        db.commit()
+        _record_trace_failure(db, row, "finalize_failed", error)
         raise HTTPException(status_code=503, detail=str(error)) from error
 
 
