@@ -40,6 +40,7 @@ def test_manifest_is_strict_unique_and_case_insensitive():
     assert featured_for_hf_handle("AI-at-Meta").slug == "facebook"
     assert featured_for_hf_handle("facebook-research").slug == "facebook"
     assert featured_for_hf_handle("GoogleDeepMind").slug == "google"
+    assert featured_for_hf_handle("MicrosoftResearch").slug == "microsoft"
     assert featured_for_hf_handle("metaresearch").slug == "facebook"
     assert featured_for_hf_handle("MetaSuperintelligenceLab").slug == "facebook"
     assert featured_for_hf_handle("facebook").name_override == "Meta"

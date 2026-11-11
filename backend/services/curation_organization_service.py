@@ -21,6 +21,7 @@ import httpx
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from backend.database.organizations_setup.organizations import featured_for_hf_handle
 from backend.models.curation import CurationOrganization
 from backend.models.database import Organization, PaperOrganization
 from backend.services.hf_organization_service import (
@@ -259,6 +260,10 @@ class CurationOrganizationService:
                 organization.logo_sha256 = hashlib.sha256(logo_data).hexdigest()
 
     def _by_hf_slug(self, hf_slug: str) -> Organization | None:
+        # A featured organization's alias handle resolves to its canonical row.
+        featured = featured_for_hf_handle(hf_slug)
+        if featured is not None:
+            hf_slug = featured.hf_slug
         return (
             self.db.query(Organization)
             .filter(func.lower(Organization.hf_slug) == hf_slug.lower())

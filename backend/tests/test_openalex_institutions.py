@@ -24,3 +24,8 @@ def test_lookup_accepts_ids_and_urls():
 def test_parent_and_child_institutions_stay_separate():
     assert organization_slug_for("I1291425158") == "google"
     assert organization_slug_for("I4210090411") == "deepmind"
+
+
+def test_microsoft_research_labs_belong_to_microsoft():
+    assert organization_slug_for("I4210113369") == "microsoft"
+    assert organization_slug_for("I4210164937") == "microsoft"

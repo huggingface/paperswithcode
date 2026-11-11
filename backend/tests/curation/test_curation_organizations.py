@@ -122,6 +122,16 @@ def test_known_hf_slug_links_existing_row_even_when_hf_has_no_profile():
     assert db.query(Organization).count() == 1
 
 
+def test_featured_alias_handle_links_the_canonical_row():
+    db = _session()
+    hf = FakeHF(_profile("AI-at-Meta", "AI at Meta", verified=True))
+    result = CurationOrganizationService(db, hf).link(
+        1, [_org(hf_slug="AI-at-Meta", name="AI at Meta")]
+    )
+    assert result.linked == [11]
+    assert db.query(Organization).count() == 1
+
+
 def test_squatted_catalog_row_yields_to_the_canonical_handle():
     db = _session()
     db.add(
