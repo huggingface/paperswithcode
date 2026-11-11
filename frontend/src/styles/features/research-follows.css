@@ -548,13 +548,6 @@
 }
 
 /* "following · 12 new" on the home feed tab. */
-.feed-tab-count {
+.feed-tab-new {
   margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--accent-text);
-  color: #fff;
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: none;
 }

@@ -593,12 +593,12 @@ it('keeps the trending card dismissed', async () => {
   await screen.findByText('Trending 8');
   expect(screen.queryByRole('region', { name: 'Get a feed for your research' })).not.toBeInTheDocument();
 });
-it('counts new following papers on the tab since the last visit, and not the invitation', async () => {
+it('badges the following tab New when papers arrived since the last visit, and not the invitation', async () => {
   localStorage.setItem('pwc:following-last-seen', '2026-11-09T08:00:00.000Z');
   vi.mocked(researchApi.followingNewCount).mockResolvedValue({ count: 12 });
   vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
   renderFeed('/');
-  const tab = await screen.findByRole('button', { name: 'following 12 new' });
+  const tab = await screen.findByRole('button', { name: 'following New' });
   expect(researchApi.followingNewCount).toHaveBeenCalledWith('2026-11-09T08:00:00.000Z');
   expect(screen.queryByRole('region', { name: 'Get a feed for your research' })).not.toBeInTheDocument();
   fireEvent.click(tab);
@@ -606,7 +606,7 @@ it('counts new following papers on the tab since the last visit, and not the inv
   expect(screen.getByRole('button', { name: 'following' })).toBeInTheDocument();
   expect(localStorage.getItem('pwc:following-last-seen')).not.toBe('2026-11-09T08:00:00.000Z');
 });
-it('marks papers added since the last visit and lists only those on request', async () => {
+it('marks papers added since the last visit without a banner', async () => {
   localStorage.setItem('pwc:following-last-seen', '2026-11-09T08:00:00.000Z');
   vi.mocked(researchApi.followingNewCount).mockResolvedValue({ count: 1 });
   const entry = (id: string, title: string, added_at: string) => ({ paper: { ...paper, id, title }, paper_key: `paper:${id}`,
@@ -618,19 +618,9 @@ it('marks papers added since the last visit and lists only those on request', as
   await screen.findByText('Fresh paper');
   const chips = [...container.querySelectorAll('.paper-card')].map(card => !!card.querySelector('.paper-new-chip'));
   expect(chips).toEqual([false, true]);
-  const show = await screen.findByRole('link', { name: 'Show only new' });
-  expect(show.closest('[role="status"]')).toHaveTextContent('1 paper added since your last visit is marked New.');
-  // The tab drops its count once Following is open.
+  expect(screen.queryByText(/since your last visit/)).not.toBeInTheDocument();
+  // The tab drops its badge once Following is open.
   expect(screen.getByRole('button', { name: 'following' })).toBeInTheDocument();
-  fireEvent.click(show);
-  await waitFor(() => expect(researchApi.following).toHaveBeenLastCalledWith(0,
-    expect.objectContaining({ addedAfter: '2026-11-09T08:00:00.000Z' })));
-  expect(await screen.findByRole('link', { name: 'Show everything you follow' })).toBeInTheDocument();
-});
-it('names the selected bubbles when no new papers match them', async () => {
-  vi.mocked(researchApi.following).mockResolvedValue([]);
-  renderFeed('/following?new_since=2026-11-09T08:00:00.000Z&follow=task:1');
-  expect(await screen.findByText(/No papers matching the selected bubbles were added since/)).toBeInTheDocument();
 });
 it('starts counting from the first homepage visit', async () => {
   renderFeed('/');
