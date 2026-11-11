@@ -421,7 +421,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   // Sidebar: tasks whose share of recent papers is rising vs their baseline.
   // Independent of Top Domains; overlapping entries appear in both sections
   // so neither list misrepresents its own signal.
-  const trendingTasks = useQuery(catalogQueries.trendingTasks({ limit: 8, level: 0, min_recent_papers: 10 }));
+  const trendingTasks = useQuery(catalogQueries.trendingTasks({ limit: 8, min_recent_papers: 10 }));
 
   const topicOnly = following && searchParams.get("only") === "topic";
   const activeFilter: FeedFilter = following ? {
