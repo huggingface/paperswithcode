@@ -5,7 +5,8 @@ description: (Also known as pwc-reply-issue.) Handle unread GitHub notifications
 
 # Reply to a GitHub Issue
 
-Resolve author feedback through Papers With Code catalog changes, then write concise, evidence-backed GitHub issue replies. Tailor every reply to the issue and verify both the catalog state and the posted comment.
+Resolve author feedback through Papers With Code catalog changes (or, for edits
+authors can make themselves, by pointing them to self-service editing), then write concise, evidence-backed GitHub issue replies. Tailor every reply to the issue and verify both the catalog state and the posted comment.
 
 ## Default workflow
 
@@ -29,7 +30,7 @@ workflow. “All unread” uses the same default:
 ## Guardrails
 
 - If the user asks only for a draft, review, or report, do not change the catalog or post anything.
-- An actionable request to handle or reply to an in-scope issue includes applying the author-requested catalog corrections and posting the verified outcome. Do not ask for permission again for that routine curation. Honor explicit limits such as "reply only" or "no catalog changes". For the user's Papers With Code unread-notification workflow, their standing preference is to mark handled notifications read as described below; honor any request to leave them unread.
+- An actionable request to handle or reply to an in-scope issue includes applying the author-requested catalog corrections and posting the verified outcome, except for self-service requests, which get the section 2a reply and no catalog change. Do not ask for permission again for that routine curation. Honor explicit limits such as "reply only" or "no catalog changes". For the user's Papers With Code unread-notification workflow, their standing preference is to mark handled notifications read as described below; honor any request to leave them unread.
 - Do not close, reopen, lock, label, assign, or transfer issues unless the user separately asks. Marking a notification read does not change issue state.
 - Do not claim that a catalog change is live until it has been verified on the live site or API.
 - Do not expose internal database details, credentials, deployment mechanics, or debugging history in a public reply.
@@ -87,7 +88,7 @@ returns each issue’s last comment, or explicitly paginate the REST search.
 
 1. Read the issue body and all current comments. Identify the repository, issue number, author name or handle, requested correction, and any claims that need acknowledgment.
 2. Inspect the current Papers With Code paper and evaluation records. Record the paper identifier, evaluation ID, dataset slug, task slug, model, metric, value, and current rank for every row discussed.
-3. Resolve each actionable author request with a catalog change that supports meaningful comparisons, following the benchmark-scope rules below. Apply supported corrections before replying; author feedback does not require accepting the author's proposed catalog structure verbatim. Check the paper, official artifacts, and existing catalog to establish the affected records and intended protocol. Use the relevant curation skill: `verify-evals` for score/protocol corrections and removals, `add-benchmark` for justified benchmark or leaderboard separation, `add-evals` for missing results, and `enrich-paper` for links or metadata. Read `docs/database.md` before database access and follow repository data-workflow rules.
+3. If section 2a applies, skip to it. Otherwise, resolve each actionable author request with a catalog change that supports meaningful comparisons, following the benchmark-scope rules below. Apply supported corrections before replying; author feedback does not require accepting the author's proposed catalog structure verbatim. Check the paper, official artifacts, and existing catalog to establish the affected records and intended protocol. Use the relevant curation skill: `verify-evals` for score/protocol corrections and removals, `add-benchmark` for justified benchmark or leaderboard separation, `add-evals` for missing results, and `enrich-paper` for links or metadata. Read `docs/database.md` before database access and follow repository data-workflow rules.
 4. Complete every independent correction supported by the evidence. For example, when an author requests separating single-frame and video-based Human3.6M results, inspect the affected rows, create or update the appropriate leaderboard groups, move the applicable results, and verify the resulting ranks. Do not stop at agreeing that a split would be useful. Investigate claims of empty repositories and correct code-availability metadata where warranted; do not automatically delete valid paper-reported scores just because code is unavailable.
 5. When a request is ambiguous, conflicts with source evidence, or cannot be completed with available access, investigate first and ask only for the specific missing detail. Complete the unblocked corrections before asking. State the concrete blocker and leave unresolved work unread; do not substitute a generic acknowledgement or promise for available catalog work.
 6. Verify the changed records through the live site or API, including leaderboard membership, scores, ranks, links, and openness metadata as applicable. Confirm exactly what changed. Distinguish additions, corrections, removals, preserved historical results, and cases where no catalog change was needed. Recheck badge eligibility after any rank changes.
@@ -105,11 +106,12 @@ every change the author asks for is one they can make:
 - a wrong score, model name, or openness flag on one of the paper's own
   evaluations, or a missing result on an existing benchmark and metric;
 - tasks or methods that already exist in the catalog;
-- organizations, GitHub repositories, project pages, Hugging Face artifacts,
-  the source URL, or X threads.
+- organizations that already exist in the catalog, GitHub repositories,
+  project pages, Hugging Face artifacts, the source URL, or X threads.
 
 In that case make no catalog change and post this reply, adapting only the
-greeting:
+greeting. It needs no evaluation links or badge sentence (sections 3 and 4 do
+not apply):
 
 ```markdown
 Hi,
@@ -120,7 +122,7 @@ Let me know in case it doesn't work. 🤗
 ```
 
 Fix it yourself (section 2) instead when any part of the request needs
-something the author cannot do: a new benchmark, metric, task, or method; a
+something the author cannot do: a new benchmark, metric, task, method, or organization; a
 leaderboard split or protocol decision; changes to another paper's results;
 title, abstract, or author metadata; or a request that the author already tried
 to make themselves and reported as not working. Do not split one request into
@@ -247,7 +249,7 @@ For multiple issues, prepare and post separate bodies. A closed issue may accept
 After posting:
 
 1. Fetch the resulting comment or the issue's latest comments.
-2. Confirm the repository, issue number, posting account, complete body, direct evaluation links, and top-three badge sentence when eligible.
+2. Confirm the repository, issue number, posting account, and complete body. Except for a section 2a self-service reply, also confirm the direct evaluation links and the top-three badge sentence when eligible.
 3. Save the public comment URL for the final summary after notification handling.
 
 If posting failed, report the exact failure and whether a comment was created. Leave failed or unresolved work unread.
