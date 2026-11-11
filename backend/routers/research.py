@@ -338,10 +338,19 @@ def following(
             "repeat to add more. Combines with topic_id as either-or."
         ),
     ),
+    added_after: datetime | None = Query(
+        None,
+        description=(
+            "Only papers added to the catalog after this time, newest first; "
+            "the papers /me/following/new-count counts. Replaces the date window."
+        ),
+    ),
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
     now = datetime.now(timezone.utc)
+    if added_after is not None and added_after.tzinfo is None:
+        added_after = added_after.replace(tzinfo=timezone.utc)
     if offset == 0:
         service.default_email_on(db, user["hf_subject"], verified_email(request), now)
     return service.feed_entries(
@@ -358,6 +367,7 @@ def following(
         topic_only=topic_only,
         topic_ids=topic_id,
         follows=[parse_follow(value) for value in follow],
+        added_after=added_after,
     )
 
 

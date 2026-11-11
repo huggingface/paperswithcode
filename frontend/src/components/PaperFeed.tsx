@@ -65,7 +65,7 @@ export const PaperFeedToolbar: React.FC<{
   </div>
 );
 
-export type PaperFeedCard = PaperCardProps & { followReasons?: string[] };
+export type PaperFeedCard = PaperCardProps & { followReasons?: string[]; isNew?: boolean };
 
 const BlockSkeleton = () => <Skeleton className="h-40 w-full" />;
 
@@ -138,6 +138,7 @@ export const PaperFeedList: React.FC<{
               showInstitution={showInstitution}
               highlightQuery={highlightQuery}
               followReasons={card.followReasons}
+              isNew={card.isNew}
             />
           </React.Fragment>
         ))}

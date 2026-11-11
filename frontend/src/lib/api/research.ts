@@ -97,6 +97,8 @@ export interface ResearchEntry {
   published: string;
   reasons: string[];
   scores: { benchmark: string; model: string | null; metrics: Record<string, unknown> }[];
+  /** When the paper joined the catalog. */
+  added_at?: string | null;
 }
 export interface FollowingFilters {
   startDate?: string;
@@ -107,6 +109,8 @@ export interface FollowingFilters {
   topicIds?: number[];
   /** Follows as `<kind>:<entity_id>`. */
   follows?: string[];
+  /** Only papers added after this time, newest first, in place of the date window. */
+  addedAfter?: string;
 }
 export const researchApi = {
   follows: () => apiRequest<ResearchFollow[]>('/me/follows'),
@@ -121,6 +125,7 @@ export const researchApi = {
     if (filters.topicOnly) params.set('topic_only', 'true');
     filters.topicIds?.forEach(id => params.append('topic_id', String(id)));
     filters.follows?.forEach(follow => params.append('follow', follow));
+    if (filters.addedAfter) params.set('added_after', filters.addedAfter);
     return apiRequest<ResearchEntry[]>(`/me/following?${params}`);
   },
   /** Following-feed papers added after `since`, at most 100. */

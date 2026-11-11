@@ -673,6 +673,39 @@ def test_new_paper_count_counts_feed_papers_added_since(db, now, monkeypatch):
     assert client.get("/me/following/new-count").status_code == 422
 
 
+def test_feed_lists_papers_added_since_newest_first(db, now, monkeypatch):
+    task = Task(name="Added since task", slug="added-since-task")
+    db.add(task)
+    db.flush()
+    seen = now - timedelta(hours=6)
+    old = paper(db, now, "added-old", days=2, created_at=now - timedelta(days=1))
+    fresh = paper(db, now, "added-new", days=3, created_at=now - timedelta(hours=1))
+    newest = paper(
+        db, now, "added-newest", days=5, created_at=now - timedelta(minutes=5)
+    )
+    for row in [old, fresh, newest]:
+        tagged(db, row, task)
+    follow(db, "task", task, now - timedelta(days=3))
+    from backend.services.paper_service import PaperService
+
+    monkeypatch.setattr(
+        PaperService,
+        "_resolve_thumbnail_url",
+        lambda self, row: f"/api/thumbnails/{row.id}.png",
+    )
+    entries = follows.feed_entries(db, "alice", now, 0, 10, added_after=seen)
+    assert [e.paper.id for e in entries] == [str(newest.id), str(fresh.id)]
+    assert len(entries) == follows.new_paper_count(db, "alice", now, seen)
+    assert all(e.added_at > seen for e in entries)
+    everything = follows.feed_entries(db, "alice", now, 0, 10)
+    assert {e.paper.id for e in everything} == {
+        str(old.id),
+        str(fresh.id),
+        str(newest.id),
+    }
+    assert all(e.added_at is not None for e in everything)
+
+
 def test_feed_uses_home_feed_trending_order(db, now, monkeypatch):
     from backend.config import get_settings
 

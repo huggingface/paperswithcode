@@ -357,11 +357,16 @@ AND NOT EXISTS (SELECT 1 FROM papers old WHERE old.arxiv_id=p.arxiv_id AND old.d
 NEW_COUNT_LIMIT = 100
 
 
-def new_paper_count(db: Session, subject: str, now: datetime, since: datetime) -> int:
-    """Following-feed papers added to the catalog after ``since``, capped at NEW_COUNT_LIMIT."""
+def new_paper_cutoff(now: datetime, since: datetime) -> date:
+    """Earliest publication date a paper added after ``since`` can count as new."""
     # A paper added after the last visit was published at most a few days before it,
     # and the feed itself only reaches back 30 days.
-    cutoff = max(since - timedelta(days=7), now - timedelta(days=30)).date()
+    return max(since - timedelta(days=7), now - timedelta(days=30)).date()
+
+
+def new_paper_count(db: Session, subject: str, now: datetime, since: datetime) -> int:
+    """Following-feed papers added to the catalog after ``since``, capped at NEW_COUNT_LIMIT."""
+    cutoff = new_paper_cutoff(now, since)
     matches = (
         text(MATCH_SQL)
         .bindparams(
@@ -517,12 +522,22 @@ def feed_entries(
     topic_only: bool = False,
     topic_ids: Sequence[int] = (),
     follows: Sequence[tuple[str, int]] = (),
+    added_after: datetime | None = None,
 ) -> list[ResearchFeedEntry]:
-    """Filter and rank matches like the home feed, then explain only the returned page."""
+    """Filter and rank matches like the home feed, then explain only the returned page.
+
+    ``added_after`` lists exactly the papers ``new_paper_count`` counts, newest first,
+    in place of the publication-date window.
+    """
     from backend.services.paper_service import PaperService
 
-    cutoff = date.min if all_time else start_date or (now - timedelta(days=30)).date()
-    until = min(end_date or now.date(), now.date())
+    if added_after is not None:
+        cutoff, until = new_paper_cutoff(now, added_after), now.date()
+    else:
+        cutoff = (
+            date.min if all_time else start_date or (now - timedelta(days=30)).date()
+        )
+        until = min(end_date or now.date(), now.date())
     matches = (
         text(MATCH_SQL)
         .bindparams(
@@ -556,7 +571,13 @@ def feed_entries(
         query = service.apply_has_code_filter(query)
     if has_hf_artifacts:
         query = service.apply_has_hf_artifacts_filter(query)
-    rows = service.apply_scoped_trending_order(query).offset(offset).limit(limit).all()
+    if added_after is not None:
+        query = query.filter(DBPaper.created_at > added_after).order_by(
+            DBPaper.created_at.desc(), DBPaper.id.desc()
+        )
+    else:
+        query = service.apply_scoped_trending_order(query)
+    rows = query.offset(offset).limit(limit).all()
     if not rows:
         return []
     entries = {
@@ -565,6 +586,7 @@ def feed_entries(
             db, subject, now, cutoff=cutoff, until=until, paper_ids=[r.id for r in rows]
         )
     }
+    added_at = {str(row.id): row.created_at for row in rows}
     papers = service.hydrate_cards(rows, include_resources=True)
     return [
         ResearchFeedEntry(
@@ -572,6 +594,7 @@ def feed_entries(
                 f"arxiv:{p.arxiv_id}" if p.arxiv_id else f"paper:{p.id}"
             ].model_dump(),
             paper=p,
+            added_at=added_at[p.id],
         )
         for p in papers
     ]
