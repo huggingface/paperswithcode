@@ -446,7 +446,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const hasFeed = !!follows.data?.length || !!topics.data?.length;
   const topicName = topicTitle;
   const building = topics.data?.filter(isTopicBuilding) ?? [];
-  const topicBuilding = building.length > 0;
+  // The note names only the building topics the selected bubbles show.
+  const shownBuilding = building.filter(topic => activeFilter.topicIds.length
+    ? activeFilter.topicIds.includes(topic.id) : !activeFilter.follows.length);
   // The one selected topic, when it is the only bubble selected.
   const filteredTopic = activeFilter.topicIds.length === 1 && !activeFilter.follows.length
     ? topics.data?.find(topic => topic.id === activeFilter.topicIds[0]) : undefined;
@@ -680,9 +682,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
               </Alert>
             )}
 
-            {following && topicBuilding && (
+            {following && shownBuilding.length > 0 && (
               <div className="following-topic-note" role="status">
-                Showing the closest papers about {building.map(topic => `“${topicName(topic)}”`).join(" and ")} now. A model is reading papers to refine these matches, which takes a few minutes.
+                Showing the closest papers about {shownBuilding.map(topic => `“${topicName(topic)}”`).join(" and ")} now. A model is reading papers to refine these matches, which takes a few minutes.
               </div>
             )}
 

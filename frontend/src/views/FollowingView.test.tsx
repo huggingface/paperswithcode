@@ -507,6 +507,22 @@ it('shows the feed for an account that follows only a topic', async () => {
   expect(await screen.findByText('A paper')).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Build your personal research feed' })).not.toBeInTheDocument();
 });
+it('names only the building topics the selected bubbles show', async () => {
+  vi.mocked(researchApi.topics).mockResolvedValue([
+    { ...topic, status: 'running', judged: 200, total: 4700 },
+    { ...topic, id: 2, text: 'speculative decoding', status: 'done' },
+  ]);
+  renderFeed('/following?topic=2');
+  expect(await screen.findByText('A paper')).toBeInTheDocument();
+  expect(screen.queryByText(/Showing the closest papers/)).not.toBeInTheDocument();
+  cleanup();
+  renderFeed('/following?follow=task:1');
+  expect(await screen.findByText('A paper')).toBeInTheDocument();
+  expect(screen.queryByText(/Showing the closest papers/)).not.toBeInTheDocument();
+  cleanup();
+  renderFeed('/following?topic=1&topic=2');
+  expect(await screen.findByText(/Showing the closest papers about \u201cReal-time video generation\u201d now/)).toBeInTheDocument();
+});
 it('has no separate trending (X) tab: X likes are part of the trending score', async () => {
   renderFeed('/');
   expect(await screen.findByRole('button', { name: 'trending' })).toHaveClass('active');
