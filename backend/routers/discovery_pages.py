@@ -104,7 +104,10 @@ KNOWN_CLIENT_TOP_LEVEL_PREFIXES = frozenset(
         "astra-for-robotics",
     }
 )
-ORGANIZATION_SLUG_ALIASES = {"googledeepmind": "google"}
+ORGANIZATION_SLUG_ALIASES = {
+    "googledeepmind": "google",
+    "microsoftresearch": "microsoft",
+}
 # Methods that were removed in favour of a task of the same topic.
 METHOD_SLUGS_MOVED_TO_TASKS = {"continual-learning": "continual-learning"}
 

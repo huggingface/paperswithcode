@@ -527,6 +527,9 @@ def test_merged_organization_slug_redirects_to_canonical_page(client):
     response = client.get("/orgs/googledeepmind?q=vision", follow_redirects=False)
     assert response.status_code == 301
     assert response.headers["location"] == "/orgs/google?q=vision"
+    response = client.get("/orgs/microsoftresearch", follow_redirects=False)
+    assert response.status_code == 301
+    assert response.headers["location"] == "/orgs/microsoft"
 
 
 def test_merged_author_redirects_to_the_author_it_was_merged_into(client, monkeypatch):

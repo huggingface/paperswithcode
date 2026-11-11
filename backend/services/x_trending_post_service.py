@@ -147,7 +147,6 @@ NOTABLE_X_HANDLES: dict[str, str | None] = {
     "liquidai": "liquidai",
     "meituan": "Meituan_LongCat",
     "microsoft": "MSFTResearch",
-    "microsoftresearch": "MSFTResearch",
     "minimaxai": "MiniMax_AI",
     "mistralai": "MistralAI",
     "moonshotai": "Kimi_Moonshot",

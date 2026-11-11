@@ -5,7 +5,7 @@ this map, by OpenAlex institution ID, never by name, so look-alike or squatted
 organization rows cannot attract links. Each institution maps to one canonical
 organization row: the institution-level row with the most links when several
 exist. Parent and child institutions stay separate (Google DeepMind is not
-Google). A slug not yet in the catalog is created under ``name``.
+Google), except Microsoft Research labs, which belong to Microsoft. A slug not yet in the catalog is created under ``name``.
 
 The list covers institutions with at least 90 catalog papers since 2025 in
 OpenAlex, plus the companies the catalog already features.
@@ -347,9 +347,9 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     OpenAlexInstitution("I4405281272", "alibaba-damo-academy", "DAMO Academy"),
     OpenAlexInstitution("I2250653659", "tencent", "Tencent"),
     OpenAlexInstitution("I1290206253", "microsoft", "Microsoft"),
-    OpenAlexInstitution("I4210113369", "microsoftresearch", "Microsoft Research Asia"),
+    OpenAlexInstitution("I4210113369", "microsoft", "Microsoft Research Asia"),
     OpenAlexInstitution(
-        "I4210164937", "microsoftresearch", "Microsoft Research (United Kingdom)"
+        "I4210164937", "microsoft", "Microsoft Research (United Kingdom)"
     ),
     OpenAlexInstitution("I1291425158", "google", "Google"),
     OpenAlexInstitution("I4210090411", "deepmind", "Google DeepMind"),
