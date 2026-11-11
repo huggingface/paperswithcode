@@ -627,6 +627,11 @@ it('marks papers added since the last visit and lists only those on request', as
     expect.objectContaining({ addedAfter: '2026-11-09T08:00:00.000Z' })));
   expect(await screen.findByRole('link', { name: 'Show everything you follow' })).toBeInTheDocument();
 });
+it('names the selected bubbles when no new papers match them', async () => {
+  vi.mocked(researchApi.following).mockResolvedValue([]);
+  renderFeed('/following?new_since=2026-11-09T08:00:00.000Z&follow=task:1');
+  expect(await screen.findByText(/No papers matching the selected bubbles were added since/)).toBeInTheDocument();
+});
 it('starts counting from the first homepage visit', async () => {
   renderFeed('/');
   await screen.findByText('No papers in this window.');
