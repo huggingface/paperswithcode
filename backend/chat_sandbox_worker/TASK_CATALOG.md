@@ -123,6 +123,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `agents` — Agents
 - `ai-weather-forecasting` — AI Weather Forecasting
 - `ai-generated-text-detection` — AI-Generated Text Detection
+- `animal-re-identification` — Animal Re-Identification
 - `anomaly-detection` — Anomaly Detection
 - `aspect-based-sentiment-analysis` — Aspect-Based Sentiment Analysis
 - `atari-games` — Atari Games
@@ -194,6 +195,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `fake-news-detection` — Fake News Detection
 - `fall-detection` — Fall Detection
 - `few-shot-class-incremental-learning` — Few-Shot Class-Incremental Learning
+- `few-shot-image-classification` — Few-Shot Image Classification
 - `few-shot-object-detection` — Few-Shot Object Detection
 - `few-shot-segmentation` — Few-Shot Segmentation
 - `finance` — Finance
@@ -201,6 +203,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `full-duplex-spoken-dialogue` — Full-Duplex Spoken Dialogue
 - `gaze-estimation` — Gaze Estimation
 - `generative-recommendation` — Generative Recommendation
+- `gesture-recognition` — Gesture Recognition
 - `graph-classification` — Graph Classification
 - `graph-machine-learning` — Graph Machine Learning
 - `graph-regression` — Graph Regression
@@ -241,11 +244,14 @@ This compact index contains every current task and subtask. Treat names and slug
 - `knowledge-graph-completion` — Knowledge Graph Completion
 - `knowledge-tracing` — Knowledge Tracing
 - `knowledge-aware-multimodal-recommendation` — Knowledge-Aware and Multimodal Recommendation
+- `label-distribution-learning` — Label Distribution Learning
 - `language-modeling` — Language Modeling
 - `learning-to-rank` — Learning to Rank
+- `line-segment-detection` — Line Segment Detection
 - `link-prediction` — Link Prediction
 - `long-context` — Long Context
 - `long-horizon-agents` — Long-Horizon Agents
+- `long-tailed-recognition` — Long-Tailed Recognition
 - `low-light-image-enhancement` — Low-Light Image Enhancement
 - `machine-translation` — Machine Translation
 - `machine-unlearning` — Machine Unlearning
@@ -261,6 +267,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `micro-expression-recognition` — Micro-Expression Recognition
 - `molecular-property-prediction` — Molecular Property Prediction
 - `motion-generation` — Motion Generation
+- `motion-magnification` — Motion Magnification
 - `motion-sensing` — Motion Sensing
 - `multi-agent-reinforcement-learning` — Multi-Agent Reinforcement Learning
 - `multi-agent-systems` — Multi-Agent Systems
@@ -382,6 +389,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `visual-speech-recognition` — Visual Speech Recognition
 - `voice-activity-detection` — Voice Activity Detection
 - `voice-cloning` — Voice cloning
+- `watermark-removal` — Watermark Removal
 - `world-knowledge` — World Knowledge
 - `world-models` — World Models
 - `zero-shot-segmentation` — Zero-shot segmentation
@@ -395,7 +403,7 @@ Frameworks are software libraries, inference engines, serving systems, and toolk
 - Large Language Models / Model Libraries: `transformers` Transformers, `sentence-transformers` Sentence Transformers
 - Large Language Models / Agent Frameworks: `hermes-agent` Hermes Agent, `openclaw` OpenClaw, `cua` Cua, `browser-use` Browser Use
 - Large Language Models / Coding Agents: `codex-cli` Codex CLI, `claude-code` Claude Code, `opencode` OpenCode, `pi-agent` Pi
-- Computer Vision / Model Libraries: `timm` timm, `ultralytics` Ultralytics, `transformers-vision` Transformers, `paddleocr` PaddleOCR, `roboflow-trackers` Trackers
+- Computer Vision / Model Libraries: `timm` timm, `ultralytics` Ultralytics, `transformers-vision` Transformers, `paddleocr` PaddleOCR, `roboflow-trackers` Trackers, `mediapipe` MediaPipe
 - Image and video generation / Generation & Inference: `diffusers` Diffusers, `comfyui` ComfyUI, `sglang-diffusion` SGLang Diffusion, `cache-dit` Cache-DiT, `fastvideo` FastVideo, `xdit` xDiT
 - Robotics / Robot Learning: `lerobot` LeRobot
 - Medical Imaging / Medical Imaging Toolkits: `monai` MONAI
