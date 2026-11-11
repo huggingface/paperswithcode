@@ -110,10 +110,22 @@ Also enumerate all scheduled automation, because dashboard coverage discovery on
 
 ```bash
 rg -n "schedule:|cron:" /srv/paperswithcode/environments/production/current/.github/workflows/*.yml
-systemctl list-timers --all --no-pager | rg -i 'pwc|paperswithcode|autonomous|submission'
+# Every timer whose service runs repo code, whatever the unit is named (x-*-sheet-import, x-post-schedule, ...).
+for s in $(systemctl list-timers --all --no-legend --plain | awk '{print $NF}'); do
+  systemctl cat "$s" 2>/dev/null | rg -qi 'paperswithcode|pwc|autonomous|submission' && echo "$s"
+done
 ```
 
-Report scheduled duties outside the dashboard separately. Do not silently redefine them as dashboard jobs.
+Report scheduled duties outside the dashboard separately. Do not silently redefine them as dashboard jobs, but audit each one's durable effect like a dashboard job. Never treat `Result=success` as proof for them.
+
+### Headless-Claude Drive-sheet routines
+
+`x-trending-sheet-import` (09:30 UTC, "AI Papers on X" sheet → `paper_x_trending` and the curation priority queue) and `x-thread-sheet-import` (09:00 UTC, "PwC X threads" sheet → paper X threads) run `handoffs/<name>-routine/run.sh` in the main checkout. That script starts `claude -p` in `dontAsk` mode, which exits 0 even when a tool call is denied and nothing gets applied. A run counts as applied only when:
+
+- **x-trending:** that day's `handoffs/x-trending-routine/runs/<UTC stamp>/result.json` exists (not only `dry-run.json`), and `max(shared_on)` in `paper_x_trending` is within about two days of today;
+- **x-thread:** that day's run dir has `candidates.json`, and `handoffs/x-thread-routine/ledger.json` was modified after it whenever there were candidates.
+
+Also read the first lines of the newest `reports/<date>.md` in each routine dir. "not applied" or "blocked" for more than one day in a row is a `broken` job, even when systemd shows success. Since 2026-11-11, each `run.sh` exits non-zero when the run did not apply, so a red unit is real. A green unit still needs the checks above.
 
 ## Phase 2: challenge the dashboard baseline
 
@@ -204,6 +216,7 @@ Propose the smallest corrective or diagnostic action, ordered by impact. Do not 
 
 ## Known blind spots and gotchas
 
+- The "AI Papers on X" import was silently blocked from 2026-10-31 to 2026-11-10 while systemd showed success. Its unit name matched none of the old timer filters, and the Drive export had changed format. Check the routine reports, not the unit status.
 - `scan_model_releases` and `discover_x_threads` show `unknown`: their output goes to a different journal unit than the dashboard reads. Check their own units with `journalctl -u` before calling them broken or healthy.
 - A red job whose only evidence is an old systemd failure with fresh data (for example `link_papers_by_task_keywords` after one failed weekly run) needs `reset-failed`, not a code fix. Propose it; do not run it.
 - `sync_artificial_analysis` and the model-release radar share one Artificial Analysis key limited to 100 requests/day (resets about 04:48 UTC). Nightly 429s mean the budget is exhausted, not that the sync is broken.
@@ -220,5 +233,5 @@ Before finishing, confirm:
 - every scheduled registry job maps to scheduler and launcher evidence;
 - every job has an independent durable-output or correctness probe, or is explicitly unverified;
 - paused/manual work is separated from scheduled health;
-- out-of-dashboard scheduled automation is listed;
+- out-of-dashboard scheduled automation is listed and has a durable-effect verdict (including both Drive-sheet routines);
 - no mutating command or external message was sent.
