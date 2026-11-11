@@ -17,6 +17,8 @@ workflow. “All unread” uses the same default:
    “Verify evals on PwC” wording). Include open and closed issues.
 2. Address the authors' concerns by making the supported catalog database
    changes, then verify the live results. Do not merely acknowledge requests.
+   When every requested change is one the authors can make themselves, invite
+   them to use "Edit with your agent" instead (section 2a).
 3. Inform the authors in tailored issue replies describing the verified
    changes, and verify each posted comment.
 4. Mark each fully handled notification read and verify its read status.
@@ -92,6 +94,43 @@ returns each issue’s last comment, or explicitly paginate the REST search.
 7. Re-read the latest issue comments immediately before posting. If an equivalent reply reporting the completed outcome is already present, do not post a duplicate.
 
 Use the connected GitHub integration first for issue metadata, comments, and posting. Use `gh` only when the integration cannot perform the required operation. Do not blindly retry an uncertain posting failure; fetch the issue comments first to determine whether the comment was created.
+
+### 2a. Point authors to self-service edits
+
+Paper pages have an **Edit with your agent** button. It gives authors a prompt
+for their own coding agent, which uses the public pwc CLI and their Hugging Face
+account to edit the paper. Prefer that over editing the catalog yourself when
+every change the author asks for is one they can make:
+
+- a wrong score, model name, or openness flag on one of the paper's own
+  evaluations, or a missing result on an existing benchmark and metric;
+- tasks or methods that already exist in the catalog;
+- organizations, GitHub repositories, project pages, Hugging Face artifacts,
+  the source URL, or X threads.
+
+In that case make no catalog change and post this reply, adapting only the
+greeting:
+
+```markdown
+Hi,
+
+Thanks for reviewing that. Could you try editing the paper page using the "Edit with your agent" button?
+
+Let me know in case it doesn't work. 🤗
+```
+
+Fix it yourself (section 2) instead when any part of the request needs
+something the author cannot do: a new benchmark, metric, task, or method; a
+leaderboard split or protocol decision; changes to another paper's results;
+title, abstract, or author metadata; or a request that the author already tried
+to make themselves and reported as not working. Do not split one request into
+a self-service part and a part you fix; handle the whole issue yourself.
+
+Mark the notification read after posting the self-service reply. When the
+author later reports that they made the edit (for example "Done"), check the
+live paper and evaluation rows. If the change is live, mark the notification
+read without replying. If it is not, or the author reports a problem, make the
+correction yourself and reply as usual.
 
 ### Keep benchmarks useful across papers
 
@@ -185,6 +224,7 @@ Adapt the middle paragraph to the facts:
 - If a historical result remains intentionally, say so plainly and explain the catalog distinction in one sentence.
 - If no change was needed, thank the author, state what was verified, and avoid implying that data was edited.
 - If only part of the request could be completed, say exactly what is live and what remains unresolved.
+- If the author can make every requested edit themselves, use the self-service reply from section 2a instead.
 
 Avoid vague phrases such as "fixed everything". Do not mention an evaluation ID as prose unless it helps disambiguate the result; normally it should appear only inside the direct URL.
 
@@ -231,6 +271,7 @@ to the verified comment and briefly say which catalog changes were applied:
 
 ```markdown
 - [owner/repository#34](https://github.com/owner/repository/issues/34#issuecomment-123): Split single-frame and video leaderboards; verified ranks; notification marked read.
+- [owner/repository#1](https://github.com/owner/repository/issues/1#issuecomment-456): Asked the author to fix the MDPBench score with "Edit with your agent"; notification marked read.
 ```
 
 Separately list any notifications cleared without a reply (for example,
