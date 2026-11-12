@@ -557,6 +557,7 @@ def create_app() -> FastAPI:
         stats,
         tasks,
         thumbnails,
+        x_post_requests,
     )
 
     app.include_router(agent_discovery.router, tags=["agent_discovery"])
@@ -604,6 +605,7 @@ def create_app() -> FastAPI:
         app.mount("/api/internal/chat-gateway", chat_gateway_app)
     app.include_router(codex_add_evals.router, prefix="/api/v1", tags=["admin"])
     app.include_router(codex_enrich_paper.router, prefix="/api/v1", tags=["admin"])
+    app.include_router(x_post_requests.router, prefix="/api/v1", tags=["admin"])
     app.include_router(
         codex_curation_callbacks.router, prefix="/api/v1", tags=["admin"]
     )

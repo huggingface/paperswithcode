@@ -11,7 +11,16 @@ release tree and calls this through `pwc-cron x_post_candidates`:
     pwc-cron x_post_candidates record --kind new_sota --subject-key K \
         --post-id 123 [--reply-id 456]
         Records a posted subject in x_insight_posts so it is never offered
-        again.
+        again (and resolves an open "Tweet it" request for that paper).
+
+    pwc-cron x_post_candidates requests
+        {"requests": [...]}: papers an admin asked for with "Tweet it", in
+        the order to post them, as trending_paper candidates plus
+        request_position and requested_at.
+
+    pwc-cron x_post_candidates resolve-request --paper-id 123 \
+        --resolution removed
+        Closes a request whose post was dropped from the agent's queue.
 
 See backend/services/x_post_candidates.py for what each kind means.
 """
@@ -25,6 +34,11 @@ from datetime import UTC, datetime
 
 from backend.database.connection import get_database_session
 from backend.services.x_post_candidates import KINDS, gather, record
+from backend.services.x_post_requests import (
+    RESOLUTIONS,
+    requested_candidates,
+    resolve_request,
+)
 
 
 def main() -> int:
@@ -36,6 +50,10 @@ def main() -> int:
     record_parser.add_argument("--subject-key", required=True)
     record_parser.add_argument("--post-id", required=True)
     record_parser.add_argument("--reply-id")
+    commands.add_parser("requests", help="Print open Tweet it requests as JSON")
+    resolve_parser = commands.add_parser("resolve-request", help="Close a request")
+    resolve_parser.add_argument("--paper-id", type=int, required=True)
+    resolve_parser.add_argument("--resolution", choices=RESOLUTIONS, required=True)
     args = parser.parse_args()
 
     session = get_database_session()
@@ -53,6 +71,13 @@ def main() -> int:
                 )
                 candidates.append(item)
             output = {"generated_at": now.isoformat(), "candidates": candidates}
+        elif args.command == "requests":
+            output = {"requests": requested_candidates(db)}
+        elif args.command == "resolve-request":
+            output = {
+                "paper_id": args.paper_id,
+                "resolved": resolve_request(db, args.paper_id, args.resolution),
+            }
         else:
             row = record(
                 db,
