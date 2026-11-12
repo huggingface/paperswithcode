@@ -51,6 +51,7 @@ vi.mock("@/components/chat/ChatSharing", () => ({ ChatSharing: () => null }));
 import ChatView from "@/views/ChatView";
 import { chatApi } from "@/lib/api/chat";
 import { ApiError } from "@/lib/apiTransport";
+import { chatArtifactKeys } from "@/lib/chatSessionQueries";
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -149,6 +150,20 @@ describe("selected conversation and active turn ownership", () => {
     expect(mocks.stream).toHaveBeenCalledTimes(1);
     await act(async () => finish.resolve());
     await waitFor(() => expect(screen.queryByText("Stop selected turn")).not.toBeInTheDocument());
+  });
+
+  it("reloads an open paper panel once a turn settles", async () => {
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "a", request_id: "r1" };
+      yield { type: "answer_delta", text: "Repaired after a lost reply" };
+      yield { type: "done", followups: [], finish_reason: "success" };
+    });
+    render(element("/chat/a"));
+    await screen.findByText("a saved question");
+    client.setQueryData(chatArtifactKeys.latexPaper("artifact-a"), { artifact_id: "artifact-a" });
+    fireEvent.click(screen.getByText("Send test prompt"));
+
+    await waitFor(() => expect(client.getQueryState(chatArtifactKeys.latexPaper("artifact-a"))?.isInvalidated).toBe(true));
   });
 
   it("a failed route load leaves the background turn alive and allows retry", async () => {
