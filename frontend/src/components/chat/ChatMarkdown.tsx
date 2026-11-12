@@ -234,6 +234,25 @@ export const ChatMarkdown: React.FC<{
           }
           return <span>{children}</span>;
         },
+        // Never load remote images from model output: an <img> fetches its URL
+        // without a click, so injected text could leak data through the query
+        // string. Show HTTPS images as an ordinary link instead.
+        img: ({ src, alt }) => {
+          const label = alt?.trim() || "Image";
+          if (typeof src === "string" && src.startsWith("https://")) {
+            return (
+              <a
+                href={src}
+                className="chat-external-link"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {label}
+              </a>
+            );
+          }
+          return <span>{label}</span>;
+        },
       }}
     >
       {source}
