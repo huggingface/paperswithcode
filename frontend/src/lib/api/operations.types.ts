@@ -278,3 +278,12 @@ export interface AutonomousOperationsResponse {
   }>;
   exclusions: string[];
 }
+
+/** An admin "Tweet it" request for one paper (see backend/services/x_post_requests.py). */
+export interface XPostRequestStatus {
+  state: "none" | "requested" | "posted";
+  /** 1 = the X account posts about this paper next. */
+  position: number | null;
+  requested_at: string | null;
+  post_url: string | null;
+}

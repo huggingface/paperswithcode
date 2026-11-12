@@ -18,6 +18,10 @@ Each candidate carries a draft, the facts the agent may use, the page link,
 and a chart card (PNG bytes) or a page to screenshot. Posted subjects are
 recorded in `x_insight_posts`, as for the scheduled insight posts, so no
 subject is offered twice.
+
+Papers an admin asked for with "Tweet it" are not candidates here: the
+agent fetches them separately (`x_post_requests.requested_candidates`) and
+puts them at the front of its queue.
 """
 
 from __future__ import annotations
@@ -47,6 +51,7 @@ from backend.models.database import (
     Repository,
     Task,
     XInsightPost,
+    XPostRequest,
 )
 from backend.models.database import Method as DBMethod
 from backend.services.method_service import MethodService
@@ -85,6 +90,8 @@ KINDS = (
     "top_papers_week",
     "top_papers_month",
 )
+# Insight kinds about one paper; `subject_paper_id` reads it from the key.
+PAPER_POST_KINDS = ("new_sota", "open_sota", "open_release", "trending_paper")
 SOTA_LIMIT = 8
 OPEN_RELEASE_DAYS = 21
 OPEN_RELEASE_PAPERS = 25
@@ -426,15 +433,23 @@ def posted_paper_ids(db: Session) -> set[int]:
     ids = set(db.scalars(select(PaperXPost.paper_id)))
     for kind, subject_key in db.execute(
         select(XInsightPost.kind, XInsightPost.subject_key).where(
-            XInsightPost.kind.in_(
-                ("new_sota", "open_sota", "open_release", "trending_paper")
-            )
+            XInsightPost.kind.in_(PAPER_POST_KINDS)
         )
     ):
         paper_id = subject_paper_id(subject_key)
         if paper_id is not None:
             ids.add(paper_id)
     return ids
+
+
+def requested_paper_ids(db: Session) -> set[int]:
+    """Papers an admin asked to post about ("Tweet it") that are still open;
+    see `backend/services/x_post_requests.py`."""
+    return set(
+        db.scalars(
+            select(XPostRequest.paper_id).where(XPostRequest.resolved_at.is_(None))
+        )
+    )
 
 
 def board_sizes(db: Session, keys: set[tuple[int, str]]) -> dict[tuple[int, str], int]:
@@ -649,84 +664,94 @@ def trending_papers(
         end_date=today,
     )
     ranks = {int(item.id): rank for rank, item in enumerate(feed.results, 1)}
-    posted = posted_paper_ids(db)
-    wanted = [pid for pid in ranks if pid not in posted][:TRENDING_PAPER_LIMIT]
+    skip = posted_paper_ids(db) | requested_paper_ids(db)
+    wanted = [pid for pid in ranks if pid not in skip][:TRENDING_PAPER_LIMIT]
     by_id = {p.id: p for p in db.scalars(select(Paper).where(Paper.id.in_(wanted)))}
-    papers = [by_id[pid] for pid in wanted if pid in by_id]
-    candidates = []
-    for paper in papers:
-        authors = list(
+    return [
+        paper_candidate(
+            db, by_id[pid], rank=ranks[pid], fetch_org_handle=fetch_org_handle
+        )
+        for pid in wanted
+        if pid in by_id
+    ]
+
+
+def paper_candidate(
+    db: Session,
+    paper: Paper,
+    *,
+    rank: int | None,
+    fetch_org_handle: Callable[[str], str | None] = hf_org_x_handle,
+) -> Candidate:
+    """A paper explainer (alphaXiv style) with a screenshot of the paper page.
+    ``rank`` is the paper's place on the homepage's trending feed, if any."""
+    authors = list(
+        db.scalars(
+            select(Author.name)
+            .join(PaperAuthor, PaperAuthor.author_id == Author.id)
+            .where(PaperAuthor.paper_id == paper.id)
+            .order_by(PaperAuthor.author_order)
+        )
+    )
+    organizations = [o.name for o in paper.organizations]
+    facts: dict[str, Any] = {
+        "title": paper.title,
+        "arxiv_id": paper.arxiv_id,
+        "source": paper.source,
+        "homepage_trending_rank": rank,
+        "published": str(paper.date_published),
+        "trending_score": round(float(paper.trending_score or 0), 1),
+        "authors": authors[:12],
+        "author_count": len(authors),
+        "organizations": organizations,
+        "verified_x_handles": [
+            f"@{h}" for h in notable_handles(db, paper, fetch_org_handle)
+        ],
+        "x_threads": x_threads(db, paper.id),
+        "tldr": paper.tldr,
+        "abstract": paper.abstract,
+        "code": list(
             db.scalars(
-                select(Author.name)
-                .join(PaperAuthor, PaperAuthor.author_id == Author.id)
-                .where(PaperAuthor.paper_id == paper.id)
-                .order_by(PaperAuthor.author_order)
-            )
-        )
-        organizations = [o.name for o in paper.organizations]
-        facts: dict[str, Any] = {
-            "title": paper.title,
-            "arxiv_id": paper.arxiv_id,
-            "source": paper.source,
-            "homepage_trending_rank": ranks[paper.id],
-            "published": str(paper.date_published),
-            "trending_score": round(float(paper.trending_score or 0), 1),
-            "authors": authors[:12],
-            "author_count": len(authors),
-            "organizations": organizations,
-            "verified_x_handles": [
-                f"@{h}" for h in notable_handles(db, paper, fetch_org_handle)
-            ],
-            "x_threads": x_threads(db, paper.id),
-            "tldr": paper.tldr,
-            "abstract": paper.abstract,
-            "code": list(
-                db.scalars(
-                    select(Repository.url)
-                    .join(
-                        PaperRepository, PaperRepository.repository_id == Repository.id
-                    )
-                    .where(PaperRepository.paper_id == paper.id)
-                    .order_by(
-                        PaperRepository.is_official.desc(),
-                        Repository.num_stars.desc(),
-                        Repository.id,
-                    )
-                    .limit(2)
+                select(Repository.url)
+                .join(PaperRepository, PaperRepository.repository_id == Repository.id)
+                .where(PaperRepository.paper_id == paper.id)
+                .order_by(
+                    PaperRepository.is_official.desc(),
+                    Repository.num_stars.desc(),
+                    Repository.id,
                 )
-            ),
-            "project_pages": list(
-                db.scalars(
-                    select(ProjectPage.url)
-                    .join(
-                        PaperProjectPage,
-                        PaperProjectPage.project_page_id == ProjectPage.id,
-                    )
-                    .where(PaperProjectPage.paper_id == paper.id)
-                    .order_by(ProjectPage.id)
-                    .limit(1)
-                )
-            ),
-            "leaderboard_results": paper_results(db, paper.id),
-            "paper_url": paper_url(paper),
-        }
-        lead = organizations[0] if organizations else (authors[0] if authors else None)
-        draft = f"{lead} just released a new paper!" if lead else "New paper!"
-        draft += f'\n\n"{paper.title}"'
-        if paper.tldr:
-            draft += f"\n\n{paper.tldr}"
-        candidates.append(
-            Candidate(
-                "trending_paper",
-                str(paper.id),
-                draft,
-                paper_url(paper),
-                facts,
-                screenshot_url=paper_url(paper),
-                score=32.0 - ranks[paper.id],
+                .limit(2)
             )
-        )
-    return candidates
+        ),
+        "project_pages": list(
+            db.scalars(
+                select(ProjectPage.url)
+                .join(
+                    PaperProjectPage,
+                    PaperProjectPage.project_page_id == ProjectPage.id,
+                )
+                .where(PaperProjectPage.paper_id == paper.id)
+                .order_by(ProjectPage.id)
+                .limit(1)
+            )
+        ),
+        "leaderboard_results": paper_results(db, paper.id),
+        "paper_url": paper_url(paper),
+    }
+    lead = organizations[0] if organizations else (authors[0] if authors else None)
+    draft = f"{lead} just released a new paper!" if lead else "New paper!"
+    draft += f'\n\n"{paper.title}"'
+    if paper.tldr:
+        draft += f"\n\n{paper.tldr}"
+    return Candidate(
+        "trending_paper",
+        str(paper.id),
+        draft,
+        paper_url(paper),
+        facts,
+        screenshot_url=paper_url(paper),
+        score=32.0 - rank if rank else 0.0,
+    )
 
 
 def x_threads(db: Session, paper_id: int) -> list[dict[str, Any]]:
@@ -944,5 +969,11 @@ def record(
         posted_at=now or datetime.now(UTC),
     )
     db.add(row)
+    paper_id = subject_paper_id(subject_key)
+    if paper_id is not None and kind in PAPER_POST_KINDS:
+        request = db.get(XPostRequest, paper_id)
+        if request is not None and request.resolved_at is None:
+            request.resolved_at = row.posted_at
+            request.resolution = "posted"
     db.commit()
     return row

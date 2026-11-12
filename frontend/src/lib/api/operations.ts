@@ -2,6 +2,7 @@ import type {
   AutonomousOperationsResponse,
   CronJobsResponse,
   PaperMarkdownJobsResponse,
+  XPostRequestStatus,
 } from "./operations.types";
 export type * from "./operations.types";
 import type { ApiRequest } from "../apiTransport";
@@ -9,6 +10,16 @@ import { apiRequest } from "./request";
 
 export class OperationsApi {
   constructor(private readonly request: ApiRequest) {}
+
+  getXPostRequest(paperId: number): Promise<XPostRequestStatus> {
+    return this.request(`/admin/papers/${paperId}/x-post-request`, { cache: "no-store" });
+  }
+
+  setXPostRequest(paperId: number, requested: boolean): Promise<XPostRequestStatus> {
+    return this.request(`/admin/papers/${paperId}/x-post-request`, {
+      method: requested ? "POST" : "DELETE",
+    });
+  }
 
   getCronStatus(forceRefresh = false): Promise<CronJobsResponse> {
     const query = forceRefresh ? "?force_refresh=true" : "";

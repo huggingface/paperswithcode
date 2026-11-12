@@ -432,10 +432,15 @@ export const adminKeys = {
   chatSandboxSpend: (environment: string) => ["admin", "chatSandboxSpend", environment] as const,
   chatWebSearchBudget: ["admin", "chatWebSearchBudget"] as const,
   codexPaperJobs: ["admin", "codexPaperJobs"] as const,
+  xPostRequest: (paperId: number) => ["admin", "xPostRequest", paperId] as const,
   catalogAudit: ["catalog-audit"] as const,
 };
 
 export const adminQueries = {
+  xPostRequest: (paperId: number) => queryOptions({
+    queryKey: adminKeys.xPostRequest(paperId),
+    queryFn: () => operationsApi.getXPostRequest(paperId),
+  }),
   cronStatus: () => queryOptions({
     queryKey: adminKeys.cronStatus,
     queryFn: () => operationsApi.getCronStatus(),

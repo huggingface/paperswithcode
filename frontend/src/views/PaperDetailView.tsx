@@ -51,6 +51,7 @@ import { PaperResourceSidebar } from "@/components/paper-detail/PaperResourceSid
 import { PaperMetadataSections } from "@/components/paper-detail/PaperMetadataSections";
 import { SignInToEditDialog } from "@/components/paper-detail/SignInToEditDialog";
 import { SavePaperButton } from "@/components/paper-detail/SavePaperButton";
+import { TweetItButton } from "@/components/paper-detail/TweetItButton";
 import { EditableActionButton } from "@/components/paper-detail/EditableActionButton";
 import { CodexPaperJobDialog } from "@/components/paper-detail/CodexPaperJobDialog";
 import { organizationShortName } from "@/lib/organizationNames";
@@ -595,6 +596,7 @@ const PaperDetailView: React.FC = () => {
               />
             )}
             <SavePaperButton paperId={paper.id} />
+            {isAdmin && <TweetItButton paperId={Number(paper.id)} />}
           </div>
 
           {paper.leaderboard_ranks && paper.leaderboard_ranks.length > 0 && (

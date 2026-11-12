@@ -489,6 +489,24 @@ class XInsightPost(Base):
     posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class XPostRequest(Base):
+    """An admin's request to post about a paper on the Papers with Code X
+    account soon. Open requests (no ``resolved_at``) go to the front of the
+    agent's queue in the order they were made."""
+
+    __tablename__ = "x_post_requests"
+
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    requested_by: Mapped[Optional[str]] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    resolution: Mapped[Optional[str]] = mapped_column(Text)
+
+
 class PaperRepository(Base):
     """Junction table for papers and repositories (many-to-many relationship)."""
 

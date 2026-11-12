@@ -64,3 +64,10 @@
   border-color: var(--ink);
 }
 .action-btn.is-saved:hover { background: color-mix(in oklch, var(--ink) 88%, var(--accent)); }
+
+/* Admin "Tweet it" button (TweetItButton) reuses .action-btn and .is-saved. */
+.action-btn-error {
+  align-self: center;
+  color: var(--negative-text);
+  font-size: 12px;
+}
