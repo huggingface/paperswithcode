@@ -968,7 +968,8 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
               WHERE d.slug IN (
                     'artificial-analysis-intelligence-index',
                     'artificial-analysis-agentic-index',
-                    'artificial-analysis-provider-voice-tts-arena'
+                    'artificial-analysis-provider-voice-tts-arena',
+                    'artificial-analysis-decision-index'
                   )
                 AND (
                     (
@@ -986,6 +987,12 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                       AND e.methodology LIKE
                           'Managed by the Papers with Code Artificial Analysis TTS live sync.%'
                     )
+                    OR
+                    (
+                      e.best_metric = 'Score'
+                      AND e.methodology LIKE
+                          'Managed by the Papers with Code Artificial Analysis Decision Index live sync.%'
+                    )
                   )
             )
             SELECT max(updated_at) AS last_write,
@@ -997,7 +1004,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                      WHERE updated_at IS NULL
                         OR updated_at <= now() - interval '3 hours'
                    ) AS stale_evaluations,
-                   3 - count(DISTINCT dataset_slug) FILTER (
+                   4 - count(DISTINCT dataset_slug) FILTER (
                      WHERE updated_at > now() - interval '3 hours'
                    ) AS missing_fresh_datasets
             FROM managed_evaluations

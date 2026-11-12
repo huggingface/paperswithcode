@@ -87,7 +87,8 @@ class ArtificialAnalysisTtsSyncStats:
         return self.__dict__.copy()
 
 
-def _next_payloads(html: str) -> str:
+def next_payloads(html: str, source: str = "Artificial Analysis TTS") -> str:
+    """Concatenate the Next.js flight chunks a server-rendered page embeds."""
     soup = BeautifulSoup(html, "html.parser")
     chunks: list[str] = []
     prefix = "self.__next_f.push("
@@ -98,18 +99,16 @@ def _next_payloads(html: str) -> str:
         try:
             payload = json.loads(text[len(prefix) : -1])
         except json.JSONDecodeError as exc:
-            raise ValueError(
-                "Artificial Analysis TTS page has invalid Next data"
-            ) from exc
+            raise ValueError(f"{source} page has invalid Next data") from exc
         if (
             not isinstance(payload, list)
             or len(payload) < 2
             or not isinstance(payload[1], str)
         ):
-            raise TypeError("Artificial Analysis TTS Next payload is malformed")
+            raise TypeError(f"{source} Next payload is malformed")
         chunks.append(payload[1])
     if not chunks:
-        raise ValueError("Artificial Analysis TTS page has no Next data")
+        raise ValueError(f"{source} page has no Next data")
     return "".join(chunks)
 
 
@@ -153,7 +152,7 @@ def parse_artificial_analysis_tts_leaderboard(
 ) -> list[ArtificialAnalysisTtsEntry]:
     if not isinstance(html, str) or not html.strip():
         raise TypeError("Artificial Analysis TTS response must be non-empty HTML")
-    models = _model_objects(_next_payloads(html))
+    models = _model_objects(next_payloads(html))
     if not MIN_EXPECTED_MODELS <= len(models) <= MAX_EXPECTED_MODELS:
         raise ValueError(
             f"Artificial Analysis TTS returned {len(models)} models; expected "
