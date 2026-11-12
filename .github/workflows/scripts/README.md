@@ -50,6 +50,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-vals-finance-agent.timer` | `*-*-* *:47:00` | `sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
 | `pwc-cron-sync-surge-chartography.timer` | `*-*-* *:38:00` | `sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
 | `pwc-cron-sync-swe-marathon.timer` | `*-*-* *:26:00` | `sync_swe_marathon` | `.github/workflows/scripts/hourly/sync_swe_marathon.py` |
+| `pwc-cron-sync-jevbench.timer` | `*-*-* *:37:00` | `sync_jevbench` | `.github/workflows/scripts/hourly/sync_jevbench.py` |
 | `pwc-cron-sync-frontiercs-2.timer` | `*-*-* *:43:00` | `sync_frontiercs_2` | `.github/workflows/scripts/hourly/sync_frontiercs_2.py` |
 | `pwc-cron-sync-vals-index.timer` | `*-*-* *:03:00` | `sync_vals_index` | `.github/workflows/scripts/hourly/sync_vals_index.py` |
 | `pwc-cron-sync-swe-sweep.timer` | `*-*-* *:08:00` | `sync_swe_sweep` | `.github/workflows/scripts/hourly/sync_swe_sweep.py` |
@@ -518,6 +519,19 @@ named in the methodology rather than the row name. It fails on another results
 version, a pass count that disagrees with the trials, or a run count outside
 10–300. `adopt_unmanaged=False` keeps self-reported vendor rows (Kimi K3.1 Pro)
 beside Abundant AI's runs.
+
+`sync_jevbench.py` keeps the `jevbench` benchmark on task `decision-making`
+equal to Benchmark Heaven's official API board
+(https://benchmarkheaven.com/jev-models/api), read from
+`/api/jevbench/latest`: every row with an API-board rank, at its Composite
+Score (equal-weight harmonic mean of Intelligence, Calibration, Speed and
+Cost). Preliminary, unranked, wrapper and listed-only rows carry no rank and
+are skipped; the stale `benchmarkheaven/jevbench` Hub snapshot is not used.
+JevBench scores are not comparable across methods, so the job fails when the
+method label leaves `v1.7`, as well as on broken ranks, a composite out of rank
+order, or a board outside 20–300 rows. General LLMs measured as decision
+models keep their best reasoning setting; vendor systems without a catalog
+paper become release-radar signals, with the vendor taken from the source host.
 
 `sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
 official `google-deepmind/physics-IQ-benchmark` README (the

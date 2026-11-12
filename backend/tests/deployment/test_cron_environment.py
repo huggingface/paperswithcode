@@ -360,6 +360,7 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_vals_finance_agent"]["timeout"] == "30m"
     assert status["jobs"]["sync_surge_chartography"]["timeout"] == "30m"
     assert status["jobs"]["sync_swe_marathon"]["timeout"] == "30m"
+    assert status["jobs"]["sync_jevbench"]["timeout"] == "30m"
     assert status["jobs"]["sync_frontiercs_2"]["timeout"] == "30m"
     assert status["jobs"]["sync_vals_index"]["timeout"] == "30m"
     assert status["jobs"]["sync_swe_sweep"]["timeout"] == "30m"

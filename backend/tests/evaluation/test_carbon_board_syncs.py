@@ -396,6 +396,7 @@ def test_every_board_has_identities_and_a_configured_fetcher():
         "sync_vals_finance_agent",
         "sync_surge_chartography",
         "sync_swe_marathon",
+        "sync_jevbench",
     }
     for job, sync in boards.BOARD_SYNCS.items():
         assert len(sync.board.identities) >= sync.board.min_selected
@@ -403,6 +404,7 @@ def test_every_board_has_identities_and_a_configured_fetcher():
             "sync_vals_finance_agent",
             "sync_surge_chartography",
             "sync_swe_marathon",
+            "sync_jevbench",
         ):
             assert sync.board.identities is IDENTITIES[sync.board.dataset_slug]
 

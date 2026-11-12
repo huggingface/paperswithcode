@@ -129,6 +129,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `swe-marathon` on task `long-horizon-agents`; Resolution Rate (%) 0–100 = trials with reward 1 / all trials of a complete v1.1 run (20 tasks x 8 trials), best reasoning effort per model and agent, from the `{version:`v1.1`,tasks:JSON.parse(...)}` block in the `/assets/index-*.js` bundle that https://www.swe-marathon.org/ loads; typically 10–300 complete runs (29 on 2026-11-10).
 - **Proof:** Recompute a few rows from the bundle (the tweet/site rounds to one decimal: 53.75 shows as 53.8); confirm `sync_swe_marathon_unreviewed` names become radar signals or get an identity in `swe_marathon_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated; a failure naming result versions means Abundant published a new benchmark version, which needs a reviewer decision (new benchmark row), not a parser patch.
 
+## `sync_jevbench`
+
+- **Contract:** `jevbench` on task `decision-making`; Composite Score 0–100 (two decimals) of every ranked row on Benchmark Heaven's official API board (`api_board_rank` set, method v1.7), from https://benchmarkheaven.com/api/jevbench/latest; ranks match https://benchmarkheaven.com/jev-models/api; typically 20–300 ranked API rows (48 on 2026-11-12, 6 on catalog papers).
+- **Proof:** Compare managed rows' relative order and values with the API board; confirm `sync_jevbench_unreviewed` names become radar signals (vendor from the source host) or get an identity in `jevbench_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated; a failure naming the method means Benchmark Heaven restated scores on a new method, which needs a reviewer decision before bumping `METHOD`, not a parser patch.
+
 ## `sync_frontiercs_2`
 
 - **Contract:** `frontiercs-2` on task `coding-agents`; Pass Rate (%) 0–100 (best metric) and FCI (unbounded, Kimi K2.7 = 0); the `MODELS`/`PASS`/`ECI` constants in https://frontier-cs.org/assets/js/fcs2-data.js behind https://frontier-cs.org/#leaderboard; typically 8–200 entries, one per model and harness (14 on 2026-10-26, all reviewed).

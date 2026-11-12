@@ -434,6 +434,15 @@ COMMANDS: dict[str, Job] = {
             "validated swe-marathon.org results bundle; never creates papers"
         ),
     ),
+    "sync_jevbench": job(
+        "-m",
+        "scripts.hourly.sync_jevbench",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed JevBench evaluation rows from Benchmark "
+            "Heaven's validated API board; never creates papers"
+        ),
+    ),
     "sync_frontiercs_2": job(
         "-m",
         "scripts.hourly.sync_frontiercs_2",
