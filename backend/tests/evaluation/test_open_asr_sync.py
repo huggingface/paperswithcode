@@ -126,7 +126,7 @@ def _session() -> Session:
                 id=2,
                 title="Legacy external model",
                 source="external",
-                source_url="https://huggingface.co/vendor/legacy",
+                source_url="https://vendor.example/legacy-technical-report.pdf",
                 version="v1",
                 is_latest_version=True,
             ),
@@ -391,6 +391,8 @@ def test_sync_replaces_legacy_and_only_deletes_stale_managed_rows(monkeypatch):
         "auto_matched": [],
         "unmatched_models": ["vendor/unmatched"],
         "missing_papers": [],
+        "no_paper_models": [],
+        "runtime_variants": [],
     }
     rows = {row.model_name: row for row in session.query(Evaluation).all()}
     assert set(rows) == {"legacy", "distil-large-v3.5", "Manual paper result"}
@@ -488,7 +490,7 @@ def test_unknown_models_match_announcements_or_become_radar_signals():
             id=3,
             title="Introducing Scribe v3",
             source="external",
-            source_url="https://example.com/scribe-v3",
+            source_url="https://example.com/scribe-v3.pdf",
             version="v1",
             is_latest_version=True,
         )
@@ -600,3 +602,91 @@ def test_sync_renames_old_rows_and_supersedes_stale_curated_scores(monkeypatch):
     again = service.sync(entries, discovery=discovery)
     assert (again.created, again.updated, again.deleted) == (0, 3, 0)
     assert service.models_needing_discovery(entries) == []
+
+
+def test_sync_drops_models_without_a_paper_and_runtime_duplicates():
+    session = _session()
+    session.add(
+        Paper(
+            id=3,
+            title="Card only",
+            source="external",
+            source_url="https://huggingface.co/vendor/card-only",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    for paper_id, model_id in ((3, "vendor/card-only"), (1, "org/model (gpu)")):
+        session.add(
+            Evaluation(
+                paper_id=paper_id,
+                task_id=12,
+                dataset_id=181,
+                model_name=model_id,
+                metrics={"WER": 9.0},
+                best_metric="WER",
+                external_source_url=SPACE_SOURCE_URL,
+                methodology=(
+                    f"{MANAGED_METHODOLOGY_PREFIX} Upstream model {model_id}; "
+                    "rank 1; default Average WER; fetched x."
+                ),
+            )
+        )
+    session.commit()
+    entries = [
+        OpenAsrEntry("vendor/card-only", 1, 4.0, None, False),
+        OpenAsrEntry("org/model (gpu)", 2, 5.0, 900.0, True),
+        OpenAsrEntry("org/model", 3, 5.5, 300.0, True),
+    ]
+
+    stats = OpenAsrSyncService(session).sync(entries)
+
+    assert stats.no_paper_models == ["vendor/card-only"]
+    assert stats.runtime_variants == ["org/model"]
+    assert (stats.updated, stats.deleted) == (1, 1)
+    row = session.query(Evaluation).one()
+    assert (row.paper_id, row.model_name) == (1, "model (gpu)")
+    assert row.metrics == {"WER": 5.0, "RTFx": 900.0}
+
+
+def test_new_best_runtime_variant_takes_over_the_existing_row():
+    session = _session()
+    session.add(
+        Paper(
+            id=3,
+            title="Echo ASR Technical Report",
+            source="external",
+            source_url="https://vendor.example/echo.pdf",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.add(
+        Evaluation(
+            id=77,
+            paper_id=3,
+            task_id=12,
+            dataset_id=181,
+            model_name="echo",
+            metrics={"WER": 6.0},
+            best_metric="WER",
+            external_source_url=SPACE_SOURCE_URL,
+            methodology=(
+                f"{MANAGED_METHODOLOGY_PREFIX} Upstream model vendor/echo; "
+                "rank 1; default Average WER; fetched x."
+            ),
+        )
+    )
+    session.commit()
+
+    stats = OpenAsrSyncService(session).sync(
+        [
+            OpenAsrEntry("vendor/echo (gpu)", 1, 5.0, 900.0, True),
+            OpenAsrEntry("vendor/echo", 2, 5.5, 300.0, True),
+        ]
+    )
+
+    assert (stats.created, stats.updated, stats.deleted) == (0, 1, 0)
+    row = session.query(Evaluation).one()
+    assert (row.id, row.paper_id, row.model_name) == (77, 3, "echo (gpu)")
+    assert row.metrics == {"WER": 5.0, "RTFx": 900.0}
