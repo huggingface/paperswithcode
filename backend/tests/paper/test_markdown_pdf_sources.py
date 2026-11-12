@@ -290,3 +290,53 @@ def test_worker_does_not_archive_external_pdf_before_document_validation(
         WORKER.process(entry, tmp_path / "content", tmp_path / "run")
 
     assert not (tmp_path / "content/external/109743/paper.pdf").exists()
+
+
+def test_worker_follows_alphaxiv_viewer_page_to_its_pdf_file(monkeypatch):
+    viewer = "https://www.alphaxiv.org/pdf/2611.singh2026tooldocs"
+    pdf_file = "https://pdfs.assets.alphaxiv.org/2611.singh2026tooldocsv1.pdf"
+    bodies = {
+        viewer: f'<html><a href="{pdf_file}">PDF</a></html>'.encode(),
+        pdf_file: b"%PDF-alphaxiv",
+    }
+    requested: list[str] = []
+
+    class Response:
+        headers = {}
+
+        def __init__(self, url):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            yield bodies[self.url]
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def stream(self, _method, url):
+            requested.append(url)
+            return Response(url)
+
+    monkeypatch.setattr(
+        WORKER, "validate_external_pdf_network_target", lambda value: value
+    )
+    monkeypatch.setattr(WORKER.httpx, "Client", Client)
+
+    assert WORKER.download_external_pdf(viewer) == b"%PDF-alphaxiv"
+    assert requested == [viewer, pdf_file]
