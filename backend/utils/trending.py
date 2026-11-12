@@ -87,6 +87,8 @@ HF_AGGREGATOR_DENYLIST = frozenset(
 
 # Final score multiplier (single-signal top ~= 50, both-signal top ~= 100).
 SCORE_SCALE = 100.0
+# Stored scores and components are rounded to 4 decimals before writing.
+STORED_SCORE_TOLERANCE = 0.02
 
 # Editorial decaying pin: temporary boost that linearly fades to the computed score.
 PIN_PEAK_SCORE = 100.0
@@ -240,6 +242,22 @@ def composite_score(
     """Combine the normalized components into the final paper score."""
     github_hf = GITHUB_WEIGHT * g_component + HF_WEIGHT * h_component
     return SCORE_SCALE * max(github_hf, x_weight * x_component)
+
+
+def hourly_lift(
+    stored_score: float | None,
+    stored_g: float | None,
+    stored_h: float | None,
+) -> float:
+    """Return the part of a stored score that sits above its GitHub/HF base.
+
+    Only the hourly job applies the X lift and decaying pins, so a targeted
+    rescore keeps this value instead of recomputing it with its own settings.
+    """
+    if stored_score is None:
+        return 0.0
+    base = composite_score(stored_g or 0.0, stored_h or 0.0)
+    return stored_score if stored_score > base + STORED_SCORE_TOLERANCE else 0.0
 
 
 def compute_paper_score(
