@@ -9,9 +9,11 @@ from backend.services.x_post_candidates import (
     Board,
     Candidate,
     classify_win,
+    headline_placement,
     league_text,
     open_beats_closed_line,
     open_closed_facts,
+    open_release_card_rows,
     open_release_score,
     open_release_text,
     open_sota_text,
@@ -238,6 +240,37 @@ def test_open_release_score_counts_only_top_three_open_placements():
         )
         == 23.0
     )
+
+
+def test_headline_placement_matches_the_draft_lead():
+    third = {"benchmark": "SciCode", "open_rank": 3, "ahead_of_best_closed": False}
+    beats = {
+        "benchmark": "AutomationBench",
+        "open_rank": 4,
+        "ahead_of_best_closed": True,
+    }
+    first = {"benchmark": "HLE", "open_rank": 1, "ahead_of_best_closed": False}
+    assert headline_placement([third, beats]) is beats
+    assert headline_placement([first, third, beats]) is first
+    assert headline_placement([third]) is third
+
+
+def test_open_release_card_rows_keep_the_model_and_best_closed():
+    b = board(
+        [(i, i, f"Open {i}", 100 - i) for i in range(1, 9)]
+        + [(9, 9, "Closed", 50), (10, 10, "Closed later", 40)],
+        open_ids=set(range(1, 9)),
+    )
+    mine = b.rows[6]
+    rows = open_release_card_rows(b, mine)
+    assert [row.model for row in rows] == [
+        "Open 1",
+        "Open 2",
+        "Open 3",
+        "Open 4",
+        "Open 7",
+        "Closed",
+    ]
 
 
 def test_open_release_text():

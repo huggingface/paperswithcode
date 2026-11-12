@@ -458,6 +458,28 @@ def open_release_score(placements: list[dict[str, Any]]) -> float:
     return sum(p["entries"] * weights.get(p["open_rank"], 0.0) for p in placements)
 
 
+def headline_placement(placements: list[dict[str, Any]]) -> dict[str, Any]:
+    """The placement the draft leads with, so the card charts the same board:
+    an open first, else a win over every closed model, else the best rank."""
+    return next(
+        (p for p in placements if p["open_rank"] == 1),
+        next((p for p in placements if p.get("ahead_of_best_closed")), placements[0]),
+    )
+
+
+def open_release_card_rows(board: Board, mine: Row, limit: int = 6) -> list[Row]:
+    """The board's top distinct models, always including the new model and the
+    best closed entry the draft compares it with, in board order."""
+    closed = next(
+        (row for row in board.rows if row.evaluation_id not in board.open_ids), None
+    )
+    required = [row for row in (mine, closed) if row is not None]
+    top = _distinct_models(board.rows, limit)
+    others = [row for row in top if row not in required]
+    keep = set(map(id, required + others[: limit - len(required)]))
+    return [row for row in board.rows if id(row) in keep]
+
+
 def open_release_text(facts: dict[str, Any], credit: str | None) -> str:
     size = f", {facts['parameters_b']}B" if facts.get("parameters_b") else ""
     lines = [f"New open-weights model: {facts['model']}{size}."]
@@ -527,7 +549,7 @@ def open_releases(
             key=lambda key: (-sizes[key], key),
         )
         placements = []
-        best_board: tuple[Board, Dataset, dict[str, Any]] | None = None
+        boards: dict[int, tuple[Board, Dataset]] = {}
         for dataset_id, metric in paper_keys:
             if len(placements) >= OPEN_RELEASE_BOARDS:
                 break
@@ -540,16 +562,13 @@ def open_releases(
             dataset = db.get(Dataset, dataset_id)
             place = {"benchmark": dataset.name, "metric": metric, **place}
             placements.append(place)
-            if best_board is None or (place["open_rank"], -place["entries"]) < (
-                best_board[2]["open_rank"],
-                -best_board[2]["entries"],
-            ):
-                best_board = (board, dataset, place)
+            boards[place["evaluation_id"]] = (board, dataset)
         score = open_release_score(placements)
-        if not score or best_board is None:
+        if not score:
             continue
         placements.sort(key=lambda p: (p["open_rank"], -p["entries"]))
-        board, dataset, best = best_board
+        best = headline_placement(placements)
+        board, dataset = boards[best["evaluation_id"]]
         own = by_id[best["evaluation_id"]]
         facts: dict[str, Any] = {
             "model": best["model"],
@@ -560,12 +579,11 @@ def open_releases(
             "paper": paper.title,
             "paper_url": f"{SITE}/paper/{paper.id}",
             "published": str(paper.date_published),
+            "card_benchmark": dataset.name,
             "placements": placements,
         }
         mine = next(r for r in board.rows if r.evaluation_id == best["evaluation_id"])
-        top = _distinct_models(board.rows, 6)
-        if mine not in top:
-            top = [*top[:5], mine]
+        top = open_release_card_rows(board, mine)
         image = render_bar_card(
             f"{best['model']} on {dataset.name}",
             f"{best['metric']} ({'lower' if board.lower else 'higher'} is better)",
