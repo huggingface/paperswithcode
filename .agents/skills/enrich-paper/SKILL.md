@@ -12,7 +12,7 @@ description: >-
 
 # Enrich a Paper
 
-This skill fills in the two things a freshly imported paper most often lacks:
+This skill fills in what a freshly imported paper most often lacks:
 
 1. **Code links** — the paper's *own* official GitHub repository and project page URL.
 2. **Hugging Face artifacts** — official model, dataset, and Space URLs, synchronized into normalized artifact links.
@@ -379,7 +379,7 @@ uv run --env-file backend/keys.env pwc paper update <paper_id> tasks <task_id> [
 uv run --env-file backend/keys.env pwc paper update <paper_id> methods <method_id> [<method_id> ...]
 ```
 
-`PaperService.update_paper_tasks` / `update_paper_methods` no longer exist; use the CLI above. The admin API (`PUT /papers/<id>/tasks?task_ids=..&task_ids=..`, same for methods, with `X-Admin-Token: $ADMIN_TOKEN`) works too, but the CLI avoids auth friction. Either way, always pass the merged union.
+The admin API (`PUT /papers/<id>/tasks?task_ids=..&task_ids=..`, same for methods, with `X-Admin-Token: $ADMIN_TOKEN`) works too, but the CLI avoids auth friction. Either way, always pass the merged union.
 
 ## Verify
 

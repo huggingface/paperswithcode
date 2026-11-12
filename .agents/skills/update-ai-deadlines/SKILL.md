@@ -8,11 +8,12 @@ metadata:
 # Update AI conference deadlines
 
 `/ai-deadlines` is generated from the `conferences` and `conference_deadlines`
-tables. The upstream huggingface/ai-deadlines YAML repo is **not** imported
-anymore (PR #456). Don't edit YAML or open PRs there. Change data only through
-the paths below. Each path writes through the guarded, audited writer: it
-never deletes, past editions and past deadlines are immutable, and every edit
-leaves a catalog audit event with before/after snapshots.
+tables. The upstream huggingface/ai-deadlines YAML repo is not a data source. Don't
+edit YAML or open PRs there. Change data only through the paths below. Sweeps
+and replays go through the guarded writer: it never deletes, past editions and
+past deadlines are immutable, and every edit leaves a catalog audit event with
+before/after snapshots. The admin endpoint (step 6) replaces an edition's whole
+deadline list and is audited the same way.
 
 ## How the pipeline works
 

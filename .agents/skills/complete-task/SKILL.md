@@ -9,7 +9,7 @@ description: >-
   evals for this task", or "bring the <task> leaderboards up to date". It mines the legacy
   evaluation-tables.json for the top benchmarks (by leaderboard entries) and their top papers, then
   orchestrates the add-benchmark, enrich-paper, add-evals, and verify-evals skills (one focused subagent
-  each, always on Composer 2.5) to index papers, create missing benchmarks, import evaluations, and verify
+  each) to index papers, create missing benchmarks, import evaluations, and verify
   every leaderboard is apples-to-apples. Prefer this orchestration skill over running those skills ad hoc
   when the goal is whole-task completion rather than a single benchmark/paper/eval. When data already
   exists, it degrades gracefully into verifying what is there. Be memory-aware: the legacy dump is ~250 MB
@@ -37,16 +37,16 @@ for *which* benchmarks and papers matter — it already encodes years of communi
 real leaderboards are. We mine it for the top benchmarks and their top papers, then re-create that data
 properly in the live database via the sub-skills.
 
-## Why delegate to subagents (and always on Composer 2.5)
+## Why delegate to subagents
 
 Each sub-skill is long and reads a lot of source material (papers, model cards, READMEs, legacy tables).
 Running them inline would blow up your context and make the orchestration unmanageable. Spawning one
 subagent per unit of work (per paper, per benchmark) keeps each agent focused on a small, well-scoped job
 and lets independent work run in parallel.
 
-**Always pass `model: "composer-2.5-fast"` when launching these subagents.** Composer 2.5 is cheap and
-plenty capable for these mechanical, well-specified sub-tasks, and the user has asked that all delegated
-work in this pipeline use it. The orchestration (this skill) stays on whatever model the user is driving.
+Run these subagents on a fast, lower-cost model: in Cursor use `composer-2.5-fast`; in other harnesses use
+the cheapest capable model their subagent tool accepts (in Claude Code, `model: "sonnet"`). These sub-tasks
+are mechanical and well-specified. The orchestration (this skill) stays on whatever model the user is driving.
 
 When launching a subagent, give it everything it needs to run autonomously: the exact sub-skill path to
 read first, the task slug, the specific paper/benchmark it owns, the relevant legacy rows, and what to
@@ -60,7 +60,8 @@ Run everything from the repo root with the project environment:
 uv run --env-file backend/keys.env ...
 ```
 
-Confirm the backend is up (start it without asking if not, per AGENTS.md):
+Confirm the API is up. If it is unavailable, use direct database checks where supported or report the
+blocker; do not start or restart deployed services during curation:
 
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/api/v1/papers/recent?limit=1
@@ -114,8 +115,8 @@ This returns, per benchmark (ranked by number of leaderboard rows, capped at the
 - `benchmark`, `row_count`, `unique_papers`, the legacy `metrics` columns, and
 - `top_papers`: up to 10 deduped papers with `model_name`, `metrics`, `paper_url`, `paper_title`, `paper_date`.
 
-Keep the caps the user asked for — **at most 5 benchmarks, at most 10 papers per benchmark** — so the
-pipeline stays bounded. The union of all `paper_url`s across benchmarks is your paper worklist; the set of
+Default to **at most 5 benchmarks and at most 10 papers per benchmark** unless the user sets other
+limits, so the pipeline stays bounded. The union of all `paper_url`s across benchmarks is your paper worklist; the set of
 `benchmark` names is your benchmark worklist.
 
 Sanity-check the picks against the live task page before committing to them — the legacy metric columns
@@ -124,7 +125,7 @@ off-topic name (legacy regex matches are loose) should be dropped.
 
 ## Phase 2 — Take stock of what already exists
 
-The user explicitly wants graceful degradation: benchmarks may already exist with many evals, and top
+Degrade gracefully: benchmarks may already exist with many evals, and top
 papers may already be indexed and enriched. **Do not redo finished work — verify it instead.** Check the
 current state before launching any write subagents:
 
@@ -181,7 +182,7 @@ last, once rows are in place.
 For each benchmark that is missing, unlinked, or missing its leaderboard metric, launch a subagent that
 reads and follows `add-benchmark`. Divide the work one benchmark per subagent so they run in parallel.
 
-Subagent prompt template (launch with `model: "composer-2.5-fast"`, `run_in_background: true`):
+Subagent prompt template (launch on the delegated-work model above, in the background):
 
 ```
 Read and follow the skill at .agents/skills/add-benchmark/SKILL.md.
@@ -207,18 +208,16 @@ Papers from the legacy dump may not be in the live DB yet. For each paper on the
 1. **Index it if missing.** For an arXiv paper, the admin endpoint is the simplest path:
 
    ```bash
-   source backend/keys.env
-   curl -s -X POST "http://localhost:8000/api/v1/papers/index/$ARXIV_ID" \
-     -H "X-Admin-Token: $PWC_ADMIN_API_TOKEN" -o /dev/null -w "%{http_code}\n"
-   # 200 = indexed, 409 = already present (both fine), 404 = not on arXiv
+   uv run --env-file backend/keys.env pwc paper index "$ARXIV_ID" --json
+   # status "created" or "existing" (both fine); an unknown id errors
    ```
 
    Parse the arXiv id from the legacy `paper_url` (e.g. `https://arxiv.org/abs/2312.00063v1` → `2312.00063`).
    If a top paper has no arXiv id (CVPR/proceedings/blog), it must be created via `add-external-paper`;
    fold that into the subagent prompt so the worker creates the external row before enriching.
 
-2. **Enrich it** with a subagent that reads and follows `enrich-paper`. Launch with
-   `model: "composer-2.5-fast"`, `run_in_background: true`:
+2. **Enrich it** with a subagent that reads and follows `enrich-paper`. Launch on the
+   delegated-work model above, in the background:
 
    ```
    Read and follow the skill at .agents/skills/enrich-paper/SKILL.md.
@@ -236,8 +235,8 @@ Papers that are already indexed and enriched (from Phase 2) don't need a subagen
 ## Phase 5 — Import evaluations (one subagent per paper)
 
 Once the benchmarks exist (Phase 3 complete) and papers are indexed (Phase 4), import the leaderboard
-rows. One subagent per paper, reading and following `add-evals`. Launch with `model: "composer-2.5-fast"`,
-`run_in_background: true`:
+rows. One subagent per paper, reading and following `add-evals`. Launch on the delegated-work model above,
+in the background:
 
 ```
 Read and follow the skill at .agents/skills/add-evals/SKILL.md.
@@ -264,7 +263,7 @@ benchmark; don't force every legacy column.
 ## Phase 6 — Verify each benchmark leaderboard (one subagent per benchmark)
 
 After evals are in, audit each benchmark for apples-to-apples comparability. One subagent per benchmark,
-reading and following `verify-evals`. Launch with `model: "composer-2.5-fast"`, `run_in_background: true`:
+reading and following `verify-evals`. Launch on the delegated-work model above, in the background:
 
 ```
 Read and follow the skill at .agents/skills/verify-evals/SKILL.md.

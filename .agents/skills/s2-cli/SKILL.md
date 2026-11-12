@@ -50,7 +50,7 @@ pass that offset. Citations must keep `offset + limit <= 9999`.
 1. Prefer `pwc search` / `pwc paper info` for papers already in Papers With Code.
 2. Use `s2 search QUERY --limit 100 --json` when you need the broader graph,
    high-citation classics, or papers missing from the local catalog.
-3. Run a second `s2 search QUERY --year 2025-2026 --limit 100 --json` for a
+3. Run a second `s2 search QUERY --year <last-year>-<this-year> --limit 100 --json` for a
    recent slice. Do not treat one search as both the classic and recent lists.
 4. Use `s2 refs PAPER` for a bibliography and `s2 citations PAPER` for citing
    work. Quote titles. Prefer `ARXIV:` IDs after the first resolution.

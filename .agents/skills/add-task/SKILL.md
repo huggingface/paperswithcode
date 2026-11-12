@@ -9,7 +9,7 @@ This skill adds curated rows to the `tasks` table so task pages, paper tagging, 
 
 > **Image storage:** seed PNG → `/tmp/paperswithcode_entity_image_seeds/tasks/<slug>.png` → `import_entity_image.py` → SQL bytes served at `/api/v1/tasks/<slug>/image`. Do **not** put task heroes in `frontend/public/` (that folder is for browser assets only: favicons, `og-image.png`, logos).
 
-When the user says **"similarly add X"** (often with just a name and area), run the full workflow below without re-asking — same area, parent, keywords, thumbnail, keyword backfill, and deploy steps as the prior task in the conversation unless they specify otherwise.
+When the user says **"similarly add X"** (often with just a name and area), run the full workflow below without re-asking — same area, parent, keywords, thumbnail, and keyword backfill steps as the prior task in the conversation unless they specify otherwise.
 
 When the user asks **"should we add X?"**, briefly judge whether the topic is distinct enough from an existing task slug (e.g. `object-detection` vs `3d-object-detection`, `image-restoration` vs `image-super-resolution`). If yes, add it; if it is only a synonym or a narrow variant of an existing task, say so and suggest updating keywords on the existing row instead.
 
