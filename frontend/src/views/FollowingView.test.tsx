@@ -625,18 +625,50 @@ it('badges the following tab New when papers arrived since the last visit, and n
 it('marks papers added since the last visit without a banner', async () => {
   localStorage.setItem('pwc:following-last-seen', '2026-11-09T08:00:00.000Z');
   vi.mocked(researchApi.followingNewCount).mockResolvedValue({ count: 1 });
-  const entry = (id: string, title: string, added_at: string) => ({ paper: { ...paper, id, title }, paper_key: `paper:${id}`,
-    title, url: `/paper/${id}`, summary: '', published: paper.published, reasons: ['Task'], scores: [], added_at });
+  const entry = (id: string, title: string, added_at: string) => ({ paper: { ...paper, id, arxiv_id: `2611.0000${id}`, title },
+    paper_key: `paper:${id}`, title, url: `/paper/${id}`, summary: '', published: paper.published, reasons: ['Task'], scores: [], added_at });
   vi.mocked(researchApi.following).mockResolvedValue([
     entry('1', 'Old paper', '2026-11-08T08:00:00Z'), entry('2', 'Fresh paper', '2026-11-10T08:00:00Z'),
   ]);
   const { container } = renderFeed();
   await screen.findByText('Fresh paper');
+  // New papers come first, once each.
+  await waitFor(() => expect([...container.querySelectorAll('.paper-card .paper-title')].map(title => title.textContent))
+    .toEqual(['Fresh paper', 'Old paper']));
   const chips = [...container.querySelectorAll('.paper-card')].map(card => !!card.querySelector('.paper-new-chip'));
-  expect(chips).toEqual([false, true]);
+  expect(chips).toEqual([true, false]);
+  expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ addedAfter: '2026-11-09T08:00:00.000Z' }));
   expect(screen.queryByText(/since your last visit/)).not.toBeInTheDocument();
   // The tab keeps its badge while Following is open.
   expect(await screen.findByRole('button', { name: 'following New' })).toBeInTheDocument();
+});
+it('keeps the badge and New marks for the rest of the visit, and moves on after it', async () => {
+  const lastVisit = new Date(Date.now() - 2 * 24 * 3600 * 1000).toISOString();
+  localStorage.setItem('pwc:following-last-seen', lastVisit);
+  vi.mocked(researchApi.followingNewCount).mockResolvedValue({ count: 3 });
+  const first = renderFeed('/following');
+  await screen.findByText('A paper');
+  const visitStart = localStorage.getItem('pwc:following-last-seen');
+  expect(visitStart).not.toBe(lastVisit);
+  expect(localStorage.getItem('pwc:following-new-since')).toBe(lastVisit);
+  first.unmount();
+  // Back on the homepage, and on Following again, papers stay new since the last visit.
+  const home = renderFeed('/');
+  expect(await screen.findByRole('button', { name: 'following New' })).toBeInTheDocument();
+  home.unmount();
+  vi.mocked(researchApi.followingNewCount).mockClear();
+  renderFeed('/following');
+  await screen.findByText('A paper');
+  expect(await screen.findByRole('button', { name: 'following New' })).toBeInTheDocument();
+  expect(researchApi.followingNewCount).toHaveBeenCalledWith(lastVisit);
+  expect(localStorage.getItem('pwc:following-last-seen')).toBe(visitStart);
+  cleanup();
+  // An hour after the visit began, the next one counts from it.
+  localStorage.setItem('pwc:following-last-seen', new Date(Date.now() - 2 * 3600 * 1000).toISOString());
+  const ended = localStorage.getItem('pwc:following-last-seen');
+  vi.mocked(researchApi.followingNewCount).mockClear();
+  renderFeed('/');
+  await waitFor(() => expect(researchApi.followingNewCount).toHaveBeenCalledWith(ended));
 });
 it('starts counting from the first homepage visit', async () => {
   renderFeed('/');
