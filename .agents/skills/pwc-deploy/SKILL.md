@@ -39,7 +39,7 @@ Never move `current` or `previous` manually, edit a release directory, serve
 directories directly. These bypass candidate qualification, feature-manifest
 validation, smoke checks, and atomic rollback.
 
-Route CRON health and job diagnostics to the repository `pwc-cli` skill.
+Route CRON health and job diagnostics to the repository `pwc-cron-health` skill.
 Route database/data migrations and Papers With Code curation to their relevant
 skills. A deploy does not authorize either.
 
@@ -59,8 +59,9 @@ smoke checks. Report the resulting `current` and `previous` releases from
 
 Staging is static, admin-gated, and owns only staging user/workflow state. A
 staging deployment must not start Vite, use production port 8000, mutate the
-production catalog, or enable production CRON. The release contract keeps
-`codex_add_evals` and `codex_enrich_paper` false in staging.
+production catalog, or enable production CRON. The release feature manifest
+(`deploy/release.py` `profile_features`) decides which features each
+environment enables; check it rather than assuming.
 
 ## Deploy production
 
@@ -72,19 +73,21 @@ sudo pwc-deploy production <exact-main-sha> --confirm DEPLOY_PRODUCTION
 ```
 
 Do not infer production authorization from approval to deploy staging, test a
-branch, merge code, or prepare a release. Preserve all staging-only feature
-boundaries; currently production chat and Sandbox features remain disabled.
+branch, merge code, or prepare a release. Preserve the environment feature
+boundaries in the release manifest; production sandbox admission stays disabled
+(`deploy/production_chat_rollout.json`).
 Production Codex curation controls are admin-only and require the protected
 HF/OpenAI/GitHub job credentials plus the writable production catalog.
 
 After success, use `pwc-status` and the release smoke checks. Verify at least
 health/release identity, the SPA shell and hashed asset MIME types, a paper
-page, one paper API response, and the production chat-absence boundary. Report
+page, one paper API response, and the chat activation state matching
+`deploy/production_chat_rollout.json`. Report
 the immediately recoverable `previous` release.
 
 ## Known transient failure: graceful drain
 
-A first `pwc-deploy` can fail with `external Pi worker did not prove graceful drain` while the old release keeps serving. Confirm with `pwc-status` that `current` is still the old release, then run the identical command again; it has succeeded on retry every time. Investigate only if the retry fails too.
+A first `pwc-deploy` can fail with `external Pi worker did not prove graceful drain` while the old release keeps serving. Confirm with `pwc-status` that `current` is still the old release, then rerun the identical command once; investigate if that retry also fails too.
 
 ## Roll back
 

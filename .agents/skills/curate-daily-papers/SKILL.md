@@ -34,7 +34,8 @@ uv run --env-file backend/keys.env ...
 Before acting, read and follow these repository skills:
 
 - `hf-cli` for the canonical daily list and paper Markdown.
-- `pwc-cli` for paper inspection and supported paper updates.
+- The repository `pwc` CLI (`uv run --env-file backend/keys.env pwc paper …`) for
+  paper inspection and `pwc paper update`.
 - `enrich-paper` for official URLs and conservative taxonomy tagging.
 - `add-evals` for evaluation eligibility, normalization, and writes.
 - `verify-evals` for the final leaderboard audit.
@@ -128,8 +129,8 @@ Before each eval write, query existing evaluations for the paper and the exact
 task/dataset/metric triple. Check both model name and leaderboard identity.
 
 Batch proposed tag and eval changes in a reviewable temporary script or explicit
-CLI commands. Keep the scope limited to the cohort IDs. Use `apply_patch` for
-temporary files and remove them after successful verification.
+CLI commands. Keep the scope limited to the cohort IDs. Write temporary scripts
+in the scratchpad and remove them after successful verification.
 
 In dry-run mode, print the exact proposed changes and stop here.
 

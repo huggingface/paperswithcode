@@ -33,7 +33,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/api/v1/datasets/1
 grep -E '^PWC_ADMIN_API_TOKEN=' backend/keys.env | head -1 | sed 's/=.*/=<redacted>/'
 ```
 
-If the server is not running, start it (or restart it without asking confirmation per AGENTS.md).
+If the API is unavailable, use the service fallback in step 7 where it applies, or report the blocker. Do not start or restart deployed services during data curation.
 
 ## Common Shortcuts From Recent Curation
 
@@ -146,7 +146,7 @@ Different starting points should converge on the same triple — a model identit
 
 You can combine sources when each one carries part of the picture (e.g. the card has the "main" table, the paper has an ablation, the README has the final leaderboard). Track per-row context — which source the score came from, model variant / mode / shot count / metric label / backbone head or task framework / harness notes — so model names and methodology lines you write later are accurate and traceable.
 
-While reading each source, also pin down the **raw model parameter count** for every model row you intend to import, since the database now stores it on each evaluation (`evaluations.num_parameters`, BIGINT). Check, in order: the HF model info JSON (`safetensors.total` or an explicit parameter field), the model card / paper / README headline that states the model size (e.g. "7B parameters", "355B-A22B", "1.5 billion parameters"), and any size column already in the source's own benchmark table. Convert size labels to the raw integer (`7B` -> `7_000_000_000`, `355B-A22B` -> `355_000_000_000` total parameters not active, `1.5B` -> `1_500_000_000`, `355M` -> `355_000_000`). Mixture-of-experts models should use **total** parameters by default; if you store the active count instead, mention it in `methodology` so the meaning of the stored value is unambiguous. If the source does not state the parameter count clearly for that specific variant, do not guess from sibling models, blog headlines, or organization conventions — leave the field unset for that row and report it as missing. Accuracy matters more than coverage here.
+While reading each source, also pin down the **raw model parameter count** for every model row you intend to import, since the database stores it on each evaluation (`evaluations.num_parameters`, BIGINT). Check, in order: the HF model info JSON (`safetensors.total` or an explicit parameter field), the model card / paper / README headline that states the model size (e.g. "7B parameters", "355B-A22B", "1.5 billion parameters"), and any size column already in the source's own benchmark table. Convert size labels to the raw integer (`7B` -> `7_000_000_000`, `355B-A22B` -> `355_000_000_000` total parameters not active, `1.5B` -> `1_500_000_000`, `355M` -> `355_000_000`). Mixture-of-experts models should use **total** parameters by default; if you store the active count instead, mention it in `methodology` so the meaning of the stored value is unambiguous. If the source does not state the parameter count clearly for that specific variant, do not guess from sibling models, blog headlines, or organization conventions — leave the field unset for that row and report it as missing. Accuracy matters more than coverage here.
 
 While reading each source, also try to pin down the **official Hugging Face model repo URL** for every model row you intend to import, since the database stores it per evaluation (`evaluations.hf_model_url`, TEXT). This is strictly opt-in: only set it when you are **100% certain** the repo is the exact evaluated model — never guess, and prefer leaving it blank over risking a false positive. Apply these rules:
 
@@ -273,7 +273,7 @@ Apply the exclusion rules in this order:
 5. Only use a canonical metric fallback when it preserves the same quantity, not merely the same benchmark name. For example, if a leaderboard only allows `Score`, an `MME Perception Score` or `MME Cognition Score` row must be skipped unless the source also reports enough official components to compute the overall `Score` and the source defines that sum as the leaderboard score. If a leaderboard only allows `Accuracy`, do not import `F1`, `Recall`, `Edit Distance`, or another table column as `Accuracy`.
 6. Treat configured broad or legacy task pages as intentional, but keep metric support as the hard gate. This repo has consolidated narrower multimodal tasks into broad parent tasks such as `Image Understanding` and `Video Understanding`, and some benchmarks may remain under an older task even after a better task page exists. It is fine to add evaluations to those existing leaderboards when the dataset is linked there and the exact source metric is supported. Do not skip solely because the task name is broad or imperfect; skip only when the source metric is not supported/configured, a component/subscore is being mistaken for a canonical total, or the source setup cannot be compared to the configured leaderboard.
 7. For each remaining benchmark, set `best_metric` to one of the already-linked metric names exactly as stored in `task_dataset_metrics`. The `metrics` JSON must contain only that selected metric key for the imported row unless every additional metric key is also linked to the same leaderboard and comparable on that page.
-   **Idempotency gate:** compare each intended row with the existing evaluations returned in context. If the same introduced model, harness/setup, selected metric, and normalized score already exist on that leaderboard, treat the lane as satisfied and omit it from `evaluations`; do not rewrite a correct row merely to rephrase `methodology` or optional source metadata. When every eligible lane is already satisfied, submit an empty `evaluations` array (plus any genuine benchmark gaps) so the scheduled workflow records an accepted `no_changes` result. Do not manufacture `validation_evidence` for unchanged rows.
+   **Idempotency gate:** skip any lane already satisfied on the leaderboard. In scheduled curation jobs, compare each intended row with the existing evaluations returned in context. If the same introduced model, harness/setup, selected metric, and normalized score already exist on that leaderboard, treat the lane as satisfied and omit it from `evaluations`; do not rewrite a correct row merely to rephrase `methodology` or optional source metadata. When every eligible lane is already satisfied, submit an empty `evaluations` array (plus any genuine benchmark gaps) so the scheduled workflow records an accepted `no_changes` result. Do not manufacture `validation_evidence` for unchanged rows.
 8. Normalize score scale to the existing leaderboard, not just the source table's printed unit. Read the configured metric `scale` before constructing the proposal. When a source prints a percentage but the catalog scale is `0-1`, divide by 100 (`91.9` -> `0.919`, `63.4%` -> `0.634`) and record the normalization in `methodology`. Conversely, never submit the printed percentage unchanged to a `0-1` metric. Before posting a `Score` row, inspect existing rows for that exact `(task_id, dataset_id, best_metric)` and compare the source value's magnitude with the leaderboard's native scale. OCRBench is the important 0-1000 case: model cards and blogs often report the same result as a percentage (for example `86.9%`). When importing OCRBench into dataset `OCRBench` / metric `Score`, convert percent-style values below 100 to native score by multiplying by 10 (`86.9` -> `869`, `91.90` -> `919`) and mention this normalization in `methodology`. Do not do this blindly for every benchmark named `Score`; if the existing leaderboard rows are mostly percent-scale or the source metric is a different quantity, keep the source value or skip and report the ambiguity.
 9. For `FPS` rows, prefer an **optimized deployment speed** when the source reports one alongside a baseline runtime number. Papers and READMEs often headline TensorRT, ONNX, Triton, compiled inference, quantization, or cache-assisted speeds in parentheses or a second column (for example `18.6 (100.2)` meaning PyTorch vs TensorRT). Import the optimized figure as the `FPS` value and record the stack in `methodology` (e.g. "TensorRT with language cache; PyTorch Float32 speed is 18.6 FPS"). Do not skip optimized FPS just because it is not the unoptimized reference implementation; do not post two FPS rows for the same model unless the user asks for both setups separately.
 10. Record `supports_harness` for the exact selected `(task_id, dataset_id)` row. This flag decides whether the API payload may include `harness`. If it is true, inspect the source notes, footnotes, model card metadata, official blog/report text, and linked official evaluation PRs or result files for a named harness before posting the row.
@@ -328,7 +328,7 @@ Use `POST /api/v1/evaluations/` with `X-Admin-Token`. Build one row per benchmar
 - When importing a **zero-shot transfer** result and the source distinguishes it from fine-tuned or in-domain rows, append `(zero-shot)` to `model_name` (e.g. `Grounding DINO 1.5 Pro (zero-shot)`). Omit the suffix for fine-tuned rows; mention the eval protocol in `methodology` either way.
 - Set `harness` only for leaderboards where `supports_harness = TRUE`. Use the source-attributed runtime/framework verbatim (`Terminus`, `Terminus-2`, `OpenHands`, `Claude Code`, `SWE-Agent`, etc.). If the source does not report a harness after checking the primary source and official linked artifacts, use `harness = "Not reported"` and mention the missing attribution in the final report.
 - Leave `harness` unset (null) on every leaderboard where `supports_harness = FALSE`, even when the setup is agentic or tool-augmented. Capture those details in `methodology`, or in a concise `model_name` suffix only when the setup represents a distinct non-harness condition.
-- Two harness variants of the same model on a harness-supporting leaderboard (e.g. `GLM-5.1` with `Claude Code` and `GLM-5.1` with `Terminus-2`) become two separate rows that differ only in `harness`. They are not duplicates.
+- On a harness-supporting leaderboard, keep one row per paper: the best eligible `(model, harness)` result. Post another harness variant of the same model only when the user explicitly asks for per-harness coverage; scheduled curation rejects more than one paper-native row per leaderboard.
 - Distinguish setups on the same benchmark that are NOT about harness (e.g. `HLE` vs `HLE w/ tools`) via a `model_name` suffix like `(w/ tools)` plus a clear `methodology` description, since the metric is shared. Only do this if the metric/methodology can clearly distinguish the rows — otherwise skip and report.
 - Skip component, subscore, split, or alternate-metric rows when their metric is not configured on the selected leaderboard. Examples: skip `MME Perception Score` and `MME Cognition Score` on an `MME` leaderboard that only allows `Score`; skip `MME-P` unless a separate MME-P dataset/leaderboard exists with that metric configured.
 - Normalize values to the leaderboard's native scale before posting. For OCRBench `Score`, store the native 0-1000 score (`869`), not the percent-style rendering (`86.9%`) commonly shown in VLM release tables. If you convert a source value, say so in `methodology` so future maintainers can trace why the stored value differs from the printed table.
@@ -383,30 +383,7 @@ def normalize_score_for_leaderboard(dataset_name, metric, score):
             return str(int(scaled)) if scaled.is_integer() else f"{scaled:g}"
     return f"{score}".rstrip("%")
 
-def determine_is_open(source_urls, hf_model_repo_ids=None):
-    """Return False for proprietary API releases unless open/reproducible artifacts are evidenced."""
-    hf_model_repo_ids = hf_model_repo_ids or []
-    open_weight_markers = (
-        "apache", "mit license", "open weights", "open-weight", "open source weights",
-        "model weights are available", "weights available on hugging face",
-        "public checkpoint", "checkpoint release", "pretrained weights",
-        "reproduce our checkpoint", "training scripts", "evaluation scripts",
-        "download weights",
-    )
-    blob = " ".join(source_urls).lower()
-    if any(marker in blob for marker in open_weight_markers):
-        return True
-    if hf_model_repo_ids:
-        return True
-    closed_vendors = ("anthropic.com", "openai.com", "blog.google", "deepmind.google", "x.ai")
-    if any(v in blob for v in closed_vendors):
-        return False
-    return True  # non-vendor academic/GitHub releases default open unless proven otherwise
-
-IS_OPEN = determine_is_open(
-    source_urls=["<announcement/system card/github readme>"],
-    hf_model_repo_ids=[],  # e.g. ["org/open-model-7b"] when weights are official
-)
+IS_OPEN = False  # decide per evaluated variant from the Closed-source / Open-source rules above
 
 def post_eval(
     paper_id, task_id, dataset_id, dataset_name, model_name, metric, score,

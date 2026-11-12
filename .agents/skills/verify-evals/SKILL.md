@@ -198,8 +198,6 @@ for paper_id, group in sorted(by_paper.items()):
 
 For external leaderboard imports that re-sync from a JSON feed, fix the import script to consolidate by `paper_id` before insert — see `_best_entry_per_paper` in `backend/database/evaluations_setup/import_posttrainbench_external_evals.py`. Re-running the import after that change is preferred over hand-deleting rows one by one.
 
-**Worked fix (PostTrainBench, agents task):** five papers had two agent-config variants each (High vs Max, reprompted vs not, etc.). Kept only the highest Accuracy per `paper_id` — e.g. Opus 4.8 (Max) 34.08% over Opus 4.8 (High) 33.80%. Leaderboard dropped from 23 to 18 rows with no duplicate model families.
-
 ### Paper attachment
 
 Each row's `paper_id` must be the paper that **introduced or released** the evaluated model, not a survey or unrelated technique paper. The score must appear in that paper (or its official README/model card linked from it).
@@ -252,7 +250,7 @@ CLOSED_NAME_MARKERS = (
 for r in rows:
     name = (r["model_name"] or "").lower()
     stored = r["is_open"]
-    hf_url = r.get("hf_model_url")  # add to Step 2 SELECT if auditing deeply
+    hf_url = r.get("hf_model_url")
 
     if stored is not False and any(m in name for m in CLOSED_NAME_MARKERS):
         print(f"REVIEW is_open: id={r['id']} {r['model_name']} stored={stored} (proprietary name)")
@@ -295,7 +293,7 @@ Name heuristics only narrow the search — always confirm against the primary so
 
 For each row, trace: **stored value → cited source → table row/cell**.
 
-Priority order for sources (same as `add-evals`):
+Priority order for sources:
 
 1. **`external_source_url`** on the evaluation row, if set
 2. arXiv paper via **`hf-cli`**
@@ -303,7 +301,7 @@ Priority order for sources (same as `add-evals`):
 4. HF model card (`uv run hf models card <repo_id> --text`)
 5. Legacy corroboration: `data/legacy_pwc_data/evaluation-tables.json` via `ijson` streaming (see Step 1; helpful for split inference on older 3D/CV benchmarks; not authoritative alone)
 
-**VPS / memory:** On the Hetzner VPS (~4GB RAM), never load `papers-with-abstracts.json` or full `evaluation-tables.json` into memory. Stream with `ijson`, fetch individual PDFs to `/tmp`, use `pdftotext` + `rg`. Prefer `gh api …/readme` and targeted SQL queries over bulk dumps.
+**VPS / memory:** The production VPS has limited RAM and disk (see `AGENTS.md`); never load `papers-with-abstracts.json` or full `evaluation-tables.json` into memory. Stream with `ijson`, fetch individual PDFs to `/tmp`, use `pdftotext` + `rg`. Prefer `gh api …/readme` and targeted SQL queries over bulk dumps.
 
 ### Reading papers with hf-cli
 
@@ -343,7 +341,7 @@ Confirm the card's eval table matches the row and that the linked `arxiv:` tag m
 
 Users filter closed-source rows on benchmark and paper pages (`is_open === false` shows a "closed" badge). A row tagged open when weights are proprietary misleads readers; tagging closed when weights are public hides legitimately reproducible results.
 
-Apply the same rules as `add-evals` Step 5 — verification runs them in reverse on the stored boolean.
+Apply the same rules as `add-evals` Step 7 (Closed-source / Open-source) — verification runs them in reverse on the stored boolean.
 
 #### Closed-source (`is_open` should be `false`)
 
@@ -424,7 +422,7 @@ Use explicit verdicts:
 | **DUPLICATE** | Same unique key twice | Delete the duplicate |
 | **DUPLICATE_VARIANT** | Same `paper_id`, different `model_name` — multiple configs/variants of one model release on the same leaderboard | **Delete** lower-scoring variants; keep the single best row that matches the contract (see Step 1 "One best eval per model") |
 | **WRONG_IS_OPEN** | Stored open/closed tag contradicts weight-release evidence for the evaluated variant | **PUT** `is_open` (and fix/clear `hf_model_url` if inconsistent); score/split unchanged |
-| **UNVERifiable** | Source missing, table ambiguous, cannot confirm split or open/closed status | Report blocker; do not delete without user confirmation |
+| **UNVERIFIABLE** | Source missing, table ambiguous, cannot confirm split or open/closed status | Report blocker; do not delete without user confirmation |
 
 **Important:** An honest `methodology` field that says "validation" does not make a validation row OK on a test leaderboard — it confirms the row should be removed or relocated.
 
@@ -442,8 +440,6 @@ These patterns recur across benchmarks:
 8. **Variant duplicates on agent benches** — same model paper listed twice under different runtime/config names (High vs Max, reprompted vs default). Users expect one row per model with the best score; lower variants are **DUPLICATE_VARIANT** even when each score is individually correct.
 9. **Default-open proprietary models** — frontier API evals imported without `is_open: false` (Claude, GPT, Gemini on agent/VLM benches). The API default is `true`; verification should flip these when the release has no public weights.
 10. **Closed tag with HF link** — `is_open: false` but `hf_model_url` populated, or open tag with only a vendor blog and no weight artifact. Fix both fields together.
-
-**Worked fix (ScanNet200, contract: validation except Mask3D on test):** Volt WRONG_SPLIT — stored 47.5 (test), validation cell is 48.4 (Table 3). PUT `metrics` + `methodology`; other rows already matched or were already validation; Mask3D 38.8 test unchanged.
 
 ## Step 5: Run automated checks
 

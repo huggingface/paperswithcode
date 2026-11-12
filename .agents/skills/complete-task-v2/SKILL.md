@@ -32,16 +32,12 @@ Do not treat this as a blind bulk import or as a narrow "add the easiest current
 
 Use this default scope unless the user narrows it:
 
-- Preserve this user intent explicitly: **"I want you to get a thorough, holistic
-  overview of this task: major benchmarks, major papers and papers they compare to,
-  evals for those papers. Importantly, we want to cover the top 100 papers on this
-  task and their benchmarks/evals."**
 - Get a **thorough, holistic overview** of the task: major benchmarks, major papers,
   papers they compare to, and paper-native evaluations for those papers. Cover the
   **top 100 papers on the live task page and their benchmarks/evals** by default.
   Every paper in that top-100 slice must either have evaluation rows or a concrete,
   evidence-backed ledger decision explaining why it cannot or should not be imported.
-- Build a **field map** before importing: major benchmarks, major papers, comparison-table baselines, recent 2025/2026 work, live task-page/trending papers, legacy PwC rows, popular GitHub repos, and relevant Hugging Face artifacts.
+- Build a **field map** before importing: major benchmarks, major papers, comparison-table baselines, recent current- and previous-year work, live task-page/trending papers, legacy PwC rows, popular GitHub repos, and relevant Hugging Face artifacts.
 - Find the **major benchmarks** for the task, not every dataset ever used, but err toward breadth at the research stage. A broad task should usually produce tens of candidate papers and many candidate benchmarks before filtering.
 - Prefer benchmarks where multiple papers report comparable numbers.
 - Exclude low-impact one-off benchmarks unless they are clearly becoming field-standard or the user asks for them.
@@ -49,7 +45,7 @@ Use this default scope unless the user narrows it:
 - Follow comparison tables in major papers to discover what the field itself treats as important. Do not import comparator rows as evals by default, but do use them to identify papers/benchmarks that deserve their own workers.
 - Use local PapersWithCode signals: live task-page papers, DB paper counts, GitHub star velocity/trending score, and linked Hugging Face artifacts. Do not rely only on citation counts.
 - Treat source-availability metadata as part of curation, not a cosmetic afterthought. A paper can have open evaluation rows without a direct HF model link when the official GitHub/project page releases weights, links unindexed HF repos, or provides reproducible scripts/configs for the evaluated checkpoint.
-- Treat 2025/2026 papers as a required explicit slice: search for them, list them, and decide whether they belong on existing benchmarks, require new benchmarks, or should be deferred.
+- Treat current- and previous-year papers as a required explicit slice: search for them, list them, and decide whether they belong on existing benchmarks, require new benchmarks, or should be deferred.
 - Add only **paper-native** evaluation results: the score must appear in the paper/official README/model card for the model that paper introduces.
 - Do not add comparator/external eval rows from another paper's comparison table unless the user explicitly asks for external evals.
 - Keep leaderboards apples-to-apples: same split, metric, degradation/protocol, input setup, and model mode.
@@ -227,13 +223,13 @@ QUERY="<task name or keywords>"
 uv run --directory clis/s2_cli --env-file ../../backend/keys.env s2 search "$QUERY" --limit 100 --json \
   > /tmp/s2-<task-slug>.json
 
-uv run --directory clis/s2_cli --env-file ../../backend/keys.env s2 search "$QUERY" --year 2025-2026 --limit 100 --json \
+uv run --directory clis/s2_cli --env-file ../../backend/keys.env s2 search "$QUERY" --year <previous-year>-<current-year> --limit 100 --json \
   > /tmp/s2-<task-slug>-recent.json
 ```
 
 Walk citation edges with `s2 refs PAPER` and `s2 citations PAPER` when a paper's bibliography or citing work matters. Quote titles; prefer `ARXIV:` IDs after the first match.
 
-Extract candidate arXiv IDs from `externalIds.ArXiv`. Keep papers that mention the task or close synonyms in title/abstract, especially high-citation classics and 2025/2026 papers.
+Extract candidate arXiv IDs from `externalIds.ArXiv`. Keep papers that mention the task or close synonyms in title/abstract, especially high-citation classics and current- and previous-year papers.
 
 Run multiple query variants for broad tasks:
 
@@ -332,11 +328,11 @@ Do not import comparator rows by default. Use them to add papers to the worklist
 
 Create an explicit recent-paper checklist:
 
-- all 2025/2026 candidates from Semantic Scholar;
-- 2025/2026 papers on the live task page;
-- 2025/2026 papers in popular GitHub repos;
-- 2025/2026 papers from Hugging Face model/dataset cards;
-- 2025/2026 papers found by following comparison tables in major papers.
+- all current- and previous-year candidates from Semantic Scholar;
+- current- and previous-year papers on the live task page;
+- current- and previous-year papers in popular GitHub repos;
+- current- and previous-year papers from Hugging Face model/dataset cards;
+- current- and previous-year papers found by following comparison tables in major papers.
 
 Do not add them just because they are recent; require source-reported scores on configured comparable benchmarks, or mark the missing benchmark/metric as follow-up.
 
@@ -346,7 +342,7 @@ Before Phase 2, write a compact field map. It must include:
 
 - benchmark families and their canonical metrics/splits;
 - major historical papers and why they matter;
-- major current/recent papers, especially 2025/2026;
+- major current/recent papers, especially current- and previous-year;
 - live/trending local papers and popular GitHub repos;
 - legacy PwC benchmark rows found and whether they are candidates;
 - missing benchmark/source-paper/metric wiring discovered;
@@ -365,7 +361,7 @@ Prefer a top 10 benchmark list for broad tasks, but do not cap discovery at 10. 
 
 1. number of independent papers reporting the same metric/setup;
 2. field importance and citation/repo signal;
-3. current/recent use, including 2025/2026 papers;
+3. current/recent use, including current- and previous-year papers;
 4. presence in legacy PwC;
 5. live task-page/trending/HF/GitHub signal;
 6. whether the DB already has a dataset, task link, and metric wiring;
@@ -418,7 +414,7 @@ for slug in dataset_slugs:
 print("== papers ==")
 for aid in arxiv_ids:
     row = db.execute(text("""
-        SELECT id, arxiv_id, title, date_published, urls_extracted, github_urls, project_page_url
+        SELECT id, arxiv_id, title, date_published, urls_extracted, thumbnail_url, hf_models
         FROM papers
         WHERE arxiv_id = :aid
         ORDER BY is_latest_version DESC NULLS LAST
@@ -601,7 +597,7 @@ task as complete.
 
 Report:
 
-- benchmark/paper scope used, including how 2025/2026 coverage was handled;
+- benchmark/paper scope used, including how current- and previous-year coverage was handled;
 - field map summary: major benchmark families, major papers, trend/GitHub/HF/legacy signals considered;
 - candidate papers/benchmarks that were found but not imported and why;
 - benchmark rows created or repaired by `add-benchmark`;

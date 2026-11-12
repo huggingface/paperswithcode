@@ -125,7 +125,7 @@ Report scheduled duties outside the dashboard separately. Do not silently redefi
 - **x-trending:** that day's `handoffs/x-trending-routine/runs/<UTC stamp>/result.json` exists (not only `dry-run.json`), and `max(shared_on)` in `paper_x_trending` is within about two days of today;
 - **x-thread:** that day's run dir has `candidates.json`, and `handoffs/x-thread-routine/ledger.json` was modified after it whenever there were candidates.
 
-Also read the first lines of the newest `reports/<date>.md` in each routine dir. "not applied" or "blocked" for more than one day in a row is a `broken` job, even when systemd shows success. Since 2026-11-11, each `run.sh` exits non-zero when the run did not apply, so a red unit is real. A green unit still needs the checks above.
+Also read the first lines of the newest `reports/<date>.md` in each routine dir. "not applied" or "blocked" for more than one day in a row is a `broken` job, even when systemd shows success. Each `run.sh` exits non-zero when the run did not apply, so a red unit is real. A green unit still needs the checks above.
 
 ## Phase 2: challenge the dashboard baseline
 
@@ -216,7 +216,6 @@ Propose the smallest corrective or diagnostic action, ordered by impact. Do not 
 
 ## Known blind spots and gotchas
 
-- The "AI Papers on X" import was silently blocked from 2026-10-31 to 2026-11-10 while systemd showed success. Its unit name matched none of the old timer filters, and the Drive export had changed format. Check the routine reports, not the unit status.
 - `scan_model_releases` and `discover_x_threads` show `unknown`: their output goes to a different journal unit than the dashboard reads. Check their own units with `journalctl -u` before calling them broken or healthy.
 - A red job whose only evidence is an old systemd failure with fresh data (for example `link_papers_by_task_keywords` after one failed weekly run) needs `reset-failed`, not a code fix. Propose it; do not run it.
 - `sync_artificial_analysis` and the model-release radar share one Artificial Analysis key limited to 100 requests/day (resets about 04:48 UTC). Nightly 429s mean the budget is exhausted, not that the sync is broken.

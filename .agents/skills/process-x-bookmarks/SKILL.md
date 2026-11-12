@@ -103,7 +103,7 @@ links a repository the page lacks).
 
 ## 5. Add evaluation results
 
-Always run this step, not only on request. For every kept paper (indexed,
+Run this step for every kept paper. For every kept paper (indexed,
 external, or already in the catalog) that has no evaluation rows, run the
 `add-evals` skill, one paper per subagent, each with its own scratch
 subdirectory. Find those papers with:

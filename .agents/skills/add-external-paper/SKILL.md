@@ -289,8 +289,6 @@ uv run --env-file backend/keys.env pwc paper update <paper_id> tasks <task_id> [
 uv run --env-file backend/keys.env pwc paper update <paper_id> methods <method_id> [<method_id> ...]
 ```
 
-(`PaperService.update_paper_tasks` / `update_paper_methods` no longer exist; do not call them.)
-
 Prefer a few high-confidence tags over broad keyword stuffing. A good external paper page should usually have 1-4 task tags and 1-5 method tags.
 
 ## Add Repositories And Project Pages
@@ -431,7 +429,7 @@ Check the local route:
 curl -s -o /dev/null -w "%{http_code}\n" "https://paperswithcode.co/paper/<paper_id>"
 ```
 
-If you changed backend code, restart the backend per `AGENTS.md`. For pure database population, no redeploy is needed, but verify the live page/API after the write.
+Backend code changes ship through the PR and `pwc-deploy` workflow in `AGENTS.md`. For pure database population, no redeploy is needed, but verify the live page/API after the write.
 
 ## Reporting Back
 

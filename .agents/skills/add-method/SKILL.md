@@ -9,7 +9,7 @@ This skill adds curated rows to the `methods` table so method pages, paper pages
 
 > **Image storage:** seed PNG → `/tmp/paperswithcode_entity_image_seeds/methods/<slug>.png` → `import_entity_image.py` → SQL bytes served at `/api/v1/methods/<slug>/image`. Do **not** put method figures in `frontend/public/` (that folder is for browser assets only: favicons, `og-image.png`, logos).
 
-When the user says **"similarly add X"** (often with just a name and source arXiv id), run the full workflow below without re-asking — same area, citation linking, thumbnail, and deploy steps as the prior method in the conversation unless they specify otherwise.
+When the user says **"similarly add X"** (often with just a name and source arXiv id), run the full workflow below without re-asking — same area, citation linking, and thumbnail steps as the prior method in the conversation unless they specify otherwise.
 
 When the user asks **"should we add X?"**, briefly judge whether the technique is distinct enough from an existing method slug (e.g. Fast Conformer vs Conformer, TDT vs RNN-Transducer). If yes, add it; if it is only a hyperparameter variant or product name with no introducing paper, say so and stop.
 

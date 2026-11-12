@@ -177,8 +177,8 @@ Use `source = 'manual'` on `paper_conferences` for admin/script imports unless a
 For anything beyond one hand edit (refreshing the page, launching research,
 applying a sweep early, gaps), use the `update-ai-deadlines` skill.
 
-The database is the source of truth for https://paperswithcode.co/ai-deadlines
-(the huggingface/ai-deadlines YAML repo is no longer imported). Scheduled sweeps
+The database is the source of truth for https://paperswithcode.co/ai-deadlines.
+Scheduled sweeps
 (`sweep_conference_deadlines` / `refresh_conference_deadlines`) research new
 editions and deadline changes; to set or correct an edition's deadlines by hand,
 use the audited admin endpoint. The list replaces the edition's deadlines, dates

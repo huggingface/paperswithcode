@@ -50,16 +50,16 @@ Resolve the closest existing PwC task or tasks from the local database. A Hub pi
 Prefer the bundled helper:
 
 ```bash
-uv run python .agents/skills/complete-task-based-on-hf/scripts/discover_hf_models.py \
+uv run --env-file backend/keys.env python .agents/skills/complete-task-based-on-hf/scripts/discover_hf_models.py \
   --pipeline-tag <pipeline-tag> --limit 30
 ```
 
 The helper invokes these live CLI queries and returns their union with rank and paper-tag metadata:
 
 ```bash
-uv run hf models list --pipeline-tag <pipeline-tag> --sort trending_score --limit 30 \
+uv run --env-file backend/keys.env hf models list --pipeline-tag <pipeline-tag> --sort trending_score --limit 30 \
   --expand author,downloads,downloadsAllTime,likes,trendingScore,createdAt,lastModified,tags,baseModels,pipeline_tag --format json
-uv run hf models list --pipeline-tag <pipeline-tag> --sort downloads --limit 30 \
+uv run --env-file backend/keys.env hf models list --pipeline-tag <pipeline-tag> --sort downloads --limit 30 \
   --expand author,downloads,downloadsAllTime,likes,trendingScore,createdAt,lastModified,tags,baseModels,pipeline_tag --format json
 ```
 
@@ -77,8 +77,8 @@ Prioritize families appearing in both rankings, then high trending-only releases
 For each prioritized official model:
 
 ```bash
-uv run hf models info <repo_id> --format json
-uv run hf models card <repo_id> --text
+uv run --env-file backend/keys.env hf models info <repo_id> --format json
+uv run --env-file backend/keys.env hf models card <repo_id> --text
 ```
 
 Model-card paper metadata is not exhaustive. Even when the card has no usable
@@ -86,8 +86,8 @@ Model-card paper metadata is not exhaustive. Even when the card has no usable
 for the release family before concluding that no report exists:
 
 ```bash
-uv run hf papers search "<release family> technical report" --limit 10
-uv run hf papers search "<release family>" --limit 10
+uv run --env-file backend/keys.env hf papers search "<release family> technical report" --limit 10
+uv run --env-file backend/keys.env hf papers search "<release family>" --limit 10
 ```
 
 Run this search for every high-priority official family whose exact release is
@@ -98,8 +98,8 @@ from model-card metadata alone.
 For each plausible report:
 
 ```bash
-uv run hf papers info <arxiv_id> --format json
-uv run hf papers read <arxiv_id>
+uv run --env-file backend/keys.env hf papers info <arxiv_id> --format json
+uv run --env-file backend/keys.env hf papers read <arxiv_id>
 ```
 
 Accept the report only when the paper introduces the evaluated release or explicitly covers that exact family/variant. Check title, authors/organization, paper abstract, linked official models, card wording, and the evaluation table. Reject these common false links:

@@ -50,7 +50,7 @@ Read `docs/database.md` before querying; read-only SQL through
 2. **arXiv copy?** Query `https://export.arxiv.org/api/query` with
    `ti:"…"` and `au:<surname>` (strip diacritics: `Alikasifoglu`, not
    `Alikaşifoğlu`). If one exists and is not indexed, run
-   `python -m backend.cli paper index <arxiv_id>` and reject with "This paper is
+   `uv run --env-file backend/keys.env python -m backend.cli paper index <arxiv_id>` and reject with "This paper is
    on arXiv, so we added it from there: /paper/<arxiv_id>."
 3. **Resolve title, authors, date, abstract** when the payload lacks them:
    - DOI → `https://api.crossref.org/works/<doi>`; IEEE pages block curl, so
