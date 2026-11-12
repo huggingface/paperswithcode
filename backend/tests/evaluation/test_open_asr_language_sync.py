@@ -179,3 +179,20 @@ def test_sync_rejects_unknown_boards():
         lang.OpenAsrLanguageSyncService(session).sync(
             {"open-asr-leaderboard": [OpenAsrEntry("o/m", 1, 1.0, None, True)]}
         )
+
+
+def test_language_rows_inherit_english_rows_listed_with_a_runtime_suffix():
+    session = _session()
+    _add_hindi_board(session)
+    english = session.query(Evaluation).filter(Evaluation.paper_id == 1).one()
+    english.methodology = english.methodology.replace(
+        "org/model-a;", "org/model-a (fast-gpu-asr);"
+    )
+    session.commit()
+    boards = {HINDI_SLUG: lang.parse_language_table(_table(), label=HINDI)}
+
+    stats = lang.OpenAsrLanguageSyncService(session).sync(boards)
+
+    assert stats[HINDI_SLUG].matched == 1
+    row = session.query(Evaluation).filter(Evaluation.dataset_id == 500).one()
+    assert (row.paper_id, row.num_parameters) == (1, 600_000_000)

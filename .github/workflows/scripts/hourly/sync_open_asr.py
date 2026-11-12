@@ -23,7 +23,6 @@ class SyncOpenAsrJob(CronJobBase):
 
     def run(self):
         entries = fetch_open_asr_leaderboard()
-        language_leaderboards = fetch_open_asr_language_leaderboards()
         session = db_manager.session_local()
         try:
             sync_service = OpenAsrSyncService(session)
@@ -51,9 +50,10 @@ class SyncOpenAsrJob(CronJobBase):
                     "open_asr_missing_papers identities=%s",
                     ",".join(stats.missing_papers),
                 )
-            # Language boards read the papers the English rows just resolved.
+            # Fetched only now, so a language-view failure never blocks the
+            # English board; language boards read the papers it just resolved.
             language_stats = OpenAsrLanguageSyncService(session).sync(
-                language_leaderboards, commit=not self.dry_run
+                fetch_open_asr_language_leaderboards(), commit=not self.dry_run
             )
             for dataset_slug, value in language_stats.items():
                 self.logger.info(

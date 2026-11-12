@@ -207,12 +207,23 @@ class OpenAsrLanguageSyncService:
             )
             .all()
         )
-        return {
-            OpenAsrSyncService._managed_model_id(row).casefold(): _KnownModel(
-                row.paper_id, row.is_open, row.hf_model_url, row.num_parameters
-            )
-            for row in rows
-        }
+        models: dict[str, _KnownModel] = {}
+        # Exact upstream ids win; a suffix-stripped Hub id ("org/m (runtime)"
+        # -> "org/m") also finds the row when the views spell it differently.
+        for exact in (False, True):
+            for row in rows:
+                model_id = OpenAsrSyncService._managed_model_id(row)
+                key = (model_id if exact else hub_model_id(model_id)).casefold()
+                models[key] = _KnownModel(
+                    row.paper_id, row.is_open, row.hf_model_url, row.num_parameters
+                )
+        return models
+
+    @staticmethod
+    def _lookup(models: dict[str, Any], model_id: str) -> Any:
+        return models.get(model_id.casefold()) or models.get(
+            hub_model_id(model_id).casefold()
+        )
 
     def _reviewed_papers(self) -> dict[str, int]:
         papers = {
@@ -259,12 +270,9 @@ class OpenAsrLanguageSyncService:
             )
 
             def known_paper(model_id: str) -> int | None:
-                key = model_id.casefold()
-                if (model := english.get(key)) is not None:
+                if (model := self._lookup(english, model_id)) is not None:
                     return model.paper_id
-                return reviewed.get(key) or reviewed.get(
-                    hub_model_id(model_id).casefold()
-                )
+                return self._lookup(reviewed, model_id)
 
             unknown = list(
                 {
@@ -361,7 +369,7 @@ class OpenAsrLanguageSyncService:
                 continue
             key = entry.model_id.casefold()
             selected.add(key)
-            known = english.get(key)
+            known = self._lookup(english, entry.model_id)
             row = managed_by_id.get(key)
             if row is None:
                 row = Evaluation(
