@@ -306,3 +306,10 @@ def test_file_routes_are_hidden_while_disabled(db):
             settings=Settings(chat_file_uploads_enabled=False),
         )
     assert error.value.status_code == 404
+
+
+def test_quota_ignores_uploads_table_while_disabled():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine, tables=[ChatSession.__table__])
+    with Session(engine) as db:
+        assert owner_storage_bytes(db, "owner-1", include_uploads=False) == 0
