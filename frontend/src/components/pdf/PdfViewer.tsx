@@ -11,6 +11,8 @@ import { PdfDocumentView, type PdfViewerControls } from "./PdfDocumentView";
 
 interface PdfViewerProps {
   url: string;
+  /** Loaded when `url` fails, e.g. an external paper's original PDF before our copy exists. */
+  fallbackUrl?: string;
   downloadUrl?: string;
   paperKey: string;
   paperTitle: string;
@@ -72,6 +74,7 @@ function CanvasPdfToolbar({ downloadUrl, page, pages, zoom, onPage, onZoom }: Pd
  */
 export function PdfViewer({
   url,
+  fallbackUrl,
   downloadUrl = url,
   paperKey,
   paperTitle,
@@ -86,6 +89,7 @@ export function PdfViewer({
   ...rest
 }: PdfViewerProps) {
   const [retry, setRetry] = useState(0);
+  const [usingFallback, setUsingFallback] = useState(false);
   const reader = chrome === "reader";
   const toolbar = (controls: PdfViewerControls) => reader ? <PdfToolbar
     paperTitle={paperTitle}
@@ -110,9 +114,9 @@ export function PdfViewer({
   /> : <CanvasPdfToolbar downloadUrl={downloadUrl} {...controls} />;
 
   return <PdfDocumentView
-    key={`${paperKey}-${retry}-${initialPage}`}
+    key={`${paperKey}-${retry}-${initialPage}-${usingFallback}`}
     {...rest}
-    url={url}
+    url={usingFallback && fallbackUrl ? fallbackUrl : url}
     downloadUrl={downloadUrl}
     paperKey={paperKey}
     initialPage={initialPage}
@@ -123,7 +127,11 @@ export function PdfViewer({
     label={reader ? "Paper PDF" : `${paperTitle} PDF preview`}
     loadingLabel={reader ? "Loading paper…" : "Loading paper preview…"}
     toolbar={toolbar}
-    onRetry={() => setRetry((value) => value + 1)}
+    onLoadError={fallbackUrl && !usingFallback ? () => setUsingFallback(true) : undefined}
+    onRetry={() => {
+      setUsingFallback(false);
+      setRetry((value) => value + 1);
+    }}
     citationLinks={reader}
     sectionHash={reader}
     authors={reader ? authors : undefined}
