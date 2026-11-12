@@ -284,3 +284,15 @@ def test_responses_prepare_leaves_placeholders_while_disabled(db):
     assert pdf.openai_file_id.encode() not in call.raw
     assert call.ledger.file_input_tokens == 0
     assert "user_files" not in call.trace_fields
+
+
+@pytest.mark.parametrize("bad_id", ["-" * 36, "a" * 36, "0" * 32 + "----"])
+def test_malformed_placeholder_ids_are_left_as_text(db, bad_id):
+    session_id = _session(db)
+    text = f'<pwc_user_file id="{bad_id}"/>'
+    payload = {"input": [_user(text)]}
+
+    attached = attach_user_files(payload, db, session_id)
+
+    assert payload["input"][0]["content"] == [{"type": "input_text", "text": text}]
+    assert attached.input_tokens == 0
