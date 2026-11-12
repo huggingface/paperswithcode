@@ -647,3 +647,46 @@ def test_sync_drops_models_without_a_paper_and_runtime_duplicates():
     row = session.query(Evaluation).one()
     assert (row.paper_id, row.model_name) == (1, "model (gpu)")
     assert row.metrics == {"WER": 5.0, "RTFx": 900.0}
+
+
+def test_new_best_runtime_variant_takes_over_the_existing_row():
+    session = _session()
+    session.add(
+        Paper(
+            id=3,
+            title="Echo ASR Technical Report",
+            source="external",
+            source_url="https://vendor.example/echo.pdf",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.add(
+        Evaluation(
+            id=77,
+            paper_id=3,
+            task_id=12,
+            dataset_id=181,
+            model_name="echo",
+            metrics={"WER": 6.0},
+            best_metric="WER",
+            external_source_url=SPACE_SOURCE_URL,
+            methodology=(
+                f"{MANAGED_METHODOLOGY_PREFIX} Upstream model vendor/echo; "
+                "rank 1; default Average WER; fetched x."
+            ),
+        )
+    )
+    session.commit()
+
+    stats = OpenAsrSyncService(session).sync(
+        [
+            OpenAsrEntry("vendor/echo (gpu)", 1, 5.0, 900.0, True),
+            OpenAsrEntry("vendor/echo", 2, 5.5, 300.0, True),
+        ]
+    )
+
+    assert (stats.created, stats.updated, stats.deleted) == (0, 1, 0)
+    row = session.query(Evaluation).one()
+    assert (row.id, row.paper_id, row.model_name) == (77, 3, "echo (gpu)")
+    assert row.metrics == {"WER": 5.0, "RTFx": 900.0}

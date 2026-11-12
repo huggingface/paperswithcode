@@ -675,6 +675,18 @@ class OpenAsrSyncService:
             managed_by_id = {
                 self._managed_model_id(row).casefold(): row for row in managed_rows
             }
+            # One row per Hub model: when upstream's best runtime variant
+            # changes, the new variant takes over the row (and its paper).
+            for row in managed_rows:
+                managed_by_id.setdefault(
+                    hub_model_id(self._managed_model_id(row)).casefold(), row
+                )
+
+            def managed_row(model_id: str) -> Evaluation | None:
+                return managed_by_id.get(model_id.casefold()) or managed_by_id.get(
+                    hub_model_id(model_id).casefold()
+                )
+
             # A curated row naming an upstream model on the same paper (for
             # example a paper-reported score from an older board version) is
             # superseded by the live score instead of shown beside it.
@@ -697,7 +709,7 @@ class OpenAsrSyncService:
                     display_names[entry.model_id], entry.model_id.split("/", 1)[0]
                 )
                 for entry in entries
-                if entry.model_id.casefold() not in managed_by_id
+                if managed_row(entry.model_id) is None
                 and entry.model_id.casefold() not in legacy_papers
                 and self._reviewed_arxiv_id(entry.model_id) is None
                 and (
@@ -717,7 +729,7 @@ class OpenAsrSyncService:
                 key = entry.model_id.casefold()
                 hub_id = hub_model_id(entry.model_id)
                 display_name = display_names[entry.model_id]
-                row = managed_by_id.get(key)
+                row = managed_row(entry.model_id)
                 discovered = (
                     discovery.resolved.get(hub_id.casefold()) if discovery else None
                 )
