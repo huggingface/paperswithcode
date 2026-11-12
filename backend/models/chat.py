@@ -896,6 +896,21 @@ class ChatSessionDetail(ChatSessionSummary):
     latex_paper: LatexPaperArtifactDescriptor | None = None
 
 
+class ChatUploadedFileDescriptor(BaseModel):
+    """A file attached to a chat; contents are never returned."""
+
+    id: uuid.UUID
+    filename: str
+    media_type: str
+    size_bytes: int
+    page_count: int | None = None
+    created_at: datetime
+
+
+class ChatUploadedFileList(BaseModel):
+    items: list[ChatUploadedFileDescriptor]
+
+
 class ChatSessionList(BaseModel):
     items: list[ChatSessionSummary]
     next_cursor: str | None = None

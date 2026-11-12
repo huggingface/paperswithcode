@@ -23,6 +23,7 @@ from backend.models.database import (
     ChatSession,
     ChatShare,
     ChatSharedArtifact,
+    ChatUploadedFile,
 )
 from backend.services import latex_paper_service
 from backend.services.chat_artifact_service import LocalArtifactStorage
@@ -63,6 +64,7 @@ def db():
             ChatSandboxLease.__table__,
             ChatShare.__table__,
             ChatSharedArtifact.__table__,
+            ChatUploadedFile.__table__,
         ],
     )
     with Session(engine) as session:
