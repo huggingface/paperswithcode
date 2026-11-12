@@ -43,6 +43,7 @@ from backend.services.open_asr_sync_service import (
     OpenAsrEntry,
     OpenAsrSyncService,
     _number,
+    best_runtime_variants,
     display_model_names,
     hub_model_id,
 )
@@ -92,6 +93,7 @@ class OpenAsrLanguageSyncStats:
     auto_matched: list[str] = field(default_factory=list)
     unmatched_models: list[str] = field(default_factory=list)
     no_paper_models: list[str] = field(default_factory=list)
+    runtime_variants: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -331,6 +333,7 @@ class OpenAsrLanguageSyncService:
         now: datetime,
     ) -> OpenAsrLanguageSyncStats:
         stats = OpenAsrLanguageSyncStats(fetched=len(entries))
+        entries, stats.runtime_variants = best_runtime_variants(entries)
         task, dataset = resolve_leaderboard(
             self.db, "Open ASR", TASK_SLUG, dataset_slug, (WER_METRIC, RTFX_METRIC)
         )

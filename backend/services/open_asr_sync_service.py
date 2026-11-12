@@ -27,6 +27,7 @@ from backend.services.leaderboard_model_matching_service import (
     LeaderboardModelMatcher,
 )
 from backend.services.leaderboard_sync_catalog import (
+    is_paper_backed,
     resolve_leaderboard,
 )
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
@@ -112,6 +113,7 @@ MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
     "Qwen/Qwen3-ASR-0.6B-hf": "2601.21337",
     "Qwen/Qwen3-ASR-1.7B": "2601.21337",
     "Qwen/Qwen3-ASR-1.7B-hf": "2601.21337",
+    "sophea/asr-k1": "2609.13498",
     "sophea/asr-k1 (preview)": "2609.13498",
     "soundsgoodai/Zipformer-cr-ctc-transducer-XL-290M": "2410.05101",
     "soundsgoodai/Zipformer-transducer-XL-290M": "2310.11230",
@@ -222,6 +224,8 @@ class OpenAsrSyncStats:
     auto_matched: list[str] = field(default_factory=list)
     unmatched_models: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
+    no_paper_models: list[str] = field(default_factory=list)
+    runtime_variants: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -233,6 +237,8 @@ class OpenAsrSyncStats:
             "auto_matched": self.auto_matched,
             "unmatched_models": self.unmatched_models,
             "missing_papers": self.missing_papers,
+            "no_paper_models": self.no_paper_models,
+            "runtime_variants": self.runtime_variants,
         }
 
 
@@ -300,6 +306,26 @@ def display_model_names(entries: list[OpenAsrEntry]) -> dict[str, str]:
         model_id: name if counts[name.casefold()] == 1 else model_id
         for model_id, name in derived.items()
     }
+
+
+def best_runtime_variants(
+    entries: list[OpenAsrEntry],
+) -> tuple[list[OpenAsrEntry], list[str]]:
+    """Keep one entry per Hub model: the runtime variant with the lowest WER.
+
+    Upstream lists a checkpoint again per inference runtime or decoding mode,
+    e.g. "nvidia/parakeet-tdt-0.6b-v2 (fast-gpu-asr)". Returns the kept
+    entries and the dropped variant ids.
+    """
+    best: dict[str, OpenAsrEntry] = {}
+    for entry in entries:
+        key = hub_model_id(entry.model_id).casefold()
+        if key not in best or (entry.wer, entry.rank) < (best[key].wer, best[key].rank):
+            best[key] = entry
+    kept = list(best.values())
+    kept_ids = {entry.model_id for entry in kept}
+    dropped = [entry.model_id for entry in entries if entry.model_id not in kept_ids]
+    return sorted(kept, key=lambda entry: entry.rank), dropped
 
 
 def _safetensors_total(model_info: Any) -> int | None:
@@ -610,6 +636,7 @@ class OpenAsrSyncService:
         if now.tzinfo is None:
             now = now.replace(tzinfo=UTC)
         stats = OpenAsrSyncStats(fetched=len(entries))
+        entries, stats.runtime_variants = best_runtime_variants(entries)
 
         try:
             task, dataset = resolve_leaderboard(
@@ -662,7 +689,7 @@ class OpenAsrSyncService:
                 self._legacy_model_id(row).casefold(): row.paper_id
                 for row in legacy_rows
             }
-            upstream_names = {entry.model_id.casefold() for entry in entries}
+            published: set[str] = set()
             # Models without a reviewed, carried-over or discovered paper go
             # to the shared matcher; the rest become release-radar signals.
             unknown = [
@@ -714,6 +741,12 @@ class OpenAsrSyncService:
                     if paper_id is None:
                         stats.missing_papers.append(f"{entry.model_id}:{arxiv_id}")
                         continue
+                # Model cards, repositories, and release posts are not papers.
+                paper = self.db.get(Paper, paper_id)
+                if paper is None or not is_paper_backed(paper):
+                    stats.no_paper_models.append(entry.model_id)
+                    continue
+                published.add(key)
 
                 methodology = (
                     f"{MANAGED_METHODOLOGY_PREFIX} Upstream model {entry.model_id}; "
@@ -777,7 +810,7 @@ class OpenAsrSyncService:
                 [model for model in unknown if model.name not in auto_matched]
             )
             for row in managed_rows:
-                if self._managed_model_id(row).casefold() not in upstream_names:
+                if self._managed_model_id(row).casefold() not in published:
                     self.db.delete(row)
                     stats.deleted += 1
             # These rows came from the retired one-shot importer. Once a valid
