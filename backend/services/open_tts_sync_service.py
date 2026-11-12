@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     Evaluation,
+    Paper,
     PaperTask,
 )
 from backend.services.artificial_analysis_sync_service import (
@@ -71,6 +72,29 @@ _MODEL_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
+_REPORT_RE = re.compile(r"technical[\s_-]*report|tech[\s_-]*report", re.IGNORECASE)
+
+
+def has_paper(paper: Paper) -> bool:
+    """Whether a model's paper is an arXiv paper or a technical report.
+
+    Model cards, code repositories, and release blog posts are not papers, so
+    their models stay off the board.
+    """
+    if paper.source == "arxiv":
+        return True
+    source_url = (paper.source_url or "").split("?", 1)[0].split("#", 1)[0]
+    return source_url.casefold().endswith(".pdf") or bool(
+        _REPORT_RE.search(f"{paper.title or ''} {source_url}")
+    )
+
+
+def display_model_name(model_name: str) -> str:
+    """Drop the Hub organization: `org/Model-1B` is shown as `Model-1B`."""
+    head, sep, tail = model_name.partition(" ")
+    if head.count("/") == 1 and all(head.split("/")):
+        head = head.split("/", 1)[1]
+    return f"{head}{sep}{tail}"
 
 
 @dataclass(frozen=True)
@@ -147,6 +171,7 @@ class OpenTtsSyncStats:
     deleted: int = 0
     auto_matched: list[str] = field(default_factory=list)
     excluded_models: list[str] = field(default_factory=list)
+    no_paper_models: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -427,6 +452,10 @@ class OpenTtsSyncService:
             else:
                 stats.excluded_models.append(entry.model_id)
                 continue
+            paper = self.db.get(Paper, paper_id)
+            if paper is None or not has_paper(paper):
+                stats.no_paper_models.append(entry.model_id)
+                continue
             selected_ids.add(key)
             row = managed_by_id.get(key)
             if row is None:
@@ -440,7 +469,9 @@ class OpenTtsSyncService:
             else:
                 stats.updated += 1
             row.paper_id = paper_id
-            row.model_name = MODEL_DISPLAY_NAMES.get(entry.model_id, entry.model_name)
+            row.model_name = MODEL_DISPLAY_NAMES.get(
+                entry.model_id, display_model_name(entry.model_name)
+            )
             row.methodology = (
                 f"{MANAGED_METHODOLOGY_PREFIX} Upstream rank {entry.rank}; "
                 f"{METHODOLOGY_BY_DATASET[dataset_slug]} without voice cloning; "
