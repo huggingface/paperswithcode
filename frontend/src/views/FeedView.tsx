@@ -480,9 +480,10 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   }, [user, following, hasFeed, followingSeen]);
   const newCount = useQuery({
     ...researchQueries.followingNewCount(user?.hf_subject, followingSeen ?? ""),
-    enabled: !following && !!user && hasFeed && !!followingSeen,
+    enabled: !!user && hasFeed && !!followingSeen,
   });
-  const newPapers = following ? 0 : newCount.data?.count ?? 0;
+  // Counted from the previous visit, so the badge stays while Following is open.
+  const newPapers = newCount.data?.count ?? 0;
   // Read before this visit overwrites it, so Following can mark what arrived since.
   const markNewAfter = following && followingSeen ? Date.parse(followingSeen) : NaN;
   // The pop-up opens on its own only when the intro first shows to a visitor who arrived without follows:
