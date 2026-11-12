@@ -34,6 +34,7 @@ from backend.services.chat_provider_gateway.lifecycle import (
     opaque_turn,
     output_tokens_allowed,
 )
+from backend.services.chat_provider_gateway.user_files import refuse_placeholders
 from backend.services.chat_provider_gateway.ledgers import (
     OpenRouterFundedLedger,
     UserBilledLedger,
@@ -375,6 +376,10 @@ class AnthropicMessagesProtocol:
         payload = parsed.payload
         model = parsed.capability_model
         raw = parsed.raw
+        if settings.chat_file_uploads_enabled:
+            # Uploaded files exist only as OpenAI file_ids; never forward a
+            # placeholder to a provider that cannot resolve it.
+            refuse_placeholders(payload)
         provider = settings.chat_route_providers.get(row.model)
         provider_mode = row.provider_mode or (
             "openrouter_funded" if provider == "openrouter" else "huggingface"
