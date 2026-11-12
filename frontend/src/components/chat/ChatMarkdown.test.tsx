@@ -75,3 +75,20 @@ describe("ChatMarkdown images", () => {
     expect(container.textContent).toContain("diagram");
   });
 });
+
+describe("ChatMarkdown linked images", () => {
+  it("keeps the outer link and adds no nested anchor", () => {
+    const { container } = render(
+      <ChatMarkdown
+        text="[![Figure 1](https://arxiv.org/html/x/fig1.png)](https://example.org/paper)"
+        papers={{}}
+      />,
+    );
+
+    expect(container.querySelector("img")).toBeNull();
+    const links = container.querySelectorAll("a");
+    expect(links).toHaveLength(1);
+    expect(links[0].getAttribute("href")).toBe("https://example.org/paper");
+    expect(links[0].textContent).toBe("Figure 1");
+  });
+});

@@ -107,6 +107,9 @@ function withholdPartialCitation(text: string): string {
   return text;
 }
 
+/** True inside a rendered Markdown link, where an image must not add another anchor. */
+const InsideLink = React.createContext(false);
+
 const chatUrlTransform = (url: string): string =>
   url.startsWith("paper:") || url.startsWith("pdf:") || isCatalogEntityHref(url)
     ? url
@@ -142,7 +145,10 @@ export const ChatMarkdown: React.FC<{
       rehypePlugins={[rehypeKatex]}
       urlTransform={chatUrlTransform}
       components={{
-        a: ({ href, children }) => {
+        a: ({ href, children: content }) => {
+          const children = (
+            <InsideLink.Provider value={true}>{content}</InsideLink.Provider>
+          );
           if (href?.startsWith("paper:")) {
             const routeId = href.slice("paper:".length);
             if (!papers[routeId] && !citations?.[routeId]) {
@@ -234,25 +240,7 @@ export const ChatMarkdown: React.FC<{
           }
           return <span>{children}</span>;
         },
-        // Never load remote images from model output: an <img> fetches its URL
-        // without a click, so injected text could leak data through the query
-        // string. Show HTTPS images as an ordinary link instead.
-        img: ({ src, alt }) => {
-          const label = alt?.trim() || "Image";
-          if (typeof src === "string" && src.startsWith("https://")) {
-            return (
-              <a
-                href={src}
-                className="chat-external-link"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {label}
-              </a>
-            );
-          }
-          return <span>{label}</span>;
-        },
+        img: ({ src, alt }) => <ChatImage src={src} alt={alt} />,
       }}
     >
       {source}
@@ -260,4 +248,27 @@ export const ChatMarkdown: React.FC<{
     {!streaming && <PdfCitationSources text={source} />}
     </>
   );
+};
+
+/**
+ * Never load remote images from model output: an <img> fetches its URL without
+ * a click, so injected text could leak data through the query string. Show an
+ * HTTPS image as an ordinary link, or as its alt text inside another link.
+ */
+const ChatImage: React.FC<{ src?: string; alt?: string }> = ({ src, alt }) => {
+  const insideLink = React.useContext(InsideLink);
+  const label = alt?.trim() || "Image";
+  if (!insideLink && src?.startsWith("https://")) {
+    return (
+      <a
+        href={src}
+        className="chat-external-link"
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        {label}
+      </a>
+    );
+  }
+  return <span>{label}</span>;
 };
