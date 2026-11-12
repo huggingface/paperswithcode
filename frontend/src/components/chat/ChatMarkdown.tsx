@@ -39,6 +39,7 @@ import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
 import type { PaperPreviewData } from "@/components/paper-preview/paperPreviewData";
 import { parseGitHubRepoUrl } from "@/lib/github";
 import { normalizeChatMath } from "@/components/chat/chatMarkdownMath";
+import { rehypeImagesAsLinks } from "@/components/chat/chatMarkdownImages";
 
 function citationPreviewData(
   routeId: string,
@@ -139,7 +140,7 @@ export const ChatMarkdown: React.FC<{
     <>
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
+      rehypePlugins={[rehypeImagesAsLinks, rehypeKatex]}
       urlTransform={chatUrlTransform}
       components={{
         a: ({ href, children }) => {
