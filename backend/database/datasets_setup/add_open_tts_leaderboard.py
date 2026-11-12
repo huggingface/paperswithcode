@@ -47,7 +47,9 @@ DESCRIPTION = (
 )
 SHORT_DESCRIPTION = f"Open TTS models ranked by English WER and RTFx on {DATASETS}."
 CORE_LANGUAGE_NAMES = ", ".join(language_name(label) for label in CORE_LANGUAGES)
-ALL_LANGUAGE_NAME = "Open TTS Leaderboard — All Languages Average"
+# Variant names end in "(<qualifier>)": the task page lists them as chips
+# labelled by that qualifier under the English board.
+ALL_LANGUAGE_NAME = f"Open TTS Leaderboard ({len(CORE_LANGUAGES)}-language average)"
 ALL_LANGUAGE_DESCRIPTION = (
     "The multilingual view of the Hugging Face Open TTS Leaderboard compares "
     "open text-to-speech models using macro-average intelligibility and "
@@ -65,7 +67,7 @@ def _language_benchmark(label: str) -> tuple[str, str, str, str]:
     language = language_name(label)
     return (
         language_dataset_slug(label),
-        f"Open TTS Leaderboard — {language}",
+        f"Open TTS Leaderboard ({language})",
         (
             "The per-language view of the Hugging Face Open TTS Leaderboard "
             f"ranks open text-to-speech models on {language} intelligibility "
@@ -139,6 +141,7 @@ def main() -> None:
             metrics[name] = metric
 
         dataset_ids: list[int] = []
+        parent: Dataset | None = None
         for slug, name, description, short_description in BENCHMARKS:
             dataset = session.query(Dataset).filter(Dataset.slug == slug).one_or_none()
             if dataset is None:
@@ -148,6 +151,11 @@ def main() -> None:
                 logger.info("Created dataset %r (id=%s)", dataset.name, dataset.id)
             dataset.name = name
             dataset.full_name = name
+            if parent is None:
+                parent = dataset  # BENCHMARKS lists the English board first.
+            else:
+                dataset.parent_dataset_id = parent.id
+                dataset.variant_type = "language"
             dataset.description = description
             dataset.short_description = short_description
             dataset.url = SPACE_SOURCE_URL

@@ -51,14 +51,17 @@ def main() -> None:
             slug = language_dataset_slug(label)
             dataset = session.query(Dataset).filter(Dataset.slug == slug).one_or_none()
             if dataset is None:
-                dataset = Dataset(name=f"Open ASR Leaderboard — {language}", slug=slug)
+                dataset = Dataset(name=f"Open ASR Leaderboard ({language})", slug=slug)
                 session.add(dataset)
                 session.flush()
                 logger.info("Created dataset %r (id=%s)", dataset.name, dataset.id)
-            dataset.name = f"Open ASR Leaderboard — {language}"
+            # "(<language>)" becomes the chip label under the English board.
+            dataset.name = f"Open ASR Leaderboard ({language})"
             dataset.full_name = (
-                f"Open Automatic Speech Recognition Leaderboard — {language}"
+                f"Open Automatic Speech Recognition Leaderboard ({language})"
             )
+            dataset.parent_dataset_id = english.id
+            dataset.variant_type = "language"
             dataset.description = (
                 "The multilingual view of the Hugging Face Open ASR Leaderboard "
                 f"ranks speech recognition models by {language} word error "
