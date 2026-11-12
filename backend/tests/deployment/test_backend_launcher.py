@@ -59,7 +59,22 @@ def test_slot_launcher_enables_chat_catalog_features(
     assert os.environ["PWC_CHAT_HF_CATALOG_ENABLED"] == "true"
 
 
-def test_staging_launcher_disables_only_posterly_artifact_generation(
+def test_run_backend_staging_disables_posterly_and_shared_artifact_previews(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    release = make_bundle(tmp_path, chat=True)
+    monkeypatch.setenv("PWC_ENVIRONMENT", "staging")
+    monkeypatch.setenv("PWC_FRONTEND_DIST_DIR", str(release / "frontend-dist"))
+    monkeypatch.setenv("PWC_RUNTIME_DATA_DIR", str(tmp_path / "runtime-data"))
+
+    configure_release_environment(release)
+
+    assert os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] == "true"
+    assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
+    assert os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] == "false"
+
+
+def test_staging_launcher_disables_posterly_and_shared_artifact_previews(
     monkeypatch: pytest.MonkeyPatch,
 ):
     manifest = build_manifest("a" * 40, "staging")
@@ -76,7 +91,7 @@ def test_staging_launcher_disables_only_posterly_artifact_generation(
         slot_launcher.configure_release(manifest, Path("/release"), "staging")
 
         assert os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] == "true"
-        assert os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] == "true"
+        assert os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] == "false"
         assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
 
 
