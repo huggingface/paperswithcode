@@ -117,8 +117,8 @@ export const researchApi = {
   followSuggestions: () => apiRequest<FollowSuggestions>('/research/follow-suggestions'),
   setFollow: (kind: FollowKind, id: string | number, enabled: boolean) =>
     apiRequest<void>(`/me/follows/${kind}/${id}`, { method: enabled ? 'PUT' : 'DELETE' }),
-  following: (offset = 0, filters: FollowingFilters = {}) => {
-    const params = new URLSearchParams({ offset: String(offset), limit: '40' });
+  following: (offset = 0, filters: FollowingFilters = {}, limit = 40) => {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     if (filters.startDate) params.set('start_date', filters.startDate);
     if (filters.endDate) params.set('end_date', filters.endDate);
     if (!filters.startDate && !filters.endDate) params.set('all_time', 'true');

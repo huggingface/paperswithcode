@@ -40,7 +40,7 @@ import { papersApi } from "@/lib/api/papers";
 import { catalogQueries, paperFeedKeys, researchQueries } from "@/lib/api/queries";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   readHomepagePaperDateRange,
   withHomepagePaperDateRange,
@@ -341,25 +341,48 @@ type FeedMode = "trending" | "following";
 const FEED_PAGE_SIZE = 30;
 // The trending feed shows the follow invitation after this many papers.
 const FOLLOW_CARD_AFTER = 6;
-// When the account last opened its following feed, in this browser.
+// When the current Following visit began, in this browser.
 const FOLLOWING_SEEN_KEY = "pwc:following-last-seen";
+// When the visit before it began: papers added since then are new throughout the current visit.
+const FOLLOWING_NEW_SINCE_KEY = "pwc:following-new-since";
+// Opening Following within this long of a visit's start continues that visit.
+const FOLLOWING_VISIT_MS = 60 * 60 * 1000;
 
-function readFollowingSeen(): string | null {
+function readStored(key: string): string | null {
   try {
-    return localStorage.getItem(FOLLOWING_SEEN_KEY);
+    return localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-function writeFollowingSeen() {
+function writeStored(key: string, value: string) {
   try {
-    localStorage.setItem(FOLLOWING_SEEN_KEY, new Date().toISOString());
+    localStorage.setItem(key, value);
   } catch {
-    // Without storage the tab simply shows no count.
+    // Without storage the tab simply shows no badge.
   }
 }
+
+const visitOver = (seen: string, now: number) => now - Date.parse(seen) > FOLLOWING_VISIT_MS;
+
+/** Papers added after this are new: the previous visit's start, or the current one's once it is over. */
+function readFollowingNewSince(now = Date.now()): string | null {
+  const seen = readStored(FOLLOWING_SEEN_KEY);
+  if (!seen) return null;
+  return visitOver(seen, now) ? seen : readStored(FOLLOWING_NEW_SINCE_KEY);
+}
+
+/** Starts counting on the first visit, and a new Following visit once the current one is over. */
+function recordFollowingVisit(openedFollowing: boolean, now = Date.now()) {
+  const seen = readStored(FOLLOWING_SEEN_KEY);
+  if (seen && !(openedFollowing && visitOver(seen, now))) return;
+  if (seen) writeStored(FOLLOWING_NEW_SINCE_KEY, seen);
+  writeStored(FOLLOWING_SEEN_KEY, new Date(now).toISOString());
+}
 const FOLLOWING_PAGE_SIZE = 40;
+// The most new papers the badge counts, all listed first on Following.
+const NEW_COUNT_LIMIT = 100;
 
 interface FeedPage {
   results: { paper: Paper; reasons?: string[]; added_at?: string | null }[];
@@ -473,11 +496,12 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const canBuildFeed = !!user || !isAuthDisabled();
   const showFollowCard = !following && canBuildFeed && !auth?.isLoading
     && (!user || (follows.isSuccess && topics.isSuccess && !hasFeed));
-  // The "New" badge on the following tab: papers added since the following feed was last opened here.
-  const [followingSeen] = useState(readFollowingSeen);
+  // The "New" badge on the following tab: papers added since the visit before this one. It stays
+  // through the whole visit, across reloads and tab switches, until Following is opened an hour later.
+  const [followingSeen] = useState(() => readFollowingNewSince());
   useEffect(() => {
-    if (user && (following || (hasFeed && !followingSeen))) writeFollowingSeen();
-  }, [user, following, hasFeed, followingSeen]);
+    if (user && (following || hasFeed)) recordFollowingVisit(following);
+  }, [user, following, hasFeed]);
   const newCount = useQuery({
     ...researchQueries.followingNewCount(user?.hf_subject, followingSeen ?? ""),
     enabled: !!user && hasFeed && !!followingSeen,
@@ -486,6 +510,16 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const newPapers = newCount.data?.count ?? 0;
   // Read before this visit overwrites it, so Following can mark what arrived since.
   const markNewAfter = following && followingSeen ? Date.parse(followingSeen) : NaN;
+  // Following lists the new papers first, newest first, then the rest by trending. Fetched alongside
+  // the feed, all the badge can count, and kept across bubble changes so the list never blanks.
+  const pinnedFilters = { topicOnly, ...activeFilter, addedAfter: followingSeen ?? undefined };
+  const pinnedNew = useQuery({
+    queryKey: [...paperFeedKeys.following(user?.hf_subject), "new", pinnedFilters],
+    queryFn: () => researchApi.following(0, pinnedFilters, NEW_COUNT_LIMIT),
+    enabled: following && !!user && !!followingSeen,
+    staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
+  });
   // The pop-up opens on its own only when the intro first shows to a visitor who arrived without follows:
   // not after a removal, and not while saving what a guest picked before signing in, which may finish
   // before follows reload. It lives here rather than in the intro so it stays open once the first save lands.
@@ -538,16 +572,19 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     pendingTopicFollowsStarted.current = true;
     followPendingTopics(ids);
   }, [user, followPendingTopics]);
-  const cards = useMemo<PaperFeedCard[]>(
-    () => infinite.data?.pages.flatMap((page) =>
-      page.results.map((entry) => ({
-        ...transformPaperForCard(entry.paper),
-        followReasons: entry.reasons,
-        isNew: !!entry.added_at && Date.parse(entry.added_at) > markNewAfter,
-      })),
-    ) ?? [],
-    [infinite.data, markNewAfter],
-  );
+  const cards = useMemo<PaperFeedCard[]>(() => {
+    const toCard = (entry: FeedPage["results"][number]) => ({
+      ...transformPaperForCard(entry.paper),
+      followReasons: entry.reasons,
+      isNew: !!entry.added_at && Date.parse(entry.added_at) > markNewAfter,
+    });
+    // Another selection's new papers, kept only so the list does not blank, are not pinned.
+    const current = pinnedNew.isPlaceholderData ? undefined : pinnedNew.data;
+    const pinned = infinite.data && current ? current.map(toCard).filter(card => card.isNew) : [];
+    const pinnedIds = new Set(pinned.map(card => card.id));
+    const ranked = infinite.data?.pages.flatMap(page => page.results.map(toCard)) ?? [];
+    return [...pinned, ...ranked.filter(card => !pinnedIds.has(card.id))];
+  }, [infinite.data, pinnedNew.data, pinnedNew.isPlaceholderData, markNewAfter]);
 
   const error = infinite.error;
 
@@ -717,7 +754,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
             ) : (
               <PaperFeedList
                 query={infinite}
-                isLoading={infinite.isLoading || (following && !!auth?.isLoading)}
+                isLoading={infinite.isLoading || pinnedNew.isLoading || (following && !!auth?.isLoading)}
                 cards={cards}
                 skeleton="card"
                 rootMargin="400px"
