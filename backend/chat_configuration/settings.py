@@ -108,7 +108,7 @@ class ChatModelSettings(BaseModel):
 class ChatOpenAIBudgetSettings(BaseModel):
     """Direct-OpenAI pricing, allowances, and rate limits."""
 
-    chat_openai_pricing_verified_at: str = Field(default="2026-10-19")
+    chat_openai_pricing_verified_at: str = Field(default="2026-11-12")
     chat_openai_pricing_max_age_days: int = Field(default=30, ge=1, le=90)
     chat_openai_input_microusd_per_million_tokens: int = Field(default=100_000, ge=1)
     chat_openai_cached_input_microusd_per_million_tokens: int = Field(
