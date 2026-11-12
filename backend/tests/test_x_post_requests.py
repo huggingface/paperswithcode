@@ -149,3 +149,17 @@ def test_admin_api_requires_an_admin(db):
     client = TestClient(app)
     assert client.get("/api/v1/admin/papers/1/x-post-request").status_code == 401
     assert client.post("/api/v1/admin/papers/1/x-post-request").status_code == 401
+
+
+def test_a_sota_post_resolves_the_request_and_links_the_post(db):
+    x_post_requests.request_post(db, 2, requested_by=None, now=NOW)
+    x_post_candidates.record(
+        db, kind="open_sota", subject_key="open:7:Accuracy:2", post_id="42", now=NOW
+    )
+    assert db.get(XPostRequest, 2).resolution == "posted"
+    status = x_post_requests.request_status(db, 2)
+    assert (status.state, status.post_url) == (
+        "posted",
+        "https://x.com/paperswithcodee/status/42",
+    )
+    assert x_post_requests.post_url(db, 12) is None  # key ends with "2", not ":12"

@@ -38,7 +38,11 @@ export const TweetItButton: React.FC<TweetItButtonProps> = ({ paperId }) => {
       <a className="action-btn" href={data.post_url} target="_blank" rel="noopener noreferrer">
         <Icon name="x" size={12} /> Posted on X
       </a>
-    ) : null;
+    ) : (
+      <button type="button" className="action-btn" disabled title="Already posted on X">
+        <Icon name="x" size={12} /> Posted on X
+      </button>
+    );
   }
 
   const requested = data?.state === "requested";

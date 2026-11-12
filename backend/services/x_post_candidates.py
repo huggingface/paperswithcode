@@ -90,6 +90,8 @@ KINDS = (
     "top_papers_week",
     "top_papers_month",
 )
+# Insight kinds about one paper; `subject_paper_id` reads it from the key.
+PAPER_POST_KINDS = ("new_sota", "open_sota", "open_release", "trending_paper")
 SOTA_LIMIT = 8
 OPEN_RELEASE_DAYS = 21
 OPEN_RELEASE_PAPERS = 25
@@ -431,9 +433,7 @@ def posted_paper_ids(db: Session) -> set[int]:
     ids = set(db.scalars(select(PaperXPost.paper_id)))
     for kind, subject_key in db.execute(
         select(XInsightPost.kind, XInsightPost.subject_key).where(
-            XInsightPost.kind.in_(
-                ("new_sota", "open_sota", "open_release", "trending_paper")
-            )
+            XInsightPost.kind.in_(PAPER_POST_KINDS)
         )
     ):
         paper_id = subject_paper_id(subject_key)
@@ -970,7 +970,7 @@ def record(
     )
     db.add(row)
     paper_id = subject_paper_id(subject_key)
-    if paper_id is not None and kind in ("open_release", "trending_paper"):
+    if paper_id is not None and kind in PAPER_POST_KINDS:
         request = db.get(XPostRequest, paper_id)
         if request is not None and request.resolved_at is None:
             request.resolved_at = row.posted_at

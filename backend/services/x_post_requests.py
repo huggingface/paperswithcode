@@ -17,11 +17,15 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.database import Paper, PaperXPost, XInsightPost, XPostRequest
-from backend.services.x_post_candidates import paper_candidate, posted_paper_ids
+from backend.services.x_post_candidates import (
+    PAPER_POST_KINDS,
+    paper_candidate,
+    posted_paper_ids,
+)
 
 ACCOUNT_URL = "https://x.com/paperswithcodee/status/"
 RESOLUTIONS = ("posted", "cancelled", "removed")
@@ -55,12 +59,17 @@ def open_requests(db: Session) -> list[XPostRequest]:
 
 
 def post_url(db: Session, paper_id: int) -> str | None:
-    """The X post about this paper, if the account made one."""
+    """The latest X post about this paper, if the account made one. SOTA keys
+    end with the paper id (`subject_paper_id`), other paper kinds are the id."""
+    key = str(paper_id)
     post_id = db.scalar(
         select(XInsightPost.post_id)
         .where(
-            XInsightPost.kind.in_(("trending_paper", "open_release")),
-            XInsightPost.subject_key == str(paper_id),
+            XInsightPost.kind.in_(PAPER_POST_KINDS),
+            or_(
+                XInsightPost.subject_key == key,
+                XInsightPost.subject_key.endswith(f":{key}"),
+            ),
         )
         .order_by(XInsightPost.posted_at.desc())
         .limit(1)
