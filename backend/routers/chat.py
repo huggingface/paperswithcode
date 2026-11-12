@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from itertools import count
 from typing import Literal
 
+import httpx
 from fastapi import (
     APIRouter,
     Depends,
@@ -54,6 +55,8 @@ from backend.models.chat import (
     ChatSessionSummary,
     ChatShareDetail,
     ChatShareSummary,
+    ChatUploadedFileDescriptor,
+    ChatUploadedFileList,
     ChatWebSearchBudgetResponse,
     CreateSessionRequest,
     UpdateSessionRequest,
@@ -67,6 +70,7 @@ from backend.models.database import (
 from backend.routers.inference_billing import inference_credential_for_request
 from backend.services.chat_artifact_service import ArtifactError, ChatArtifactService
 from backend.services.chat_autocomplete_service import get_autocomplete_vocabulary
+from backend.services.chat_file_service import ChatFileService, FileCleanup
 from backend.services.chat_feedback_service import (
     ChatFeedbackService,
     ChatFeedbackUnavailable,
@@ -1754,6 +1758,16 @@ async def delete_session(
                 503,
                 "Poster storage deletion could not be verified. Retry before relying on removal.",
             ) from exc
+        try:
+            ChatFileService(db, settings).purge(
+                FileCleanup(receipt.uploaded_file_keys, receipt.openai_file_ids)
+            )
+        except (httpx.HTTPError, OSError, ValueError) as exc:
+            raise ChatServiceError(
+                "chat_deletion_unverified",
+                503,
+                "Uploaded file deletion could not be verified. Retry before relying on removal.",
+            ) from exc
         db.commit()
         if not service.deletion_complete(receipt):
             raise ChatServiceError(
@@ -1765,6 +1779,103 @@ async def delete_session(
     except ChatServiceError as exc:
         db.rollback()
         _raise(exc)
+
+
+def _file_descriptor(row) -> ChatUploadedFileDescriptor:
+    return ChatUploadedFileDescriptor(
+        id=row.id,
+        filename=row.filename,
+        media_type=row.media_type,
+        size_bytes=row.size_bytes,
+        page_count=row.page_count,
+        created_at=row.created_at,
+    )
+
+
+def _require_file_uploads(settings: Settings) -> None:
+    if not settings.chat_file_uploads_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@router.post(
+    "/sessions/{session_id}/files",
+    response_model=ChatUploadedFileDescriptor,
+    status_code=201,
+)
+def upload_chat_file(
+    session_id: uuid.UUID,
+    http_request: Request,
+    response: Response,
+    file: UploadFile = File(),
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Attach a PDF, image, or text file to a direct-Luna chat."""
+    _require_file_uploads(settings)
+    response.headers["Cache-Control"] = "private, no-store"
+    _require_same_origin_csrf(http_request, settings)
+    owner = owner_from_user(user)
+    service = ChatFileService(db, settings)
+    try:
+        service.remove_stale_pending(owner.hf_user_id)
+        db.commit()
+        data = file.file.read(settings.chat_file_max_bytes + 1)
+        row = service.upload(
+            owner, session_id, filename=file.filename or "file", data=data
+        )
+        return _file_descriptor(row)
+    except ChatServiceError as exc:
+        db.rollback()
+        _raise(exc)
+
+
+@router.get("/sessions/{session_id}/files", response_model=ChatUploadedFileList)
+def list_chat_files(
+    session_id: uuid.UUID,
+    response: Response,
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    _require_file_uploads(settings)
+    response.headers["Cache-Control"] = "private, no-store"
+    try:
+        rows = ChatFileService(db, settings).list_files(
+            owner_from_user(user), session_id
+        )
+        return ChatUploadedFileList(items=[_file_descriptor(row) for row in rows])
+    except ChatServiceError as exc:
+        _raise(exc)
+
+
+@router.delete("/sessions/{session_id}/files/{file_id}", status_code=204)
+def delete_chat_file(
+    session_id: uuid.UUID,
+    file_id: uuid.UUID,
+    http_request: Request,
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    _require_file_uploads(settings)
+    _require_same_origin_csrf(http_request, settings)
+    try:
+        ChatFileService(db, settings).delete_file(
+            owner_from_user(user), session_id, file_id
+        )
+        db.commit()
+        return Response(status_code=204)
+    except ChatServiceError as exc:
+        db.rollback()
+        _raise(exc)
+    except (httpx.HTTPError, OSError, ValueError):
+        db.rollback()
+        _raise(
+            ChatServiceError(
+                "file_deletion_failed", 503, "The file could not be deleted; try again"
+            )
+        )
 
 
 @router.post("/paper-context/prewarm")

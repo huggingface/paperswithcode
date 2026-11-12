@@ -33,6 +33,7 @@ from backend.models.database import (
     ChatShare,
     ChatSharedArtifact,
     ChatTurnReservation,
+    ChatUploadedFile,
 )
 from backend.services.chat_turn_mode import TurnMode, resolve_turn_mode
 from backend.services.chat_executor_turn_admission import ChatExecutorTurnAdmission
@@ -252,6 +253,36 @@ class ChatDeletionReceipt:
     sdk_session_id: uuid.UUID | None
     sdk_project_key: str | None
     artifact_prefixes: tuple[str, ...] = ()
+    uploaded_file_keys: tuple[str, ...] = ()
+    openai_file_ids: tuple[str, ...] = ()
+
+
+def owner_storage_bytes(
+    db: Session, hf_user_id: str, *, include_uploads: bool = True
+) -> int:
+    """Chat data counted against the per-user quota: transcripts plus uploads.
+
+    Uploads are only queried while file uploads are enabled, so a release can
+    run before ``add_chat_uploaded_files.sql`` has been applied.
+    """
+    session_bytes = (
+        select(
+            func.coalesce(
+                func.sum(ChatSession.transcript_bytes + ChatSession.projection_bytes),
+                0,
+            )
+        )
+        .where(ChatSession.hf_user_id == hf_user_id)
+        .scalar_subquery()
+    )
+    if not include_uploads:
+        return db.scalar(select(session_bytes)) or 0
+    file_bytes = (
+        select(func.coalesce(func.sum(ChatUploadedFile.size_bytes), 0))
+        .where(ChatUploadedFile.hf_user_id == hf_user_id)
+        .scalar_subquery()
+    )
+    return db.scalar(select(session_bytes + file_bytes)) or 0
 
 
 def owner_from_user(
@@ -1402,18 +1433,10 @@ class ChatSessionService:
         return latest
 
     def _load_owner_storage_bytes(self, owner: ChatOwner) -> int:
-        return (
-            self.db.scalar(
-                select(
-                    func.coalesce(
-                        func.sum(
-                            ChatSession.transcript_bytes + ChatSession.projection_bytes
-                        ),
-                        0,
-                    )
-                ).where(ChatSession.hf_user_id == owner.hf_user_id)
-            )
-            or 0
+        return owner_storage_bytes(
+            self.db,
+            owner.hf_user_id,
+            include_uploads=self.settings.chat_file_uploads_enabled,
         )
 
     def _load_replacement_plan(
@@ -2554,8 +2577,21 @@ class ChatSessionService:
             if session.sandbox_lease
             else None
         )
+        uploaded_files = (
+            list(
+                self.db.execute(
+                    select(
+                        ChatUploadedFile.storage_key, ChatUploadedFile.openai_file_id
+                    ).where(ChatUploadedFile.session_id == session.id)
+                )
+            )
+            if self.settings.chat_file_uploads_enabled
+            else []
+        )
         receipt = ChatDeletionReceipt(
             session_id=session.id,
+            uploaded_file_keys=tuple(key for key, _ in uploaded_files),
+            openai_file_ids=tuple(file_id for _, file_id in uploaded_files if file_id),
             sandbox_id=sandbox_id,
             snapshot_id=snapshot_id,
             sdk_session_id=session.sdk_session_id,
@@ -2591,6 +2627,12 @@ class ChatSessionService:
                 ChatSandboxLease.chat_session_id == receipt.session_id
             ),
         ]
+        if self.settings.chat_file_uploads_enabled:
+            checks.append(
+                select(ChatUploadedFile.id).where(
+                    ChatUploadedFile.session_id == receipt.session_id
+                )
+            )
         if receipt.sdk_session_id and receipt.sdk_project_key:
             checks.extend(
                 [

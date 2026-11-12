@@ -42,6 +42,7 @@ from backend.models.database.chat_artifacts import (
     ChatLatexPaperFigureReference,
     ChatLatexPaperStorageCleanup,
 )
+from backend.models.database.chat_files import ChatUploadedFile
 from backend.models.database.chat_providers import (
     ChatTitleBudgetState,
     ChatTitleProviderCall,
@@ -225,6 +226,7 @@ __all__ = [
     "ChatTurnLatency",
     "ChatTurnCapability",
     "ChatArtifact",
+    "ChatUploadedFile",
     "ChatArtifactVersion",
     "ChatLatexPaperVersion",
     "ChatLatexPaperFigureBlob",
