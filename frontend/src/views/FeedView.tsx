@@ -40,7 +40,7 @@ import { papersApi } from "@/lib/api/papers";
 import { catalogQueries, paperFeedKeys, researchQueries } from "@/lib/api/queries";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   readHomepagePaperDateRange,
   withHomepagePaperDateRange,
@@ -381,6 +381,8 @@ function recordFollowingVisit(openedFollowing: boolean, now = Date.now()) {
   writeStored(FOLLOWING_SEEN_KEY, new Date(now).toISOString());
 }
 const FOLLOWING_PAGE_SIZE = 40;
+// The most new papers the badge counts, all listed first on Following.
+const NEW_COUNT_LIMIT = 100;
 
 interface FeedPage {
   results: { paper: Paper; reasons?: string[]; added_at?: string | null }[];
@@ -508,13 +510,15 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const newPapers = newCount.data?.count ?? 0;
   // Read before this visit overwrites it, so Following can mark what arrived since.
   const markNewAfter = following && followingSeen ? Date.parse(followingSeen) : NaN;
-  // Following lists the new papers first, newest first, then the rest by trending.
+  // Following lists the new papers first, newest first, then the rest by trending. Fetched alongside
+  // the feed, all the badge can count, and kept across bubble changes so the list never blanks.
   const pinnedFilters = { topicOnly, ...activeFilter, addedAfter: followingSeen ?? undefined };
   const pinnedNew = useQuery({
     queryKey: [...paperFeedKeys.following(user?.hf_subject), "new", pinnedFilters],
-    queryFn: () => researchApi.following(0, pinnedFilters),
-    enabled: following && !!user && !!followingSeen && newPapers > 0,
+    queryFn: () => researchApi.following(0, pinnedFilters, NEW_COUNT_LIMIT),
+    enabled: following && !!user && !!followingSeen,
     staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
   // The pop-up opens on its own only when the intro first shows to a visitor who arrived without follows:
   // not after a removal, and not while saving what a guest picked before signing in, which may finish

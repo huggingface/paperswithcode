@@ -637,7 +637,7 @@ it('marks papers added since the last visit without a banner', async () => {
     .toEqual(['Fresh paper', 'Old paper']));
   const chips = [...container.querySelectorAll('.paper-card')].map(card => !!card.querySelector('.paper-new-chip'));
   expect(chips).toEqual([true, false]);
-  expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ addedAfter: '2026-11-09T08:00:00.000Z' }));
+  expect(researchApi.following).toHaveBeenCalledWith(0, expect.objectContaining({ addedAfter: '2026-11-09T08:00:00.000Z' }), 100);
   expect(screen.queryByText(/since your last visit/)).not.toBeInTheDocument();
   // The tab keeps its badge while Following is open.
   expect(await screen.findByRole('button', { name: 'following New' })).toBeInTheDocument();
