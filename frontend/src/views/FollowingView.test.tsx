@@ -670,6 +670,28 @@ it('keeps the badge and New marks for the rest of the visit, and moves on after 
   renderFeed('/');
   await waitFor(() => expect(researchApi.followingNewCount).toHaveBeenCalledWith(ended));
 });
+it('pins only the selected bubble\'s new papers while switching bubbles', async () => {
+  localStorage.setItem('pwc:following-last-seen', '2026-11-09T08:00:00.000Z');
+  vi.mocked(researchApi.followingNewCount).mockResolvedValue({ count: 1 });
+  const entry = (id: string, title: string, added_at: string) => ({ paper: { ...paper, id, arxiv_id: `2611.0000${id}`, title },
+    paper_key: `paper:${id}`, title, url: `/paper/${id}`, summary: '', published: paper.published, reasons: ['Task'], scores: [], added_at });
+  let releasePinned: () => void = () => {};
+  vi.mocked(researchApi.following).mockImplementation(async (_offset, filters) => {
+    if (filters?.addedAfter && filters.follows?.length) {
+      await new Promise<void>(resolve => { releasePinned = resolve; });
+      return [];
+    }
+    if (filters?.addedAfter) return [entry('2', 'Fresh paper', '2026-11-10T08:00:00Z')];
+    return filters?.follows?.length ? [entry('3', 'Bubble paper', '2026-11-01T08:00:00Z')]
+      : [entry('1', 'Old paper', '2026-11-08T08:00:00Z'), entry('2', 'Fresh paper', '2026-11-10T08:00:00Z')];
+  });
+  const { container } = renderFeed();
+  await waitFor(() => expect(container.querySelector('.paper-card .paper-title')).toHaveTextContent('Fresh paper'));
+  fireEvent.click(screen.getByRole('link', { name: /^Task/ }));
+  await screen.findByText('Bubble paper');
+  expect(screen.queryByText('Fresh paper')).not.toBeInTheDocument();
+  releasePinned();
+});
 it('starts counting from the first homepage visit', async () => {
   renderFeed('/');
   await screen.findByText('No papers in this window.');

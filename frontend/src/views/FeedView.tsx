@@ -578,11 +578,13 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
       followReasons: entry.reasons,
       isNew: !!entry.added_at && Date.parse(entry.added_at) > markNewAfter,
     });
-    const pinned = infinite.data && pinnedNew.data ? pinnedNew.data.map(toCard).filter(card => card.isNew) : [];
+    // Another selection's new papers, kept only so the list does not blank, are not pinned.
+    const current = pinnedNew.isPlaceholderData ? undefined : pinnedNew.data;
+    const pinned = infinite.data && current ? current.map(toCard).filter(card => card.isNew) : [];
     const pinnedIds = new Set(pinned.map(card => card.id));
     const ranked = infinite.data?.pages.flatMap(page => page.results.map(toCard)) ?? [];
     return [...pinned, ...ranked.filter(card => !pinnedIds.has(card.id))];
-  }, [infinite.data, pinnedNew.data, markNewAfter]);
+  }, [infinite.data, pinnedNew.data, pinnedNew.isPlaceholderData, markNewAfter]);
 
   const error = infinite.error;
 
