@@ -76,6 +76,15 @@ def test_robots_policies_are_environment_aware_and_end_with_newline():
     assert "X-Robots-Tag" not in production_headers
 
 
+def test_production_robots_blocks_seo_crawlers_in_one_group():
+    production, _ = robots_policy("production")
+    seo_group, general_group = production.split("\n\n")
+    for crawler in ("AhrefsBot", "DataForSeoBot", "SERankingBacklinksBot"):
+        assert f"User-agent: {crawler}\n" in seo_group
+    assert seo_group.endswith("Disallow: /")
+    assert general_group.startswith("User-agent: *\nAllow: /\n")
+
+
 def _query(*, one=None, rows=()):
     result = MagicMock()
     for method in (
