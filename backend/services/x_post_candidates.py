@@ -549,6 +549,7 @@ def open_releases(
             key=lambda key: (-sizes[key], key),
         )
         placements = []
+        # Keyed by placement: one evaluation can place on several metric boards.
         boards: dict[int, tuple[Board, Dataset]] = {}
         for dataset_id, metric in paper_keys:
             if len(placements) >= OPEN_RELEASE_BOARDS:
@@ -562,13 +563,13 @@ def open_releases(
             dataset = db.get(Dataset, dataset_id)
             place = {"benchmark": dataset.name, "metric": metric, **place}
             placements.append(place)
-            boards[place["evaluation_id"]] = (board, dataset)
+            boards[id(place)] = (board, dataset)
         score = open_release_score(placements)
         if not score:
             continue
         placements.sort(key=lambda p: (p["open_rank"], -p["entries"]))
         best = headline_placement(placements)
-        board, dataset = boards[best["evaluation_id"]]
+        board, dataset = boards[id(best)]
         own = by_id[best["evaluation_id"]]
         facts: dict[str, Any] = {
             "model": best["model"],
