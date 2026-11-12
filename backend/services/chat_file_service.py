@@ -9,6 +9,7 @@ as the chat session; deleting the file or the chat deletes both.
 from __future__ import annotations
 
 import hashlib
+import logging
 import tempfile
 import unicodedata
 import uuid
@@ -18,7 +19,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
@@ -30,6 +32,8 @@ from backend.services.chat_session_service import (
     owner_storage_bytes,
 )
 from backend.services.hf_bucket_filesystem import BucketFileSystem
+
+logger = logging.getLogger(__name__)
 
 OPENAI_FILES_URL = "https://api.openai.com/v1/files"
 OPENAI_TIMEOUT_SECONDS = 60
@@ -229,6 +233,17 @@ class ChatFileService:
             )
         )
 
+    def _lock_owner(self, owner: ChatOwner) -> None:
+        """Serialize uploads with turn admission on the owner's quota key."""
+        if self.db.get_bind().dialect.name == "postgresql":
+            self.db.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtextextended(f"chat-user:{owner.hf_user_id}", 0)
+                    )
+                )
+            )
+
     def upload(
         self,
         owner: ChatOwner,
@@ -242,29 +257,10 @@ class ChatFileService:
         Commits several times on purpose: the pending row must be durable
         before any external write so cleanup can always find what it left.
         """
-        session = self._owned_session(owner, session_id)
-        if session.selected_model != self.settings.chat_openai_luna_route:
-            raise ChatServiceError(
-                "file_upload_model_unsupported", 409, "File uploads need GPT-6 Luna"
-            )
         if not data:
             raise ChatServiceError("file_empty", 422, "The file is empty")
         if len(data) > self.settings.chat_file_max_bytes:
             raise ChatServiceError("file_too_large", 413, "The file is too large")
-        existing = self.db.scalar(
-            select(func.count())
-            .select_from(ChatUploadedFile)
-            .where(ChatUploadedFile.session_id == session.id)
-        )
-        if existing >= self.settings.chat_file_max_per_session:
-            raise ChatServiceError(
-                "file_limit_reached", 409, "This chat has reached its file limit"
-            )
-        owner_bytes = owner_storage_bytes(self.db, owner.hf_user_id)
-        if owner_bytes + len(data) > self.settings.chat_user_byte_limit:
-            raise ChatServiceError(
-                "chat_storage_quota_exceeded", 409, "Chat storage quota exceeded"
-            )
         name = safe_filename(filename)
         try:
             kind = sniff(name, data)
@@ -287,6 +283,36 @@ class ChatFileService:
             kind.media_type, len(data), page_count
         )
 
+        self._lock_owner(owner)
+        session = self.db.scalar(
+            select(ChatSession)
+            .where(
+                ChatSession.id == session_id,
+                ChatSession.hf_user_id == owner.hf_user_id,
+            )
+            .with_for_update()
+        )
+        if session is None:
+            raise ChatServiceError("session_not_found", 404, "Chat not found")
+        if session.selected_model != self.settings.chat_openai_luna_route:
+            raise ChatServiceError(
+                "file_upload_model_unsupported", 409, "File uploads need GPT-6 Luna"
+            )
+        existing = self.db.scalar(
+            select(func.count())
+            .select_from(ChatUploadedFile)
+            .where(ChatUploadedFile.session_id == session.id)
+        )
+        if existing >= self.settings.chat_file_max_per_session:
+            raise ChatServiceError(
+                "file_limit_reached", 409, "This chat has reached its file limit"
+            )
+        owner_bytes = owner_storage_bytes(self.db, owner.hf_user_id)
+        if owner_bytes + len(data) > self.settings.chat_user_byte_limit:
+            raise ChatServiceError(
+                "chat_storage_quota_exceeded", 409, "Chat storage quota exceeded"
+            )
+
         file_id = uuid.uuid4()
         row = ChatUploadedFile(
             id=file_id,
@@ -304,18 +330,31 @@ class ChatFileService:
         )
         self.db.add(row)
         self.db.commit()
+        storage_key = row.storage_key
+        openai_file_id = None
         try:
-            self.storage.write(row.storage_key, data)
-            row.openai_file_id = self.openai_files.upload(name, data, kind.media_type)
-        except (httpx.HTTPError, OSError, ValueError) as error:
+            self.storage.write(storage_key, data)
+            openai_file_id = self.openai_files.upload(name, data, kind.media_type)
+            # Record the OpenAI id at once: it is the only handle that can
+            # delete that copy. If the chat was deleted meanwhile, this fails.
+            row.openai_file_id = openai_file_id
+            row.state = "ready"
+            self.db.commit()
+        except (httpx.HTTPError, OSError, ValueError, SQLAlchemyError) as error:
             self.db.rollback()
-            self._remove(row)
+            self._discard(
+                FileCleanup(
+                    storage_keys=(storage_key,),
+                    openai_file_ids=(openai_file_id,) if openai_file_id else (),
+                )
+            )
+            self.db.execute(
+                delete(ChatUploadedFile).where(ChatUploadedFile.id == file_id)
+            )
             self.db.commit()
             raise ChatServiceError(
                 "file_upload_failed", 502, "The file could not be stored; try again"
             ) from error
-        row.state = "ready"
-        self.db.commit()
         return row
 
     def delete_file(
@@ -343,25 +382,26 @@ class ChatFileService:
                 )
             )
         )
+        removed = 0
         for row in rows:
-            self._remove(row)
-        return len(rows)
+            try:
+                self._remove(row)
+            except (httpx.HTTPError, OSError, ValueError):
+                logger.warning("chat_file_stale_cleanup_failed file_id=%s", row.id)
+                continue
+            removed += 1
+        return removed
 
-    def cleanup_for_session(self, session_id: uuid.UUID) -> FileCleanup:
-        """Collect what to delete externally before the session row cascades."""
-        rows = list(
-            self.db.scalars(
-                select(ChatUploadedFile).where(
-                    ChatUploadedFile.session_id == session_id
-                )
+    def _discard(self, cleanup: FileCleanup) -> None:
+        """Best-effort removal after a failed upload; leftovers are logged."""
+        try:
+            self.purge(cleanup)
+        except (httpx.HTTPError, OSError, ValueError):
+            logger.warning(
+                "chat_file_discard_failed storage_keys=%s openai_file_ids=%s",
+                cleanup.storage_keys,
+                cleanup.openai_file_ids,
             )
-        )
-        return FileCleanup(
-            storage_keys=tuple(row.storage_key for row in rows),
-            openai_file_ids=tuple(
-                row.openai_file_id for row in rows if row.openai_file_id
-            ),
-        )
 
     def purge(self, cleanup: FileCleanup) -> None:
         """Delete external copies; raises if any deletion fails."""

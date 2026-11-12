@@ -7,7 +7,7 @@ from pathlib import Path
 import fitz
 import httpx
 import pytest
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, delete, event, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session
@@ -313,3 +313,56 @@ def test_quota_ignores_uploads_table_while_disabled():
     Base.metadata.create_all(engine, tables=[ChatSession.__table__])
     with Session(engine) as db:
         assert owner_storage_bytes(db, "owner-1", include_uploads=False) == 0
+
+
+def test_upload_racing_chat_deletion_removes_the_openai_copy(db, settings):
+    session_id = _session(db)
+
+    class DeletesRowDuringUpload(FakeOpenAIFiles):
+        def upload(self, filename, data, media_type):
+            # A concurrent chat deletion cascades the pending row away.
+            db.execute(
+                delete(ChatUploadedFile).execution_options(synchronize_session=False)
+            )
+            return super().upload(filename, data, media_type)
+
+    openai = DeletesRowDuringUpload()
+    service, _, _ = _service(db, settings, openai)
+
+    with pytest.raises(ChatServiceError) as error:
+        service.upload(OWNER, session_id, filename="a.txt", data=b"hello")
+    assert error.value.code == "file_upload_failed"
+    assert openai.deleted == list(openai.uploaded)
+    assert not any(
+        path.is_file() for path in Path(settings.chat_file_local_dir).rglob("*")
+    )
+
+
+def test_stale_cleanup_keeps_rows_it_cannot_remove(db, settings):
+    session_id = _session(db)
+
+    class DeleteFails(FakeOpenAIFiles):
+        def delete(self, file_id):
+            raise httpx.ConnectError("down")
+
+    service, _, _ = _service(db, settings, DeleteFails())
+    db.add(
+        ChatUploadedFile(
+            id=uuid.uuid4(),
+            session_id=session_id,
+            hf_user_id=OWNER.hf_user_id,
+            filename="a.txt",
+            media_type="text/plain",
+            size_bytes=7,
+            sha256="0" * 64,
+            token_estimate=2,
+            storage_key="chat-files/stale",
+            openai_file_id="file-stale",
+            state="pending",
+            created_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+    )
+    db.commit()
+
+    assert service.remove_stale_pending(OWNER.hf_user_id) == 0
+    assert len(db.scalars(select(ChatUploadedFile)).all()) == 1
