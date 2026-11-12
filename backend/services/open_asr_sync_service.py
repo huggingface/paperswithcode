@@ -125,6 +125,7 @@ MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
 # Display names for upstream ids whose derived name would drop the vendor.
 MODEL_DISPLAY_NAMES: dict[str, str] = {
     "sophea/asr-k1 (preview)": "Sophea ASR K1 (preview)",
+    "sophea/asr-k1": "Sophea ASR K1",
 }
 
 _TAG_RE = re.compile(r"<[^>]+>")

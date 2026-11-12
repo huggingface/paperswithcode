@@ -20,11 +20,15 @@ from backend.services.external_resource_service import (
 )
 from backend.services.open_tts_sync_service import (
     ALL_LANGUAGE_DATASET_SLUG,
+    CORE_LANGUAGES,
     DATASET_SLUG,
+    LANGUAGE_BOARDS,
     RTFX_METRIC,
     SPACE_SOURCE_URL,
     TASK_SLUG,
     WER_METRIC,
+    language_dataset_slug,
+    language_name,
 )
 
 logging.basicConfig(
@@ -34,25 +38,44 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 NAME = "Open TTS Leaderboard"
+DATASETS = "Seed-TTS, CV3-Eval, and MiniMax Multilingual"
 DESCRIPTION = (
     "The Hugging Face Open TTS Leaderboard compares open text-to-speech models "
     "on intelligibility and generation speed. This benchmark mirrors its "
-    "default comparable view: English macro-averages across Seed-TTS and "
-    "CV3-Eval without voice cloning."
+    f"default comparable view: English macro-averages across {DATASETS} "
+    "without voice cloning."
 )
-SHORT_DESCRIPTION = (
-    "Open TTS models ranked by English WER and RTFx on Seed-TTS and CV3-Eval."
-)
+SHORT_DESCRIPTION = f"Open TTS models ranked by English WER and RTFx on {DATASETS}."
+CORE_LANGUAGE_NAMES = ", ".join(language_name(label) for label in CORE_LANGUAGES)
 ALL_LANGUAGE_NAME = "Open TTS Leaderboard — All Languages Average"
 ALL_LANGUAGE_DESCRIPTION = (
     "The multilingual view of the Hugging Face Open TTS Leaderboard compares "
     "open text-to-speech models using macro-average intelligibility and "
-    "generation speed across every language currently exposed by the Space, "
-    "on Seed-TTS and CV3-Eval without voice cloning."
+    f"generation speed across the {len(CORE_LANGUAGES)} languages that Seed-TTS "
+    f"and CV3-Eval cover ({CORE_LANGUAGE_NAMES}), on {DATASETS} without voice "
+    "cloning. Languages covered only by MiniMax have their own boards."
 )
 ALL_LANGUAGE_SHORT_DESCRIPTION = (
-    "Open TTS models ranked by average WER and RTFx across all available languages."
+    f"Open TTS models ranked by average WER and RTFx across "
+    f"{len(CORE_LANGUAGES)} languages."
 )
+
+
+def _language_benchmark(label: str) -> tuple[str, str, str, str]:
+    language = language_name(label)
+    return (
+        language_dataset_slug(label),
+        f"Open TTS Leaderboard — {language}",
+        (
+            "The per-language view of the Hugging Face Open TTS Leaderboard "
+            f"ranks open text-to-speech models on {language} intelligibility "
+            f"and generation speed, macro-averaged across the {DATASETS} sets "
+            f"that cover {language}, without voice cloning."
+        ),
+        f"Open TTS models ranked by {language} WER and RTFx.",
+    )
+
+
 BENCHMARKS = (
     (DATASET_SLUG, NAME, DESCRIPTION, SHORT_DESCRIPTION),
     (
@@ -61,7 +84,11 @@ BENCHMARKS = (
         ALL_LANGUAGE_DESCRIPTION,
         ALL_LANGUAGE_SHORT_DESCRIPTION,
     ),
+    *(_language_benchmark(label) for label in LANGUAGE_BOARDS),
 )
+DEEPLINK_CODES = {
+    language_dataset_slug(label): code for label, code in LANGUAGE_BOARDS.items()
+}
 SOURCE_TITLE = "Open TTS Leaderboard"
 # The formal citation declares only 2026; use the Space's public createdAt date
 # rather than inventing a January publication date.
@@ -124,6 +151,8 @@ def main() -> None:
             dataset.description = description
             dataset.short_description = short_description
             dataset.url = SPACE_SOURCE_URL
+            if (code := DEEPLINK_CODES.get(slug)) is not None:
+                dataset.url = f"{SPACE_SOURCE_URL}?languages={code}"
             dataset.hf_url = SPACE_SOURCE_URL
             dataset.homepage = SPACE_SOURCE_URL
             dataset.paper_url = _paper_url(source_paper)
