@@ -7,6 +7,22 @@ from backend.config import get_settings
 
 router = APIRouter()
 
+# Commercial SEO and backlink crawlers send heavy traffic and bring no readers.
+BLOCKED_SEO_CRAWLERS = (
+    "AhrefsBot",
+    "AhrefsSiteAudit",
+    "DataForSeoBot",
+    "SERankingBacklinksBot",
+    "SemrushBot",
+    "SemrushBot-BA",
+    "MJ12bot",
+    "Barkrowler",
+)
+SEO_CRAWLER_BLOCK = (
+    "".join(f"User-agent: {name}\n" for name in BLOCKED_SEO_CRAWLERS)
+    + "Disallow: /\n\n"
+)
+
 
 def robots_policy(environment: str) -> tuple[str, dict[str, str]]:
     if environment.lower() == "staging":
@@ -15,7 +31,8 @@ def robots_policy(environment: str) -> tuple[str, dict[str, str]]:
             {"X-Robots-Tag": "noindex, nofollow", "Cache-Control": "no-store"},
         )
     return (
-        "User-agent: *\nAllow: /\nSitemap: https://paperswithcode.co/sitemap.xml\n",
+        SEO_CRAWLER_BLOCK
+        + "User-agent: *\nAllow: /\nSitemap: https://paperswithcode.co/sitemap.xml\n",
         {"Cache-Control": "public, max-age=300"},
     )
 
