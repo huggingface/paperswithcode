@@ -46,6 +46,7 @@ component after canonicalization.
 Canonical `source_url` should be the most durable primary surface for the release:
 
 - **The paper PDF whenever one exists**, even when a project page or landing page also exists. Make the PDF the `source_url` and put the project/landing page in `project_pages`. Example: paper 123404 uses `https://sunovivid.github.io/correction-training/paper.pdf` as `source_url` and the project page as a project link.
+- A `source_url` must return the PDF bytes itself, not a viewer page. alphaXiv `https://www.alphaxiv.org/pdf/<id>` URLs are an HTML viewer: store the file it links, `https://pdfs.assets.alphaxiv.org/<id>v<N>.pdf` (paper 132154).
 - Technical report or blog post over a GitHub README when no PDF exists.
 - HF model card when the model card is the release surface.
 - GitHub repo when the README is the only technical report.

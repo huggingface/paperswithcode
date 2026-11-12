@@ -56,6 +56,10 @@ MODEL_REVISION = os.environ.get(
 MAX_PAGES = int(os.environ.get("PWC_MARKDOWN_MAX_PAGES", "30"))
 USER_AGENT = "paperswithcode-paper-markdown/1.0 (https://paperswithcode.co)"
 MAX_PDF_BYTES = 150 * 1024 * 1024
+ALPHAXIV_HOSTS = {"alphaxiv.org", "www.alphaxiv.org"}
+ALPHAXIV_PDF_FILE_URL = re.compile(
+    rb"https://pdfs\.assets\.alphaxiv\.org/[A-Za-z0-9._-]+\.pdf"
+)
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 MAX_IMAGE_PIXELS = 80_000_000
 MARKDOWN_IMAGE = re.compile(r"(!\[[^\]]*\]\()(?P<source>[^)\s]+)(\))")
@@ -487,13 +491,8 @@ def download_external_pdf(
     def validate_request(request: httpx.Request) -> None:
         validate_external_pdf_network_target(str(request.url))
 
-    with httpx.Client(
-        headers={"User-Agent": USER_AGENT},
-        timeout=timeout_seconds,
-        follow_redirects=True,
-        event_hooks={"request": [validate_request]},
-    ) as client:
-        with client.stream("GET", url) as response:
+    def read(client: httpx.Client, target: str) -> bytes:
+        with client.stream("GET", target) as response:
             response.raise_for_status()
             content_length = response.headers.get("content-length")
             if content_length is not None:
@@ -515,8 +514,23 @@ def download_external_pdf(
                 if len(data) + len(chunk) > MAX_PDF_BYTES:
                     raise ValueError("invalid_pdf")
                 data.extend(chunk)
+        return bytes(data)
 
-    result = bytes(data)
+    with httpx.Client(
+        headers={"User-Agent": USER_AGENT},
+        timeout=timeout_seconds,
+        follow_redirects=True,
+        event_hooks={"request": [validate_request]},
+    ) as client:
+        result = read(client, url)
+        # alphaXiv serves /pdf/<id> as an HTML viewer that links the PDF file.
+        if (
+            not result.startswith(b"%PDF-")
+            and urlsplit(url).hostname in ALPHAXIV_HOSTS
+            and (match := ALPHAXIV_PDF_FILE_URL.search(result))
+        ):
+            result = read(client, match.group().decode())
+
     if not result.startswith(b"%PDF-"):
         raise ValueError("invalid_pdf")
     return result
