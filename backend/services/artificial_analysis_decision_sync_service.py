@@ -240,6 +240,19 @@ class DecisionIndexSyncService:
                 DATASET_SLUG,
                 (METRIC_NAME,),
             )
+            rows = (
+                self.db.query(Evaluation)
+                .filter(
+                    Evaluation.task_id == task.id,
+                    Evaluation.dataset_id == dataset.id,
+                )
+                .all()
+            )
+            managed = {
+                row.external_source_url: row
+                for row in rows
+                if (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
+            }
             # (paper id, is_open) per contestant slug
             bound: dict[str, tuple[int, bool]] = {}
             for entry in leaderboard.entries:
@@ -265,20 +278,18 @@ class DecisionIndexSyncService:
             matched = matcher.match(
                 [LeaderboardModel(e.name, e.lab) for e in new_entries]
             )
+            unmatched: list[LeaderboardModel] = []
             for entry in new_entries:
-                if (match := matched.get(entry.name)) is None:
+                if (match := matched.get(entry.name)) is not None:
+                    bound[entry.slug] = (match.paper_id, match.is_open)
+                    stats.auto_matched.append(entry.name)
+                elif (row := managed.get(entry.source_url)) is not None:
+                    # Keep the binding an earlier run matched.
+                    bound[entry.slug] = (row.paper_id, bool(row.is_open))
+                else:
                     stats.unreviewed.append(entry.name)
-                    continue
-                bound[entry.slug] = (match.paper_id, match.is_open)
-                stats.auto_matched.append(entry.name)
-            matcher.report_unmatched(
-                [
-                    LeaderboardModel(e.name, e.lab)
-                    for e in new_entries
-                    if e.name not in matched
-                ],
-                now=now,
-            )
+                    unmatched.append(LeaderboardModel(entry.name, entry.lab))
+            matcher.report_unmatched(unmatched, now=now)
 
             # One row per model and paper: effort settings keep their best.
             best: dict[tuple[int, str], DecisionIndexEntry] = {}
@@ -295,19 +306,6 @@ class DecisionIndexSyncService:
                     stats.collapsed.append(entry.name)
             selected = {entry.source_url: entry for entry in best.values()}
 
-            rows = (
-                self.db.query(Evaluation)
-                .filter(
-                    Evaluation.task_id == task.id,
-                    Evaluation.dataset_id == dataset.id,
-                )
-                .all()
-            )
-            managed = {
-                row.external_source_url: row
-                for row in rows
-                if (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
-            }
             # The page lists every scored contestant; owned rows it no longer
             # selects were withdrawn upstream or collapsed into a better setting.
             for source_url, row in managed.items():

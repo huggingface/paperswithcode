@@ -247,3 +247,25 @@ def test_sync_requires_reviewed_papers_when_committing(monkeypatch):
     )
     assert dry.matched == 0
     assert session.query(Evaluation).count() == 0
+
+
+def test_sync_keeps_an_earlier_binding_when_rematch_misses(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(decision, "LeaderboardModelMatcher", _FakeMatcher)
+    _FakeMatcher.matches = {"Other 1": MatchedModel(3, "Other 1", True)}
+    leaderboard = decision.parse_decision_index_leaderboard(_page(_contestants()))
+    discovery = aa.ArtificialAnalysisDiscovery(
+        papers={"lab_model-a": 1, "lab_chat-model": 2, "lab_chat-model-low": 2}
+    )
+    decision.DecisionIndexSyncService(session).sync(leaderboard, discovery=discovery)
+    _FakeMatcher.matches = {}
+
+    stats = decision.DecisionIndexSyncService(session).sync(
+        leaderboard, discovery=discovery
+    )
+
+    assert stats.retired == 0
+    assert "Other 1" not in stats.unreviewed
+    assert "Other 1" not in _FakeMatcher.reported
+    row = session.query(Evaluation).filter(Evaluation.model_name == "Other 1").one()
+    assert (row.paper_id, row.is_open) == (3, True)
