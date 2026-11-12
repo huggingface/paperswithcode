@@ -164,6 +164,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `cross-view-object-correspondence` — Cross-view object correspondence
 - `crowd-counting` — Crowd Counting
 - `cybersecurity` — Cybersecurity
+- `decision-making` — Decision Making
 - `deep-research-agents` — Deep Research Agents
 - `deepfake-detection` — Deepfake Detection
 - `defect-detection` — Defect Detection
