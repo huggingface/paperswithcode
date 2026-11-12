@@ -148,6 +148,9 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "artificial-analysis-provider-voice-tts-arena" in (
         artificial_analysis_job.db_freshness_query
     )
+    assert "artificial-analysis-decision-index" in (
+        artificial_analysis_job.db_freshness_query
+    )
     assert "missing_fresh_datasets" in artificial_analysis_job.db_freshness_query
     assert "stale_evaluations" in artificial_analysis_job.db_freshness_query
 
