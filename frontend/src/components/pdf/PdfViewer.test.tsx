@@ -10,6 +10,7 @@ let intersecting = true;
 const intersectionObservers: Array<{ element: Element; rootMargin: string; callback: IntersectionObserverCallback }> = [];
 const reactPdf = vi.hoisted(() => ({
   documentOptions: [] as unknown[],
+  files: [] as unknown[],
   renders: [] as Array<() => void>,
   holdRenders: false,
   pageText: [] as string[],
@@ -50,8 +51,9 @@ vi.mock("./PdfToolbar", () => ({
 }));
 
 vi.mock("react-pdf", () => ({
-    Document: ({ children, onLoadSuccess, onLoadError, onItemClick, options }: {
+    Document: ({ children, file, onLoadSuccess, onLoadError, onItemClick, options }: {
       children: React.ReactNode;
+      file?: unknown;
       onLoadSuccess: (pdf: { numPages: number }) => void;
       onLoadError: (error: Error) => void;
       onItemClick?: (item: { pageNumber: number; pageIndex: number }) => void;
@@ -60,6 +62,7 @@ vi.mock("react-pdf", () => ({
       // Match React-PDF's LinkService, which retains the first callback.
       const initialItemClick = React.useRef(onItemClick);
       reactPdf.documentOptions.push(options);
+      reactPdf.files.push(file);
       return <div>
         <button onClick={() => onLoadSuccess(outlinePdf(1))}>Load PDF</button>
         <button onClick={() => onLoadSuccess(outlinePdf(13))}>Load long PDF</button>
@@ -116,6 +119,7 @@ describe("PdfViewer resize rendering", () => {
     intersectionObservers.length = 0;
     resizeCallback = undefined;
     reactPdf.documentOptions.length = 0;
+    reactPdf.files.length = 0;
     reactPdf.renders.length = 0;
     reactPdf.holdRenders = false;
     reactPdf.pageText = [];
@@ -561,6 +565,29 @@ describe("PdfViewer resize rendering", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Paper content is still being prepared. Please try again later.",
     );
+  });
+
+  it("reads the original PDF while the archived copy is not ready", () => {
+    render(<PdfViewer
+      url="/paper-assets/external/96723/paper.pdf"
+      fallbackUrl="https://example.github.io/static/paper.pdf"
+      paperKey="96723"
+      paperTitle="External paper"
+      paperHref="/paper/96723"
+      loadErrorMessage="Paper content is still being prepared. Please try again later."
+    />);
+    expect(reactPdf.files.at(-1)).toBe("/paper-assets/external/96723/paper.pdf");
+
+    fireEvent.click(screen.getByRole("button", { name: "Fail PDF" }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(reactPdf.files.at(-1)).toBe("https://example.github.io/static/paper.pdf");
+
+    // When the original PDF fails too, the reader explains why; Retry tries our copy again.
+    fireEvent.click(screen.getByRole("button", { name: "Fail PDF" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Paper content is still being prepared.");
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(reactPdf.files.at(-1)).toBe("/paper-assets/external/96723/paper.pdf");
   });
 
   it("reloads the document from scratch on Retry", () => {

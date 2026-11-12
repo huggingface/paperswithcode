@@ -25,8 +25,17 @@ function looksLikePdfUrl(value: unknown): boolean {
   return marker.includes(".pdf") || parsed.pathname.toLowerCase().includes("/pdf");
 }
 
+/**
+ * The original PDF an external paper is archived from. Mirrors
+ * external_pdf_url in .github/workflows/scripts/hourly/backfill_paper_markdown.py.
+ */
+export function externalPaperPdf(paper: Paper): string | null {
+  if (looksLikePdfUrl(paper.source_url)) return safeExternalHref(paper.source_url);
+  return safeExternalHref(paper.conference_url_pdf);
+}
+
 function hasExternalPdf(paper: Paper): boolean {
-  return looksLikePdfUrl(paper.source_url) || Boolean(safeExternalHref(paper.conference_url_pdf));
+  return Boolean(externalPaperPdf(paper));
 }
 
 /** The web page an HTML-only external paper is read from, as Markdown. */

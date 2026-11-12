@@ -48,6 +48,8 @@ export interface PdfDocumentViewProps {
   onPageChange?: (page: number) => void;
   onClose?: () => void;
   loadErrorMessage?: string;
+  /** Called instead of showing the load error, e.g. to try another source. */
+  onLoadError?: () => void;
   /** Passage a chat citation points at: scrolled into view and briefly highlighted. */
   highlight?: PdfHighlight;
   /** Opens preview cards from in-text citations and bibliography entries. */
@@ -101,6 +103,7 @@ export function PdfDocumentView({
   onPageChange,
   onClose,
   loadErrorMessage,
+  onLoadError,
   highlight: citedHighlight,
   citationLinks = false,
   sectionHash = false,
@@ -380,7 +383,9 @@ export function PdfDocumentView({
         options={documentOptions}
         loading={<div className="pdf-loading" role="status">{loadingLabel}</div>}
         onLoadSuccess={loadDocument}
-        onLoadError={(loadError) => setError(loadErrorMessage || pdfErrorMessage(loadError))}
+        onLoadError={(loadError) => onLoadError
+          ? onLoadError()
+          : setError(loadErrorMessage || pdfErrorMessage(loadError))}
         externalLinkTarget="_blank"
         onItemClick={({ pageNumber }) => internalLinkNavigation.current(pageNumber)}
       >

@@ -13,7 +13,7 @@ import { assetUrl, isPaperReaderChatEnabled } from "@/lib/apiUrl";
 import { chatApi } from "@/lib/api/chat";
 import type { PaperSelectionDraft } from "@/lib/chat";
 import { safeExternalHref } from "@/lib/safeExternalHref";
-import { externalPaperWebPage, readerCollapsedKey, readerPageKey, readerSessionKey } from "@/lib/paperReader";
+import { externalPaperPdf, externalPaperWebPage, readerCollapsedKey, readerPageKey, readerSessionKey } from "@/lib/paperReader";
 import { normalizePaperRouteId } from "@/lib/utils";
 import { ChatExperience } from "@/views/ChatView";
 import { PdfCitationContext, type PdfCitationTarget } from "@/components/chat/PdfCitationContext";
@@ -123,6 +123,8 @@ function PaperReaderExperience({ routeId }: { routeId: string }) {
   const pdfUrl = originalPdfUrl && paper?.source !== "external"
     ? rangeReadablePdfHref(originalPdfUrl)
     : originalPdfUrl;
+  // Until the Markdown backfill archives an external PDF, read the author's copy.
+  const externalSourcePdf = !webPage && paper?.source === "external" ? externalPaperPdf(paper) : null;
   const toolbarResources = readerToolbarResources(paper);
   const authors = useMemo(() => paper?.author_links?.flatMap((author) => author.id
     ? [{ id: author.id, name: author.name, avatarUrl: author.hf_avatar_url }]
@@ -398,7 +400,8 @@ function PaperReaderExperience({ routeId }: { routeId: string }) {
         /> : pdfUrl && (
           <PdfViewer
             url={pdfUrl}
-            downloadUrl={originalPdfUrl ?? pdfUrl}
+            fallbackUrl={externalSourcePdf ?? undefined}
+            downloadUrl={externalSourcePdf ?? originalPdfUrl ?? pdfUrl}
             paperKey={canonicalRoute}
             paperTitle={paper.title}
             paperHref={`/paper/${canonicalRoute}`}
