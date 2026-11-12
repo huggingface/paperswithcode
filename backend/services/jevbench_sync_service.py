@@ -82,9 +82,10 @@ _GPT_6 = "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
 # introducing paper. Other names are matched automatically when the catalog
 # names them unambiguously, and otherwise handed to the release radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
+    # The Drex technical report; the model-card page was merged into it.
     "Drex Max": ModelIdentity(
         "Drex Max",
-        source_url="https://huggingface.co/nace-ai/drex-max-v1",
+        arxiv_id="2611.07854",
         is_open=True,
         hf_model_url="https://huggingface.co/nace-ai/drex-max-v1",
     ),
