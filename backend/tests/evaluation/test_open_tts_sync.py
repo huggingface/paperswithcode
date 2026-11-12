@@ -200,30 +200,20 @@ def test_fetch_rejects_nondefault_or_missing_filter_echoes():
         raise AssertionError("missing filter echoes were accepted")
 
 
-def test_fetches_english_and_every_available_language_view():
-    all_languages = [
-        "🇬🇧 English",
-        "🇨🇳 Chinese",
-        "🇫🇷 French",
-        "🇪🇸 Spanish",
-        "🇩🇪 German",
-        "🇮🇹 Italian",
-        "🇯🇵 Japanese",
-        "🇰🇷 Korean",
-        "🇷🇺 Russian",
-    ]
-    choices = [[language, language] for language in all_languages]
+def test_fetches_english_core_language_and_per_language_views():
+    languages = [*tts.CORE_LANGUAGES, "🇭🇰 Cantonese", *tts.LANGUAGE_BOARDS]
+    choices = [[language, language] for language in dict.fromkeys(languages)]
     multilingual_payload = _payload()
     for row in multilingual_payload["data"][5:]:
         row[0] = None
         row[2] = None
         row[3] = None
+    requested = []
 
     class FakeClient:
         def __init__(self, url, *, verbose):
             assert url == SPACE_APP_URL
             assert verbose is False
-            self.calls = 0
 
         def predict(self, *, version, search, langs, datasets, clone, api_name):
             assert (version, search, datasets, clone, api_name) == (
@@ -233,21 +223,23 @@ def test_fetches_english_and_every_available_language_view():
                 False,
                 "/partial",
             )
-            self.calls += 1
-            if self.calls == 1:
-                assert langs == [DEFAULT_LANGUAGE]
+            requested.append(langs)
+            if langs == [DEFAULT_LANGUAGE]:
                 return _response(_payload(), language_choices=choices)
-            assert langs == all_languages
-            return _response(
-                multilingual_payload,
-                language=all_languages,
-                language_choices=choices,
-            )
+            if langs == list(tts.CORE_LANGUAGES):
+                payload = multilingual_payload
+            else:
+                payload = _payload(4)
+            return _response(payload, language=langs, language_choices=choices)
 
     leaderboards = tts.fetch_open_tts_leaderboards(FakeClient)
 
+    assert set(leaderboards) == set(tts.METHODOLOGY_BY_DATASET)
     assert len(leaderboards[tts.DATASET_SLUG]) == 15
     assert len(leaderboards[tts.ALL_LANGUAGE_DATASET_SLUG]) == 5
+    assert len(leaderboards["open-tts-leaderboard-hindi"]) == 4
+    assert ["🇮🇳 Hindi"] in requested
+    assert ["🇭🇰 Cantonese"] not in requested
 
 
 def test_parser_rejects_truncated_or_noncontiguous_data():
@@ -621,7 +613,7 @@ def test_syncs_english_and_all_language_benchmarks(monkeypatch):
     assert rows[tts.DATASET_SLUG].metrics == {"WER": 1.25, "RTFx": 12.5}
     multilingual = rows[tts.ALL_LANGUAGE_DATASET_SLUG]
     assert multilingual.metrics == {"WER": 3.5, "RTFx": 10.0}
-    assert "all available languages" in multilingual.methodology
+    assert "9 Seed-TTS and CV3-Eval languages" in multilingual.methodology
     assert multilingual.best_rank == 1
 
 
@@ -768,13 +760,15 @@ def test_setup_creates_english_and_all_language_benchmarks(monkeypatch):
     setup.main()
 
     datasets = {dataset.slug: dataset for dataset in session.query(Dataset).all()}
-    assert set(datasets) == {
-        tts.DATASET_SLUG,
-        tts.ALL_LANGUAGE_DATASET_SLUG,
-    }
+    assert set(datasets) == set(tts.METHODOLOGY_BY_DATASET)
+    assert len(datasets) == 23
     assert all(dataset.introducing_paper_id == 9 for dataset in datasets.values())
-    assert session.query(TaskDataset).count() == 2
-    assert session.query(TaskDatasetMetric).count() == 4
+    hindi = datasets["open-tts-leaderboard-hindi"]
+    assert hindi.name == "Open TTS Leaderboard — Hindi"
+    assert hindi.url == f"{SPACE_SOURCE_URL}?languages=hi"
+    assert datasets[tts.DATASET_SLUG].url == SPACE_SOURCE_URL
+    assert session.query(TaskDataset).count() == 23
+    assert session.query(TaskDatasetMetric).count() == 46
 
 
 def test_cron_syncs_both_open_tts_views(monkeypatch):

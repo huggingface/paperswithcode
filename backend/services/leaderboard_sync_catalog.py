@@ -7,6 +7,7 @@ catalog and never create papers.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
@@ -15,6 +16,23 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from backend.models.database import Dataset, Metric, Paper, Task, TaskDatasetMetric
+
+
+_REPORT_RE = re.compile(r"tech(?:nical)?[\s_-]*report", re.IGNORECASE)
+
+
+def is_paper_backed(paper: Paper) -> bool:
+    """Whether a paper is on arXiv or is a technical report.
+
+    Model cards, code repositories, and release blog posts are not papers;
+    syncs that publish only paper-backed models skip them.
+    """
+    if paper.source == "arxiv":
+        return True
+    source_url = (paper.source_url or "").split("?", 1)[0].split("#", 1)[0]
+    return source_url.casefold().endswith(".pdf") or bool(
+        _REPORT_RE.search(f"{paper.title or ''} {source_url}")
+    )
 
 
 @dataclass(frozen=True)

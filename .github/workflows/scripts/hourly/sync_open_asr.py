@@ -4,6 +4,10 @@ import argparse
 import asyncio
 
 from backend.database.connection import db_manager
+from backend.services.open_asr_language_sync_service import (
+    OpenAsrLanguageSyncService,
+    fetch_open_asr_language_leaderboards,
+)
 from backend.services.open_asr_sync_service import (
     OpenAsrPaperDiscoveryService,
     OpenAsrSyncService,
@@ -45,6 +49,17 @@ class SyncOpenAsrJob(CronJobBase):
                 self.logger.warning(
                     "open_asr_missing_papers identities=%s",
                     ",".join(stats.missing_papers),
+                )
+            # Fetched only now, so a language-view failure never blocks the
+            # English board; language boards read the papers it just resolved.
+            language_stats = OpenAsrLanguageSyncService(session).sync(
+                fetch_open_asr_language_leaderboards(), commit=not self.dry_run
+            )
+            for dataset_slug, value in language_stats.items():
+                self.logger.info(
+                    "open_asr_language_sync dataset=%s stats=%s",
+                    dataset_slug,
+                    value.to_dict(),
                 )
         finally:
             session.close()

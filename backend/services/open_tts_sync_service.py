@@ -31,6 +31,9 @@ from backend.services.leaderboard_model_matching_service import (
     MatchedModel,
 )
 from backend.services.leaderboard_sync_catalog import (
+    is_paper_backed as has_paper,
+)
+from backend.services.leaderboard_sync_catalog import (
     resolve_leaderboard,
 )
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
@@ -38,8 +41,11 @@ from backend.services.leaderboard_sync_ownership import managed_methodology_pref
 SPACE_APP_URL = "https://hf-audio-open-tts-leaderboard.hf.space"
 SPACE_SOURCE_URL = "https://huggingface.co/spaces/hf-audio/open_tts_leaderboard"
 DEFAULT_LANGUAGE = "🇬🇧 English"
-DEFAULT_DATASETS = ["Seed-TTS", "CV3-Eval"]
-EXPECTED_LANGUAGES = (
+DEFAULT_DATASETS = ["Seed-TTS", "CV3-Eval", "MiniMax"]
+# Seed-TTS and CV3-Eval cover these languages; the all-languages board averages
+# over them. MiniMax adds languages that only it covers (2026-11-12), which
+# ranked a single model across every language.
+CORE_LANGUAGES = (
     "🇬🇧 English",
     "🇨🇳 Chinese",
     "🇫🇷 French",
@@ -50,8 +56,34 @@ EXPECTED_LANGUAGES = (
     "🇰🇷 Korean",
     "🇷🇺 Russian",
 )
+# Per-language boards (label -> the Space's `?languages=<code>` deeplink code).
+# English is the default board; Cantonese ranks too few models for a board.
+LANGUAGE_BOARDS = {
+    "🇨🇳 Chinese": "zh",
+    "🇫🇷 French": "fr",
+    "🇪🇸 Spanish": "es",
+    "🇩🇪 German": "de",
+    "🇮🇹 Italian": "it",
+    "🇯🇵 Japanese": "ja",
+    "🇰🇷 Korean": "ko",
+    "🇷🇺 Russian": "ru",
+    "🇵🇹 Portuguese": "pt",
+    "🇳🇱 Dutch": "nl",
+    "🇵🇱 Polish": "pl",
+    "🇨🇿 Czech": "cs",
+    "🇷🇴 Romanian": "ro",
+    "🇬🇷 Greek": "el",
+    "🇫🇮 Finnish": "fi",
+    "🇹🇷 Turkish": "tr",
+    "🇸🇦 Arabic": "ar",
+    "🇮🇳 Hindi": "hi",
+    "🇮🇩 Indonesian": "id",
+    "🇹🇭 Thai": "th",
+    "🇻🇳 Vietnamese": "vi",
+}
 MIN_EXPECTED_ENTRIES = 15
 MIN_EXPECTED_ALL_LANGUAGE_ENTRIES = 5
+MIN_EXPECTED_LANGUAGE_ENTRIES = 3
 MAX_EXPECTED_ENTRIES = 100
 DATASET_SLUG = "open-tts-leaderboard"
 ALL_LANGUAGE_DATASET_SLUG = "open-tts-leaderboard-all-languages"
@@ -59,11 +91,32 @@ TASK_SLUG = "text-to-speech"
 WER_METRIC = "WER"
 RTFX_METRIC = "RTFx"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Open TTS")
+DATASET_LABEL = "Seed-TTS, CV3-Eval, and MiniMax Multilingual"
+
+
+def language_name(label: str) -> str:
+    """`🇮🇳 Hindi` -> `Hindi`."""
+    return label.split(" ", 1)[1]
+
+
+def language_dataset_slug(label: str) -> str:
+    """`🇮🇳 Hindi` -> `open-tts-leaderboard-hindi`."""
+    return f"{DATASET_SLUG}-{language_name(label).casefold()}"
+
+
 METHODOLOGY_BY_DATASET = {
-    DATASET_SLUG: "English macro-average across Seed-TTS and CV3-Eval",
+    DATASET_SLUG: f"English macro-average across {DATASET_LABEL}",
     ALL_LANGUAGE_DATASET_SLUG: (
-        "Macro-average across all available languages on Seed-TTS and CV3-Eval"
+        f"Macro-average across the {len(CORE_LANGUAGES)} Seed-TTS and CV3-Eval "
+        f"languages on {DATASET_LABEL}"
     ),
+    **{
+        language_dataset_slug(label): (
+            f"{language_name(label)} macro-average across the {DATASET_LABEL} "
+            "sets that cover it"
+        )
+        for label in LANGUAGE_BOARDS
+    },
 }
 
 _MODEL_LINK_RE = re.compile(
@@ -72,21 +125,6 @@ _MODEL_LINK_RE = re.compile(
     re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
-_REPORT_RE = re.compile(r"technical[\s_-]*report|tech[\s_-]*report", re.IGNORECASE)
-
-
-def has_paper(paper: Paper) -> bool:
-    """Whether a model's paper is an arXiv paper or a technical report.
-
-    Model cards, code repositories, and release blog posts are not papers, so
-    their models stay off the board.
-    """
-    if paper.source == "arxiv":
-        return True
-    source_url = (paper.source_url or "").split("?", 1)[0].split("#", 1)[0]
-    return source_url.casefold().endswith(".pdf") or bool(
-        _REPORT_RE.search(f"{paper.title or ''} {source_url}")
-    )
 
 
 def display_model_name(model_name: str) -> str:
@@ -237,9 +275,10 @@ def _available_languages(payload: Any) -> list[str]:
         ):
             raise TypeError("Open TTS response contains invalid language choices")
         languages.append(choice[1])
-    if len(languages) != len(set(languages)) or not set(EXPECTED_LANGUAGES).issubset(
-        languages
-    ):
+    if len(languages) != len(set(languages)) or not {
+        *CORE_LANGUAGES,
+        *LANGUAGE_BOARDS,
+    }.issubset(languages):
         raise ValueError("Open TTS response is missing expected language choices")
     return languages
 
@@ -263,10 +302,10 @@ def parse_open_tts_leaderboard(
     }
     if not required.issubset(headers):
         raise ValueError("Open TTS response is missing required columns")
-    if not MIN_EXPECTED_ENTRIES <= len(rows) <= MAX_EXPECTED_ENTRIES:
+    if not min_ranked_entries <= len(rows) <= MAX_EXPECTED_ENTRIES:
         raise ValueError(
             f"Open TTS returned {len(rows)} rows; expected "
-            f"{MIN_EXPECTED_ENTRIES}-{MAX_EXPECTED_ENTRIES}"
+            f"{min_ranked_entries}-{MAX_EXPECTED_ENTRIES}"
         )
 
     indexes = {name: headers.index(name) for name in required}
@@ -347,34 +386,36 @@ def fetch_open_tts_leaderboard(
 def fetch_open_tts_leaderboards(
     client_factory: Callable[..., Any] = Client,
 ) -> dict[str, list[OpenTtsEntry]]:
-    """Fetch the English and all-available-language comparable views."""
+    """Fetch the English, core-language, and per-language comparable views."""
     client = client_factory(SPACE_APP_URL, verbose=False)
-    english_payload = client.predict(
-        version="latest",
-        search="",
-        langs=[DEFAULT_LANGUAGE],
-        datasets=DEFAULT_DATASETS,
-        clone=False,
-        api_name="/partial",
-    )
-    languages = _available_languages(english_payload)
-    english = parse_open_tts_leaderboard(_default_table_value(english_payload))
-    all_language_payload = client.predict(
-        version="latest",
-        search="",
-        langs=languages,
-        datasets=DEFAULT_DATASETS,
-        clone=False,
-        api_name="/partial",
-    )
-    all_languages = parse_open_tts_leaderboard(
-        _table_value(all_language_payload, languages=languages),
-        min_ranked_entries=MIN_EXPECTED_ALL_LANGUAGE_ENTRIES,
-    )
-    return {
-        DATASET_SLUG: english,
-        ALL_LANGUAGE_DATASET_SLUG: all_languages,
+
+    def fetch(languages: list[str], min_ranked_entries: int) -> list[OpenTtsEntry]:
+        payload = client.predict(
+            version="latest",
+            search="",
+            langs=languages,
+            datasets=DEFAULT_DATASETS,
+            clone=False,
+            api_name="/partial",
+        )
+        if languages == [DEFAULT_LANGUAGE]:
+            _available_languages(payload)
+        return parse_open_tts_leaderboard(
+            _table_value(payload, languages=languages),
+            min_ranked_entries=min_ranked_entries,
+        )
+
+    leaderboards = {
+        DATASET_SLUG: fetch([DEFAULT_LANGUAGE], MIN_EXPECTED_ENTRIES),
+        ALL_LANGUAGE_DATASET_SLUG: fetch(
+            list(CORE_LANGUAGES), MIN_EXPECTED_ALL_LANGUAGE_ENTRIES
+        ),
     }
+    for label in LANGUAGE_BOARDS:
+        leaderboards[language_dataset_slug(label)] = fetch(
+            [label], MIN_EXPECTED_LANGUAGE_ENTRIES
+        )
+    return leaderboards
 
 
 async def discover_open_tts_papers(
@@ -474,7 +515,7 @@ class OpenTtsSyncService:
             )
             row.methodology = (
                 f"{MANAGED_METHODOLOGY_PREFIX} Upstream rank {entry.rank}; "
-                f"{METHODOLOGY_BY_DATASET[dataset_slug]} without voice cloning; "
+                f"{METHODOLOGY_BY_DATASET[dataset_slug]}, without voice cloning; "
                 f"fetched {now.isoformat()}."
             )
             row.metrics = {WER_METRIC: entry.wer, RTFX_METRIC: entry.rtfx}
@@ -587,9 +628,8 @@ class OpenTtsSyncService:
         fetched_at: datetime | None = None,
         commit: bool = True,
     ) -> dict[str, OpenTtsSyncStats]:
-        expected = {DATASET_SLUG, ALL_LANGUAGE_DATASET_SLUG}
-        if set(leaderboards) != expected:
-            raise ValueError("Both Open TTS leaderboard views are required")
+        if not {DATASET_SLUG, ALL_LANGUAGE_DATASET_SLUG}.issubset(leaderboards):
+            raise ValueError("Both Open TTS average views are required")
         return self._sync_benchmarks(
             leaderboards,
             discovery=discovery,
