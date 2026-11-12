@@ -191,8 +191,11 @@ def parse_jevbench(text: str) -> list[LeaderboardEntry]:
 
         lab = _host_lab(system.get("source_url"))
         label = name.strip()
-        if lab and label.endswith(f" ({lab})"):
-            label = label.removesuffix(f" ({lab})")
+        # Only a whole trailing "(Lab)" is the vendor, never the end of a
+        # larger parenthetical such as "(hosted by Foo (Lab))".
+        stripped = label.removesuffix(f" ({lab})") if lab else label
+        if stripped != label and stripped.count("(") == stripped.count(")"):
+            label = stripped
         value = Decimal(str(score)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
         measured_on = (system.get("draw") or {}).get("measured_on")
         entries.append(

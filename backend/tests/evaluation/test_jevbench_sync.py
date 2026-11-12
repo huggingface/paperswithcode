@@ -223,6 +223,16 @@ def test_parser_fails_loudly_on_layout_changes(text, message):
         parse_jevbench(text)
 
 
+def test_vendor_is_stripped_only_as_a_whole_trailing_parenthetical():
+    payload = _payload()
+    _system(payload, "drex-max")["name"] = "Drex Max (hosted (Nace AI)"
+    _system(payload, "kettei-fat")["name"] = "kettei-fat (Sqwish (Sqwish)"
+    names = {entry.name for entry in parse_jevbench(json.dumps(payload))}
+    assert "Drex Max (hosted (Nace AI)" in names
+    assert "kettei-fat (Sqwish (Sqwish)" in names
+    assert "Myles-G 12B" in names
+
+
 def test_parser_enforces_entry_bounds(monkeypatch):
     monkeypatch.setattr(service, "MIN_EXPECTED_ENTRIES", 49)
     with pytest.raises(ValueError, match="has 48 entries"):
