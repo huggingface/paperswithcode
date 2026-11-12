@@ -155,7 +155,7 @@ def main() -> None:
                 parent = dataset  # BENCHMARKS lists the English board first.
             else:
                 dataset.parent_dataset_id = parent.id
-                dataset.variant_type = "language"
+                dataset.variant_type = "subset"
             dataset.description = description
             dataset.short_description = short_description
             dataset.url = SPACE_SOURCE_URL

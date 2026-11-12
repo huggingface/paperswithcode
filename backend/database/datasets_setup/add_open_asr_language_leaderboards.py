@@ -61,7 +61,7 @@ def main() -> None:
                 f"Open Automatic Speech Recognition Leaderboard ({language})"
             )
             dataset.parent_dataset_id = english.id
-            dataset.variant_type = "language"
+            dataset.variant_type = "subset"
             dataset.description = (
                 "The multilingual view of the Hugging Face Open ASR Leaderboard "
                 f"ranks speech recognition models by {language} word error "
