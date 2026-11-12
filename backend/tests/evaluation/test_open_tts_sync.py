@@ -764,7 +764,14 @@ def test_setup_creates_english_and_all_language_benchmarks(monkeypatch):
     assert len(datasets) == 23
     assert all(dataset.introducing_paper_id == 9 for dataset in datasets.values())
     hindi = datasets["open-tts-leaderboard-hindi"]
-    assert hindi.name == "Open TTS Leaderboard — Hindi"
+    assert hindi.name == "Open TTS Leaderboard (Hindi)"
+    english = datasets[tts.DATASET_SLUG]
+    assert english.parent_dataset_id is None
+    assert {
+        dataset.parent_dataset_id
+        for slug, dataset in datasets.items()
+        if slug != tts.DATASET_SLUG
+    } == {english.id}
     assert hindi.url == f"{SPACE_SOURCE_URL}?languages=hi"
     assert datasets[tts.DATASET_SLUG].url == SPACE_SOURCE_URL
     assert session.query(TaskDataset).count() == 23
