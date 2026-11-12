@@ -42,6 +42,7 @@ from backend.utils.trending import (
     apply_decaying_pin,
     compute_paper_score,
     decaying_pin_floor,
+    hourly_lift,
     is_hf_aggregator,
     parse_trending_paper_id_pin_specs,
     parse_trending_pin_specs,
@@ -82,6 +83,10 @@ def x_settings() -> tuple[float, float]:
     return weight, min_likes
 
 
+def _optional_float(value) -> float | None:
+    return float(value) if value is not None else None
+
+
 def load_population(session, cutoff):
     """Return ``{paper_id: {"github_raw", "existing", "artifacts", "x_raw"}}``.
 
@@ -90,6 +95,7 @@ def load_population(session, cutoff):
     - ``artifacts``: list of ``(kind, trending_score)`` for linked HF artifacts,
       excluding aggregators (see ``is_hf_aggregator``).
     - ``x_raw``: likes/hour of the fastest linked X post from the last week.
+    - ``hourly_lift``: the stored X lift or pin score above the GitHub/HF base.
     """
     log("Loading paper population (GitHub component)...")
     github_rows = session.execute(
@@ -97,6 +103,9 @@ def load_population(session, cutoff):
             SELECT
                 p.id AS paper_id,
                 (p.trending_score IS NOT NULL) AS existing,
+                p.trending_score AS stored_score,
+                p.github_trending_component AS stored_g,
+                p.hf_trending_component AS stored_h,
                 gh.github_raw
             FROM papers p
             LEFT JOIN LATERAL (
@@ -122,6 +131,11 @@ def load_population(session, cutoff):
             "existing": bool(row.existing),
             "artifacts": [],
             "x_raw": 0.0,
+            "hourly_lift": hourly_lift(
+                _optional_float(row.stored_score),
+                _optional_float(row.stored_g),
+                _optional_float(row.stored_h),
+            ),
         }
     log(f"Population size: {len(population)} papers")
 
@@ -223,7 +237,12 @@ def build_score_changes(
     x_weight=DEFAULT_X_WEIGHT,
     x_min_likes_per_hour=DEFAULT_X_MIN_LIKES_PER_HOUR,
 ):
-    """Compute updates/clears for all papers or an explicit target set."""
+    """Compute updates/clears for all papers or an explicit target set.
+
+    A targeted rescore (the 15-minute hot GitHub job) refreshes only the
+    GitHub/HF base. It runs without the trending-cron.env settings, so it keeps
+    the X lift and pin score the hourly job last wrote instead of dropping them.
+    """
     selected = sorted(population) if paper_ids is None else sorted(set(paper_ids))
     updates = []
     clears = []
@@ -241,6 +260,8 @@ def build_score_changes(
             x_weight=x_weight,
             x_min_likes_per_hour=x_min_likes_per_hour,
         )
+        if paper_ids is not None:
+            score = max(score, entry["hourly_lift"])
         # With X weighted at 0, an X-only paper scores 0 and stays unscored.
         if score > 0:
             updates.append(

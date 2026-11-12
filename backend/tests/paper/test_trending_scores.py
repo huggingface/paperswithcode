@@ -33,8 +33,22 @@ def _load_module():
 def test_population_ignores_hf_aggregator_links():
     cron = _load_module()
     github_rows = [
-        SimpleNamespace(paper_id=1, existing=False, github_raw=None),
-        SimpleNamespace(paper_id=2, existing=True, github_raw=None),
+        SimpleNamespace(
+            paper_id=1,
+            existing=False,
+            stored_score=None,
+            stored_g=None,
+            stored_h=None,
+            github_raw=None,
+        ),
+        SimpleNamespace(
+            paper_id=2,
+            existing=True,
+            stored_score=100.0,
+            stored_g=0.0,
+            stored_h=0.0,
+            github_raw=None,
+        ),
     ]
     hf_rows = [
         SimpleNamespace(
@@ -68,6 +82,8 @@ def test_population_ignores_hf_aggregator_links():
     assert population[2]["artifacts"] == []
     assert population[1]["x_raw"] == 0.0
     assert population[2]["x_raw"] == 12.5
+    assert population[1]["hourly_lift"] == 0.0
+    assert population[2]["hourly_lift"] == 100.0
     # Paper 2 only had an aggregator, so its stored score is cleared.
     github_corpus, hf_corpora = cron.derive_corpora(population)
     updates, clears = cron.build_score_changes(population, github_corpus, hf_corpora)
@@ -78,9 +94,27 @@ def test_population_ignores_hf_aggregator_links():
 def test_targeted_compute_only_changes_selected_papers(monkeypatch):
     cron = _load_module()
     population = {
-        1: {"github_raw": 10.0, "existing": False, "artifacts": [], "x_raw": 0.0},
-        2: {"github_raw": 2.0, "existing": True, "artifacts": [], "x_raw": 0.0},
-        3: {"github_raw": 0.0, "existing": True, "artifacts": [], "x_raw": 0.0},
+        1: {
+            "github_raw": 10.0,
+            "existing": False,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        },
+        2: {
+            "github_raw": 2.0,
+            "existing": True,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        },
+        3: {
+            "github_raw": 0.0,
+            "existing": True,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        },
     }
     calls = []
 
@@ -104,8 +138,20 @@ def test_targeted_compute_only_changes_selected_papers(monkeypatch):
 def test_full_and_targeted_compute_agree_for_same_paper(monkeypatch):
     cron = _load_module()
     population = {
-        1: {"github_raw": 10.0, "existing": False, "artifacts": [], "x_raw": 0.0},
-        2: {"github_raw": 2.0, "existing": False, "artifacts": [], "x_raw": 0.0},
+        1: {
+            "github_raw": 10.0,
+            "existing": False,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        },
+        2: {
+            "github_raw": 2.0,
+            "existing": False,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        },
     }
     github_corpus, hf_corpora = cron.derive_corpora(population)
     full, _ = cron.build_score_changes(population, github_corpus, hf_corpora)
@@ -114,6 +160,84 @@ def test_full_and_targeted_compute_agree_for_same_paper(monkeypatch):
     )
 
     assert targeted == [next(update for update in full if update["id"] == 2)]
+
+
+def test_targeted_rescore_keeps_hourly_x_lift(monkeypatch):
+    """The 15-minute job runs without PWC_TRENDING_X_WEIGHT; it must not drop
+    the X lift the hourly job wrote (2611.09501 flipped between #1 and #324)."""
+    cron = _load_module()
+    monkeypatch.delenv("PWC_TRENDING_X_WEIGHT", raising=False)
+    lifted = cron.hourly_lift(100.0, 0.9841, 0.0)
+    population = {
+        1: {
+            "github_raw": 10.0,
+            "existing": True,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        },
+        2: {
+            "github_raw": 2.0,
+            "existing": True,
+            "artifacts": [],
+            "x_raw": 242.0,
+            "hourly_lift": lifted,
+        },
+    }
+    github_corpus, hf_corpora = cron.derive_corpora(population)
+
+    targeted, _ = cron.build_score_changes(
+        population, github_corpus, hf_corpora, paper_ids=[2]
+    )
+    full, _ = cron.build_score_changes(population, github_corpus, hf_corpora)
+
+    assert lifted == 100.0
+    assert targeted[0]["score"] == 100.0
+    # The hourly run recomputes the lift from its own settings (here: weight 0).
+    assert next(u for u in full if u["id"] == 2)["score"] == 25.0
+
+
+def test_targeted_rescore_keeps_pinned_paper_without_live_signal():
+    cron = _load_module()
+    population = {
+        1: {
+            "github_raw": 10.0,
+            "existing": True,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        },
+        2: {
+            "github_raw": 0.0,
+            "existing": True,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 80.0,
+        },
+    }
+    github_corpus, hf_corpora = cron.derive_corpora(population)
+
+    updates, clears = cron.build_score_changes(
+        population, github_corpus, hf_corpora, paper_ids=[2]
+    )
+
+    assert updates[0]["id"] == 2 and updates[0]["score"] == 80.0
+    assert clears == []
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        ((None, None, None), 0.0),
+        ((50.0, 0.5, 0.5), 0.0),
+        ((50.005, 0.5001, 0.4999), 0.0),
+        ((100.0, 0.98, 0.0), 100.0),
+        ((72.0, 0.4, 0.2), 72.0),
+    ],
+)
+def test_hourly_lift(stored, expected):
+    cron = _load_module()
+    assert cron.hourly_lift(*stored) == expected
 
 
 def test_decaying_pins_share_state_for_arxiv_and_internal_paper_ids(
@@ -156,7 +280,13 @@ def test_decaying_pins_share_state_for_arxiv_and_internal_paper_ids(
 def test_full_run_clears_scores_of_papers_that_left_the_window(monkeypatch):
     cron = _load_module()
     population = {
-        1: {"github_raw": 10.0, "existing": False, "artifacts": [], "x_raw": 0.0}
+        1: {
+            "github_raw": 10.0,
+            "existing": False,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        }
     }
     monkeypatch.setattr(cron, "load_population", lambda _session, _cutoff: population)
     monkeypatch.setattr(
@@ -179,7 +309,13 @@ def test_full_run_clears_scores_of_papers_that_left_the_window(monkeypatch):
 def test_targeted_run_leaves_aged_out_scores_to_the_full_run(monkeypatch):
     cron = _load_module()
     population = {
-        1: {"github_raw": 10.0, "existing": False, "artifacts": [], "x_raw": 0.0}
+        1: {
+            "github_raw": 10.0,
+            "existing": False,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        }
     }
     monkeypatch.setattr(cron, "load_population", lambda _session, _cutoff: population)
     aged_out = Mock(return_value=[7])
@@ -198,8 +334,20 @@ def test_targeted_run_leaves_aged_out_scores_to_the_full_run(monkeypatch):
 def test_x_only_paper_stays_unscored_while_x_weight_is_zero():
     cron = _load_module()
     population = {
-        1: {"github_raw": 10.0, "existing": False, "artifacts": [], "x_raw": 0.0},
-        2: {"github_raw": 0.0, "existing": True, "artifacts": [], "x_raw": 50.0},
+        1: {
+            "github_raw": 10.0,
+            "existing": False,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "hourly_lift": 0.0,
+        },
+        2: {
+            "github_raw": 0.0,
+            "existing": True,
+            "artifacts": [],
+            "x_raw": 50.0,
+            "hourly_lift": 0.0,
+        },
     }
     github_corpus, hf_corpora = cron.derive_corpora(population)
 
