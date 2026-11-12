@@ -619,7 +619,7 @@ it('badges the following tab New when papers arrived since the last visit, and n
   expect(screen.queryByRole('region', { name: 'Get a feed for your research' })).not.toBeInTheDocument();
   fireEvent.click(tab);
   await screen.findByText('A paper');
-  expect(screen.getByRole('button', { name: 'following' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'following New' })).toBeInTheDocument();
   expect(localStorage.getItem('pwc:following-last-seen')).not.toBe('2026-11-09T08:00:00.000Z');
 });
 it('marks papers added since the last visit without a banner', async () => {
@@ -635,8 +635,8 @@ it('marks papers added since the last visit without a banner', async () => {
   const chips = [...container.querySelectorAll('.paper-card')].map(card => !!card.querySelector('.paper-new-chip'));
   expect(chips).toEqual([false, true]);
   expect(screen.queryByText(/since your last visit/)).not.toBeInTheDocument();
-  // The tab drops its badge once Following is open.
-  expect(screen.getByRole('button', { name: 'following' })).toBeInTheDocument();
+  // The tab keeps its badge while Following is open.
+  expect(await screen.findByRole('button', { name: 'following New' })).toBeInTheDocument();
 });
 it('starts counting from the first homepage visit', async () => {
   renderFeed('/');
