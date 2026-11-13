@@ -148,6 +148,20 @@ describe("SharedChatView", () => {
     );
   });
 
+  it("shows no provider attribution for direct OpenAI conversations", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ ...payload, model_provider: "openai" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    renderView();
+
+    expect(await screen.findByText("Generated with DeepSeek V4 Flash")).toBeVisible();
+    expect(screen.queryByText(/Powered by/i)).not.toBeInTheDocument();
+  });
+
   it("opens a public poster beside the transcript without loading private chat history", async () => {
     window.history.replaceState({}, "", `/share/${shareId}`);
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1280);
