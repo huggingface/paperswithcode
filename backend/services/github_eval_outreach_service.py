@@ -5,7 +5,11 @@ from datetime import datetime, timezone
 import re
 import time
 
-from backend.services.github_eval_outreach_body import render_repository_body
+from backend.services.github_eval_outreach_body import (
+    RELEASE_ISSUE_TITLE,
+    render_release_comment,
+    render_repository_body,
+)
 from backend.services.github_eval_outreach_state import OutreachState
 from backend.services.github_issue_body_service import ISSUE_TITLE
 from backend.services.github_issue_publish_service import (
@@ -49,6 +53,26 @@ def issues(api, repository: str, *, state: str = "all", creator: str | None = No
             arguments += ["-f", f"creator={creator}"]
         batch = api(arguments)
         yield from (issue for issue in batch if "pull_request" not in issue)
+        if len(batch) < 100:
+            return
+        page += 1
+
+
+def comments(api, repository: str, number: int):
+    page = 1
+    while True:
+        batch = api(
+            [
+                f"repos/{repository}/issues/{number}/comments",
+                "--method",
+                "GET",
+                "-f",
+                "per_page=100",
+                "-f",
+                f"page={page}",
+            ]
+        )
+        yield from batch
         if len(batch) < 100:
             return
         page += 1
@@ -120,6 +144,9 @@ class OutreachRunner:
     def reconcile_pending(self, key, record):
         pending = record["pending"]
         repository = pending["repository"]
+        if pending.get("comment_on"):
+            self.reconcile_comment(key, record)
+            return
         if pending.get("number"):
             found = self.api([f"repos/{repository}/issues/{pending['number']}"])
         else:
@@ -151,6 +178,43 @@ class OutreachRunner:
         record.pop("pending")
         self.state.put(key, record)
         self.record("verified", repository, issue_url=found["html_url"])
+
+    def reconcile_comment(self, key, record):
+        pending = record["pending"]
+        repository = pending["repository"]
+        if pending.get("comment_id"):
+            found = self.api(
+                [f"repos/{repository}/issues/comments/{pending['comment_id']}"]
+            )
+        else:
+            found = next(
+                (
+                    comment
+                    for comment in comments(self.api, repository, pending["comment_on"])
+                    if comment.get("body") == pending["body"]
+                ),
+                None,
+            )
+        if (
+            not found
+            or found.get("body") != pending["body"]
+            or found.get("user", {}).get("login", "").lower() != self.login.lower()
+        ):
+            self.record(
+                "needs_review",
+                repository,
+                reason="Uncertain comment; automatic repost is disabled",
+            )
+            return
+        record["covered"] = sorted(
+            set(record.get("covered", [])) | set(pending["papers"])
+        )
+        record["comments"] = [*record.get("comments", []), found["html_url"]]
+        record.pop("pending")
+        self.state.put(key, record)
+        self.record(
+            "commented_on_release_issue", repository, comment_url=found["html_url"]
+        )
 
     def resolve_aliases(self, cohort):
         """Finish bounded identity discovery before grouping, including redirected URLs."""
@@ -230,15 +294,36 @@ class OutreachRunner:
         ):
             self.record("ineligible", repository)
             return
-        if next(issues(self.api, repository, state="open", creator=self.login), None):
+        # A Hugging Face release request from this account takes priority: the
+        # evaluation message joins that thread instead of opening a second issue.
+        release = next(
+            (
+                issue
+                for issue in issues(self.api, repository, creator=self.login)
+                if RELEASE_ISSUE_TITLE.fullmatch(issue.get("title") or "")
+            ),
+            None,
+        )
+        if not release and next(
+            issues(self.api, repository, state="open", creator=self.login), None
+        ):
             self.record("open_issue", repository)
             return
+        bodies = [
+            issue.get("body") or ""
+            for issue in site_issues(self.api, repository, sleep=self.sleep)
+        ]
+        if release:
+            bodies += [
+                comment.get("body") or ""
+                for comment in comments(self.api, repository, release["number"])
+                if comment.get("user", {}).get("login", "").lower()
+                == self.login.lower()
+            ]
         covered = set(record.get("covered", []))
-        for issue in site_issues(self.api, repository, sleep=self.sleep):
+        for body in bodies:
             covered.update(
-                paper.id
-                for paper in uncovered
-                if matches_paper(issue.get("body") or "", paper)
+                paper.id for paper in uncovered if matches_paper(body, paper)
             )
         record["covered"] = sorted(covered)
         self.state.put(key, record)
@@ -259,17 +344,23 @@ class OutreachRunner:
             self.draft(paper.id)
             for paper in sorted(uncovered, key=lambda item: item.id)
         ]
-        body = render_repository_body(drafts)
+        if release:
+            body = render_release_comment(drafts)
+        else:
+            body = render_repository_body(drafts)
         if self.dry_run:
             self.record(
-                "would_create",
+                "would_comment" if release else "would_create",
                 repository,
                 body=body,
                 papers=[paper.id for paper in uncovered],
+                **({"issue_url": release["html_url"]} if release else {}),
             )
             return
         # Recheck the author gate immediately before the write, after potentially slow drafts.
-        if next(issues(self.api, repository, state="open", creator=self.login), None):
+        if not release and next(
+            issues(self.api, repository, state="open", creator=self.login), None
+        ):
             self.record("open_issue", repository)
             return
         pending = {
@@ -278,23 +369,33 @@ class OutreachRunner:
             "body": body,
             "at": self.now(),
         }
+        if release:
+            pending["comment_on"] = release["number"]
         record["pending"] = pending
         self.state.put(
             key, record
         )  # commit before POST, including before any process death
         self.counts["attempted"] += 1
+        if release:
+            request = [
+                f"repos/{repository}/issues/{release['number']}/comments",
+                "--method",
+                "POST",
+                "--raw-field",
+                f"body={body}",
+            ]
+        else:
+            request = [
+                f"repos/{repository}/issues",
+                "--method",
+                "POST",
+                "--raw-field",
+                f"title={ISSUE_TITLE}",
+                "--raw-field",
+                f"body={body}",
+            ]
         try:
-            issue = self.api(
-                [
-                    f"repos/{repository}/issues",
-                    "--method",
-                    "POST",
-                    "--raw-field",
-                    f"title={ISSUE_TITLE}",
-                    "--raw-field",
-                    f"body={body}",
-                ]
-            )
+            created = self.api(request)
         except GithubApiError as error:
             if error.status == 422 or (
                 error.status == 403 and not error.is_rate_limited
@@ -310,7 +411,10 @@ class OutreachRunner:
             raise  # uncertain outcomes retain the pre-POST checkpoint; no blind retries
         finally:
             self.sleep(10)
-        pending["number"] = issue["number"]
+        if release:
+            pending["comment_id"] = created["id"]
+        else:
+            pending["number"] = created["number"]
         self.state.put(key, record)
         self.reconcile_pending(key, record)
 

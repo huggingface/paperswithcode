@@ -1,5 +1,7 @@
 """One approved outreach message per repository, grouping its eligible papers."""
 
+import re
+
 from backend.services.github_issue_body_service import (
     GithubIssueDraft,
     outreach_signer,
@@ -7,6 +9,10 @@ from backend.services.github_issue_body_service import (
     render_ranking_paragraphs,
     validate_issue_body,
 )
+
+# Title of the Hugging Face artifact-release request that the community-science
+# paper-parsing pipeline opens from the same account (``Release X on Hugging Face``).
+RELEASE_ISSUE_TITLE = re.compile(r"Release .+ on Hugging Face", re.IGNORECASE)
 
 
 def render_repository_body(papers: list[GithubIssueDraft]) -> str:
@@ -72,6 +78,28 @@ def render_repository_body(papers: list[GithubIssueDraft]) -> str:
     body = "\n\n".join(parts)
     if len(body.encode()) > 60000:
         raise ValueError("Grouped issue exceeds the publication size limit")
+    for paper in papers:
+        validate_issue_body(body, paper.paper_id)
+    return body
+
+
+def render_release_comment(papers: list[GithubIssueDraft]) -> str:
+    """The verify-evals message as a follow-up comment on a release issue.
+
+    The release issue already introduces the sender, so the comment drops the
+    standalone greeting and introduction and keeps the rest of the message.
+    """
+    signer = outreach_signer()
+    paragraphs = [
+        paragraph
+        for paragraph in render_repository_body(papers).split("\n\n")
+        if paragraph != "Hi," and not paragraph.startswith(f"{signer} here from ")
+    ]
+    if paragraphs[0].startswith("I've made "):
+        paragraphs[0] = (
+            "Separately, I've also made " + paragraphs[0][len("I've made ") :]
+        )
+    body = "\n\n".join(["Hi again,", *paragraphs])
     for paper in papers:
         validate_issue_body(body, paper.paper_id)
     return body

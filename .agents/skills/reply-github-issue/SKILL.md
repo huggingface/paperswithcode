@@ -55,6 +55,21 @@ artifacts (model, PanTrack dataset) on Hugging Face” are not. Exclude unrelate
 issues and pull-request notifications as well. Expand beyond PwC catalog work
 only when the user explicitly requests it.
 
+Mixed threads are the exception. When a release issue already exists, the
+evaluation outreach CRON posts the verify-evals message as a NielsRogge comment
+on that release thread (a comment starting “Hi again,” that links
+`paperswithcode.co/paper/…#results`) instead of opening a separate issue.
+Treat such a thread as in scope for its evaluation part: handle author replies
+about scores, protocols, badges, or catalog metadata, and leave the Hugging
+Face release discussion to the release reply agent. Do not answer release
+questions, and do not treat a release-only reply as an answer to the
+evaluations. In the campaign search, also include
+`is:issue author:NielsRogge "Release" "on Hugging Face" "paperswithcode.co"`
+(open and closed) and keep only threads with that verify-evals comment. Mark a
+mixed thread's notification read only when its release part has no new author
+activity that the release agent still needs to see; otherwise leave it unread
+after replying.
+
 For “unread”, paginate unread notifications first and retain only in-scope issue
 threads, including both open and closed issues. Do not expand that request to
 read issues or the entire verification campaign. Apply any subsequent issue
