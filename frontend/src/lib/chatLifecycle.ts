@@ -118,23 +118,37 @@ function endReasoning(block: ReasoningBlock): ReasoningBlock {
 }
 
 /**
- * Reasoning timing is stamped only in this tab, so a server reload would drop it.
- * Copy it onto the reloaded latest reply, matching reasoning blocks by text.
+ * Reasoning timing is stamped only in this tab, so a server reload would drop
+ * it. The server builds the same reasoning blocks in the same order (its text
+ * may differ after link normalization), so pair replies from the latest
+ * backwards and copy timing by position when the reasoning counts agree.
  */
 export function carryReasoningTiming(local: ChatMessage[], reloaded: ChatMessage[]): ChatMessage[] {
-  const timed = ([...local].reverse().find((message) => message.role === "assistant")?.blocks ?? [])
-    .filter((block): block is ReasoningBlock => block.kind === "reasoning" && block.endedAt !== undefined);
-  if (timed.length === 0) return reloaded;
-  return patchLast(reloaded, (message) => message.role !== "assistant" ? message : {
-    ...message,
-    blocks: message.blocks?.map((block) => {
-      if (block.kind !== "reasoning") return block;
-      const index = timed.findIndex((candidate) => candidate.text.trim() === block.text.trim());
-      if (index < 0) return block;
-      const [{ startedAt, endedAt }] = timed.splice(index, 1);
-      return { ...block, startedAt, endedAt };
-    }),
+  const reasoningOf = (message: ChatMessage) => (message.blocks ?? []).filter(
+    (block): block is ReasoningBlock => block.kind === "reasoning",
+  );
+  const localReplies = local.filter((message) => message.role === "assistant");
+  let pending = reloaded.filter((message) => message.role === "assistant").length;
+  let changed = false;
+  const result = reloaded.map((message) => {
+    if (message.role !== "assistant") return message;
+    pending -= 1;
+    const source = localReplies[localReplies.length - 1 - pending];
+    const timings = source ? reasoningOf(source) : [];
+    if (!timings.some((block) => block.endedAt !== undefined)) return message;
+    if (timings.length !== reasoningOf(message).length) return message;
+    changed = true;
+    let index = 0;
+    return {
+      ...message,
+      blocks: message.blocks?.map((block) => {
+        if (block.kind !== "reasoning") return block;
+        const { startedAt, endedAt } = timings[index++];
+        return endedAt === undefined ? block : { ...block, startedAt, endedAt };
+      }),
+    };
   });
+  return changed ? result : reloaded;
 }
 
 function reduceEvent(

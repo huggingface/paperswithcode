@@ -322,28 +322,53 @@ describe("compaction progress", () => {
 describe("carryReasoningTiming", () => {
   const reasoning = (text: string, timing = {}) => ({ kind: "reasoning" as const, text, active: false, open: false, ...timing });
 
-  it("keeps this tab's thinking time when the server transcript replaces the reply", () => {
+  it("keeps this tab's thinking time on every reloaded reply, matched by position", () => {
     const local: ChatMessage[] = [
-      { id: "u1", role: "user", text: "Q" },
-      { id: "a1", role: "assistant", blocks: [
-        reasoning("First", { startedAt: 1, endedAt: 2 }),
+      { id: "u1", role: "user", text: "Q1" },
+      { id: "a1", role: "assistant", blocks: [reasoning("Earlier", { startedAt: 0, endedAt: 4 })] },
+      { id: "u2", role: "user", text: "Q2" },
+      { id: "a2", role: "assistant", blocks: [
+        reasoning("See [paper](paper:2401.00001)", { startedAt: 1, endedAt: 2 }),
         reasoning("Second", { startedAt: 3, endedAt: 9 }),
       ] },
     ];
     const reloaded: ChatMessage[] = [
-      { id: "u1", role: "user", text: "Q" },
-      { id: "server-a1", role: "assistant", blocks: [reasoning("Second "), reasoning("Other"), reasoning("First")] },
+      { id: "u1", role: "user", text: "Q1" },
+      { id: "s1", role: "assistant", blocks: [reasoning("Earlier")] },
+      { id: "u2", role: "user", text: "Q2" },
+      { id: "s2", role: "assistant", blocks: [reasoning("See [paper](paper:abc-route)"), reasoning("Second")] },
     ];
 
-    expect(carryReasoningTiming(local, reloaded)[1].blocks).toEqual([
-      reasoning("Second ", { startedAt: 3, endedAt: 9 }),
-      reasoning("Other"),
-      reasoning("First", { startedAt: 1, endedAt: 2 }),
+    const carried = carryReasoningTiming(local, reloaded);
+    expect(carried[1].blocks).toEqual([reasoning("Earlier", { startedAt: 0, endedAt: 4 })]);
+    expect(carried[3].blocks).toEqual([
+      reasoning("See [paper](paper:abc-route)", { startedAt: 1, endedAt: 2 }),
+      reasoning("Second", { startedAt: 3, endedAt: 9 }),
     ]);
   });
 
-  it("returns the reload unchanged when nothing was timed", () => {
-    const reloaded: ChatMessage[] = [{ id: "a1", role: "assistant", blocks: [reasoning("Plan")] }];
+  it("aligns replies from the latest when the reload holds older history", () => {
+    const local: ChatMessage[] = [
+      { id: "a2", role: "assistant", blocks: [reasoning("Latest", { startedAt: 1, endedAt: 2 })] },
+    ];
+    const reloaded: ChatMessage[] = [
+      { id: "s1", role: "assistant", blocks: [reasoning("Old")] },
+      { id: "s2", role: "assistant", blocks: [reasoning("Latest")] },
+    ];
+
+    const carried = carryReasoningTiming(local, reloaded);
+    expect(carried[0]).toBe(reloaded[0]);
+    expect(carried[1].blocks).toEqual([reasoning("Latest", { startedAt: 1, endedAt: 2 })]);
+  });
+
+  it("leaves a reply alone when its reasoning blocks don't line up", () => {
+    const local: ChatMessage[] = [
+      { id: "a1", role: "assistant", blocks: [reasoning("A", { startedAt: 1, endedAt: 2 })] },
+    ];
+    const reloaded: ChatMessage[] = [
+      { id: "s1", role: "assistant", blocks: [reasoning("A"), reasoning("B")] },
+    ];
+    expect(carryReasoningTiming(local, reloaded)).toBe(reloaded);
     expect(carryReasoningTiming([], reloaded)).toBe(reloaded);
   });
 });
