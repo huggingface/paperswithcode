@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChatEvent, ChatMessage } from "./chat";
-import { chatLifecycleReducer, initialChatLifecycle } from "./chatLifecycle";
+import { carryReasoningTiming, chatLifecycleReducer, initialChatLifecycle } from "./chatLifecycle";
 
 const streaming = (): ChatMessage[] => [{
   id: "assistant",
@@ -110,7 +110,7 @@ describe("chatLifecycleReducer", () => {
     expect(state.title).toBe(" New title");
     expect(state.messages[0]).toMatchObject({ error: "Failed", errorCode: "provider_error" });
     expect(state.messages[0].blocks).toEqual([
-      { kind: "reasoning", text: "Plan", active: false, open: false },
+      { kind: "reasoning", text: "Plan", active: false, open: false, startedAt: expect.any(Number), endedAt: expect.any(Number) },
       expect.objectContaining({ kind: "tool", id: "tool-1", status: "error", open: true }),
     ]);
   });
@@ -133,7 +133,7 @@ describe("chatLifecycleReducer", () => {
 
     expect(stopped.messages[0]).toMatchObject({ streaming: false, finishReason: "stopped" });
     expect(stopped.messages[0].blocks).toEqual([
-      { kind: "reasoning", text: "Partial", active: false, open: false },
+      { kind: "reasoning", text: "Partial", active: false, open: false, endedAt: expect.any(Number) },
       expect.objectContaining({ kind: "tool", id: "tool-1", status: "error", open: true }),
       { kind: "answer", text: "Answer", done: true },
     ]);
@@ -316,5 +316,60 @@ describe("compaction progress", () => {
       expect(chatLifecycleReducer(active, { type: "event", event }).messages[0].compacting).toBe(false);
     }
     expect(chatLifecycleReducer(active, { type: "stop" }).messages[0].compacting).toBe(false);
+  });
+});
+
+describe("carryReasoningTiming", () => {
+  const reasoning = (text: string, timing = {}) => ({ kind: "reasoning" as const, text, active: false, open: false, ...timing });
+
+  it("keeps this tab's thinking time on every reloaded reply, matched by position", () => {
+    const local: ChatMessage[] = [
+      { id: "u1", role: "user", text: "Q1" },
+      { id: "a1", role: "assistant", blocks: [reasoning("Earlier", { startedAt: 0, endedAt: 4 })] },
+      { id: "u2", role: "user", text: "Q2" },
+      { id: "a2", role: "assistant", blocks: [
+        reasoning("See [paper](paper:2401.00001)", { startedAt: 1, endedAt: 2 }),
+        reasoning("Second", { startedAt: 3, endedAt: 9 }),
+      ] },
+    ];
+    const reloaded: ChatMessage[] = [
+      { id: "u1", role: "user", text: "Q1" },
+      { id: "s1", role: "assistant", blocks: [reasoning("Earlier")] },
+      { id: "u2", role: "user", text: "Q2" },
+      { id: "s2", role: "assistant", blocks: [reasoning("See [paper](paper:abc-route)"), reasoning("Second")] },
+    ];
+
+    const carried = carryReasoningTiming(local, reloaded);
+    expect(carried[1].blocks).toEqual([reasoning("Earlier", { startedAt: 0, endedAt: 4 })]);
+    expect(carried[3].blocks).toEqual([
+      reasoning("See [paper](paper:abc-route)", { startedAt: 1, endedAt: 2 }),
+      reasoning("Second", { startedAt: 3, endedAt: 9 }),
+    ]);
+  });
+
+  it("copies nothing when a local reply was never persisted", () => {
+    const local: ChatMessage[] = [
+      { id: "u1", role: "user", text: "Q1" },
+      { id: "a1", role: "assistant", blocks: [reasoning("One", { startedAt: 0, endedAt: 4 })] },
+      { id: "u2", role: "user", text: "Q2" },
+      { id: "a2", role: "assistant", blocks: [reasoning("Two", { startedAt: 5, endedAt: 9 })] },
+    ];
+    const reloaded: ChatMessage[] = [
+      { id: "u1", role: "user", text: "Q1" },
+      { id: "s1", role: "assistant", blocks: [reasoning("One")] },
+      { id: "u2", role: "user", text: "Q2" },
+    ];
+    expect(carryReasoningTiming(local, reloaded)).toBe(reloaded);
+  });
+
+  it("leaves a reply alone when its reasoning blocks don't line up", () => {
+    const local: ChatMessage[] = [
+      { id: "a1", role: "assistant", blocks: [reasoning("A", { startedAt: 1, endedAt: 2 })] },
+    ];
+    const reloaded: ChatMessage[] = [
+      { id: "s1", role: "assistant", blocks: [reasoning("A"), reasoning("B")] },
+    ];
+    expect(carryReasoningTiming(local, reloaded)).toBe(reloaded);
+    expect(carryReasoningTiming([], reloaded)).toBe(reloaded);
   });
 });

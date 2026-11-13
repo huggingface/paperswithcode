@@ -25,6 +25,7 @@ import {
 } from "@/lib/chatLatency";
 import {
   EVENT_TRAITS,
+  carryReasoningTiming,
   type ChatLifecycleAction,
   findLastMatchingIndex,
   toggleChatBlock,
@@ -281,7 +282,7 @@ export function useChat(options: UseChatOptions) {
   const reloadCanonical = async (sessionId: string, epoch: number) => {
     const loadSession = optionsRef.current.loadSession ?? ((id: string) => chatApi.getSession(id));
     const detail = await loadSession(sessionId);
-    let restored = toUiMessages(detail);
+    let restored = carryReasoningTiming(turn.state.messages, toUiMessages(detail));
     if (stoppedProjectionRef.current?.sessionId === sessionId) {
       restored = stoppedProjectionRef.current.messages;
       stoppedProjectionRef.current = null;

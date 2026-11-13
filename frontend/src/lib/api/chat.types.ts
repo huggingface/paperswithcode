@@ -215,6 +215,10 @@ export interface ReasoningBlock {
   active: boolean;
   open: boolean;
   citations?: ChatCitation[];
+  /** Browser clock (epoch ms) when this tab saw reasoning start; absent for loaded history. */
+  startedAt?: number;
+  /** Browser clock (epoch ms) when this tab saw reasoning end. */
+  endedAt?: number;
 }
 
 export interface ToolBlock {

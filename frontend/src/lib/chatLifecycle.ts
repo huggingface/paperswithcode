@@ -1,4 +1,4 @@
-import type { ChatBlock, ChatEvent, ChatMessage } from "./chat";
+import type { ChatBlock, ChatEvent, ChatMessage, ReasoningBlock } from "./chat";
 
 /** The visible projection of one turn. Turn status lives in `ChatTurn.phase`. */
 export interface ChatLifecycleState {
@@ -112,6 +112,46 @@ function patchBlock(
   });
 }
 
+/** Collapse finished reasoning and stamp when it ended, for "Thought for N seconds". */
+function endReasoning(block: ReasoningBlock): ReasoningBlock {
+  return { ...block, active: false, open: false, endedAt: Date.now() };
+}
+
+/**
+ * Reasoning timing is stamped only in this tab, so a server reload would drop
+ * it. Server and client ids differ, and the server's reasoning text may differ
+ * after link normalization, so copy timing by position, and only when both
+ * transcripts have the same message roles in the same order and each reply has
+ * the same number of reasoning blocks. Anything else keeps the generic label
+ * rather than risk a wrong duration.
+ */
+export function carryReasoningTiming(local: ChatMessage[], reloaded: ChatMessage[]): ChatMessage[] {
+  if (
+    local.length !== reloaded.length
+    || local.some((message, index) => message.role !== reloaded[index].role)
+  ) return reloaded;
+  const reasoningOf = (message: ChatMessage) => (message.blocks ?? []).filter(
+    (block): block is ReasoningBlock => block.kind === "reasoning",
+  );
+  let changed = false;
+  const result = reloaded.map((message, messageIndex) => {
+    const timings = reasoningOf(local[messageIndex]);
+    if (!timings.some((block) => block.endedAt !== undefined)) return message;
+    if (timings.length !== reasoningOf(message).length) return message;
+    changed = true;
+    let index = 0;
+    return {
+      ...message,
+      blocks: message.blocks?.map((block) => {
+        if (block.kind !== "reasoning") return block;
+        const { startedAt, endedAt } = timings[index++];
+        return endedAt === undefined ? block : { ...block, startedAt, endedAt };
+      }),
+    };
+  });
+  return changed ? result : reloaded;
+}
+
 function reduceEvent(
   state: ChatLifecycleState,
   event: ChatEvent,
@@ -157,10 +197,10 @@ function reduceEvent(
             blocks: [
               ...(visible.blocks ?? []).map((block) => (
                 block.kind === "reasoning" && block.active
-                  ? { ...block, active: false, open: false }
+                  ? endReasoning(block)
                   : block
               )),
-              { kind: "reasoning", text: "", active: true, open: true },
+              { kind: "reasoning", text: "", active: true, open: true, startedAt: Date.now() },
             ],
           };
         }),
@@ -196,7 +236,7 @@ function reduceEvent(
           return {
             ...message,
             blocks: blocks.map((block, index) => index === currentIndex
-              ? { ...current, active: false, open: false }
+              ? endReasoning(current)
               : block),
           };
         }),
@@ -395,7 +435,7 @@ function reduceEvent(
             block.kind === "answer"
               ? { ...block, done: true }
               : block.kind === "reasoning" && block.active
-                ? { ...block, active: false, open: false }
+                ? endReasoning(block)
                 : block
           )),
         })),
@@ -411,7 +451,7 @@ function reduceEvent(
           errorCode: event.code,
           blocks: (message.blocks ?? []).map((block) => (
             block.kind === "reasoning" && block.active
-              ? { ...block, active: false, open: false }
+              ? endReasoning(block)
               : block.kind === "tool" && block.status === "running"
                 ? { ...block, status: "error", open: true }
               : block
@@ -431,7 +471,7 @@ function stopMessages(messages: ChatMessage[]): ChatMessage[] {
         return [{ ...block, status: "error", open: true }];
       }
       if (block.kind === "reasoning" && block.active) {
-        return block.text ? [{ ...block, active: false, open: false }] : [];
+        return block.text ? [endReasoning(block)] : [];
       }
       if (block.kind === "answer") return [{ ...block, done: true }];
       return [block];

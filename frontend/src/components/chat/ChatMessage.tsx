@@ -134,6 +134,15 @@ const InlinePaperMentions: React.FC<{
   return <>{pieces}</>;
 };
 
+/** "Thought for 12 seconds" when this tab timed the reasoning; history has no timing. */
+const reasoningDoneLabel = ({ startedAt, endedAt }: ReasoningBlock): string => {
+  if (startedAt === undefined || endedAt === undefined) return "Thought for a few seconds";
+  const seconds = Math.max(1, Math.round((endedAt - startedAt) / 1_000));
+  if (seconds < 60) return `Thought for ${seconds} second${seconds === 1 ? "" : "s"}`;
+  const remainder = seconds % 60;
+  return `Thought for ${Math.floor(seconds / 60)}m${remainder ? ` ${remainder}s` : ""}`;
+};
+
 const ReasoningBlockView: React.FC<{
   block: ReasoningBlock;
   papers: Record<string, ChatPaperHit>;
@@ -169,7 +178,7 @@ const ReasoningBlockView: React.FC<{
         aria-expanded={block.open}
       >
         <CheckIcon />
-        <span>Thought for a few seconds</span>
+        <span>{reasoningDoneLabel(block)}</span>
         <Chevron open={block.open} />
       </button>
       {block.open && (
