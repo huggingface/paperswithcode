@@ -117,6 +117,26 @@ function endReasoning(block: ReasoningBlock): ReasoningBlock {
   return { ...block, active: false, open: false, endedAt: Date.now() };
 }
 
+/**
+ * Reasoning timing is stamped only in this tab, so a server reload would drop it.
+ * Copy it onto the reloaded latest reply, matching reasoning blocks by text.
+ */
+export function carryReasoningTiming(local: ChatMessage[], reloaded: ChatMessage[]): ChatMessage[] {
+  const timed = ([...local].reverse().find((message) => message.role === "assistant")?.blocks ?? [])
+    .filter((block): block is ReasoningBlock => block.kind === "reasoning" && block.endedAt !== undefined);
+  if (timed.length === 0) return reloaded;
+  return patchLast(reloaded, (message) => message.role !== "assistant" ? message : {
+    ...message,
+    blocks: message.blocks?.map((block) => {
+      if (block.kind !== "reasoning") return block;
+      const index = timed.findIndex((candidate) => candidate.text.trim() === block.text.trim());
+      if (index < 0) return block;
+      const [{ startedAt, endedAt }] = timed.splice(index, 1);
+      return { ...block, startedAt, endedAt };
+    }),
+  });
+}
+
 function reduceEvent(
   state: ChatLifecycleState,
   event: ChatEvent,

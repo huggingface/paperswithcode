@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ChatEvent, ChatMessage } from "./chat";
-import { chatLifecycleReducer, initialChatLifecycle } from "./chatLifecycle";
+import { carryReasoningTiming, chatLifecycleReducer, initialChatLifecycle } from "./chatLifecycle";
 
 const streaming = (): ChatMessage[] => [{
   id: "assistant",
@@ -316,5 +316,34 @@ describe("compaction progress", () => {
       expect(chatLifecycleReducer(active, { type: "event", event }).messages[0].compacting).toBe(false);
     }
     expect(chatLifecycleReducer(active, { type: "stop" }).messages[0].compacting).toBe(false);
+  });
+});
+
+describe("carryReasoningTiming", () => {
+  const reasoning = (text: string, timing = {}) => ({ kind: "reasoning" as const, text, active: false, open: false, ...timing });
+
+  it("keeps this tab's thinking time when the server transcript replaces the reply", () => {
+    const local: ChatMessage[] = [
+      { id: "u1", role: "user", text: "Q" },
+      { id: "a1", role: "assistant", blocks: [
+        reasoning("First", { startedAt: 1, endedAt: 2 }),
+        reasoning("Second", { startedAt: 3, endedAt: 9 }),
+      ] },
+    ];
+    const reloaded: ChatMessage[] = [
+      { id: "u1", role: "user", text: "Q" },
+      { id: "server-a1", role: "assistant", blocks: [reasoning("Second "), reasoning("Other"), reasoning("First")] },
+    ];
+
+    expect(carryReasoningTiming(local, reloaded)[1].blocks).toEqual([
+      reasoning("Second ", { startedAt: 3, endedAt: 9 }),
+      reasoning("Other"),
+      reasoning("First", { startedAt: 1, endedAt: 2 }),
+    ]);
+  });
+
+  it("returns the reload unchanged when nothing was timed", () => {
+    const reloaded: ChatMessage[] = [{ id: "a1", role: "assistant", blocks: [reasoning("Plan")] }];
+    expect(carryReasoningTiming([], reloaded)).toBe(reloaded);
   });
 });
