@@ -39,6 +39,12 @@ API_ENDPOINT = "https://artificialanalysis.ai/api/v2/language/models/free"
 SOURCE_URL_PREFIX = "https://artificialanalysis.ai/models/"
 METRIC_NAME = "Score"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Artificial Analysis")
+# "Claude Opus 5.5 (Max, Default Fallback)" names the base model "Claude Opus 5.5".
+_SETTINGS_SUFFIX = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _identity_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
 # Reviewed upstream renames. Only previously managed rows may carry their
@@ -47,6 +53,7 @@ MODEL_SLUG_RENAMES = {
     "k2-4b-ph1": "k2-horizon-3-7b",
     "k2-7b-ph2": "k2-horizon-7b",
     "k2-mova-36b-mid5": "k2-horizon-mova-36b-a4b",
+    "k-exaone-2-0-0803": "k-exaone-2-0",
 }
 
 
@@ -192,13 +199,27 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "2026-07-15",
         is_open=True,
     ),
-    "k-exaone-2-0-0803": PaperIdentity(arxiv_id="2608.04505", is_open=True),
+    "gemini-3-1-flash-lite-preview": external(
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-flash-lite/",
+        "Gemini 3.1 Flash-Lite: Built for intelligence at scale",
+        "2026-03-03",
+    ),
+    "gemma-4-31b": PaperIdentity(arxiv_id="2607.02770", is_open=True),
+    "granite-4-2-8b": external(
+        "https://huggingface.co/blog/ibm-granite/granite-4-2",
+        "Granite 4.2 LLMs: How They're Built",
+        "2026-08-25",
+        is_open=True,
+    ),
+    "k-exaone-2-0": PaperIdentity(arxiv_id="2608.04505", is_open=True),
     "kimi-k3": PaperIdentity(arxiv_id="2607.24653", is_open=True),
     "ling-3-1-flash": external(
         "https://developer.ant-ling.com/en/docs/models/ling#ling-31-flash",
         "Ling-3.1-flash",
         "2026-09-30",
     ),
+    "mimo-v2-6-flash": PaperIdentity(arxiv_id="2610.11959", is_open=True),
+    "mimo-v2-6-pro": PaperIdentity(arxiv_id="2610.11959", is_open=True),
     "minimax-m3": external(
         "https://www.minimax.io/blog/minimax-m3",
         "MiniMax M3: Frontier Coding, 1M Context, Native Multimodality — All in One Model",
@@ -250,7 +271,19 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "Qwen3.8-Max: A New Bar for Coding and Cowork",
         "2026-08-03",
     ),
+    "reflection-beam": external(
+        "https://reflection.ai/documents/beam-model-tech-report.pdf",
+        "Beam Model Technical Report",
+        "2026-10-05",
+        is_open=True,
+    ),
     "solar-open2-250b": PaperIdentity(arxiv_id="2607.20062", is_open=True),
+    "tencent-hy4": external(
+        "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/",
+        "Hy4",
+        "2026-11-04",
+        is_open=True,
+    ),
 }
 
 
@@ -280,12 +313,15 @@ class ArtificialAnalysisDiscovery:
     papers: dict[str, int] = field(default_factory=dict)
     indexed_papers: list[str] = field(default_factory=list)
     would_index: list[str] = field(default_factory=list)
+    # Base models (not settings variants) that no catalog paper announces yet.
+    unmatched: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "resolved": len(self.papers),
             "indexed_papers": self.indexed_papers,
             "would_index": self.would_index,
+            "unmatched": self.unmatched,
         }
 
 
@@ -580,6 +616,10 @@ class ArtificialAnalysisPaperDiscoveryService:
                 release = resolved_releases.get(entry.slug)
                 if release is not None and release.paper_id is not None:
                     result.papers[entry.slug] = release.paper_id
+                elif _identity_key(entry.slug) == _identity_key(
+                    _SETTINGS_SUFFIX.sub("", entry.name)
+                ):
+                    result.unmatched.append(entry.slug)
         return result
 
 
