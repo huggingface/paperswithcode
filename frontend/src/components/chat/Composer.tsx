@@ -10,7 +10,8 @@ import { ArrowUpIcon, Spinner } from "@/components/chat/icons";
 import { completedScrollHeight, isCompletionKey, useChatCompletion } from "@/components/chat/useChatCompletion";
 import { useComposerDictation } from "@/components/chat/useComposerDictation";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
-import type { ChatDraft } from "@/lib/chat";
+import { formatFileSize, withoutSelection, type ChatDraft, type ChatUploadedFile } from "@/lib/chat";
+import { ApiError } from "@/lib/apiTransport";
 import { emptyChatDraft } from "@/lib/paperSelection";
 
 interface ComposerProps {
@@ -26,7 +27,24 @@ interface ComposerProps {
   paperMentionsEnabled?: boolean;
   paperSelectionEnabled?: boolean;
   paperArtifactsEnabled?: boolean;
+  /** Present only on surfaces that accept uploads (/chat and the reader). */
+  fileUploads?: ComposerFileUploads;
 }
+
+export interface ComposerFileUploads {
+  /** Uploads to the given chat, or creates one first, and returns both. */
+  upload: (file: File, sessionId?: string) => Promise<{ sessionId: string; file: ChatUploadedFile }>;
+  remove: (sessionId: string, fileId: string) => void;
+}
+
+export const MAX_CHAT_FILES = 5;
+const ACCEPTED_FILES = ".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.tex,.bib,.csv,.tsv,.json,.py,.ipynb,.yaml,.yml";
+
+const PaperclipIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
 
 const EMPTY_DRAFT: ChatDraft = emptyChatDraft();
 
@@ -36,6 +54,7 @@ const Composer: React.FC<ComposerProps> = ({
   paperMentionsEnabled = false,
   paperSelectionEnabled = true,
   paperArtifactsEnabled = false,
+  fileUploads,
 }) => {
   const [localDraft, setLocalDraft] = useState<ChatDraft>(EMPTY_DRAFT);
   const value = draft ?? localDraft;
@@ -44,6 +63,41 @@ const Composer: React.FC<ComposerProps> = ({
   const change = (next: ChatDraft) => {
     if (!draft) setLocalDraft(next);
     onDraftChange?.(next);
+  };
+  // Uploads finish after later renders; they extend the latest draft.
+  const latest = useRef({ value, change });
+  latest.current = { value, change };
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(0);
+  const [fileError, setFileError] = useState("");
+  const files = value.files ?? [];
+  const attachFiles = async (selected: File[]) => {
+    if (!fileUploads) return;
+    setFileError("");
+    for (const file of selected) {
+      if ((latest.current.value.files?.length ?? 0) + 1 > MAX_CHAT_FILES) {
+        setFileError(`A chat can hold at most ${MAX_CHAT_FILES} files.`);
+        return;
+      }
+      setUploading((count) => count + 1);
+      try {
+        const uploaded = await fileUploads.upload(file, latest.current.value.fileSessionId);
+        const current = latest.current.value;
+        latest.current.change({
+          ...current,
+          files: [...(current.files ?? []), uploaded.file],
+          fileSessionId: uploaded.sessionId,
+        });
+      } catch (error) {
+        setFileError(error instanceof ApiError ? error.displayMessage : `${file.name} could not be uploaded.`);
+      } finally {
+        setUploading((count) => count - 1);
+      }
+    }
+  };
+  const removeFile = (fileId: string) => {
+    if (value.fileSessionId) fileUploads?.remove(value.fileSessionId, fileId);
+    change({ ...value, files: files.filter((file) => file.id !== fileId) });
   };
   const mentions = usePaperMentions({
     draft: value,
@@ -80,7 +134,7 @@ const Composer: React.FC<ComposerProps> = ({
     const leading = value.text.length - value.text.trimStart().length;
     const text = value.text.trim();
     const selectionBlocked = Boolean(value.paperSelection) && !paperSelectionEnabled;
-    if (!text || busy || disabled || selectionBlocked) return;
+    if (!text || busy || disabled || selectionBlocked || uploading > 0) return;
     const end = leading + text.length;
     const normalized: ChatDraft = {
       text,
@@ -88,6 +142,8 @@ const Composer: React.FC<ComposerProps> = ({
         .filter((mention) => mention.start >= leading && mention.end <= end)
         .map((mention) => ({ ...mention, start: mention.start - leading, end: mention.end - leading })),
       ...(value.paperSelection ? { paperSelection: value.paperSelection } : {}),
+      ...(files.length ? { files } : {}),
+      ...(value.fileSessionId ? { fileSessionId: value.fileSessionId } : {}),
     };
     onSend(normalized);
   };
@@ -103,7 +159,7 @@ const Composer: React.FC<ComposerProps> = ({
   const selectionBlocked = Boolean(value.paperSelection) && !paperSelectionEnabled;
   const canSend = dictation.active
     ? dictation.phase === "recording" && !selectionBlocked
-    : Boolean(value.text.trim()) && !selectionBlocked;
+    : Boolean(value.text.trim()) && !selectionBlocked && uploading === 0;
   const sendAfterRecording = () => {
     sendAfterDictation.current = true;
     dictation.finish();
@@ -120,7 +176,7 @@ const Composer: React.FC<ComposerProps> = ({
           selection={value.paperSelection}
           editable
           onRemove={() => {
-            change({ text: value.text, paperMentions: value.paperMentions });
+            change(withoutSelection(value));
             ref.current?.focus();
           }}
         />
@@ -130,6 +186,19 @@ const Composer: React.FC<ComposerProps> = ({
           Paper selection is currently disabled. Remove the selected passage or wait for the feature to recover.
         </div>
       )}
+      {(files.length > 0 || uploading > 0) && (
+        <ul className="chat-composer-files" aria-label="Attached files">
+          {files.map((file) => (
+            <li key={file.id} className="chat-file-chip">
+              <span className="chat-file-chip-name" title={file.filename}>{file.filename}</span>
+              <span className="chat-file-chip-size">{formatFileSize(file.size_bytes)}</span>
+              <button type="button" className="chat-file-chip-remove" onClick={() => removeFile(file.id)} aria-label={`Remove ${file.filename}`}>×</button>
+            </li>
+          ))}
+          {uploading > 0 && <li className="chat-file-chip chat-file-chip-pending"><Spinner /> Uploading…</li>}
+        </ul>
+      )}
+      {fileError && <div className="chat-paper-mention-message" role="alert">{fileError}</div>}
       <div className="chat-composer-textarea-wrap">
         <PaperMentionHighlights text={value.text} mentions={value.paperMentions} scrollTop={scrollTop} completion={completion} />
         <textarea
@@ -219,6 +288,32 @@ const Composer: React.FC<ComposerProps> = ({
           <span className="chat-composer-hint">{completion ? "Tab to complete · " : ""}Enter to send · Shift+Enter for newline</span>
         </div>
         <div className="chat-composer-actions">
+          {fileUploads && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                accept={ACCEPTED_FILES}
+                onChange={(event) => {
+                  const selected = Array.from(event.target.files ?? []);
+                  event.target.value = "";
+                  void attachFiles(selected);
+                }}
+              />
+              <button
+                type="button"
+                className="chat-attach"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={disabled || busy || files.length >= MAX_CHAT_FILES}
+                aria-label="Attach files"
+                title="Attach PDF, image, or text files"
+              >
+                <PaperclipIcon />
+              </button>
+            </>
+          )}
           <DictationButton dictation={dictation} disabled={disabled} />
           <button type="button" className={`chat-send${(busy || canSend) ? " chat-send-on" : ""}`} onClick={busy ? onStop : dictation.active ? sendAfterRecording : submit} disabled={disabled || (busy ? !onStop : !canSend)} aria-label={busy ? "Stop generating" : "Send message"}>
             {busy ? (onStop ? <span aria-hidden="true">■</span> : <Spinner light />) : <ArrowUpIcon />}

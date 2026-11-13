@@ -20,7 +20,7 @@ import { CheckIcon, Chevron, SearchIcon, Spinner } from "@/components/chat/icons
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
 import { authorsLine, excerpt, venueLine } from "@/components/chat/paperDisplay";
-import { CHAT_PROGRESS_LABELS } from "@/lib/chat";
+import { CHAT_PROGRESS_LABELS, formatFileSize, withoutSelection } from "@/lib/chat";
 import type {
   AnswerBlock,
   AppBlock,
@@ -28,6 +28,7 @@ import type {
   ChatCitation,
   ChatPaperHit,
   ChatDraft,
+  ChatUploadedFile,
   PaperMentionDraft,
   PaperSelectionDraft,
   ReasoningBlock,
@@ -424,7 +425,7 @@ const MentionUserEditor: React.FC<UserEditorProps & { paperMentions: PaperMentio
         <PaperSelectionCard
           selection={value.paperSelection}
           editable
-          onRemove={() => setValue({ text: value.text, paperMentions: value.paperMentions })}
+          onRemove={() => setValue(withoutSelection(value))}
         />
       )}
       <div className="chat-inline-editor-textarea-wrap">
@@ -453,6 +454,7 @@ export const UserMessage: React.FC<{
   text: string;
   paperMentions?: PaperMentionDraft[];
   paperSelection?: PaperSelectionDraft;
+  attachedFiles?: ChatUploadedFile[];
   paperMentionsEnabled?: boolean;
   isInitial?: boolean;
   editingAllowed?: boolean;
@@ -467,6 +469,7 @@ export const UserMessage: React.FC<{
   text,
   paperMentions = [],
   paperSelection,
+  attachedFiles = [],
   paperMentionsEnabled = false,
   editingAllowed = false,
   editing = false,
@@ -506,6 +509,16 @@ export const UserMessage: React.FC<{
     <div className="chat-msg chat-msg-user" data-message-id={id}>
       <div className="chat-user-message-wrap">
         {paperSelection && <PaperSelectionCard selection={paperSelection} />}
+        {attachedFiles.length > 0 && (
+          <ul className="chat-message-files" aria-label="Attached files">
+            {attachedFiles.map((file) => (
+              <li key={file.id} className="chat-file-chip">
+                <span className="chat-file-chip-name" title={file.filename}>{file.filename}</span>
+                <span className="chat-file-chip-size">{formatFileSize(file.size_bytes)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="chat-bubble" onDoubleClick={selectDoubleClickedWord}>
           <InlinePaperMentions text={text} mentions={paperMentions} />
         </div>

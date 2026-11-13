@@ -9,6 +9,7 @@ import type {
   ChatShareDetail,
   ChatShareSummary,
   ChatStreamRequest,
+  ChatUploadedFile,
   ChatWebSearchBudgetStatus,
   InferenceBillingStatus,
   LatexPaperArtifactDescriptor,
@@ -46,14 +47,26 @@ export class ChatApi {
   createSession(
     selectedModel?: string,
     reasoningEffort: ReasoningEffort = "low",
+    primaryPaperRouteId?: string,
   ): Promise<ChatSession> {
     return this.request("/chat/sessions", {
       method: "POST",
       body: JSON.stringify({
         selected_model: selectedModel || null,
         reasoning_effort: reasoningEffort,
+        ...(primaryPaperRouteId ? { primary_paper_route_id: primaryPaperRouteId } : {}),
       }),
     });
+  }
+
+  uploadFile(sessionId: string, file: File): Promise<ChatUploadedFile> {
+    const form = new FormData();
+    form.set("file", file);
+    return this.request(`/chat/sessions/${sessionId}/files`, { method: "POST", body: form });
+  }
+
+  deleteFile(sessionId: string, fileId: string): Promise<void> {
+    return this.request(`/chat/sessions/${sessionId}/files/${fileId}`, { method: "DELETE" });
   }
 
   getSession(id: string): Promise<ChatSessionDetail> {

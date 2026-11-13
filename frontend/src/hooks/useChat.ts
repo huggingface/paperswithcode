@@ -504,6 +504,7 @@ export function useChat(options: UseChatOptions) {
       text: draft.text,
       paperMentions: draft.paperMentions,
       paperSelection: draft.paperSelection,
+      attachedFiles: draft.files,
     };
     const nextAssistant = streamingAssistant(nextId());
     const replaceIndex = replacement && latestUser
@@ -512,7 +513,9 @@ export function useChat(options: UseChatOptions) {
     const optimistic = replaceIndex < 0
       ? [...current, nextUser, nextAssistant]
       : [...current.slice(0, replaceIndex), nextUser, nextAssistant];
-    const { sessionId, initialModel } = optionsRef.current;
+    // A new chat that already holds uploads was created for them first.
+    const sessionId = optionsRef.current.sessionId ?? draft.fileSessionId ?? null;
+    const { initialModel } = optionsRef.current;
     return run(draft, buildRequest(draft.text, {
       session_id: sessionId,
       client_message_id: crypto.randomUUID(),
@@ -523,14 +526,18 @@ export function useChat(options: UseChatOptions) {
   });
 
   const editAndResend = useStableCallback((messageId: string, input: ChatDraft | string) => {
-    const draft = admitDraft(input);
-    if (!draft) return false;
+    const admitted = admitDraft(input);
+    if (!admitted) return false;
     const snapshot = turn.visibleMessages.slice();
     const targetIndex = snapshot.findIndex(
       (message) => message.id === messageId && message.role === "user",
     );
     if (targetIndex < 0) return false;
     const target = snapshot[targetIndex];
+    // The inline editors edit text only; an edited prompt keeps its files.
+    const draft = admitted.files || !target.attachedFiles?.length
+      ? admitted
+      : { ...admitted, files: target.attachedFiles };
     const { sessionId } = optionsRef.current;
     if (!sessionId || !target.revision) return false;
     const nextUser: ChatMessage = {
@@ -539,6 +546,7 @@ export function useChat(options: UseChatOptions) {
       text: draft.text,
       paperMentions: draft.paperMentions,
       paperSelection: draft.paperSelection,
+      attachedFiles: draft.files,
       revision: target.revision + 1,
       status: "generating",
     };

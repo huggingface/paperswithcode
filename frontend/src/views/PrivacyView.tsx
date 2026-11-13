@@ -11,7 +11,7 @@ const PrivacyView: React.FC = () => {
       <header className="legal-header">
         <p className="legal-kicker">Legal</p>
         <h1>Privacy Policy</h1>
-        <p className="legal-effective-date">Effective August 11, 2026</p>
+        <p className="legal-effective-date">Effective November 13, 2026</p>
       </header>
 
       <p>
@@ -40,10 +40,17 @@ const PrivacyView: React.FC = () => {
           </li>
           <li>
             <strong>Research assistant content.</strong> We collect your questions,
-            conversation history, generated answers, citations, tool calls and results,
-            and feedback about answers. Chats are private to your account unless you
+            files you attach, conversation history, generated answers, citations, tool
+            calls and results, and feedback about answers. Chats are private to your account unless you
             choose to create a share link; anyone with that link may be able to view the
             shared chat.
+          </li>
+          <li>
+            <strong>Uploaded files.</strong> If you attach a PDF, image, or text file to
+            a chat, we store it privately with that chat so the research assistant can
+            read it again later and so we can review chat quality. Uploaded files count
+            toward your chat-data limit. A shared chat shows only each file&apos;s name
+            and size, but answers in it may quote the file.
           </li>
           <li>
             <strong>Voice input.</strong> If you dictate into the research assistant,
@@ -118,8 +125,9 @@ const PrivacyView: React.FC = () => {
           </li>
           <li>
             <strong>Model providers.</strong> Research-assistant content is sent to the
-            model provider you use, such as Hugging Face Inference Providers or
-            OpenRouter, so it can generate a response. That provider&apos;s privacy terms
+            model provider you use, such as OpenAI, Hugging Face Inference Providers, or
+            OpenRouter, so it can generate a response. Files you attach are uploaded to
+            OpenAI, which stores them until the chat is deleted. That provider&apos;s privacy terms
             also apply to its processing.
           </li>
           <li>
@@ -165,7 +173,8 @@ const PrivacyView: React.FC = () => {
           active chats and 100 MB of chat data per user. Archiving hides a chat and
           frees active-chat quota but does not delete it. You may deliberately share an
           unlisted snapshot; deleting its private chat removes the durable transcript,
-          workspace reference, and share link after deletion is verified. No dedicated
+          workspace reference, uploaded files (including the copy held by OpenAI), and
+          share link after deletion is verified. No dedicated
           private-chat export format is currently offered.
         </p>
         <p>

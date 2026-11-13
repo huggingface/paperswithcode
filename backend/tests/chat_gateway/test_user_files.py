@@ -296,3 +296,46 @@ def test_malformed_placeholder_ids_are_left_as_text(db, bad_id):
 
     assert payload["input"][0]["content"] == [{"type": "input_text", "text": text}]
     assert attached.input_tokens == 0
+
+
+def test_placeholder_lines_inside_a_prompt_are_split_out(db):
+    session_id = _session(db)
+    pdf = _file(db, session_id)
+    prompt = f"<user_files>\n{placeholder(pdf.id)}\n</user_files>\n<user_request>\nSummarize\n</user_request>"
+    payload = {
+        "input": [{"role": "user", "content": [{"type": "input_text", "text": prompt}]}]
+    }
+
+    attached = attach_user_files(payload, db, session_id)
+
+    content = payload["input"][0]["content"]
+    assert [part["type"] for part in content] == [
+        "input_text",
+        "input_text",
+        "input_file",
+        "input_text",
+    ]
+    assert content[0]["text"].strip() == "<user_files>"
+    assert "Summarize" in content[3]["text"]
+    assert attached.input_tokens == 5_000
+
+
+def test_tool_output_with_placeholder_line_and_text_is_split(db):
+    session_id = _session(db)
+    pdf = _file(db, session_id)
+    payload = {
+        "input": [
+            _user("Check the appendix"),
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": f"Attached again:\n{placeholder(pdf.id)}",
+            },
+        ]
+    }
+
+    attach_user_files(payload, db, session_id)
+
+    output = payload["input"][1]["output"]
+    assert output[0] == {"type": "input_text", "text": "Attached again:\n"}
+    assert output[2]["file_id"] == pdf.openai_file_id

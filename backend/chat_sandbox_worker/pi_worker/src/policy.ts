@@ -1,5 +1,6 @@
 import { chatToolName } from "./mcp.js";
 import path from "node:path";
+import { MAX_USER_FILE_READS, USER_FILE_TOOL } from "./user_file_tools.js";
 import { PWC_MCP_TOOL_NAMES, pwcMcpEnabled } from "./pwc_mcp_tools.js";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import {
@@ -111,6 +112,7 @@ export class PolicyController {
   webSearches = 0;
   readMeCalls = 0;
   createViewCalls = 0;
+  userFileReads = 0;
   outputBytes = 0;
   toolingClosed = false;
   answerProduced = false;
@@ -136,6 +138,7 @@ export class PolicyController {
     this.webSearches = 0;
     this.readMeCalls = 0;
     this.createViewCalls = 0;
+    this.userFileReads = 0;
     this.outputBytes = 0;
     this.toolingClosed = false;
     this.answerProduced = false;
@@ -188,7 +191,7 @@ export class PolicyController {
       if (this.failedCalls.has(key)) return this.deny(id, REPEATED_FAILURE);
       this.callKeys.set(id, key);
     }
-    if (!catalogTool && !new Set(["bash", "read", "search_web", "read_me", "create_view"]).has(name)) {
+    if (!catalogTool && !new Set(["bash", "read", "search_web", "read_me", "create_view", USER_FILE_TOOL]).has(name)) {
       return this.deny(id, "That tool is not available.");
     }
     if (this.mcpOnlyResearch() && (name === "bash" || name === "read")) {
@@ -203,6 +206,12 @@ export class PolicyController {
     }
     if ((name === "read_me" || name === "create_view") && !this.options.excalidrawEnabled) {
       return this.deny(id, "Diagram tools are not available.");
+    }
+    if (name === USER_FILE_TOOL) {
+      if (this.userFileReads >= MAX_USER_FILE_READS) {
+        return this.deny(id, `read_user_file may be called at most ${MAX_USER_FILE_READS} times per turn.`);
+      }
+      this.userFileReads += 1;
     }
     if (name === "read_me") {
       if (this.readMeCalls >= 1) return this.deny(id, "read_me may be called once per turn.");

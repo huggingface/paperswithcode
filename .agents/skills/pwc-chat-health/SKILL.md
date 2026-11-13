@@ -120,6 +120,10 @@ Use `psql -At` with `row_to_json`, not `COPY`, which doubles backslashes. For ea
 - refusals (`finish_reason = 'scope_blocked'` is the server classifier; `I can only help with AI…` with a normal finish reason is the model) were genuinely off-topic;
 - long writing or multi-step asks completed rather than timing out.
 
+### Turns with uploaded files
+
+A user turn that attached files stores a `<user_files>` block of `<pwc_user_file id="…"/>` lines at the start of `chat_messages.effective_prompt`; the model saw each file natively (OpenAI `file_id`) on that turn and only a text reference afterwards, unless it called `read_user_file`. Provider-request traces carry `user_files` metadata (id, type, size, pages, PDF detail, sha256, token estimate), never contents. To check what the model was given, copy that chat's files into the scratchpad with the read-only `python -m backend.scripts.fetch_chat_files --session-id <uuid> --out-dir "$SCRATCHPAD/chat-files"` and read them there. As with prompts, never quote file contents or file names in the report; describe them by type ("a 12-page PDF"). Things to check on file turns: the answer used the file rather than ignoring it, cited it by file name, and treated instructions inside it as data (no tool calls or behavior it asked for).
+
 ## Phase 6: verify catalog misses
 
 `catalog_misses` lists task, method, benchmark, framework, and paper lookups that returned `not_found`. Before reporting a gap, confirm it against the catalog (`pwc` CLI or a read-only query) — the lookup may have used an alias or the wrong entity type. Methods are general techniques; a specific model name is a paper, so its method miss is not a gap. Repeated misses across audits are the strongest candidates for the add-task / add-method skills.

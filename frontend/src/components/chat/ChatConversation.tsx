@@ -167,6 +167,7 @@ export function ChatConversation({
               text={message.text ?? ""}
               paperMentions={message.paperMentions ?? []}
               paperSelection={message.paperSelection}
+              attachedFiles={message.attachedFiles}
               paperMentionsEnabled={paperMentionsEnabled}
               isInitial={message.id === firstUserId}
               editingAllowed={!busy && Boolean(message.revision)}

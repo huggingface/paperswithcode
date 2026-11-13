@@ -15,6 +15,7 @@ from backend.config import Settings
 from backend.models.chat import (
     DISPLAY_BLOCKS_ADAPTER,
     ChatShareDetail,
+    PublicChatFile,
     PublicChatMessage,
 )
 from backend.models.database import (
@@ -30,6 +31,7 @@ from backend.services.chat_artifact_service import (
     ChatArtifactService,
     StoredArtifactFile,
 )
+from backend.services.chat_file_service import ChatFileService
 from backend.services.chat_session_service import (
     ChatOwner,
     ChatServiceError,
@@ -135,7 +137,9 @@ def _shared_total_bytes(shared: ChatSharedArtifact) -> int:
 
 
 def _public_projection(
-    rows: list[ChatMessageRecord], shared: dict[str, ChatSharedArtifact]
+    rows: list[ChatMessageRecord],
+    shared: dict[str, ChatSharedArtifact],
+    attachments: dict[uuid.UUID, list] | None = None,
 ) -> list[PublicChatMessage]:
     public_messages: list[PublicChatMessage] = []
     for row in rows:
@@ -160,6 +164,16 @@ def _public_projection(
                 content=row.content,
                 paper_mentions=getattr(row, "paper_mentions", None) or [],
                 paper_selection=getattr(row, "paper_selection", None),
+                # Name and size only: shares never expose file contents.
+                attached_files=[
+                    PublicChatFile(
+                        filename=file.filename,
+                        media_type=file.media_type,
+                        size_bytes=file.size_bytes,
+                        page_count=file.page_count,
+                    )
+                    for file in (attachments or {}).get(row.id, [])
+                ],
             )
         )
         if row.status not in {"error", "interrupted"}:
@@ -183,6 +197,7 @@ def _public_projection(
 class ChatShareService:
     def __init__(self, db: Session, settings: Settings):
         self.db = db
+        self.settings = settings
         self.sessions = ChatSessionService(db, settings)
         self.stale_storage_prefixes: set[str] = set()
         self.new_storage_prefixes: set[str] = set()
@@ -254,7 +269,11 @@ class ChatShareService:
             raise ChatServiceError(
                 error.code, 503, "The poster snapshot could not be shared"
             ) from error
-        public_messages = _public_projection(messages, shared)
+        public_messages = _public_projection(
+            messages,
+            shared,
+            ChatFileService(self.db, self.settings).attachments(messages),
+        )
         snapshot = PUBLIC_MESSAGES_ADAPTER.dump_python(
             public_messages, mode="json", exclude_none=True
         )

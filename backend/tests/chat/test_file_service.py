@@ -366,3 +366,102 @@ def test_stale_cleanup_keeps_rows_it_cannot_remove(db, settings):
 
     assert service.remove_stale_pending(OWNER.hf_user_id) == 0
     assert len(db.scalars(select(ChatUploadedFile)).all()) == 1
+
+
+def test_turn_files_validates_and_orders_attachments(db, settings):
+    from backend.services.chat_file_service import prompt_file_ids, prompt_with_files
+
+    session_id = _session(db)
+    service, _, _ = _service(db, settings)
+    first = service.upload(OWNER, session_id, filename="a.txt", data=b"one")
+    second = service.upload(OWNER, session_id, filename="b.md", data=b"two")
+
+    rows = service.turn_files(OWNER, session_id, [second.id, first.id, second.id])
+    assert [row.id for row in rows] == [second.id, first.id]
+
+    prompt = prompt_with_files("<user_request>\nhi\n</user_request>", rows)
+    assert prompt.startswith(f'<user_files>\n<pwc_user_file id="{second.id}"/>\n')
+    assert prompt.endswith("<user_request>\nhi\n</user_request>")
+    assert prompt_file_ids(prompt) == [second.id, first.id]
+    assert prompt_file_ids("hi") == []
+    assert prompt_with_files("hi", []) == "hi"
+
+
+def test_turn_files_refuses_foreign_missing_and_disabled(db, settings):
+    session_id = _session(db)
+    service, _, _ = _service(db, settings)
+    other = _session(db)
+    foreign = service.upload(OWNER, other, filename="a.txt", data=b"one")
+
+    with pytest.raises(ChatServiceError) as error:
+        service.turn_files(OWNER, session_id, [foreign.id])
+    assert error.value.code == "file_not_found"
+    with pytest.raises(ChatServiceError) as error:
+        service.turn_files(OWNER, None, [foreign.id])
+    assert error.value.code == "file_not_found"
+    with pytest.raises(ChatServiceError) as error:
+        service.turn_files(
+            ChatOwner(hf_user_id="intruder", hf_username="x"), other, [foreign.id]
+        )
+    assert error.value.status_code == 404
+    settings.chat_file_uploads_enabled = False
+    with pytest.raises(ChatServiceError) as error:
+        service.turn_files(OWNER, other, [foreign.id])
+    assert error.value.code == "file_uploads_disabled"
+    assert service.turn_files(OWNER, other, []) == []
+
+
+def test_attachments_map_user_messages_to_their_files(db, settings):
+    from types import SimpleNamespace
+
+    from backend.services.chat_file_service import prompt_with_files
+
+    session_id = _session(db)
+    service, _, _ = _service(db, settings)
+    row = service.upload(OWNER, session_id, filename="a.pdf", data=_pdf(2))
+    message_id = uuid.uuid4()
+    messages = [
+        SimpleNamespace(
+            id=message_id, role="user", effective_prompt=prompt_with_files("hi", [row])
+        ),
+        SimpleNamespace(id=uuid.uuid4(), role="assistant", effective_prompt=None),
+        SimpleNamespace(id=uuid.uuid4(), role="user", effective_prompt="plain"),
+    ]
+
+    attachments = service.attachments(messages)
+
+    assert list(attachments) == [message_id]
+    assert [file.filename for file in attachments[message_id]] == ["a.pdf"]
+    settings.chat_file_uploads_enabled = False
+    assert service.attachments(messages) == {}
+
+
+def test_shared_chats_show_attachment_names_only(db, settings):
+    from types import SimpleNamespace
+
+    from backend.services.chat_share_service import _public_projection
+
+    session_id = _session(db)
+    service, _, _ = _service(db, settings)
+    row = service.upload(OWNER, session_id, filename="secret.txt", data=b"hidden")
+    message = SimpleNamespace(
+        id=uuid.uuid4(),
+        role="user",
+        content="see file",
+        paper_mentions=[],
+        paper_selection=None,
+        status="complete",
+    )
+
+    [public] = _public_projection([message], {}, {message.id: [row]})
+
+    dumped = public.model_dump()
+    assert dumped["attached_files"] == [
+        {
+            "filename": "secret.txt",
+            "media_type": "text/plain",
+            "size_bytes": 6,
+            "page_count": None,
+        }
+    ]
+    assert "hidden" not in str(dumped) and str(row.id) not in str(dumped)

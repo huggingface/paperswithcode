@@ -171,7 +171,21 @@ export interface ChatStreamRequest {
   primary_paper_route_id?: string;
   viewer_context?: { page: number };
   paper_selection?: PaperSelectionWire;
+  file_ids?: string[];
 }
+
+/** A file uploaded to a chat; its contents never come back to the browser. */
+export interface ChatUploadedFile {
+  id: string;
+  filename: string;
+  media_type: string;
+  size_bytes: number;
+  page_count?: number | null;
+  created_at?: string;
+}
+
+/** What a shared chat shows of an attachment. */
+export type PublicChatFile = Pick<ChatUploadedFile, "filename" | "media_type" | "size_bytes" | "page_count">;
 
 export interface PaperMentionDraft {
   key: string;
@@ -338,6 +352,7 @@ export interface ChatSessionDetail extends ChatSession {
       page_verified?: boolean;
     } | null;
     viewer_context?: { page: number } | null;
+    attached_files?: ChatUploadedFile[];
     revision: number;
     status: string;
     display_blocks: ChatBlock[];
@@ -441,6 +456,7 @@ export interface PublicChatMessage {
     included_bytes?: number;
     page_verified?: boolean;
   } | null;
+  attached_files?: PublicChatFile[];
   display_blocks: ChatBlock[];
   citations: ChatCitation[];
   model?: string | null;
@@ -517,6 +533,7 @@ export interface ChatAvailability {
   paper_reader_selection_enabled?: boolean;
   paper_reader_citations_enabled?: boolean;
   paper_artifacts_enabled?: boolean;
+  file_uploads_enabled?: boolean;
 }
 
 export interface ChatAutocompleteVocabulary {

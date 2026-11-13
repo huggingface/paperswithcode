@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useChatViewportHeight } from "@/hooks/useChatViewportHeight";
 
 import { ChatComposerSurface } from "@/components/chat/ChatComposerSurface";
+import type { ComposerFileUploads } from "@/components/chat/Composer";
+import { chatApi } from "@/lib/api/chat";
 import { ChatConversation } from "@/components/chat/ChatConversation";
 import {
   ChatCapacityDialog,
@@ -30,7 +32,7 @@ import { useInferenceAuthorization } from "@/components/chat/useInferenceAuthori
 import { PanelIcon, Spinner } from "@/components/chat/icons";
 import { Icon } from "@/components/Icon";
 import { useChat } from "@/hooks/useChat";
-import { DEFAULT_REASONING_EFFORT, isChatLive, type ChatDraft, type PaperSelectionDraft } from "@/lib/chat";
+import { DEFAULT_REASONING_EFFORT, isChatLive, withoutSelection, type ChatDraft, type PaperSelectionDraft } from "@/lib/chat";
 import {
   clearQueuedChatLaunch,
   readQueuedChatLaunch,
@@ -65,7 +67,7 @@ const withReaderSelection = (
   if (!readerOwnsSelection) return draft;
   return paperSelection
     ? { ...draft, paperSelection }
-    : { text: draft.text, paperMentions: draft.paperMentions };
+    : withoutSelection(draft);
 };
 
 export interface ChatExperienceProps {
@@ -234,6 +236,26 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     if (mode === "paper") onReaderSubmit?.();
   }, [authorizeSend, mode, onPaperSelectionChange, onReaderSubmit, paperSelection, readerOwnsSelection, restorePrompt, sendChat, user]);
 
+  // A new chat is created before its first upload; the first turn then targets it.
+  const fileUploads = useMemo<ComposerFileUploads>(() => ({
+    upload: async (file, pendingSessionId) => {
+      let sessionId = routeSessionIdRef.current ?? pendingSessionId;
+      if (!sessionId) {
+        const session = await chatApi.createSession(
+          selectedModel,
+          reasoningEffort,
+          mode === "paper" ? primaryPaper?.routeId : undefined,
+        );
+        sessionId = session.id;
+        void refreshSessions();
+      }
+      return { sessionId, file: await chatApi.uploadFile(sessionId, file) };
+    },
+    remove: (sessionId, fileId) => {
+      void chatApi.deleteFile(sessionId, fileId).catch(() => undefined);
+    },
+  }), [mode, primaryPaper?.routeId, reasoningEffort, refreshSessions, selectedModel]);
+
   const selectedTurn = chat.selectedBusy;
   const { load: loadChat, activeConfiguration } = chat;
   const routeQuery = useQuery({
@@ -358,7 +380,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     draft: withReaderSelection(draft, readerOwnsSelection, paperSelection),
     onDraftChange: (next: ChatDraft) => {
       if (onPaperSelectionChange) {
-        setDraft({ text: next.text, paperMentions: next.paperMentions });
+        setDraft(withoutSelection(next));
         if (next.paperSelection !== paperSelection) onPaperSelectionChange(next.paperSelection);
       } else {
         setDraft(next);
@@ -369,6 +391,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     paperMentionsEnabled: Boolean(availability?.paper_mentions_enabled),
     paperSelectionEnabled: availability?.paper_reader_selection_enabled === true,
     paperArtifactsEnabled: mode === "general" && availability?.paper_artifacts_enabled === true,
+    fileUploads: availability?.file_uploads_enabled === true && user ? fileUploads : undefined,
   };
   const surfaceProps = {
     composerProps,
