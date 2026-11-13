@@ -26,6 +26,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services import artificial_analysis_sync_service as aa
+from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
 @compiles(BigInteger, "sqlite")
@@ -952,7 +953,9 @@ def _identity_session() -> Session:
     return session
 
 
-def _paper(session: Session, title: str, *, source: str = "external") -> Paper:
+def _paper(
+    session: Session, title: str, *, source: str = "external", evidence: bool = True
+) -> Paper:
     count = session.query(Paper).count()
     identity = (
         {"arxiv_id": f"2609.{count:05d}"}
@@ -964,6 +967,8 @@ def _paper(session: Session, title: str, *, source: str = "external") -> Paper:
     )
     session.add(paper)
     session.flush()
+    if evidence:
+        add_release_evidence(session, paper.id)
     return paper
 
 
@@ -989,6 +994,10 @@ def test_discovery_binds_base_slugs_to_launch_pages(monkeypatch):
     _paper(session, "A team of Gemini 4 Argon agents beats Minecraft", source="arxiv")
     _paper(session, "Introducing Twin Model")
     _paper(session, "Twin Model", source="arxiv")
+    fable = _paper(session, "Introducing Claude Fable 5.2 and Claude Mythos 5.2")
+    sol_luna = _paper(session, "Introducing GPT-6 Sol and Luna")
+    # A title alone is not enough: the paper must report results or a release.
+    _paper(session, "Introducing Ghost Model", evidence=False)
     session.commit()
     monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", {})
     entries = [
@@ -996,6 +1005,10 @@ def test_discovery_binds_base_slugs_to_launch_pages(monkeypatch):
         ("claude-opus-5-5-xhigh", "Claude Opus 5.5 (Xhigh, Default Fallback)"),
         ("gemini-4-argon", "Gemini 4 Argon (High)"),
         ("twin-model", "Twin Model"),
+        ("claude-fable-5-2", "Claude Fable 5.2 (Max, Default Fallback)"),
+        ("claude-mythos-5-2", "Claude Mythos 5.2 (Max)"),
+        ("gpt-6-luna", "GPT-6 Luna (Max)"),
+        ("ghost-model", "Ghost Model"),
         ("unknown-model", "Unknown Model"),
     ]
     leaderboard = aa.ArtificialAnalysisLeaderboard(
@@ -1014,13 +1027,22 @@ def test_discovery_binds_base_slugs_to_launch_pages(monkeypatch):
         )
     )
 
-    # Settings variants and ambiguous titles stay unbound.
-    assert result.papers == {"claude-opus-5-5": opus.id, "gemini-4-argon": argon.id}
+    # Joint launch pages bind every model they announce; settings variants,
+    # ambiguous titles and pages without results stay unbound.
+    expected = {
+        "claude-opus-5-5": opus.id,
+        "gemini-4-argon": argon.id,
+        "claude-fable-5-2": fable.id,
+        "claude-mythos-5-2": fable.id,
+        "gpt-6-luna": sol_luna.id,
+    }
+    assert result.papers == expected
+    assert result.unmatched == ["twin-model", "ghost-model", "unknown-model"]
     aliases = {
         alias.alias: alias.model_release_id
         for alias in session.query(ModelProviderAlias).all()
     }
-    assert set(aliases) == {"claude-opus-5-5", "gemini-4-argon"}
+    assert set(aliases) == set(expected)
     release = session.get(ModelRelease, aliases["claude-opus-5-5"])
     assert (release.paper_id, release.canonical_name) == (opus.id, "Claude Opus 5.5")
 
@@ -1031,4 +1053,4 @@ def test_discovery_binds_base_slugs_to_launch_pages(monkeypatch):
         )
     )
     assert again.papers == result.papers
-    assert session.query(ModelProviderAlias).count() == 2
+    assert session.query(ModelProviderAlias).count() == len(expected)

@@ -19,24 +19,20 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import urlsplit
 
-from sqlalchemy import exists, or_
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
-    Evaluation,
     HfArtifact,
     ModelProviderAlias,
     ModelRelease,
     ModelReleaseSignal,
-    Paper,
     PaperHfArtifact,
 )
 from backend.services.model_release_identity_service import (
     ModelReleaseIdentityService,
+    announcing_paper_id,
 )
 from backend.services.model_release_signal_service import signal_key
-
-TITLE_CANDIDATE_LIMIT = 50
 
 
 @dataclass(frozen=True)
@@ -146,22 +142,6 @@ def _identity_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
-def _phrase(value: str) -> str:
-    return re.sub(r"[\s_-]+", " ", value.casefold()).strip()
-
-
-def title_announces_model(title: str, model_name: str) -> bool:
-    """Whether ``title`` is the model's own announcement.
-
-    "Kimi K3.1 Pro: ...", "Introducing GPT-6.1 Terra" and "Introducing GPT-6
-    Sol and Luna" announce those models; "Kimi K3.1 Pro: ..." does not announce "Kimi K3" or "Kimi K3.1",
-    and "Evaluating GPT-6.1 Terra on ..." announces nothing.
-    """
-    name = re.escape(_phrase(model_name))
-    pattern = rf"(?:(?:introducing|announcing|meet) )?(?:the )?{name}(?:$|\s*[:,;(|&]|\s+[-–—]\s|\s+and\s)"
-    return re.match(pattern, _phrase(title)) is not None
-
-
 class LeaderboardModelMatcher:
     def __init__(
         self,
@@ -192,7 +172,7 @@ class LeaderboardModelMatcher:
             for name, release in releases.items()
         }
         for name in names:
-            if name not in matched and (paper_id := self._title_match(name)):
+            if name not in matched and (paper_id := announcing_paper_id(self.db, name)):
                 # Open only when the paper links the model's own weights.
                 hf_model_url = self._weights_url(paper_id, name)
                 matched[name] = MatchedModel(
@@ -262,36 +242,6 @@ class LeaderboardModelMatcher:
             if _identity_key(repo_id.rsplit("/", 1)[-1]) == key:
                 return url
         return None
-
-    def _title_match(self, model_name: str) -> int | None:
-        tokens = re.findall(r"[a-z0-9]+", model_name.casefold())
-        if not tokens:
-            return None
-        candidates = (
-            self.db.query(Paper.id, Paper.title)
-            .filter(
-                Paper.is_latest_version,
-                Paper.title.ilike(f"%{'%'.join(tokens)}%"),
-                # A model's own paper reports results or records its release;
-                # "KNN and ANN-based ..." or "GPT-4o: ... in piglets" do not.
-                or_(
-                    exists().where(Evaluation.paper_id == Paper.id),
-                    exists().where(ModelRelease.paper_id == Paper.id),
-                ),
-            )
-            .order_by(Paper.id)
-            .limit(TITLE_CANDIDATE_LIMIT + 1)
-            .all()
-        )
-        # Too many candidates to rule out a second announcement.
-        if len(candidates) > TITLE_CANDIDATE_LIMIT:
-            return None
-        paper_ids = {
-            paper_id
-            for paper_id, title in candidates
-            if title_announces_model(title, model_name)
-        }
-        return paper_ids.pop() if len(paper_ids) == 1 else None
 
     def report_unmatched(
         self, models: list[LeaderboardModel], *, now: datetime | None = None

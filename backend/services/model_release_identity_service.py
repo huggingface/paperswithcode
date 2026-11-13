@@ -5,10 +5,11 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 
-from sqlalchemy import func, or_
+from sqlalchemy import exists, func, or_
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
+    Evaluation,
     HfArtifact,
     ModelProviderAlias,
     ModelRelease,
@@ -18,21 +19,96 @@ from backend.models.database import (
 
 # Provider labels end in a settings suffix: "Claude Opus 5.5 (Max, Default Fallback)".
 _SETTINGS_SUFFIX = re.compile(r"\s*\([^()]*\)\s*$")
-# Release pages are titled "<name>", "Introducing <name>" or "<name>: <subtitle>".
-_HEADLINE_VERBS = ("", "introducing ", "announcing ", "meet ")
-_LEAD_VERB = re.compile(r"^(?:introducing|announcing|meet)\s+", re.IGNORECASE)
+# Release pages are titled "<name>", "Introducing <name> and <name>" or
+# "<name>: <subtitle>".
+_LEAD_VERB = re.compile(r"^(?:(?:introducing|announcing|meet) )?(?:the )?")
+# Only a launch headline announces the later members of "<name> and <name>".
+_LAUNCH_VERB = re.compile(r"(?:introducing|announcing|meet) ")
+_HEADLINE_END = re.compile(r"\s*[:;(|]|\s+[-–—]\s")
+_CONJUNCTION = re.compile(r"\s*,\s*(?:and\s+)?|\s*&\s*|\s+and\s+")
+# Announcing papers fetched per name before ambiguity can no longer be ruled out.
+TITLE_CANDIDATE_LIMIT = 50
 
 
 def _identity_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
+def _phrase(value: str) -> str:
+    return re.sub(r"[\s_-]+", " ", value.casefold()).strip()
+
+
+def _announced_names(title: str) -> set[str]:
+    """The model names a headline announces, as phrases.
+
+    "Introducing GPT-6 Sol and Luna" announces "gpt 6 sol" and "gpt 6 luna";
+    "Introducing Claude Fable 5.2 and Claude Mythos 5.2" announces both models.
+    """
+    phrase = _phrase(title)
+    launch = _LAUNCH_VERB.match(phrase) is not None
+    headline = _HEADLINE_END.split(_LEAD_VERB.sub("", phrase), maxsplit=1)[0]
+    parts = [part for part in _CONJUNCTION.split(headline) if part]
+    if not parts:
+        return set()
+    first, *others = parts
+    if not launch:
+        # "Comparing GPT-6 Sol and Claude Opus 5.5" announces neither model.
+        return {first}
+    prefix = first.split()
+    later = set()
+    for other in others:
+        # A later member may drop the shared family prefix ("Sol and Luna").
+        later.update(" ".join([*prefix[:size], other]) for size in range(len(prefix)))
+    # Later members name versioned models ("Claude Mythos 5.2"), not products
+    # launched alongside them ("Claude 3.7 Sonnet and Claude Code").
+    return {first} | {name for name in later if re.search(r"\d", name)}
+
+
+def title_announces_model(title: str, model_name: str) -> bool:
+    """Whether ``title`` is the model's own announcement.
+
+    "Kimi K3.1 Pro: ...", "Introducing GPT-6.1 Terra" and "Introducing GPT-6
+    Sol and Luna" announce those models; "Kimi K3.1 Pro: ..." does not announce
+    "Kimi K3" or "Kimi K3.1", and "Evaluating GPT-6.1 Terra on ..." announces
+    nothing.
+    """
+    return _phrase(model_name) in _announced_names(title)
+
+
+def announcing_paper_id(db: Session, model_name: str) -> int | None:
+    """The one latest paper whose title announces ``model_name``, if unambiguous."""
+    tokens = re.findall(r"[a-z0-9]+", model_name.casefold())
+    if not tokens:
+        return None
+    candidates = (
+        db.query(Paper.id, Paper.title)
+        .filter(
+            Paper.is_latest_version,
+            Paper.title.ilike(f"%{'%'.join(tokens)}%"),
+            # A model's own paper reports results or records its release;
+            # "KNN and ANN-based ..." or "GPT-4o: ... in piglets" do not.
+            or_(
+                exists().where(Evaluation.paper_id == Paper.id),
+                exists().where(ModelRelease.paper_id == Paper.id),
+            ),
+        )
+        .order_by(Paper.id)
+        .limit(TITLE_CANDIDATE_LIMIT + 1)
+        .all()
+    )
+    # Too many candidates to rule out a second announcement.
+    if len(candidates) > TITLE_CANDIDATE_LIMIT:
+        return None
+    paper_ids = {
+        paper_id
+        for paper_id, title in candidates
+        if title_announces_model(title, model_name)
+    }
+    return paper_ids.pop() if len(paper_ids) == 1 else None
+
+
 def _sql_identity_key(column):
     return func.regexp_replace(func.lower(column), "[^a-z0-9]+", "", "g")
-
-
-def _escape_like(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 def _chunks(values: list, size: int) -> Iterable[list]:
@@ -184,8 +260,9 @@ class ModelReleaseIdentityService:
         Only a slug that spells the model name binds ("claude-opus-5-5" for
         "Claude Opus 5.5 (Max)"); settings variants such as "-xhigh" stay
         unbound, so a leaderboard keeps one row per model. The paper must be the
-        only latest paper titled "<name>", "Introducing <name>" (or another
-        launch verb), or an external "<name>: <subtitle>" release page.
+        only latest paper whose title announces the model (see
+        ``title_announces_model``), including joint launches such as
+        "Introducing Claude Fable 5.2 and Claude Mythos 5.2".
         """
         bound: dict[str, ModelRelease] = {}
         for batch in _chunks(list(dict.fromkeys(models)), 100):
@@ -215,40 +292,11 @@ class ModelReleaseIdentityService:
         bases = {alias: base for alias, base in bases.items() if alias not in taken}
         if not bases:
             return {}
-        names = sorted({base.casefold() for base in bases.values()})
-        headlines = sorted(
-            {f"{verb}{name}" for name in names for verb in _HEADLINE_VERBS}
-        )
-        papers_by_key: dict[str, set[int]] = {}
-        for paper_id, title in (
-            self.db.query(Paper.id, Paper.title)
-            .filter(
-                Paper.is_latest_version,
-                or_(
-                    func.lower(Paper.title).in_(headlines),
-                    (Paper.source == "external")
-                    & or_(
-                        *(
-                            func.lower(Paper.title).like(
-                                f"{_escape_like(headline)}:%", escape="\\"
-                            )
-                            for headline in headlines
-                        )
-                    ),
-                ),
-            )
-            .limit(len(headlines) * 4)
-            .all()
-        ):
-            name = _LEAD_VERB.sub("", title.strip()).split(":", 1)[0]
-            papers_by_key.setdefault(_identity_key(name), set()).add(paper_id)
-
         bound: dict[str, ModelRelease] = {}
         for alias, base in bases.items():
-            paper_ids = papers_by_key.get(_identity_key(base), set())
-            if len(paper_ids) != 1:
+            paper_id = announcing_paper_id(self.db, base)
+            if paper_id is None:
                 continue
-            paper_id = next(iter(paper_ids))
             release = (
                 self.db.query(ModelRelease)
                 .filter(

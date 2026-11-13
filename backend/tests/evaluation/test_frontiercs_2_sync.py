@@ -42,9 +42,8 @@ from backend.services.frontiercs_2_sync_service import (
     fetch_frontiercs_2,
     parse_frontiercs_2,
 )
-from backend.services.leaderboard_model_matching_service import (
-    title_announces_model,
-)
+from backend.services import model_release_identity_service as identity
+from backend.services.model_release_identity_service import title_announces_model
 from backend.tests.evaluation.model_evidence import add_release_evidence
 
 
@@ -473,7 +472,7 @@ def test_ambiguous_titles_are_not_matched(monkeypatch):
     ]
     session.query(Evaluation).delete()
     session.commit()
-    monkeypatch.setattr(matching, "TITLE_CANDIDATE_LIMIT", 1)
+    monkeypatch.setattr(identity, "TITLE_CANDIDATE_LIMIT", 1)
     assert FrontierCS2SyncService(session).sync(source).auto_matched == []
 
 
@@ -489,6 +488,36 @@ def test_ambiguous_titles_are_not_matched(monkeypatch):
         ("GPT-6.1 Terra Is Not Robust", "GPT-6.1 Terra", False),
         ("Introducing GPT-6 Sol and Luna", "GPT-6 Sol", True),
         ("Introducing GPT-6 Sol and Luna", "GPT-6", False),
+        ("Introducing GPT-6 Sol and Luna", "GPT-6 Luna", True),
+        (
+            "Introducing Claude Fable 5.2 and Claude Mythos 5.2",
+            "Claude Fable 5.2",
+            True,
+        ),
+        (
+            "Introducing Claude Fable 5.2 and Claude Mythos 5.2",
+            "Claude Mythos 5.2",
+            True,
+        ),
+        (
+            "Introducing Claude Fable 5.2 and Claude Mythos 5.2",
+            "Claude Fable 5",
+            False,
+        ),
+        ("Introducing Gemini 3.8 Flash and 3.8 Flash Cyber", "Gemini 3.8 Flash", True),
+        (
+            "Introducing Gemini 3.8 Flash and 3.8 Flash Cyber",
+            "Gemini 3.8 Flash Cyber",
+            True,
+        ),
+        ("Introducing Qwen4, Qwen4-VL & Qwen4-Coder", "Qwen4 Coder", True),
+        ("Comparing GPT-6 Sol and Claude Opus 5.5", "Claude Opus 5.5", False),
+        ("Claude Fable 5.2 and Claude Mythos 5.2", "Claude Mythos 5.2", False),
+        ("Inkling-Small", "Inkling Small", True),
+        ("Evaluating GPT-6 Sol and Luna on Long Tasks", "GPT-6 Luna", False),
+        (", and", "GPT-6", False),
+        ("Claude 3.7 Sonnet and Claude Code", "Claude 3.7 Sonnet", True),
+        ("Claude 3.7 Sonnet and Claude Code", "Claude Code", False),
     ],
 )
 def test_title_announces_model(title, name, announces):
