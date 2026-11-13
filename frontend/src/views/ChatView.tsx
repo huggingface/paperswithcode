@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useChatViewportHeight } from "@/hooks/useChatViewportHeight";
 
 import { ChatComposerSurface } from "@/components/chat/ChatComposerSurface";
-import type { ComposerFileUploads } from "@/components/chat/Composer";
+import { UploadAbandoned, type ComposerFileUploads } from "@/components/chat/Composer";
 import { chatApi } from "@/lib/api/chat";
 import { ChatConversation } from "@/components/chat/ChatConversation";
 import {
@@ -125,10 +125,14 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   // A chat created for uploads before its first turn; it belongs to this route.
   const uploadSessionRef = useRef<string | null>(null);
   const creatingUploadSessionRef = useRef<Promise<string> | null>(null);
-  useEffect(() => {
+  // Bumped whenever the composer starts over; late uploads for an older one are dropped.
+  const uploadGenerationRef = useRef(0);
+  const resetUploadSession = useCallback(() => {
+    uploadGenerationRef.current += 1;
     uploadSessionRef.current = null;
     creatingUploadSessionRef.current = null;
-  }, [routeSessionId]);
+  }, []);
+  useEffect(() => { resetUploadSession(); }, [routeSessionId, resetUploadSession]);
   // Queued launch controls belong to the chat the launch returns to.
   const model = useChatModelSelection({
     userId,
@@ -254,21 +258,30 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   // A new chat is created before its first upload; the first turn then targets it.
   const fileUploads = useMemo<ComposerFileUploads>(() => ({
     upload: async (file, pendingSessionId) => {
+      const generation = uploadGenerationRef.current;
       let sessionId = routeSessionIdRef.current ?? pendingSessionId ?? uploadSessionRef.current;
       if (!sessionId) {
         // Parallel picks share one new chat.
-        creatingUploadSessionRef.current ??= chatApi.createSession(
-          selectedModel,
-          reasoningEffort,
-          mode === "paper" ? primaryPaper?.routeId : undefined,
-        ).then((session) => {
-          uploadSessionRef.current = session.id;
-          void refreshSessions();
-          return session.id;
-        }).finally(() => { creatingUploadSessionRef.current = null; });
+        if (!creatingUploadSessionRef.current) {
+          const creating: Promise<string> = chatApi.createSession(
+            selectedModel,
+            reasoningEffort,
+            mode === "paper" ? primaryPaper?.routeId : undefined,
+          ).then((session) => {
+            if (generation === uploadGenerationRef.current) uploadSessionRef.current = session.id;
+            void refreshSessions();
+            return session.id;
+          }).finally(() => {
+            if (creatingUploadSessionRef.current === creating) creatingUploadSessionRef.current = null;
+          });
+          creatingUploadSessionRef.current = creating;
+        }
         sessionId = await creatingUploadSessionRef.current;
       }
-      return { sessionId, file: await chatApi.uploadFile(sessionId, file) };
+      if (generation !== uploadGenerationRef.current) throw new UploadAbandoned();
+      const uploaded = await chatApi.uploadFile(sessionId, file);
+      if (generation !== uploadGenerationRef.current) throw new UploadAbandoned();
+      return { sessionId, file: uploaded };
     },
     remove: (sessionId, fileId) => {
       void chatApi.deleteFile(sessionId, fileId).catch(() => undefined);
@@ -349,6 +362,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   }, [chat.busy, refreshSessions, user]);
 
   const newChat = () => {
+    resetUploadSession();
     if (window.innerWidth <= 900) setSidebarOpen(false);
     loadChat([], null);
     setInitializedRoute(null);

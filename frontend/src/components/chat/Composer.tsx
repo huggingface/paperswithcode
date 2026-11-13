@@ -37,6 +37,9 @@ export interface ComposerFileUploads {
   remove: (sessionId: string, fileId: string) => void;
 }
 
+/** The composer started over while this upload ran; drop it silently. */
+export class UploadAbandoned extends Error {}
+
 export const MAX_CHAT_FILES = 5;
 const ACCEPTED_FILES = ".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.tex,.bib,.csv,.tsv,.json,.py,.ipynb,.yaml,.yml";
 
@@ -89,6 +92,7 @@ const Composer: React.FC<ComposerProps> = ({
           fileSessionId: uploaded.sessionId,
         });
       } catch (error) {
+        if (error instanceof UploadAbandoned) return;
         setFileError(error instanceof ApiError ? error.displayMessage : `${file.name} could not be uploaded.`);
       } finally {
         setUploading((count) => count - 1);

@@ -391,4 +391,43 @@ describe("uploads before the first turn", () => {
     expect(mocks.stream.mock.calls[0][0]).toMatchObject({ session_id: "fresh" });
     await waitFor(() => expect(screen.getByTestId("route")).toHaveTextContent("/chat/fresh"));
   });
+
+  it("forgets the created chat when the composer starts a new chat", async () => {
+    enableUploads();
+    vi.spyOn(chatApi, "createSession").mockResolvedValue({ ...detail("fresh"), messages: undefined } as never);
+    vi.spyOn(chatApi, "uploadFile").mockRejectedValue(new Error("quota"));
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "other", request_id: "r1" };
+      await new Promise(() => undefined);
+    });
+    render(element("/chat"));
+    fireEvent.click(await screen.findByText("Attach test file"));
+    await waitFor(() => expect(chatApi.uploadFile).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getAllByText("New chat")[0]);
+    fireEvent.click(screen.getByText("Send test prompt"));
+
+    await waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
+    expect(mocks.stream.mock.calls[0][0]).toMatchObject({ session_id: null });
+  });
+
+  it("drops an upload whose chat was created after the composer started over", async () => {
+    enableUploads();
+    const created = deferred<never>();
+    vi.spyOn(chatApi, "createSession").mockReturnValue(created.promise);
+    const upload = vi.spyOn(chatApi, "uploadFile").mockResolvedValue(file);
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "other", request_id: "r1" };
+      await new Promise(() => undefined);
+    });
+    render(element("/chat"));
+    fireEvent.click(await screen.findByText("Attach test file"));
+    fireEvent.click(screen.getAllByText("New chat")[0]);
+    await act(async () => created.resolve({ ...detail("late"), messages: undefined } as never));
+    fireEvent.click(screen.getByText("Send test prompt"));
+
+    await waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
+    expect(upload).not.toHaveBeenCalled();
+    expect(mocks.upload).toBeNull();
+    expect(mocks.stream.mock.calls[0][0]).toMatchObject({ session_id: null });
+  });
 });
