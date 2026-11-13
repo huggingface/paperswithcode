@@ -37,6 +37,10 @@ from backend.services.chat_provider_gateway.lifecycle import (
     output_tokens_allowed,
     qualification_scope_claim,
 )
+from backend.services.chat_provider_gateway.user_files import (
+    AttachedFiles,
+    attach_user_files,
+)
 
 logger = logging.getLogger("backend.chat_gateway_app")
 
@@ -234,6 +238,11 @@ class OpenAIResponsesProtocol:
         except HTTPException:
             self.observe_rejection("request_contract")
             raise
+        files = (
+            attach_user_files(payload, db, row.chat_session_id)
+            if settings.chat_file_uploads_enabled
+            else AttachedFiles()
+        )
         reasoning_effort = payload["reasoning"]["effort"]
         raw = json.dumps(payload, separators=(",", ":")).encode()
         if len(raw) > MAX_OPENAI_REQUEST_BYTES:
@@ -256,6 +265,7 @@ class OpenAIResponsesProtocol:
                 public_model_id=row.model,
                 reasoning_effort=reasoning_effort,
                 request_bytes=len(raw),
+                file_input_tokens=files.input_tokens,
                 maximum_output_tokens=maximum_tokens,
                 qualification_scope_id=qualification_scope_claim(row, db, settings),
             ),
@@ -266,6 +276,7 @@ class OpenAIResponsesProtocol:
                 "reasoning_effort": reasoning_effort,
                 "routing_policy": "direct",
                 "service_tier": "default",
+                **({"user_files": files.trace} if files.trace else {}),
             },
         )
 

@@ -81,6 +81,7 @@ class OpenAIResponsesLedger:
     request_bytes: int
     maximum_output_tokens: int
     qualification_scope_id: uuid.UUID | None
+    file_input_tokens: int = 0
     name: str = "openai"
     metered: bool = True
     call_id: uuid.UUID | None = None
@@ -104,6 +105,7 @@ class OpenAIResponsesLedger:
                 bounds=OpenAIRequestBounds(
                     request_bytes=self.request_bytes,
                     maximum_output_tokens=self.maximum_output_tokens,
+                    file_input_tokens=self.file_input_tokens,
                 ),
                 qualification_scope_id=self.qualification_scope_id,
             )

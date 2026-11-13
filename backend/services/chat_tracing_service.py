@@ -998,6 +998,7 @@ def start_provider_request_trace(
     offered_tool_names: list[str] | None = None,
     offered_tool_digest: str | None = None,
     mcp_provider_states: dict[str, str] | None = None,
+    user_files: list[dict[str, object]] | None = None,
 ) -> ProviderRequestTrace | NullProviderRequestTrace:
     if not trace_id:
         return NullProviderRequestTrace()
@@ -1030,6 +1031,9 @@ def start_provider_request_trace(
             metadata["offered_tool_digest"] = offered_tool_digest
         if mcp_provider_states is not None:
             metadata["mcp_provider_states"] = mcp_provider_states
+        if user_files:
+            # Metadata only: audits read file contents from our store by id.
+            metadata["user_files"] = user_files
         observation = client.start_observation(
             trace_context={"trace_id": trace_id},
             name="provider-request",

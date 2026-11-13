@@ -84,6 +84,9 @@ class OpenAIUsageStatus:
 class OpenAIRequestBounds:
     request_bytes: int
     maximum_output_tokens: int
+    # Upload-time estimate for files attached by OpenAI file_id; their bytes
+    # are not in the request body, so request_bytes cannot bound them.
+    file_input_tokens: int = 0
 
 
 def _rate(settings: Settings, name: str) -> int:
@@ -117,13 +120,17 @@ def safe_maximum_microusd(
         raise OpenAIPricingUnavailable("Direct OpenAI pricing is stale")
     if not 1 <= bounds.request_bytes <= MAX_REQUEST_BYTES:
         raise OpenAIPricingUnavailable("Direct OpenAI request size is unbounded")
+    if bounds.file_input_tokens < 0:
+        raise OpenAIPricingUnavailable("Direct OpenAI file input is unbounded")
     if not 1 <= bounds.maximum_output_tokens <= 128_000:
         raise OpenAIPricingUnavailable("Direct OpenAI output is unbounded")
     input_rate = max(
         _rate(settings, "chat_openai_input_microusd_per_million_tokens"),
         _rate(settings, "chat_openai_cache_write_microusd_per_million_tokens"),
     )
-    maximum_input_tokens = min(bounds.request_bytes, MAX_BILLABLE_INPUT_TOKENS)
+    maximum_input_tokens = min(
+        bounds.request_bytes + bounds.file_input_tokens, MAX_BILLABLE_INPUT_TOKENS
+    )
     input_multiplier, output_multiplier = long_context_rates(maximum_input_tokens)
     return _priced_microusd(
         maximum_input_tokens, input_rate * input_multiplier
