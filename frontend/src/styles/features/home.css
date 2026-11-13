@@ -19,6 +19,8 @@
 .ask-home-row > .chat-dictation-pill { flex: none; margin: 0 2px 2px 0; }
 .ask-home-row > .chat-dictation-mic + .chat-send,
 .ask-home-row > .chat-dictation-pill + .chat-send { margin-left: -4px; }
+/* The 34px mic centers on the 38px send button in this bottom-aligned row. */
+.ask-home-row > .chat-dictation-mic { margin-bottom: 4px; }
 .ask-home-textarea-wrap { position: relative; flex: 1; min-width: 0; }
 .ask-home textarea {
   position: relative;
