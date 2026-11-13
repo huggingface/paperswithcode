@@ -286,7 +286,11 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       }
       if (generation !== uploadGenerationRef.current) throw new UploadAbandoned();
       const uploaded = await chatApi.uploadFile(sessionId, file);
-      if (generation !== uploadGenerationRef.current) throw new UploadAbandoned();
+      if (generation !== uploadGenerationRef.current) {
+        // No composer will show this file, so nothing could remove it later.
+        void chatApi.deleteFile(sessionId, uploaded.id).catch(() => undefined);
+        throw new UploadAbandoned();
+      }
       return { sessionId, file: uploaded };
     },
     remove: (sessionId, fileId) => {

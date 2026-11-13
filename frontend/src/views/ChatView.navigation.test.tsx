@@ -452,4 +452,20 @@ describe("uploads before the first turn", () => {
 
     expect(screen.getByTestId("draft-files")).toBeEmptyDOMElement();
   });
+
+  it("deletes an upload that finished after the composer started over", async () => {
+    enableUploads();
+    const uploading = deferred<typeof file>();
+    vi.spyOn(chatApi, "createSession").mockResolvedValue({ ...detail("fresh"), messages: undefined } as never);
+    vi.spyOn(chatApi, "uploadFile").mockReturnValue(uploading.promise);
+    const remove = vi.spyOn(chatApi, "deleteFile").mockResolvedValue(undefined);
+    render(element("/chat"));
+    fireEvent.click(await screen.findByText("Attach test file"));
+    await waitFor(() => expect(chatApi.uploadFile).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getAllByText("New chat")[0]);
+    await act(async () => uploading.resolve(file));
+
+    expect(remove).toHaveBeenCalledWith("fresh", "file-1");
+    expect(mocks.upload).toBeNull();
+  });
 });
