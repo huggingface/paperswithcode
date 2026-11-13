@@ -117,4 +117,24 @@ describe("SearchOverlay paper handoff", () => {
     await user.click(screen.getByText("Noam Shazeer"));
     expect(screen.getByTestId("location")).toHaveTextContent("/authors/420");
   });
+
+  it("lets keyboard users tab to a result and open it with Enter", async () => {
+    searchPapers.mockResolvedValue({
+      results: [{ id: 1, arxiv_id: "1706.03762", title: "Attention Is All You Need", authors: [] }],
+      next_page: null,
+      previous_page: null,
+    });
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderOverlay(onClose);
+    await user.type(screen.getByPlaceholderText(/Search papers/), "attention");
+    const result = await screen.findByRole("link", { name: /Attention Is All You Need/ });
+
+    await user.tab(); // Ask row
+    await user.tab();
+    expect(result).toHaveFocus();
+    await user.keyboard("{Enter}");
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("location")).toHaveTextContent("/paper/1706.03762");
+  });
 });

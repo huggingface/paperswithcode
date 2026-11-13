@@ -55,8 +55,16 @@
   cursor: pointer;
   gap: 4px;
 }
+.search-result,
+.search-result-tag { color: inherit; text-decoration: none; }
 .search-result:hover,
 .search-result.focused { background: var(--bg-subtle); }
+.search-result:focus-visible,
+.search-result-tag:focus-visible {
+  background: var(--bg-subtle);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
 .search-result-title {
   font-family: var(--serif);
   font-size: 14.5px;
