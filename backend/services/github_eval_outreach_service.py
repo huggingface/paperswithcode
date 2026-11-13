@@ -78,6 +78,33 @@ def comments(api, repository: str, number: int):
         page += 1
 
 
+def is_release_issue(issue) -> bool:
+    return bool(RELEASE_ISSUE_TITLE.fullmatch(issue.get("title") or ""))
+
+
+def release_target(releases):
+    """The newest release issue that accepts comments, preferring open threads."""
+    unlocked = [issue for issue in releases if not issue.get("locked")]
+    return min(
+        unlocked,
+        key=lambda issue: (issue.get("state") != "open", -issue["number"]),
+        default=None,
+    )
+
+
+def blocked_by_open_issue(authored, release) -> bool:
+    """Any other open thread from this account means a conversation is active.
+
+    Only the release thread being commented on is exempt; without one, any open
+    authored issue blocks, as for standalone verify-evals issues.
+    """
+    return any(
+        issue.get("state") == "open"
+        and not (release and issue["number"] == release["number"])
+        for issue in authored
+    )
+
+
 # GitHub allows 30 authenticated search requests per minute; pacing every
 # search call at this interval keeps a repository pass under that cap.
 SEARCH_PACE_SECONDS = 2
@@ -296,27 +323,20 @@ class OutreachRunner:
             return
         # A Hugging Face release request from this account takes priority: the
         # evaluation message joins that thread instead of opening a second issue.
-        release = next(
-            (
-                issue
-                for issue in issues(self.api, repository, creator=self.login)
-                if RELEASE_ISSUE_TITLE.fullmatch(issue.get("title") or "")
-            ),
-            None,
-        )
-        if not release and next(
-            issues(self.api, repository, state="open", creator=self.login), None
-        ):
+        authored = list(issues(self.api, repository, creator=self.login))
+        releases = [issue for issue in authored if is_release_issue(issue)]
+        release = release_target(releases)
+        if blocked_by_open_issue(authored, release):
             self.record("open_issue", repository)
             return
         bodies = [
             issue.get("body") or ""
             for issue in site_issues(self.api, repository, sleep=self.sleep)
         ]
-        if release:
+        for issue in releases:
             bodies += [
                 comment.get("body") or ""
-                for comment in comments(self.api, repository, release["number"])
+                for comment in comments(self.api, repository, issue["number"])
                 if comment.get("user", {}).get("login", "").lower()
                 == self.login.lower()
             ]
@@ -358,8 +378,8 @@ class OutreachRunner:
             )
             return
         # Recheck the author gate immediately before the write, after potentially slow drafts.
-        if not release and next(
-            issues(self.api, repository, state="open", creator=self.login), None
+        if blocked_by_open_issue(
+            issues(self.api, repository, state="open", creator=self.login), release
         ):
             self.record("open_issue", repository)
             return

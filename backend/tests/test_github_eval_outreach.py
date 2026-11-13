@@ -734,3 +734,59 @@ def test_release_comment_drops_standalone_introduction():
         f"Separately, I've also made the [paper]({url}) and [1 paper-native evaluation]({url}#results) available on Papers with Code.",
     ]
     assert "here from the open-source team" not in comment
+
+
+def test_locked_release_issue_falls_back_to_standalone_issue(state):
+    github = Github()
+    github.rows = [{**release_issue("closed"), "locked": True}]
+    assert runner(state, github).run()["counts"]["verified"] == 1
+    assert [call[0] for call in github.posts] == ["repos/lab/code/issues"]
+    assert not github.comments
+
+
+def test_other_open_outreach_issue_blocks_closed_release_comment(state):
+    github = Github()
+    github.rows = [
+        release_issue("closed"),
+        {
+            **release_issue(),
+            "number": 2,
+            "title": ISSUE_TITLE,
+            "html_url": "https://github.com/lab/code/issues/2",
+        },
+    ]
+    assert runner(state, github).run()["counts"]["open_issue"] == 1
+    assert not github.posts
+
+
+def test_open_release_issue_is_preferred_over_closed_one(state):
+    github = Github()
+    github.rows = [
+        release_issue("closed"),
+        {
+            **release_issue(),
+            "number": 2,
+            "html_url": "https://github.com/lab/code/issues/2",
+        },
+    ]
+    assert runner(state, github).run()["counts"]["commented_on_release_issue"] == 1
+    assert [call[0] for call in github.posts] == ["repos/lab/code/issues/2/comments"]
+
+
+def test_comment_on_any_release_thread_covers_paper_after_state_loss(tmp_path):
+    github = Github()
+    github.rows = [release_issue("closed")]
+    first = OutreachState(tmp_path / "first.sqlite3")
+    runner(first, github).run()
+    first.close()
+    github.rows.append(
+        {
+            **release_issue("closed"),
+            "number": 2,
+            "html_url": "https://github.com/lab/code/issues/2",
+        }
+    )
+    fresh = OutreachState(tmp_path / "fresh.sqlite3")
+    assert runner(fresh, github).run()["counts"]["already_contacted"] == 1
+    fresh.close()
+    assert len(github.posts) == 1
