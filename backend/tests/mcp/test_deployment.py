@@ -265,6 +265,8 @@ def test_launcher_runs_installed_module_with_virtualenv_python(tmp_path, monkeyp
         "8003",
         "--no-proxy-headers",
         "--no-access-log",
+        "--timeout-graceful-shutdown",
+        "5",
     ]
 
 
