@@ -8,6 +8,7 @@ as the chat session; deleting the file or the chat deletes both.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import logging
 import re
@@ -15,6 +16,7 @@ import tempfile
 import unicodedata
 import uuid
 from abc import ABC, abstractmethod
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -116,12 +118,29 @@ class BucketChatFileStorage(ChatFileStorage):
             pass
 
 
+@functools.lru_cache(maxsize=4)
+def _bucket_storage(bucket_id: str, token: str | None) -> BucketChatFileStorage:
+    # One client per process keeps its connections and Xet session warm.
+    return BucketChatFileStorage(bucket_id, token)
+
+
 def chat_file_storage_from_settings(settings: Settings) -> ChatFileStorage:
     if settings.chat_file_storage_backend == "hf_bucket":
-        return BucketChatFileStorage(
+        return _bucket_storage(
             settings.chat_file_hf_bucket_id, settings.hf_token or None
         )
     return LocalChatFileStorage(Path(settings.chat_file_local_dir))
+
+
+def warm_chat_file_storage(settings: Settings) -> None:
+    """Open the bucket client at startup so the first upload is not the slow one."""
+    if settings.chat_file_storage_backend != "hf_bucket":
+        return
+    storage = chat_file_storage_from_settings(settings)
+    try:
+        storage.filesystem.info(storage._path("warmup"))
+    except FileNotFoundError:
+        pass
 
 
 class OpenAIFilesClient:
@@ -423,8 +442,17 @@ class ChatFileService:
         storage_key = row.storage_key
         openai_file_id = None
         try:
-            self.storage.write(storage_key, data)
-            openai_file_id = self.openai_files.upload(name, data, kind.media_type)
+            # The two copies are independent, so write them at the same time;
+            # leaving the block waits for both before either outcome is used.
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                stored = pool.submit(self.storage.write, storage_key, data)
+                uploaded = pool.submit(
+                    self.openai_files.upload, name, data, kind.media_type
+                )
+            if uploaded.exception() is None:
+                openai_file_id = uploaded.result()
+            stored.result()
+            uploaded.result()
             # Record the OpenAI id at once: it is the only handle that can
             # delete that copy. If the chat was deleted meanwhile, this fails.
             row.openai_file_id = openai_file_id

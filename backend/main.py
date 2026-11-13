@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import threading
 import time
 from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
@@ -137,6 +138,15 @@ async def lifespan(app: FastAPI):
             )
     if settings.chat_enabled and not settings.chat_require_auth:
         raise RuntimeError("PWC_CHAT_REQUIRE_AUTH must remain enabled")
+    if settings.is_deployed and settings.chat_file_uploads_enabled:
+        from backend.services.chat_file_service import warm_chat_file_storage
+
+        threading.Thread(
+            target=warm_chat_file_storage,
+            args=(settings,),
+            name="chat-file-storage-warmup",
+            daemon=True,
+        ).start()
 
     maintenance_task = None
     pool_startup_task = None
