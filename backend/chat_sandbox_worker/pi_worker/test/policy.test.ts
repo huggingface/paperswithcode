@@ -139,6 +139,23 @@ test("activates paper limits only from a successful pwc-paper receipt", () => {
   assert.equal(value.paperActivated, true);
 });
 
+test("keeps pwc-paper commands under the paper budget after research spends the default", () => {
+  const value = new PolicyController({
+    maximumCalls: 3, maximumRounds: 9, maximumDirectSearches: 1, maximumWebSearches: 1,
+    maximumResultBytes: 1024, maximumTurnOutputBytes: 4096, bashTimeoutSeconds: 5,
+    paperMaximumCalls: 30, paperMaximumRounds: 12, paperMaximumDirectSearches: 8, paperTimeoutSeconds: 600,
+  });
+  value.reset(false);
+  for (const id of ["one", "two", "three"]) {
+    assert.equal(value.authorize(id, "bash", { command: "echo research" }), undefined);
+    value.finish(id, "ok");
+  }
+
+  assert.equal(value.authorize("create", "bash", { command: 'pwc-paper create --title "Survey"' }), undefined);
+  value.finish("create", "receipt withheld");
+  assert.notEqual(value.authorize("more", "bash", { command: "echo research" }), undefined);
+});
+
 test("activates lazy paper limits from trusted draft and repair receipts", () => {
   for (const operation of ["draft", "repair"] as const) {
     const value = new PolicyController({

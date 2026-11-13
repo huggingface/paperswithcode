@@ -35,9 +35,7 @@ from latex_compiler_space.app import (
     network_isolation_command,
 )
 
-TEST_QUALIFIED_IMAGE = (
-    "registry.hf.space/pwc-test-latex-compiler-staging@sha256:" + "a" * 64
-)
+TEST_QUALIFIED_IMAGE = "im-TestLatexCompilerImage0"
 
 
 def _keys() -> tuple[Ed25519PrivateKey, str]:
