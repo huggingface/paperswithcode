@@ -93,14 +93,14 @@ def release_target(releases):
 
 
 def blocked_by_open_issue(authored, release) -> bool:
-    """Any other open thread from this account means a conversation is active.
+    """Any other open conversation from this account blocks outreach.
 
-    Only the release thread being commented on is exempt; without one, any open
-    authored issue blocks, as for standalone verify-evals issues.
+    When the message joins a release thread, other release threads are part of
+    the same request and do not block; without one, any open authored issue
+    blocks, as for standalone verify-evals issues.
     """
     return any(
-        issue.get("state") == "open"
-        and not (release and issue["number"] == release["number"])
+        issue.get("state") == "open" and not (release and is_release_issue(issue))
         for issue in authored
     )
 

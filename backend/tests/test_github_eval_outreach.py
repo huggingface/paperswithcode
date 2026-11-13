@@ -790,3 +790,17 @@ def test_comment_on_any_release_thread_covers_paper_after_state_loss(tmp_path):
     assert runner(fresh, github).run()["counts"]["already_contacted"] == 1
     fresh.close()
     assert len(github.posts) == 1
+
+
+def test_sibling_open_release_issue_does_not_block_comment(state):
+    github = Github()
+    github.rows = [
+        release_issue(),
+        {
+            **release_issue(),
+            "number": 2,
+            "html_url": "https://github.com/lab/code/issues/2",
+        },
+    ]
+    assert runner(state, github).run()["counts"]["commented_on_release_issue"] == 1
+    assert [call[0] for call in github.posts] == ["repos/lab/code/issues/2/comments"]
