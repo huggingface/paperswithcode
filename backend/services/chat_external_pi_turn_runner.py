@@ -629,6 +629,11 @@ class ExternalPiChatTurnRunner:
             "reader_mode": self.admission.reader_mode,
             "poster_mode": self.admission.poster_mode,
             "paper_artifacts_enabled": self.admission.paper_artifacts_enabled,
+            # read_user_file only exists where the gateway can resolve files.
+            "user_files_enabled": (
+                self.settings.chat_file_uploads_enabled
+                and self.admission.model_route == self.settings.chat_openai_luna_route
+            ),
             "reasoning_effort": self.admission.reasoning_effort,
             "fetchable_urls": list(self.admission.fetchable_urls),
             "hf_username": self.hf_username,

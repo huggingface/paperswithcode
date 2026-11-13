@@ -37,5 +37,6 @@ export function draftRequestFields(context: ChatRequestContext, draft: ChatDraft
     ...primaryPaperField(context),
     ...(viewerContext ? { viewer_context: viewerContext } : {}),
     ...(draft.paperSelection ? { paper_selection: toPaperSelectionWire(draft.paperSelection) } : {}),
+    ...(draft.files?.length ? { file_ids: draft.files.map((file) => file.id) } : {}),
   };
 }

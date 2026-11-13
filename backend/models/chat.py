@@ -163,6 +163,7 @@ class ChatRequest(BaseModel):
     ) = None
     viewer_context: ViewerContextRequest | None = None
     paper_selection: PaperSelectionRequest | None = None
+    file_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
     def validate_message(self) -> "ChatRequest":
@@ -828,6 +829,7 @@ class ChatMessageResponse(BaseModel):
     paper_mentions: list[PaperMentionSnapshot] = Field(default_factory=list)
     paper_selection: PaperSelectionSnapshot | None = None
     viewer_context: ViewerContextRequest | None = None
+    attached_files: list["ChatUploadedFileDescriptor"] = Field(default_factory=list)
     revision: int
     status: str
     citations: list[CitationSnapshot] = Field(default_factory=list)
@@ -857,6 +859,7 @@ class PublicChatMessage(BaseModel):
     content: str = Field(max_length=256_000)
     paper_mentions: list[PaperMentionSnapshot] = Field(default_factory=list)
     paper_selection: PaperSelectionSnapshot | None = None
+    attached_files: list["PublicChatFile"] = Field(default_factory=list, max_length=5)
     display_blocks: list[DisplayBlock] = Field(default_factory=list)
     citations: list[CitationSnapshot] = Field(default_factory=list, max_length=20)
     model: str | None = Field(default=None, max_length=255)
@@ -907,6 +910,17 @@ class ChatUploadedFileDescriptor(BaseModel):
     created_at: datetime
 
 
+class PublicChatFile(BaseModel):
+    """A shared chat shows an attachment's name and size, never its contents."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    filename: str = Field(max_length=255)
+    media_type: str = Field(max_length=100)
+    size_bytes: int
+    page_count: int | None = None
+
+
 class ChatUploadedFileList(BaseModel):
     items: list[ChatUploadedFileDescriptor]
 
@@ -923,6 +937,13 @@ class ArchiveOldChatsResponse(BaseModel):
 class CreateSessionRequest(BaseModel):
     selected_model: str | None = None
     reasoning_effort: ReasoningEffort = "medium"
+    # Lets the reader create its chat before the first turn, to attach files.
+    primary_paper_route_id: (
+        Annotated[
+            str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
+        ]
+        | None
+    ) = None
 
 
 class UpdateSessionRequest(BaseModel):
@@ -955,6 +976,7 @@ class ChatAvailabilityResponse(BaseModel):
     paper_reader_selection_enabled: bool = False
     paper_reader_citations_enabled: bool = False
     paper_artifacts_enabled: bool = False
+    file_uploads_enabled: bool = False
 
 
 class ChatAutocompleteVocabularyResponse(BaseModel):
@@ -1350,3 +1372,7 @@ def sse_event(event_type: str, **payload: object) -> bytes:
         )
         + "\n\n"
     ).encode()
+
+
+ChatMessageResponse.model_rebuild()
+PublicChatMessage.model_rebuild()

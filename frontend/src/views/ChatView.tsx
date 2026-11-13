@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { useChatViewportHeight } from "@/hooks/useChatViewportHeight";
 
 import { ChatComposerSurface } from "@/components/chat/ChatComposerSurface";
+import { UploadAbandoned, type ComposerFileUploads } from "@/components/chat/Composer";
+import { chatApi } from "@/lib/api/chat";
 import { ChatConversation } from "@/components/chat/ChatConversation";
 import {
   ChatCapacityDialog,
@@ -30,7 +32,7 @@ import { useInferenceAuthorization } from "@/components/chat/useInferenceAuthori
 import { PanelIcon, Spinner } from "@/components/chat/icons";
 import { Icon } from "@/components/Icon";
 import { useChat } from "@/hooks/useChat";
-import { DEFAULT_REASONING_EFFORT, isChatLive, type ChatDraft, type PaperSelectionDraft } from "@/lib/chat";
+import { DEFAULT_REASONING_EFFORT, isChatLive, withoutSelection, type ChatDraft, type PaperSelectionDraft } from "@/lib/chat";
 import {
   clearQueuedChatLaunch,
   readQueuedChatLaunch,
@@ -65,7 +67,7 @@ const withReaderSelection = (
   if (!readerOwnsSelection) return draft;
   return paperSelection
     ? { ...draft, paperSelection }
-    : { text: draft.text, paperMentions: draft.paperMentions };
+    : withoutSelection(draft);
 };
 
 export interface ChatExperienceProps {
@@ -120,6 +122,23 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   const [queuedLaunch] = useState(readQueuedChatLaunch);
   const routeSessionIdRef = useRef(routeSessionId);
   routeSessionIdRef.current = routeSessionId;
+  // A chat created for uploads before its first turn; it belongs to this route.
+  const uploadSessionRef = useRef<string | null>(null);
+  const creatingUploadSessionRef = useRef<Promise<string> | null>(null);
+  // Bumped whenever the composer starts over; late uploads for an older one are dropped.
+  const uploadGenerationRef = useRef(0);
+  const resetUploadSession = useCallback(() => {
+    uploadGenerationRef.current += 1;
+    uploadSessionRef.current = null;
+    creatingUploadSessionRef.current = null;
+  }, []);
+  // Reset during render, not in an effect, so an upload resolving right after
+  // navigation already sees the new generation.
+  const uploadRouteRef = useRef(routeSessionId);
+  if (uploadRouteRef.current !== routeSessionId) {
+    uploadRouteRef.current = routeSessionId;
+    resetUploadSession();
+  }
   // Queued launch controls belong to the chat the launch returns to.
   const model = useChatModelSelection({
     userId,
@@ -170,7 +189,11 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
         webSearchEnabled: configuration?.webSearchEnabled ?? webSearchEnabled,
         reasoningEffort: configuration?.reasoningEffort ?? reasoningEffort,
       });
-      if ((routeSessionIdRef.current ?? null) === originSessionId && id !== originSessionId) {
+      const route = routeSessionIdRef.current ?? null;
+      // A turn on the chat created for uploads still starts from this route.
+      const fromUploadSession = route === null && uploadSessionRef.current !== null
+        && (id === uploadSessionRef.current || originSessionId === uploadSessionRef.current);
+      if ((route === originSessionId || fromUploadSession) && id !== route) {
         if (mode === "paper") onReaderSessionId?.(id);
         else navigate(`/chat/${id}`, { replace: true });
       }
@@ -220,7 +243,11 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
 
   const readerOwnsSelection = Boolean(onPaperSelectionChange);
   const send = useCallback(async (nextDraft: ChatDraft) => {
-    const payload = withReaderSelection(nextDraft, readerOwnsSelection, paperSelection);
+    const selected = withReaderSelection(nextDraft, readerOwnsSelection, paperSelection);
+    // Send into the chat created for an upload, even if that upload failed or was removed.
+    const payload = !routeSessionIdRef.current && !selected.fileSessionId && uploadSessionRef.current
+      ? { ...selected, fileSessionId: uploadSessionRef.current }
+      : selected;
     const authorized = authorizeSend(payload, Boolean(user));
     if (authorized !== true && !(await authorized)) return;
     stopChatAutoSend();
@@ -233,6 +260,53 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     onPaperSelectionChange?.(undefined);
     if (mode === "paper") onReaderSubmit?.();
   }, [authorizeSend, mode, onPaperSelectionChange, onReaderSubmit, paperSelection, readerOwnsSelection, restorePrompt, sendChat, user]);
+
+  // A new chat is created before its first upload; the first turn then targets it.
+  const uploadToChat = useCallback(async (file: File, pendingSessionId?: string) => {
+    const generation = uploadGenerationRef.current;
+    let sessionId = routeSessionIdRef.current ?? pendingSessionId ?? uploadSessionRef.current;
+    if (!sessionId) {
+      // Parallel picks share one new chat.
+      if (!creatingUploadSessionRef.current) {
+        const creating: Promise<string> = chatApi.createSession(
+          selectedModel,
+          reasoningEffort,
+          mode === "paper" ? primaryPaper?.routeId : undefined,
+        ).then((session) => {
+          if (generation === uploadGenerationRef.current) uploadSessionRef.current = session.id;
+          void refreshSessions();
+          return session.id;
+        }).finally(() => {
+          if (creatingUploadSessionRef.current === creating) creatingUploadSessionRef.current = null;
+        });
+        creatingUploadSessionRef.current = creating;
+      }
+      sessionId = await creatingUploadSessionRef.current;
+    }
+    if (generation !== uploadGenerationRef.current) throw new UploadAbandoned();
+    const uploaded = await chatApi.uploadFile(sessionId, file);
+    if (generation !== uploadGenerationRef.current) {
+      // No composer will show this file, so nothing could remove it later.
+      void chatApi.deleteFile(sessionId, uploaded.id).catch(() => undefined);
+      throw new UploadAbandoned();
+    }
+    return { sessionId, file: uploaded };
+  }, [mode, primaryPaper?.routeId, reasoningEffort, refreshSessions, selectedModel]);
+  // Suggestions send outside the composer, so they wait for uploads too.
+  const [uploadsInFlight, setUploadsInFlight] = useState(0);
+  const fileUploads = useMemo<ComposerFileUploads>(() => ({
+    upload: async (file, pendingSessionId) => {
+      setUploadsInFlight((count) => count + 1);
+      try {
+        return await uploadToChat(file, pendingSessionId);
+      } finally {
+        setUploadsInFlight((count) => count - 1);
+      }
+    },
+    remove: (sessionId, fileId) => {
+      void chatApi.deleteFile(sessionId, fileId).catch(() => undefined);
+    },
+  }), [uploadToChat]);
 
   const selectedTurn = chat.selectedBusy;
   const { load: loadChat, activeConfiguration } = chat;
@@ -308,6 +382,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   }, [chat.busy, refreshSessions, user]);
 
   const newChat = () => {
+    resetUploadSession();
     if (window.innerWidth <= 900) setSidebarOpen(false);
     loadChat([], null);
     setInitializedRoute(null);
@@ -351,14 +426,19 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     || publicShare.pending
   ));
   const routeSessionError = !routeReady && !isRouteSessionLoading && routeQuery.error?.message;
+  // Uploads belong to one chat; a draft carried to another chat leaves them behind.
+  const composerDraft = !draft.fileSessionId
+    || draft.fileSessionId === (routeSessionId ?? uploadSessionRef.current)
+    ? draft
+    : { ...draft, files: undefined, fileSessionId: undefined };
   const composerProps = {
     onSend: send,
     busy: selectedTurn,
     onStop: chat.stop,
-    draft: withReaderSelection(draft, readerOwnsSelection, paperSelection),
+    draft: withReaderSelection(composerDraft, readerOwnsSelection, paperSelection),
     onDraftChange: (next: ChatDraft) => {
       if (onPaperSelectionChange) {
-        setDraft({ text: next.text, paperMentions: next.paperMentions });
+        setDraft(withoutSelection(next));
         if (next.paperSelection !== paperSelection) onPaperSelectionChange(next.paperSelection);
       } else {
         setDraft(next);
@@ -369,12 +449,14 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     paperMentionsEnabled: Boolean(availability?.paper_mentions_enabled),
     paperSelectionEnabled: availability?.paper_reader_selection_enabled === true,
     paperArtifactsEnabled: mode === "general" && availability?.paper_artifacts_enabled === true,
+    fileUploads: availability?.file_uploads_enabled === true && user ? fileUploads : undefined,
   };
   const surfaceProps = {
     composerProps,
     provider: model.provider,
     sponsored: model.sponsored,
     paused: chatPaused,
+    uploading: uploadsInFlight > 0,
     error: chat.sessionError,
   };
 

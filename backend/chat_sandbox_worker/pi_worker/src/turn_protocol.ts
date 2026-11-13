@@ -179,6 +179,7 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
   const optional = new Set([
     "turn_id", "assignment_token", "worker_generation", "reader_mode", "poster_mode",
     "paper_artifacts_enabled", "paper_descriptor", "provider_protocol", "agent_session_id",
+    "user_files_enabled",
   ]);
   if (Object.keys(frame).some((key) => !required.has(key) && !optional.has(key))) {
     throw new TurnProtocolError("Invalid Pi run frame keys");
@@ -203,6 +204,7 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
     (frame.reader_mode !== undefined && typeof frame.reader_mode !== "boolean") ||
     (frame.poster_mode !== undefined && typeof frame.poster_mode !== "boolean") ||
     (frame.paper_artifacts_enabled !== undefined && typeof frame.paper_artifacts_enabled !== "boolean") ||
+    (frame.user_files_enabled !== undefined && typeof frame.user_files_enabled !== "boolean") ||
     (frame.paper_descriptor !== undefined && (!frame.paper_descriptor || typeof frame.paper_descriptor !== "object" || Array.isArray(frame.paper_descriptor))) ||
     !new Set(["low", "medium", "high", "max"]).has(String(frame.reasoning_effort)) ||
     typeof frame.hf_username !== "string" || !Array.isArray(frame.fetchable_urls) ||
@@ -218,5 +220,6 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
     reader_mode: frame.reader_mode === true,
     poster_mode: frame.poster_mode === true,
     paper_artifacts_enabled: frame.paper_artifacts_enabled === true,
+    user_files_enabled: frame.user_files_enabled === true,
   } as unknown as RunTurn | ExternalRunTurn;
 }

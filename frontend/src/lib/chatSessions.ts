@@ -183,6 +183,7 @@ export function toUiMessages(detail: ChatSessionDetail): ChatMessage[] {
         key: mention.occurrence_id,
       })),
       paperSelection: toPaperSelection(message.paper_selection),
+      attachedFiles: message.attached_files?.length ? message.attached_files : undefined,
       revision: message.revision,
       status: message.status,
       error: message.status === "complete" ? undefined : message.error_code || message.status,
@@ -212,6 +213,9 @@ export function publicShareToUiMessages(detail: ChatShareDetail): ChatMessage[] 
           key: mention.occurrence_id,
         })),
         paperSelection: toPaperSelection(message.paper_selection),
+        attachedFiles: message.attached_files?.length
+          ? message.attached_files.map((file, index) => ({ ...file, id: `${message.id}-file-${index}` }))
+          : undefined,
       }
     : {
         id: message.id,

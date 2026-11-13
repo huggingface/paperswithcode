@@ -383,7 +383,7 @@ def _summary(session: ChatSession) -> ChatSessionSummary:
     )
 
 
-def _message(row: ChatMessageRecord) -> ChatMessageResponse:
+def _message(row: ChatMessageRecord, files: list | None = None) -> ChatMessageResponse:
     return ChatMessageResponse(
         id=row.id,
         turn_id=row.turn_id,
@@ -393,6 +393,7 @@ def _message(row: ChatMessageRecord) -> ChatMessageResponse:
         paper_mentions=row.paper_mentions or [],
         paper_selection=getattr(row, "paper_selection", None),
         viewer_context=getattr(row, "viewer_context", None),
+        attached_files=[_file_descriptor(file) for file in files or ()],
         revision=row.revision,
         status=row.status,
         citations=row.citations or [],
@@ -499,6 +500,7 @@ def chat_availability():
             "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
             "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
             "paper_reader_citations_enabled": settings.paper_reader_citations_enabled,
+            "file_uploads_enabled": settings.chat_file_uploads_enabled,
             "paper_artifacts_enabled": (
                 settings.chat_artifacts_enabled
                 and settings.chat_latex_paper_enabled
@@ -519,6 +521,7 @@ def chat_availability():
             "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
             "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
             "paper_reader_citations_enabled": settings.paper_reader_citations_enabled,
+            "file_uploads_enabled": settings.chat_file_uploads_enabled,
             "paper_artifacts_enabled": (
                 settings.chat_artifacts_enabled
                 and settings.chat_latex_paper_enabled
@@ -539,6 +542,7 @@ def chat_availability():
             "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
             "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
             "paper_reader_citations_enabled": settings.paper_reader_citations_enabled,
+            "file_uploads_enabled": settings.chat_file_uploads_enabled,
             "paper_artifacts_enabled": (
                 settings.chat_artifacts_enabled
                 and settings.chat_latex_paper_enabled
@@ -555,6 +559,7 @@ def chat_availability():
         "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
         "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
         "paper_reader_citations_enabled": settings.paper_reader_citations_enabled,
+        "file_uploads_enabled": settings.chat_file_uploads_enabled,
         "paper_artifacts_enabled": (
             settings.chat_artifacts_enabled
             and settings.chat_latex_paper_enabled
@@ -853,8 +858,26 @@ def create_session(
             },
         )
     try:
+        primary_paper_id = None
+        if body.primary_paper_route_id is not None:
+            if not settings.paper_reader_chat_enabled:
+                raise ChatServiceError(
+                    "paper_reader_chat_disabled",
+                    404,
+                    "Paper reader chat is not enabled.",
+                )
+            primary_paper_id = int(
+                ChatPaperContextService(db, settings)
+                .prepare_one(
+                    body.primary_paper_route_id, pdf_fallback=True, reader=True
+                )
+                .paper_id
+            )
         session = ChatSessionService(db, settings).create_session(
-            owner_from_user(user), body.selected_model, body.reasoning_effort
+            owner_from_user(user),
+            body.selected_model,
+            body.reasoning_effort,
+            primary_paper_id=primary_paper_id,
         )
         db.commit()
         db.refresh(session)
@@ -983,9 +1006,10 @@ def get_session(
         session, messages = ChatSessionService(db, settings).get_session(
             owner_from_user(user), session_id
         )
+        attachments = ChatFileService(db, settings).attachments(messages)
         return ChatSessionDetail(
             **_summary(session).model_dump(),
-            messages=[_message(row) for row in messages],
+            messages=[_message(row, attachments.get(row.id)) for row in messages],
             transcript_status=session.transcript_status,
             latex_paper=LatexPaperService(db, settings).get_descriptor(
                 owner_from_user(user).hf_user_id, session.id

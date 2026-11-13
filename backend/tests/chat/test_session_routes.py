@@ -124,7 +124,7 @@ def test_session_detail_never_caches_private_paper_metadata(monkeypatch):
         response,
         user={"hf_user_id": "owner-1", "username": "owner"},
         db=object(),
-        settings=object(),
+        settings=Settings(),
     )
 
     assert response.headers["Cache-Control"] == "private, no-store"
@@ -256,6 +256,7 @@ def test_chat_availability_maps_spend_rejection_to_content_free_paused_state(
         "paper_reader_selection_enabled": False,
         "paper_reader_citations_enabled": False,
         "paper_artifacts_enabled": False,
+        "file_uploads_enabled": False,
     }
 
 

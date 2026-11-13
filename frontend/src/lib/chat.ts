@@ -33,6 +33,7 @@ import type {
   ChatEvent,
   ChatPaperHit,
   ChatStreamRequest,
+  ChatUploadedFile,
   PaperMentionDraft,
   ReasoningEffort,
 } from "@/lib/api/chat.types";
@@ -54,6 +55,22 @@ export interface ChatDraft {
   text: string;
   paperMentions: PaperMentionDraft[];
   paperSelection?: PaperSelectionDraft;
+  /** Files uploaded for this prompt, and the chat they were uploaded to. */
+  files?: ChatUploadedFile[];
+  fileSessionId?: string;
+}
+
+/** A short human-readable file size, e.g. "1.2 MB". */
+export function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** The same draft without its reader selection. */
+export function withoutSelection(draft: ChatDraft): ChatDraft {
+  const { paperSelection: _removed, ...rest } = draft;
+  return rest;
 }
 
 /* ---------- UI message model (also persisted for session history) ---------- */
@@ -90,6 +107,8 @@ export interface ChatMessage {
   progress?: ChatProgress;
   paperMentions?: PaperMentionDraft[];
   paperSelection?: PaperSelectionDraft;
+  /** User messages: files attached to this prompt (name and size only). */
+  attachedFiles?: ChatUploadedFile[];
 }
 
 /** The newest user prompt in a transcript. */
@@ -106,6 +125,7 @@ export function draftFromMessage(message: ChatMessage | undefined): ChatDraft {
     text: message?.text ?? "",
     paperMentions: message?.paperMentions ?? [],
     ...(message?.paperSelection ? { paperSelection: message.paperSelection } : {}),
+    ...(message?.attachedFiles?.length ? { files: message.attachedFiles } : {}),
   };
 }
 

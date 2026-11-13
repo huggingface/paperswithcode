@@ -47,9 +47,7 @@ export function withDraftText(
   text: string,
   paperMentions: PaperMentionDraft[],
 ): ChatDraft {
-  return draft.paperSelection
-    ? { text, paperMentions, paperSelection: draft.paperSelection }
-    : { text, paperMentions };
+  return { ...draft, text, paperMentions };
 }
 
 export function parsePaperSelectionDraft(value: unknown): PaperSelectionDraft | undefined {

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   user: { hf_subject: "owner", username: "owner" } as { hf_subject: string; username: string } | null,
   authLoading: false,
   frames: [] as Array<{ path: string; text: string }>,
+  upload: null as { sessionId: string; file: { id: string; filename: string; media_type: string; size_bytes: number } } | null,
 }));
 vi.mock("@/lib/authContext", () => ({ useAuth: () => ({ user: mocks.user, isLoading: mocks.authLoading }) }));
 vi.mock("@/lib/chat", async (original) => ({
@@ -28,6 +29,17 @@ vi.mock("@/components/chat/ChatComposerSurface", () => ({
     <button onClick={() => props.onSend({ text: "New question", paperMentions: [] })} disabled={props.disabled || props.busy}>Send test prompt</button>
     {props.busy && <button onClick={props.onStop}>Stop selected turn</button>}
     <output data-testid="draft">{props.draft?.text}</output>
+    <output data-testid="draft-files">{props.draft?.files?.map((file) => file.id).join(",")}</output>
+    {props.fileUploads && <button onClick={() => {
+      const before = props.draft ?? { text: "", paperMentions: [] };
+      void props.fileUploads!.upload(new File(["%PDF"], "notes.pdf")).then((result) => {
+        mocks.upload = result;
+        props.onDraftChange?.({ ...before, files: [result.file], fileSessionId: result.sessionId });
+      }, () => undefined);
+    }}>Attach test file</button>}
+    <button onClick={() => mocks.upload && props.onSend({
+      text: "About the file", paperMentions: [], files: [mocks.upload.file], fileSessionId: mocks.upload.sessionId,
+    })}>Send with file</button>
   </>,
 }));
 vi.mock("@/components/chat/ChatConversation", () => ({
@@ -50,6 +62,7 @@ vi.mock("@/components/chat/LatexPaperArtifact", () => ({ LatexPaperArtifact: ({ 
 vi.mock("@/components/chat/ChatSharing", () => ({ ChatSharing: () => null }));
 import ChatView from "@/views/ChatView";
 import { chatApi } from "@/lib/api/chat";
+import { chatAvailabilityQuery } from "@/lib/chatSessionQueries";
 import { ApiError } from "@/lib/apiTransport";
 
 const deferred = <T,>() => {
@@ -86,6 +99,7 @@ beforeEach(() => {
   mocks.user = { hf_subject: "owner", username: "owner" };
   mocks.authLoading = false;
   mocks.frames = [];
+  mocks.upload = null;
   mocks.getSession.mockImplementation(async (id: string) => detail(id));
   vi.spyOn(chatApi, "getSession").mockImplementation((id) => mocks.getSession(id));
   vi.spyOn(chatApi, "getModels").mockResolvedValue({ items: [{ id: "gpt-5.6-luna@openai", label: "Luna", provider: "openai" }], default_model: "gpt-5.6-luna@openai" });
@@ -334,5 +348,124 @@ describe("chat URLs opened by someone other than the owner", () => {
     vi.spyOn(chatApi, "getSessionPublicShare").mockRejectedValue(notFound());
     render(shareElement("/chat/a"));
     await screen.findByRole("alert");
+  });
+});
+
+describe("uploads before the first turn", () => {
+  const file = { id: "file-1", filename: "notes.pdf", media_type: "application/pdf", size_bytes: 4 };
+  const enableUploads = () => client.setQueryData(chatAvailabilityQuery().queryKey, {
+    status: "available", reason: null, expected_recovery_at: null,
+    paper_mentions_enabled: false, web_search_available: false, file_uploads_enabled: true,
+  });
+
+  it("sends the first turn into the chat created for the upload and opens it", async () => {
+    enableUploads();
+    vi.spyOn(chatApi, "createSession").mockResolvedValue({ ...detail("fresh"), messages: undefined } as never);
+    vi.spyOn(chatApi, "uploadFile").mockResolvedValue(file);
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "fresh", request_id: "r1" };
+      await new Promise(() => undefined);
+    });
+    render(element("/chat"));
+    fireEvent.click(await screen.findByText("Attach test file"));
+    await waitFor(() => expect(mocks.upload).not.toBeNull());
+    fireEvent.click(screen.getByText("Send with file"));
+
+    await waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
+    expect(mocks.stream.mock.calls[0][0]).toMatchObject({ session_id: "fresh", file_ids: ["file-1"] });
+    expect(mocks.stream.mock.calls[0][0]).not.toHaveProperty("initial_model");
+    await waitFor(() => expect(screen.getByTestId("route")).toHaveTextContent("/chat/fresh"));
+  });
+
+  it("reuses the created chat after a failed upload, including for a plain prompt", async () => {
+    enableUploads();
+    const create = vi.spyOn(chatApi, "createSession").mockResolvedValue({ ...detail("fresh"), messages: undefined } as never);
+    vi.spyOn(chatApi, "uploadFile").mockRejectedValue(new Error("quota"));
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "fresh", request_id: "r1" };
+      await new Promise(() => undefined);
+    });
+    render(element("/chat"));
+    fireEvent.click(await screen.findByText("Attach test file"));
+    fireEvent.click(screen.getByText("Attach test file"));
+    await waitFor(() => expect(chatApi.uploadFile).toHaveBeenCalledTimes(2));
+    expect(create).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByText("Send test prompt"));
+
+    await waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
+    expect(mocks.stream.mock.calls[0][0]).toMatchObject({ session_id: "fresh" });
+    await waitFor(() => expect(screen.getByTestId("route")).toHaveTextContent("/chat/fresh"));
+  });
+
+  it("forgets the created chat when the composer starts a new chat", async () => {
+    enableUploads();
+    vi.spyOn(chatApi, "createSession").mockResolvedValue({ ...detail("fresh"), messages: undefined } as never);
+    vi.spyOn(chatApi, "uploadFile").mockRejectedValue(new Error("quota"));
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "other", request_id: "r1" };
+      await new Promise(() => undefined);
+    });
+    render(element("/chat"));
+    fireEvent.click(await screen.findByText("Attach test file"));
+    await waitFor(() => expect(chatApi.uploadFile).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getAllByText("New chat")[0]);
+    fireEvent.click(screen.getByText("Send test prompt"));
+
+    await waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
+    expect(mocks.stream.mock.calls[0][0]).toMatchObject({ session_id: null });
+  });
+
+  it("drops an upload whose chat was created after the composer started over", async () => {
+    enableUploads();
+    const created = deferred<never>();
+    vi.spyOn(chatApi, "createSession").mockReturnValue(created.promise);
+    const upload = vi.spyOn(chatApi, "uploadFile").mockResolvedValue(file);
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "other", request_id: "r1" };
+      await new Promise(() => undefined);
+    });
+    render(element("/chat"));
+    fireEvent.click(await screen.findByText("Attach test file"));
+    fireEvent.click(screen.getAllByText("New chat")[0]);
+    await act(async () => created.resolve({ ...detail("late"), messages: undefined } as never));
+    fireEvent.click(screen.getByText("Send test prompt"));
+
+    await waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
+    expect(upload).not.toHaveBeenCalled();
+    expect(mocks.upload).toBeNull();
+    expect(mocks.stream.mock.calls[0][0]).toMatchObject({ session_id: null });
+  });
+
+  it("keeps an upload that resolves during navigation out of the next chat's composer", async () => {
+    enableUploads();
+    const uploading = deferred<typeof file>();
+    vi.spyOn(chatApi, "uploadFile").mockReturnValue(uploading.promise);
+    render(element("/chat/a"));
+    await screen.findByText("a saved question");
+    fireEvent.click(screen.getByText("Attach test file"));
+    await waitFor(() => expect(chatApi.uploadFile).toHaveBeenCalledOnce());
+    await act(async () => {
+      fireEvent.click(screen.getByText("Visit b"));
+      uploading.resolve(file);
+    });
+    await screen.findByText("b saved question");
+
+    expect(screen.getByTestId("draft-files")).toBeEmptyDOMElement();
+  });
+
+  it("deletes an upload that finished after the composer started over", async () => {
+    enableUploads();
+    const uploading = deferred<typeof file>();
+    vi.spyOn(chatApi, "createSession").mockResolvedValue({ ...detail("fresh"), messages: undefined } as never);
+    vi.spyOn(chatApi, "uploadFile").mockReturnValue(uploading.promise);
+    const remove = vi.spyOn(chatApi, "deleteFile").mockResolvedValue(undefined);
+    render(element("/chat"));
+    fireEvent.click(await screen.findByText("Attach test file"));
+    await waitFor(() => expect(chatApi.uploadFile).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getAllByText("New chat")[0]);
+    await act(async () => uploading.resolve(file));
+
+    expect(remove).toHaveBeenCalledWith("fresh", "file-1");
+    expect(mocks.upload).toBeNull();
   });
 });

@@ -25,6 +25,7 @@ from backend.services.chat_durable_qualification_evidence import (
     QualificationEvidenceUnavailable,
     record_qualification_event_safely,
 )
+from backend.services.chat_file_service import ChatFileService, prompt_with_files
 from backend.services.chat_live_stream_service import live_chat_stream_registry
 from backend.services.chat_paper_context_service import (
     ChatPaperContextService,
@@ -80,7 +81,7 @@ def _prepare_paper_turn(
     body: ChatRequest,
 ) -> PreparedPaperTurn:
     with db_manager.session_local() as db:
-        return ChatPaperContextService(db, settings).prepare_turn(
+        prepared = ChatPaperContextService(db, settings).prepare_turn(
             owner_id=owner_id,
             display_message=body.message,
             mentions=body.paper_mentions,
@@ -90,6 +91,16 @@ def _prepare_paper_turn(
             viewer_context=body.viewer_context,
             paper_selection=body.paper_selection,
         )
+        files = ChatFileService(db, settings).turn_files(
+            ChatOwner(hf_user_id=owner_id, hf_username=""),
+            body.session_id,
+            body.file_ids,
+        )
+    if not files:
+        return prepared
+    return replace(
+        prepared, effective_prompt=prompt_with_files(prepared.effective_prompt, files)
+    )
 
 
 async def _release_durable_admission() -> None:

@@ -26,6 +26,7 @@ import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider
 import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
 import { PWC_MCP_TOOL_NAMES, createPwcMcpToolsExtension, pwcMcpEnabled } from "./pwc_mcp_tools.js";
+import { USER_FILE_TOOL, createUserFileToolExtension } from "./user_file_tools.js";
 import { CATALOG_TOOL_NAMES, createCatalogToolsExtension } from "./catalog_tools.js";
 import { loadPromptAsset, renderPrompt, taskCatalogForPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
@@ -45,6 +46,7 @@ export interface RunTurn {
   poster_mode: boolean;
   paper_artifacts_enabled: boolean;
   paper_descriptor?: Record<string, unknown>;
+  user_files_enabled?: boolean;
   reasoning_effort: "low" | "medium" | "high" | "max";
   hf_username: string;
 }
@@ -443,6 +445,11 @@ export class PiWorker {
           factory: createRemoteToolsExtension(this.remoteTools),
           hidden: true,
         }] : []),
+        ...(run.user_files_enabled ? [{
+          name: "pwc-user-files",
+          factory: createUserFileToolExtension(),
+          hidden: true,
+        }] : []),
         ...(this.gateway && this.remoteTools ? [{
           name: "pwc-catalog",
           factory: pwcMcpEnabled() ? createPwcMcpToolsExtension(this.gateway) : createCatalogToolsExtension(this.gateway),
@@ -464,6 +471,7 @@ export class PiWorker {
         ...(run.web_search_enabled ? [WEB_SEARCH_TOOL] : []),
         ...(this.gateway && this.remoteTools ? (pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : CATALOG_TOOL_NAMES) : []),
         ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : []),
+        ...(run.user_files_enabled ? [USER_FILE_TOOL] : []),
       ],
       excludeTools: ["edit", "write", "grep", "find", "ls", "ask_question"],
       resourceLoader: loader,

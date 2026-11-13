@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, expect, it } from "vitest";
 
@@ -44,5 +44,40 @@ describe("ChatComposerSurface", () => {
     unmount();
     renderSurface("followup", undefined, link);
     expect(screen.queryByRole("link", { name: "Reproduce with ML Intern" })).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatComposerSurface suggestions with uploads", () => {
+  const file = { id: "file-1", filename: "notes.pdf", media_type: "application/pdf", size_bytes: 4 };
+  const renderWithFiles = (onSend: (draft: unknown) => void, uploading = false) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(<QueryClientProvider client={client}>
+      <ChatComposerSurface
+        variant="empty"
+        composerProps={{
+          draft: { text: "typed", paperMentions: [], files: [file], fileSessionId: "session-1" },
+          onDraftChange: () => {},
+          onSend,
+        }}
+        provider="openai"
+        paused={false}
+        uploading={uploading}
+        suggestions={["Explain in simple terms"]}
+      />
+    </QueryClientProvider>);
+  };
+
+  it("sends a suggestion with the attached files", () => {
+    const sent: unknown[] = [];
+    renderWithFiles((draft) => sent.push(draft));
+    fireEvent.click(screen.getByRole("button", { name: "Explain in simple terms" }));
+    expect(sent).toEqual([{
+      text: "Explain in simple terms", paperMentions: [], files: [file], fileSessionId: "session-1",
+    }]);
+  });
+
+  it("disables suggestions while files upload", () => {
+    renderWithFiles(() => {}, true);
+    expect(screen.getByRole("button", { name: "Explain in simple terms" })).toBeDisabled();
   });
 });
