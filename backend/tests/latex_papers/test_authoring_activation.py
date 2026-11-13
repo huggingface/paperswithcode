@@ -55,6 +55,30 @@ def test_paper_cli_activation_lazily_extends_worker_limits():
     assert hooks.bash_timeout_ms == 600_000
 
 
+def test_pwc_paper_command_keeps_the_paper_budget_after_research_spends_the_default():
+    settings = WorkerSettings(
+        chat_max_tool_calls=12, chat_latex_paper_max_tool_calls=30
+    )
+    hooks = WorkerToolHooks(settings)
+    hooks.budget.calls = 12
+    hooks.budget.tool_rounds_started = hooks.budget.maximum_rounds
+
+    def decision(tool_id: str, command: str) -> str:
+        output = asyncio.run(
+            hooks.pre(
+                {"tool_name": "Bash", "tool_input": {"command": command}},
+                tool_id,
+                None,
+            )
+        )
+        hooks.budget.complete_call(tool_id)
+        return output["hookSpecificOutput"]["permissionDecision"]
+
+    assert decision("create", 'pwc-paper create --title "Survey"') == "allow"
+    assert not hooks.paper_activated
+    assert decision("research", "pwc search diffusion") == "deny"
+
+
 def test_failed_pwc_paper_receipt_does_not_activate_worker_limits():
     hooks = WorkerToolHooks(WorkerSettings())
     receipt = (
@@ -306,3 +330,18 @@ def test_worker_trusts_a_quoted_paper_title_with_literal_parentheses():
 
     assert hooks.paper_activated is True
     assert any(event["type"] == "paper_artifact" for event in events)
+
+
+def test_worker_recognizes_edit_context_without_a_receipt():
+    assert (
+        agent._pwc_paper_command("pwc-paper edit-context --directory /workspace/paper")
+        == "edit-context"
+    )
+    assert "edit-context" not in agent._PAPER_RECEIPT_OPERATIONS
+    assert agent._pwc_paper_command("pwc-paper edit-context") is None
+    assert (
+        agent._pwc_paper_command(
+            "pwc-paper edit-context --directory /workspace/paper --artifact-id x"
+        )
+        is None
+    )
