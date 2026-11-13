@@ -500,6 +500,10 @@
 .topic-dialog-chip-open:hover:not(:disabled),
 .topic-dialog-chip-open:focus-visible { color: var(--accent-text); background: var(--accent-soft); }
 .topic-dialog-chip-open:disabled { opacity: 0.35; cursor: default; }
+.topic-dialog-topic:not(.is-removed) .topic-dialog-chip-remove:hover:not(:disabled),
+.topic-dialog-topic:not(.is-removed) .topic-dialog-chip-remove:focus-visible { color: var(--danger, #b42318); background: color-mix(in srgb, var(--danger, #b42318) 10%, transparent); }
+.topic-dialog-topic.is-removed .topic-dialog-chip { text-decoration: line-through; opacity: 0.6; }
+.topic-dialog-topic.is-removed .topic-dialog-chip-remove { color: var(--accent-text); }
 .topic-dialog-chip-creator { color: inherit; opacity: 0.7; font-size: 12px; }
 .topic-dialog-topic { display: flex; align-items: center; gap: 6px; }
 .topic-dialog-topic.is-editing .topic-dialog-chip { outline: 2px solid var(--accent); outline-offset: 1px; }

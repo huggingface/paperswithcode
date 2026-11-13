@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { ArrowRight, ArrowUpRight, Check, Pencil, Plus } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Check, Pencil, Plus, Trash2, Undo2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import SortableList from '@/components/SortableList';
@@ -239,7 +239,7 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
       </label></h3>
       <p className="topic-dialog-hint">
         {!editing && atLimit ? `You follow ${TOPIC_LIMIT} topics, the most allowed. Remove one below to add another.`
-          : 'A model reads every new paper and adds the ones that match to your Following feed. New topics are public and show your Hugging Face username; make one private from its ✎ button below.'}
+          : 'A model reads every new paper and adds the ones that match to your Following feed. New topics are public and show your Hugging Face username; make one private from its ✎ button below, or remove one with its trash button.'}
       </p>
       <textarea id="topic-dialog-input" className="research-topic-input" rows={4} maxLength={TOPIC_MAX_LENGTH}
         aria-label="Research topic"
@@ -294,11 +294,12 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
         onReorder={setOrder}
         renderItem={(topic, handle) => {
           const on = !removals.includes(topic.id);
-          return <div className={`topic-dialog-topic ${topic.id === editId ? 'is-editing' : ''}`}>
+          const toggleRemoval = () => setRemovals(current => on ? [...current, topic.id] : current.filter(id => id !== topic.id));
+          return <div className={`topic-dialog-topic ${topic.id === editId ? 'is-editing' : ''} ${on ? '' : 'is-removed'}`}>
             {handle}
             <span className="topic-dialog-chip-wrap">
               <button type="button" className="topic-dialog-chip" aria-pressed={on} disabled={saving} title={topic.text}
-                onClick={() => setRemovals(current => on ? [...current, topic.id] : current.filter(id => id !== topic.id))}>
+                onClick={toggleRemoval}>
                 {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}
                 {topicTitle(topic)}
                 {topic.creator && <span className="topic-dialog-chip-creator">@{topic.creator.username}</span>}
@@ -308,6 +309,11 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
                 <Pencil aria-hidden="true" />
               </button>
               <PageLink to={topicPath(topic)} name={topicTitle(topic)} />
+              <button type="button" className="topic-dialog-chip-open topic-dialog-chip-remove" disabled={saving}
+                aria-label={on ? `Remove ${topicTitle(topic)}` : `Keep ${topicTitle(topic)}`}
+                title={on ? 'Remove from your feed on Save' : 'Keep this topic'} onClick={toggleRemoval}>
+                {on ? <Trash2 aria-hidden="true" /> : <Undo2 aria-hidden="true" />}
+              </button>
             </span>
           </div>;
         }}

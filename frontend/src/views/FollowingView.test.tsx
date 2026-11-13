@@ -457,6 +457,20 @@ it('adds another topic from Edit feed and can drop an existing one in the same s
   expect(researchApi.removeTopic).toHaveBeenCalledWith(2);
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 });
+it('removes a topic from its trash button on save, and can undo before saving', async () => {
+  vi.mocked(researchApi.topics).mockResolvedValue([topic, { ...topic, id: 2, text: 'speculative decoding' }]);
+  vi.spyOn(researchApi, 'removeTopic').mockResolvedValue(undefined);
+  renderFeed();
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit feed' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove Real-time video generation' }));
+  expect(screen.getByRole('button', { name: 'Real-time video generation' })).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(screen.getByRole('button', { name: 'Keep Real-time video generation' }));
+  expect(screen.getByRole('button', { name: 'Real-time video generation' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Speculative decoding' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+  await waitFor(() => expect(researchApi.removeTopic).toHaveBeenCalledWith(2));
+  expect(researchApi.removeTopic).not.toHaveBeenCalledWith(1);
+});
 it('keeps Edit feed at the topic limit and explains it', async () => {
   vi.mocked(researchApi.topics).mockResolvedValue(Array.from({ length: TOPIC_LIMIT }, (_, i) => ({ ...topic, id: i + 1, text: `topic ${i}` })));
   renderFeed();
