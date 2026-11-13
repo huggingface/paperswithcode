@@ -43,6 +43,7 @@ class Github:
             "archived": False,
         }
         self.login = "Example-Bot"
+        self.comments = []
 
     def __call__(self, args):
         self.calls.append(args)
@@ -50,6 +51,8 @@ class Github:
             return {"login": self.login}
         if "/issues" not in args[0]:
             return self.metadata.copy()
+        if "/comments" in args[0]:
+            return self.comment_call(args)
         if "POST" in args:
             if self.post_error:
                 raise self.post_error
@@ -94,6 +97,27 @@ class Github:
         if "state=open" in args:
             rows = [row for row in rows if row.get("state") == "open"]
         page = int(next(value[5:] for value in args if value.startswith("page=")))
+        return rows[(page - 1) * 100 : page * 100]
+
+    def comment_call(self, args):
+        if args[0].startswith("repos/lab/code/issues/comments/"):
+            return self.comments[int(args[0].split("/")[-1]) - 1].copy()
+        number = int(args[0].split("/")[-2])
+        if "POST" in args:
+            if self.post_error:
+                raise self.post_error
+            comment = {
+                "id": len(self.comments) + 1,
+                "issue": number,
+                "body": next(v[5:] for v in args if v.startswith("body=")),
+                "user": {"login": "Example-Bot"},
+                "html_url": f"https://github.com/lab/code/issues/{number}"
+                f"#issuecomment-{len(self.comments) + 1}",
+            }
+            self.comments.append(comment)
+            return comment.copy()
+        page = int(next(value[5:] for value in args if value.startswith("page=")))
+        rows = [comment for comment in self.comments if comment["issue"] == number]
         return rows[(page - 1) * 100 : page * 100]
 
     @property
@@ -595,3 +619,188 @@ def test_new_evaluations_take_priority_after_oldest_fairness_slot(state):
     ]
     assert result["counts"]["curating"] == 1
     assert result["counts"]["repositories_due"] == 3
+
+
+def release_issue(state="open"):
+    return {
+        "number": 1,
+        "title": "Release TernScope weights on Hugging Face",
+        "state": state,
+        "body": "Hi, would you like to release the weights on the Hub?",
+        "user": {"login": "Example-Bot"},
+        "html_url": "https://github.com/lab/code/issues/1",
+    }
+
+
+@pytest.mark.parametrize("issue_state", ["open", "closed"])
+def test_release_issue_receives_evals_as_comment_instead_of_new_issue(
+    state, issue_state
+):
+    github = Github()
+    github.rows = [release_issue(issue_state)]
+    result = runner(state, github).run()
+    assert result["counts"]["commented_on_release_issue"] == 1
+    assert len(github.rows) == 1
+    assert [call[0] for call in github.posts] == ["repos/lab/code/issues/1/comments"]
+    body = github.comments[0]["body"]
+    assert body.startswith("Hi again,")
+    assert "paper/1#results" in body
+    record = state.get("repo:42")
+    assert record["covered"] == [1]
+    assert record["comments"] == ["https://github.com/lab/code/issues/1#issuecomment-1"]
+    assert not record.get("pending")
+    runner(state, github).run()
+    assert len(github.posts) == 1
+
+
+def test_existing_release_comment_covers_paper_after_state_loss(tmp_path):
+    github = Github()
+    github.rows = [release_issue()]
+    first = OutreachState(tmp_path / "first.sqlite3")
+    runner(first, github).run()
+    first.close()
+    fresh = OutreachState(tmp_path / "fresh.sqlite3")
+    assert runner(fresh, github).run()["counts"]["already_contacted"] == 1
+    fresh.close()
+    assert len(github.posts) == 1
+
+
+def test_open_non_release_issue_still_blocks(state):
+    github = Github()
+    github.rows = [{**release_issue(), "title": "Question about the code"}]
+    assert runner(state, github).run()["counts"]["open_issue"] == 1
+    assert not github.posts
+
+
+def test_comment_that_succeeded_before_timeout_is_reconciled(state):
+    github = Github()
+    github.rows = [release_issue()]
+    real_api = github.__call__
+
+    def timeout_after_post(args):
+        result = real_api(args)
+        if "POST" in args:
+            raise subprocess.TimeoutExpired("gh", 60)
+        return result
+
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner(state, timeout_after_post).run()
+    assert state.get("repo:42")["pending"]["comment_on"] == 1
+    result = runner(state, github).run()
+    assert result["counts"]["commented_on_release_issue"] == 1
+    assert len(github.posts) == 1
+
+
+def test_unconfirmed_comment_is_held_for_review(state):
+    github = Github()
+    github.rows = [release_issue()]
+    github.post_error = subprocess.TimeoutExpired("gh", 60)
+    with pytest.raises(subprocess.TimeoutExpired):
+        runner(state, github).run()
+    github.post_error = None
+    assert runner(state, github).run()["counts"]["needs_review"] == 1
+    assert len(github.posts) == 1
+
+
+def test_preview_reports_release_comment(tmp_path):
+    github = Github()
+    github.rows = [release_issue()]
+    state = OutreachState(tmp_path / "state.sqlite3", dry_run=True)
+    result = runner(state, github, dry_run=True).run()
+    state.close()
+    event = next(e for e in result["events"] if e["status"] == "would_comment")
+    assert event["issue_url"] == "https://github.com/lab/code/issues/1"
+    assert not github.posts
+
+
+def test_release_comment_drops_standalone_introduction():
+    from backend.services.github_eval_outreach_body import render_release_comment
+
+    url = "https://paperswithcode.co/paper/7"
+    body = "\n\n".join(
+        [
+            "Hi,",
+            "Alex here from the open-source team at Hugging Face. Congratulations on your work!",
+            f"I've made the [paper]({url}) and [1 paper-native evaluation]({url}#results) available on Papers with Code.",
+            "Kind regards,",
+            "Alex",
+        ]
+    )
+    comment = render_release_comment(
+        [GithubIssueDraft(ISSUE_TITLE, "7", "P", 1, (), (), ("lab/code",), body)]
+    )
+    assert comment.split("\n\n")[:2] == [
+        "Hi again,",
+        f"Separately, I've also made the [paper]({url}) and [1 paper-native evaluation]({url}#results) available on Papers with Code.",
+    ]
+    assert "here from the open-source team" not in comment
+
+
+def test_locked_release_issue_falls_back_to_standalone_issue(state):
+    github = Github()
+    github.rows = [{**release_issue("closed"), "locked": True}]
+    assert runner(state, github).run()["counts"]["verified"] == 1
+    assert [call[0] for call in github.posts] == ["repos/lab/code/issues"]
+    assert not github.comments
+
+
+def test_other_open_outreach_issue_blocks_closed_release_comment(state):
+    github = Github()
+    github.rows = [
+        release_issue("closed"),
+        {
+            **release_issue(),
+            "number": 2,
+            "title": ISSUE_TITLE,
+            "html_url": "https://github.com/lab/code/issues/2",
+        },
+    ]
+    assert runner(state, github).run()["counts"]["open_issue"] == 1
+    assert not github.posts
+
+
+def test_open_release_issue_is_preferred_over_closed_one(state):
+    github = Github()
+    github.rows = [
+        release_issue("closed"),
+        {
+            **release_issue(),
+            "number": 2,
+            "html_url": "https://github.com/lab/code/issues/2",
+        },
+    ]
+    assert runner(state, github).run()["counts"]["commented_on_release_issue"] == 1
+    assert [call[0] for call in github.posts] == ["repos/lab/code/issues/2/comments"]
+
+
+def test_comment_on_any_release_thread_covers_paper_after_state_loss(tmp_path):
+    github = Github()
+    github.rows = [release_issue("closed")]
+    first = OutreachState(tmp_path / "first.sqlite3")
+    runner(first, github).run()
+    first.close()
+    github.rows.append(
+        {
+            **release_issue("closed"),
+            "number": 2,
+            "html_url": "https://github.com/lab/code/issues/2",
+        }
+    )
+    fresh = OutreachState(tmp_path / "fresh.sqlite3")
+    assert runner(fresh, github).run()["counts"]["already_contacted"] == 1
+    fresh.close()
+    assert len(github.posts) == 1
+
+
+def test_sibling_open_release_issue_does_not_block_comment(state):
+    github = Github()
+    github.rows = [
+        release_issue(),
+        {
+            **release_issue(),
+            "number": 2,
+            "html_url": "https://github.com/lab/code/issues/2",
+        },
+    ]
+    assert runner(state, github).run()["counts"]["commented_on_release_issue"] == 1
+    assert [call[0] for call in github.posts] == ["repos/lab/code/issues/2/comments"]
