@@ -347,18 +347,19 @@ describe("carryReasoningTiming", () => {
     ]);
   });
 
-  it("aligns replies from the latest when the reload holds older history", () => {
+  it("copies nothing when a local reply was never persisted", () => {
     const local: ChatMessage[] = [
-      { id: "a2", role: "assistant", blocks: [reasoning("Latest", { startedAt: 1, endedAt: 2 })] },
+      { id: "u1", role: "user", text: "Q1" },
+      { id: "a1", role: "assistant", blocks: [reasoning("One", { startedAt: 0, endedAt: 4 })] },
+      { id: "u2", role: "user", text: "Q2" },
+      { id: "a2", role: "assistant", blocks: [reasoning("Two", { startedAt: 5, endedAt: 9 })] },
     ];
     const reloaded: ChatMessage[] = [
-      { id: "s1", role: "assistant", blocks: [reasoning("Old")] },
-      { id: "s2", role: "assistant", blocks: [reasoning("Latest")] },
+      { id: "u1", role: "user", text: "Q1" },
+      { id: "s1", role: "assistant", blocks: [reasoning("One")] },
+      { id: "u2", role: "user", text: "Q2" },
     ];
-
-    const carried = carryReasoningTiming(local, reloaded);
-    expect(carried[0]).toBe(reloaded[0]);
-    expect(carried[1].blocks).toEqual([reasoning("Latest", { startedAt: 1, endedAt: 2 })]);
+    expect(carryReasoningTiming(local, reloaded)).toBe(reloaded);
   });
 
   it("leaves a reply alone when its reasoning blocks don't line up", () => {

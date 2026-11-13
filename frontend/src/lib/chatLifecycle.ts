@@ -119,22 +119,23 @@ function endReasoning(block: ReasoningBlock): ReasoningBlock {
 
 /**
  * Reasoning timing is stamped only in this tab, so a server reload would drop
- * it. The server builds the same reasoning blocks in the same order (its text
- * may differ after link normalization), so pair replies from the latest
- * backwards and copy timing by position when the reasoning counts agree.
+ * it. Server and client ids differ, and the server's reasoning text may differ
+ * after link normalization, so copy timing by position, and only when both
+ * transcripts have the same message roles in the same order and each reply has
+ * the same number of reasoning blocks. Anything else keeps the generic label
+ * rather than risk a wrong duration.
  */
 export function carryReasoningTiming(local: ChatMessage[], reloaded: ChatMessage[]): ChatMessage[] {
+  if (
+    local.length !== reloaded.length
+    || local.some((message, index) => message.role !== reloaded[index].role)
+  ) return reloaded;
   const reasoningOf = (message: ChatMessage) => (message.blocks ?? []).filter(
     (block): block is ReasoningBlock => block.kind === "reasoning",
   );
-  const localReplies = local.filter((message) => message.role === "assistant");
-  let pending = reloaded.filter((message) => message.role === "assistant").length;
   let changed = false;
-  const result = reloaded.map((message) => {
-    if (message.role !== "assistant") return message;
-    pending -= 1;
-    const source = localReplies[localReplies.length - 1 - pending];
-    const timings = source ? reasoningOf(source) : [];
+  const result = reloaded.map((message, messageIndex) => {
+    const timings = reasoningOf(local[messageIndex]);
     if (!timings.some((block) => block.endedAt !== undefined)) return message;
     if (timings.length !== reasoningOf(message).length) return message;
     changed = true;
