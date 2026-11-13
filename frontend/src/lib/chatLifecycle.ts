@@ -1,4 +1,4 @@
-import type { ChatBlock, ChatEvent, ChatMessage } from "./chat";
+import type { ChatBlock, ChatEvent, ChatMessage, ReasoningBlock } from "./chat";
 
 /** The visible projection of one turn. Turn status lives in `ChatTurn.phase`. */
 export interface ChatLifecycleState {
@@ -112,6 +112,11 @@ function patchBlock(
   });
 }
 
+/** Collapse finished reasoning and stamp when it ended, for "Thought for N seconds". */
+function endReasoning(block: ReasoningBlock): ReasoningBlock {
+  return { ...block, active: false, open: false, endedAt: Date.now() };
+}
+
 function reduceEvent(
   state: ChatLifecycleState,
   event: ChatEvent,
@@ -157,10 +162,10 @@ function reduceEvent(
             blocks: [
               ...(visible.blocks ?? []).map((block) => (
                 block.kind === "reasoning" && block.active
-                  ? { ...block, active: false, open: false }
+                  ? endReasoning(block)
                   : block
               )),
-              { kind: "reasoning", text: "", active: true, open: true },
+              { kind: "reasoning", text: "", active: true, open: true, startedAt: Date.now() },
             ],
           };
         }),
@@ -196,7 +201,7 @@ function reduceEvent(
           return {
             ...message,
             blocks: blocks.map((block, index) => index === currentIndex
-              ? { ...current, active: false, open: false }
+              ? endReasoning(current)
               : block),
           };
         }),
@@ -395,7 +400,7 @@ function reduceEvent(
             block.kind === "answer"
               ? { ...block, done: true }
               : block.kind === "reasoning" && block.active
-                ? { ...block, active: false, open: false }
+                ? endReasoning(block)
                 : block
           )),
         })),
@@ -411,7 +416,7 @@ function reduceEvent(
           errorCode: event.code,
           blocks: (message.blocks ?? []).map((block) => (
             block.kind === "reasoning" && block.active
-              ? { ...block, active: false, open: false }
+              ? endReasoning(block)
               : block.kind === "tool" && block.status === "running"
                 ? { ...block, status: "error", open: true }
               : block
@@ -431,7 +436,7 @@ function stopMessages(messages: ChatMessage[]): ChatMessage[] {
         return [{ ...block, status: "error", open: true }];
       }
       if (block.kind === "reasoning" && block.active) {
-        return block.text ? [{ ...block, active: false, open: false }] : [];
+        return block.text ? [endReasoning(block)] : [];
       }
       if (block.kind === "answer") return [{ ...block, done: true }];
       return [block];

@@ -40,6 +40,7 @@ import type { PaperPreviewData } from "@/components/paper-preview/paperPreviewDa
 import { parseGitHubRepoUrl } from "@/lib/github";
 import { normalizeChatMath } from "@/components/chat/chatMarkdownMath";
 import { rehypeImagesAsLinks } from "@/components/chat/chatMarkdownImages";
+import { useRenderThrottledText } from "@/components/chat/useRenderThrottledText";
 
 function citationPreviewData(
   routeId: string,
@@ -125,13 +126,46 @@ function isGitHubUrl(href: string): boolean {
   }
 }
 
-export const ChatMarkdown: React.FC<{
+interface ChatMarkdownProps {
   text: string;
   streaming?: boolean;
   papers: Record<string, ChatPaperHit>;
   citations?: Record<string, ChatCitation>;
   webCitations?: Record<string, ChatCitation>;
-}> = ({ text, streaming, papers, citations, webCitations }) => {
+}
+
+function sameRecord<T>(a?: Record<string, T>, b?: Record<string, T>): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key]);
+}
+
+/**
+ * Paper and citation maps are rebuilt on every streamed chunk, so compare
+ * their entries: a finished message then skips its Markdown parse entirely.
+ */
+const sameMarkdownProps = (a: ChatMarkdownProps, b: ChatMarkdownProps): boolean => (
+  a.text === b.text
+  && a.streaming === b.streaming
+  && sameRecord(a.papers, b.papers)
+  && sameRecord(a.citations, b.citations)
+  && sameRecord(a.webCitations, b.webCitations)
+);
+
+/** Re-parses and redraws the Markdown only when its own text or links change. */
+export const ChatMarkdown = React.memo(function ChatMarkdown(props: ChatMarkdownProps) {
+  const text = useRenderThrottledText(props.text, Boolean(props.streaming));
+  return <ChatMarkdownBody {...props} text={text} />;
+}, sameMarkdownProps);
+
+const ChatMarkdownBody = React.memo(function ChatMarkdownBody({
+  text,
+  streaming,
+  papers,
+  citations,
+  webCitations,
+}: ChatMarkdownProps) {
   const source = normalizeChatMath(
     streaming ? withholdPartialCitation(text) : text,
   );
@@ -242,4 +276,4 @@ export const ChatMarkdown: React.FC<{
     {!streaming && <PdfCitationSources text={source} />}
     </>
   );
-};
+}, sameMarkdownProps);

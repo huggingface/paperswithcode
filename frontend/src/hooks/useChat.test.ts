@@ -610,6 +610,7 @@ describe("useChat reasoning projection", () => {
       text: "**Same plan**",
       active: false,
       open: false,
+      startedAt: expect.any(Number), endedAt: expect.any(Number),
     }]);
   });
 
@@ -633,8 +634,8 @@ describe("useChat reasoning projection", () => {
       (block) => block.kind === "reasoning",
     );
     expect(reasoning).toEqual([
-      { kind: "reasoning", text: "First plan", active: false, open: false },
-      { kind: "reasoning", text: "Second plan", active: false, open: false },
+      { kind: "reasoning", text: "First plan", active: false, open: false, startedAt: expect.any(Number), endedAt: expect.any(Number) },
+      { kind: "reasoning", text: "Second plan", active: false, open: false, startedAt: expect.any(Number), endedAt: expect.any(Number) },
     ]);
   });
 });

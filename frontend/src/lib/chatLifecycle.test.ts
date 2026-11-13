@@ -110,7 +110,7 @@ describe("chatLifecycleReducer", () => {
     expect(state.title).toBe(" New title");
     expect(state.messages[0]).toMatchObject({ error: "Failed", errorCode: "provider_error" });
     expect(state.messages[0].blocks).toEqual([
-      { kind: "reasoning", text: "Plan", active: false, open: false },
+      { kind: "reasoning", text: "Plan", active: false, open: false, startedAt: expect.any(Number), endedAt: expect.any(Number) },
       expect.objectContaining({ kind: "tool", id: "tool-1", status: "error", open: true }),
     ]);
   });
@@ -133,7 +133,7 @@ describe("chatLifecycleReducer", () => {
 
     expect(stopped.messages[0]).toMatchObject({ streaming: false, finishReason: "stopped" });
     expect(stopped.messages[0].blocks).toEqual([
-      { kind: "reasoning", text: "Partial", active: false, open: false },
+      { kind: "reasoning", text: "Partial", active: false, open: false, endedAt: expect.any(Number) },
       expect.objectContaining({ kind: "tool", id: "tool-1", status: "error", open: true }),
       { kind: "answer", text: "Answer", done: true },
     ]);

@@ -659,6 +659,21 @@ describe("AssistantMessage", () => {
     );
   });
 
+  it.each([
+    { timing: {}, label: "Thought for a few seconds" },
+    { timing: { startedAt: 1_000, endedAt: 1_200 }, label: "Thought for 1 second" },
+    { timing: { startedAt: 1_000, endedAt: 13_400 }, label: "Thought for 12 seconds" },
+    { timing: { startedAt: 0, endedAt: 125_000 }, label: "Thought for 2m 5s" },
+  ])("labels finished reasoning as $label", ({ timing, label }) => {
+    renderAssistant({
+      id: "assistant-1",
+      role: "assistant",
+      blocks: [{ kind: "reasoning", text: "Checked.", active: false, open: false, ...timing }],
+    });
+
+    expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+  });
+
   it("does not reuse the workspace status after streamed work has started", () => {
     renderAssistant({
       id: "assistant-1",
