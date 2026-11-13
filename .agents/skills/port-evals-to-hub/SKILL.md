@@ -22,7 +22,7 @@ All scripts live in `.agents/skills/port-evals-to-hub/scripts/` and run from the
 | `open_eval_prs.py SPEC.json [--apply]` | Checks every result in a spec, prints the PRs, and with `--apply` opens them and appends them to the registry. |
 | `sweep_eval_prs.py [--apply]` | Re-checks every registered PR: repoints links to a view where the result is visible, removes invisible results, closes PRs left with none. |
 
-Run `find_candidates.py` with `uv run --env-file backend/keys.env python …`; the Hub-only scripts need just `uv run python …`. The registry defaults to `reports/hf-eval-results-prs.json` (local, not committed).
+Run `find_candidates.py` with `uv run --env-file backend/keys.env python …`; the Hub-only scripts need just `uv run python …`. The two use different tokens: the `HF_TOKEN` in keys.env can read gated `eval.yaml` files (GPQA) but cannot open PRs, while the default `hf` token can write but may lack access to the gated file. If a gated benchmark is skipped with "task_id … not in eval.yaml", check it with `--env-file`, open the PR without it, then commit that benchmark's file to `refs/pr/<num>`. The registry defaults to `reports/hf-eval-results-prs.json` (local, not committed).
 
 Opening, editing, or closing PRs posts publicly on other people's repos. The auto-mode classifier may block `--apply`; if it does, show the user the exact command and let them run it, then verify the result.
 
@@ -43,10 +43,12 @@ Read the model card, paper, README, or blog yourself. Never rely only on the PwC
 
 Skip a result, or the whole repo, when:
 - **The score is third-party.** For example a card's † numbers from Artificial Analysis, or scores for the model taken from a benchmark's own paper. The source must be the model's authors.
-- **The protocol differs from the board.** Examples: with tools or code execution on a no-tools board (AIME tool-integrated reasoning), inference tricks such as zoom, cropping, verifiers, or agentic refinement on a direct-inference board (ScreenSpot-Pro), a subset of the benchmark (Terminal-Bench run on 88 of 89 tasks), or a different metric or scale. Use the no-tools number when the source gives both, and say so in `notes`.
+- **The protocol differs from the board in a way a note can't fix.** Examples: inference tricks such as zoom, cropping, verifiers, or agentic refinement on a direct-inference board (ScreenSpot-Pro), a subset of the benchmark (Terminal-Bench run on 88 of 89 tasks), or a different metric or scale. Tool use is the exception; see below.
 - **The benchmark is contaminated or may be.** For example a tech report admitting overlap, or training data that visibly contains test items. Raise possible contamination with the user rather than deciding silently.
 - **The board mixes metrics or protocols.** For now that means Video-MME-v2: skip it.
 - **The checkpoint is unfinished** ("still training", "under revision").
+
+Tool-assisted scores are allowed when `notes` labels them. When the source reports a score with tools or code execution, such as a "with Python" column or AIME tool-integrated reasoning, add it next to the plain score on the same board. Name the tool in that result's `notes` (for example "With Python tool."), and leave it out of the plain score's `notes`, so the reviewer can tell the two apart.
 
 Use the number exactly as the source prints it, in the board's units. DeepSWE uses percent, so a PwC 0.627 becomes 62.7. When the source shows the same score at two precisions, the model card's precise value wins (44.94 over the blog's 44.9).
 
