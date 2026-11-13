@@ -6,7 +6,7 @@ import { DictationButton } from "@/components/chat/DictationButton";
 import { PaperMentionPicker } from "@/components/chat/PaperMentionPicker";
 import { PaperMentionHighlights } from "@/components/chat/PaperMentionHighlights";
 import { PaperSelectionCard } from "@/components/chat/PaperSelectionCard";
-import { ArrowUpIcon, Spinner } from "@/components/chat/icons";
+import { ArrowUpIcon, PaperclipIcon, Spinner } from "@/components/chat/icons";
 import { completedScrollHeight, isCompletionKey, useChatCompletion } from "@/components/chat/useChatCompletion";
 import { useComposerDictation } from "@/components/chat/useComposerDictation";
 import { usePaperMentions } from "@/components/chat/usePaperMentions";
@@ -42,12 +42,6 @@ export class UploadAbandoned extends Error {}
 
 export const MAX_CHAT_FILES = 5;
 const ACCEPTED_FILES = ".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.tex,.bib,.csv,.tsv,.json,.py,.ipynb,.yaml,.yml";
-
-const PaperclipIcon = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-  </svg>
-);
 
 const EMPTY_DRAFT: ChatDraft = emptyChatDraft();
 
