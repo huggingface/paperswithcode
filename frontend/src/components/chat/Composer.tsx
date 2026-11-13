@@ -45,6 +45,11 @@ const ACCEPTED_FILES = ".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.tex,.bib,.csv,.tsv,
 
 const EMPTY_DRAFT: ChatDraft = emptyChatDraft();
 
+/** Scroll the whole composer, not just the caret, into the visible chat. */
+function revealComposer(textarea: HTMLTextAreaElement) {
+  textarea.closest(".chat-composer")?.scrollIntoView({ block: "nearest" });
+}
+
 const Composer: React.FC<ComposerProps> = ({
   onSend, busy, placeholder, autoFocus, draft, onDraftChange, onStop,
   disabled = false, describedBy,
@@ -123,8 +128,28 @@ const Composer: React.FC<ComposerProps> = ({
     if (el) {
       el.style.height = "auto";
       el.style.height = `${Math.min(completedScrollHeight(el), 200)}px`;
+      if (document.activeElement === el) revealComposer(el);
     }
   }, [value.text, completion]);
+
+  // A mobile keyboard shrinks the chat; keep the focused composer above it.
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    let frame = 0;
+    const reveal = () => {
+      cancelAnimationFrame(frame);
+      // Wait a frame so the chat has resized to the new viewport first.
+      frame = requestAnimationFrame(() => {
+        if (ref.current && document.activeElement === ref.current) revealComposer(ref.current);
+      });
+    };
+    viewport.addEventListener("resize", reveal);
+    return () => {
+      cancelAnimationFrame(frame);
+      viewport.removeEventListener("resize", reveal);
+    };
+  }, []);
 
   useEffect(() => { if (autoFocus) ref.current?.focus(); }, [autoFocus]);
 
