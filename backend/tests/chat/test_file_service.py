@@ -465,3 +465,86 @@ def test_shared_chats_show_attachment_names_only(db, settings):
         }
     ]
     assert "hidden" not in str(dumped) and str(row.id) not in str(dumped)
+
+
+def test_upload_writes_both_copies_concurrently(db, settings):
+    import threading
+
+    session_id = _session(db)
+    # Each side waits for the other: this only finishes when both run at once.
+    barrier = threading.Barrier(2, timeout=5)
+
+    class WaitingStorage(LocalChatFileStorage):
+        def write(self, key, data):
+            barrier.wait()
+            super().write(key, data)
+
+    class WaitingOpenAI(FakeOpenAIFiles):
+        def upload(self, filename, data, media_type):
+            barrier.wait()
+            return super().upload(filename, data, media_type)
+
+    storage = WaitingStorage(Path(settings.chat_file_local_dir))
+    openai = WaitingOpenAI()
+    service = ChatFileService(db, settings, storage=storage, openai_files=openai)
+
+    row = service.upload(OWNER, session_id, filename="a.txt", data=b"hello")
+
+    assert row.state == "ready"
+    assert storage.read(row.storage_key) == b"hello"
+    assert openai.uploaded[row.openai_file_id] == b"hello"
+
+
+def test_failed_bucket_write_still_deletes_the_openai_copy(db, settings):
+    session_id = _session(db)
+
+    class FailingStorage(LocalChatFileStorage):
+        def write(self, key, data):
+            raise OSError("bucket down")
+
+    openai = FakeOpenAIFiles()
+    service = ChatFileService(
+        db,
+        settings,
+        storage=FailingStorage(Path(settings.chat_file_local_dir)),
+        openai_files=openai,
+    )
+
+    with pytest.raises(ChatServiceError) as error:
+        service.upload(OWNER, session_id, filename="a.txt", data=b"hello")
+    assert error.value.code == "file_upload_failed"
+    assert openai.deleted == list(openai.uploaded) and openai.deleted
+    assert db.scalars(select(ChatUploadedFile)).all() == []
+
+
+def test_bucket_storage_client_is_shared_per_process():
+    from backend.services.chat_file_service import chat_file_storage_from_settings
+
+    settings = Settings(
+        chat_file_storage_backend="hf_bucket",
+        chat_file_hf_bucket_id="someone/chat-files",
+    )
+    assert chat_file_storage_from_settings(settings) is chat_file_storage_from_settings(
+        settings
+    )
+
+
+def test_unexpected_failure_still_removes_both_copies(db, settings):
+    session_id = _session(db)
+
+    class BrokenStorage(LocalChatFileStorage):
+        def write(self, key, data):
+            raise RuntimeError("unexpected client bug")
+
+    openai = FakeOpenAIFiles()
+    service = ChatFileService(
+        db,
+        settings,
+        storage=BrokenStorage(Path(settings.chat_file_local_dir)),
+        openai_files=openai,
+    )
+
+    with pytest.raises(RuntimeError):
+        service.upload(OWNER, session_id, filename="a.txt", data=b"hello")
+    assert openai.deleted == list(openai.uploaded) and openai.deleted
+    assert db.scalars(select(ChatUploadedFile)).all() == []
