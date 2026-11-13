@@ -11,6 +11,9 @@ try:
 except ModuleNotFoundError:
     from mcp_release import MCP_ENVIRONMENTS, MCP_PORTS, validate_release
 
+# Long enough for an ordinary tool call (p99 ~1.5 s) to finish.
+GRACEFUL_SHUTDOWN_SECONDS = 5
+
 
 def main() -> None:
     if len(sys.argv) != 2 or sys.argv[1] not in {"production", "staging"}:
@@ -34,6 +37,11 @@ def main() -> None:
             str(MCP_PORTS[sys.argv[1]]),
             "--no-proxy-headers",
             "--no-access-log",
+            # Listen streams stay open until the client leaves, so without a
+            # bound uvicorn waits on them until systemd's SIGKILL, refusing
+            # new connections the whole time.
+            "--timeout-graceful-shutdown",
+            str(GRACEFUL_SHUTDOWN_SECONDS),
         ],
         os.environ.copy(),
     )
