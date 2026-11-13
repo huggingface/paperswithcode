@@ -62,7 +62,6 @@ from backend.services.x_insight_post_service import (
     SITE,
     SOTA_MIN_ENTRIES,
     SOTA_PAPER_AGE_DAYS,
-    SOTA_WINDOW,
     _distinct_models,
     recently_posted,
     sota_credit,
@@ -92,7 +91,10 @@ KINDS = (
 )
 # Insight kinds about one paper; `subject_paper_id` reads it from the key.
 PAPER_POST_KINDS = ("new_sota", "open_sota", "open_release", "trending_paper")
-SOTA_LIMIT = 8
+# The agent checks every SOTA board live and rejects saturated ones, so offer it more, fresher
+# results than the 3-day window of x_insight_post_service, which left it about two at a time.
+SOTA_LIMIT = 20
+SOTA_WINDOW = timedelta(days=7)
 OPEN_RELEASE_DAYS = 21
 OPEN_RELEASE_PAPERS = 25
 OPEN_RELEASE_BOARDS = 12
