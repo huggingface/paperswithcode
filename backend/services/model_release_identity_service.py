@@ -22,6 +22,8 @@ _SETTINGS_SUFFIX = re.compile(r"\s*\([^()]*\)\s*$")
 # Release pages are titled "<name>", "Introducing <name> and <name>" or
 # "<name>: <subtitle>".
 _LEAD_VERB = re.compile(r"^(?:(?:introducing|announcing|meet) )?(?:the )?")
+# Only a launch headline announces the later members of "<name> and <name>".
+_LAUNCH_VERB = re.compile(r"(?:introducing|announcing|meet) ")
 _HEADLINE_END = re.compile(r"\s*[:;(|]|\s+[-–—]\s")
 _CONJUNCTION = re.compile(r"\s*,\s*(?:and\s+)?|\s*&\s*|\s+and\s+")
 # Announcing papers fetched per name before ambiguity can no longer be ruled out.
@@ -37,16 +39,21 @@ def _phrase(value: str) -> str:
 
 
 def _announced_names(title: str) -> set[str]:
-    """The model names a launch headline announces, as phrases.
+    """The model names a headline announces, as phrases.
 
     "Introducing GPT-6 Sol and Luna" announces "gpt 6 sol" and "gpt 6 luna";
     "Introducing Claude Fable 5.2 and Claude Mythos 5.2" announces both models.
     """
-    headline = _HEADLINE_END.split(_LEAD_VERB.sub("", _phrase(title)), maxsplit=1)[0]
+    phrase = _phrase(title)
+    launch = _LAUNCH_VERB.match(phrase) is not None
+    headline = _HEADLINE_END.split(_LEAD_VERB.sub("", phrase), maxsplit=1)[0]
     parts = [part for part in _CONJUNCTION.split(headline) if part]
     if not parts:
         return set()
     first, *others = parts
+    if not launch:
+        # "Comparing GPT-6 Sol and Claude Opus 5.5" announces neither model.
+        return {first}
     prefix = first.split()
     later = set()
     for other in others:
