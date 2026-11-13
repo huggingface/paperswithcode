@@ -12,6 +12,8 @@ interface ChatComposerSurfaceProps {
   /** Billed to Papers With Code, so the user billing notice does not apply. */
   sponsored?: boolean;
   paused: boolean;
+  /** Files are uploading; a suggestion would send before they are attached. */
+  uploading?: boolean;
   /** Why the last send was rejected; shown next to the restored draft. */
   error?: string;
   suggestions?: readonly string[];
@@ -25,6 +27,7 @@ export function ChatComposerSurface({
   provider,
   sponsored = false,
   paused,
+  uploading = false,
   error,
   suggestions = [],
   suggestionLinks,
@@ -51,13 +54,12 @@ export function ChatComposerSurface({
         type="button"
         key={example}
         className="chat-example"
-        disabled={paused}
+        disabled={paused || uploading}
+        // A suggestion replaces the typed text; selection and files still go with it.
         onClick={() => composerProps.onSend({
+          ...composerProps.draft,
           text: example,
           paperMentions: [],
-          ...(composerProps.draft?.paperSelection
-            ? { paperSelection: composerProps.draft.paperSelection }
-            : {}),
         })}
       >{example}</button>)}
       {suggestionLinks}

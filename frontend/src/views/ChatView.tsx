@@ -262,41 +262,51 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   }, [authorizeSend, mode, onPaperSelectionChange, onReaderSubmit, paperSelection, readerOwnsSelection, restorePrompt, sendChat, user]);
 
   // A new chat is created before its first upload; the first turn then targets it.
+  const uploadToChat = useCallback(async (file: File, pendingSessionId?: string) => {
+    const generation = uploadGenerationRef.current;
+    let sessionId = routeSessionIdRef.current ?? pendingSessionId ?? uploadSessionRef.current;
+    if (!sessionId) {
+      // Parallel picks share one new chat.
+      if (!creatingUploadSessionRef.current) {
+        const creating: Promise<string> = chatApi.createSession(
+          selectedModel,
+          reasoningEffort,
+          mode === "paper" ? primaryPaper?.routeId : undefined,
+        ).then((session) => {
+          if (generation === uploadGenerationRef.current) uploadSessionRef.current = session.id;
+          void refreshSessions();
+          return session.id;
+        }).finally(() => {
+          if (creatingUploadSessionRef.current === creating) creatingUploadSessionRef.current = null;
+        });
+        creatingUploadSessionRef.current = creating;
+      }
+      sessionId = await creatingUploadSessionRef.current;
+    }
+    if (generation !== uploadGenerationRef.current) throw new UploadAbandoned();
+    const uploaded = await chatApi.uploadFile(sessionId, file);
+    if (generation !== uploadGenerationRef.current) {
+      // No composer will show this file, so nothing could remove it later.
+      void chatApi.deleteFile(sessionId, uploaded.id).catch(() => undefined);
+      throw new UploadAbandoned();
+    }
+    return { sessionId, file: uploaded };
+  }, [mode, primaryPaper?.routeId, reasoningEffort, refreshSessions, selectedModel]);
+  // Suggestions send outside the composer, so they wait for uploads too.
+  const [uploadsInFlight, setUploadsInFlight] = useState(0);
   const fileUploads = useMemo<ComposerFileUploads>(() => ({
     upload: async (file, pendingSessionId) => {
-      const generation = uploadGenerationRef.current;
-      let sessionId = routeSessionIdRef.current ?? pendingSessionId ?? uploadSessionRef.current;
-      if (!sessionId) {
-        // Parallel picks share one new chat.
-        if (!creatingUploadSessionRef.current) {
-          const creating: Promise<string> = chatApi.createSession(
-            selectedModel,
-            reasoningEffort,
-            mode === "paper" ? primaryPaper?.routeId : undefined,
-          ).then((session) => {
-            if (generation === uploadGenerationRef.current) uploadSessionRef.current = session.id;
-            void refreshSessions();
-            return session.id;
-          }).finally(() => {
-            if (creatingUploadSessionRef.current === creating) creatingUploadSessionRef.current = null;
-          });
-          creatingUploadSessionRef.current = creating;
-        }
-        sessionId = await creatingUploadSessionRef.current;
+      setUploadsInFlight((count) => count + 1);
+      try {
+        return await uploadToChat(file, pendingSessionId);
+      } finally {
+        setUploadsInFlight((count) => count - 1);
       }
-      if (generation !== uploadGenerationRef.current) throw new UploadAbandoned();
-      const uploaded = await chatApi.uploadFile(sessionId, file);
-      if (generation !== uploadGenerationRef.current) {
-        // No composer will show this file, so nothing could remove it later.
-        void chatApi.deleteFile(sessionId, uploaded.id).catch(() => undefined);
-        throw new UploadAbandoned();
-      }
-      return { sessionId, file: uploaded };
     },
     remove: (sessionId, fileId) => {
       void chatApi.deleteFile(sessionId, fileId).catch(() => undefined);
     },
-  }), [mode, primaryPaper?.routeId, reasoningEffort, refreshSessions, selectedModel]);
+  }), [uploadToChat]);
 
   const selectedTurn = chat.selectedBusy;
   const { load: loadChat, activeConfiguration } = chat;
@@ -446,6 +456,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     provider: model.provider,
     sponsored: model.sponsored,
     paused: chatPaused,
+    uploading: uploadsInFlight > 0,
     error: chat.sessionError,
   };
 
