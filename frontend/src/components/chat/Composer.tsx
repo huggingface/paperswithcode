@@ -132,23 +132,16 @@ const Composer: React.FC<ComposerProps> = ({
     }
   }, [value.text, completion]);
 
-  // A mobile keyboard shrinks the chat; keep the focused composer above it.
+  // A mobile keyboard shrinks the chat page; keep the focused composer above it.
+  // Observe the page itself so the scroll runs after its new height is laid out.
   useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    let frame = 0;
-    const reveal = () => {
-      cancelAnimationFrame(frame);
-      // Wait a frame so the chat has resized to the new viewport first.
-      frame = requestAnimationFrame(() => {
-        if (ref.current && document.activeElement === ref.current) revealComposer(ref.current);
-      });
-    };
-    viewport.addEventListener("resize", reveal);
-    return () => {
-      cancelAnimationFrame(frame);
-      viewport.removeEventListener("resize", reveal);
-    };
+    const page = ref.current?.closest(".chat-page, .shared-chat-page");
+    if (!page) return;
+    const observer = new ResizeObserver(() => {
+      if (ref.current && document.activeElement === ref.current) revealComposer(ref.current);
+    });
+    observer.observe(page);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => { if (autoFocus) ref.current?.focus(); }, [autoFocus]);

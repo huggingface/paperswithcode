@@ -207,20 +207,27 @@ describe("Composer completion", () => {
 describe("Composer mobile keyboard", () => {
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-  it("scrolls the focused composer into view when the keyboard shrinks the viewport", () => {
-    const viewport = new EventTarget();
-    vi.stubGlobal("visualViewport", viewport);
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 1; });
+  it("scrolls the focused composer into view when the keyboard shrinks the chat page", () => {
+    let resizePage = () => {};
+    const observe = vi.fn();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(callback: () => void) { resizePage = callback; }
+      observe = observe;
+      disconnect() {}
+    });
     const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
     const client = new QueryClient();
-    const { container } = render(<QueryClientProvider client={client}><Harness onSend={vi.fn()} /></QueryClientProvider>);
+    const { container } = render(
+      <QueryClientProvider client={client}><div className="chat-page"><Harness onSend={vi.fn()} /></div></QueryClientProvider>,
+    );
+    expect(observe).toHaveBeenCalledWith(container.querySelector(".chat-page"));
     const textarea = screen.getByRole("combobox");
 
-    viewport.dispatchEvent(new Event("resize"));
+    resizePage();
     expect(scrollIntoView).not.toHaveBeenCalled();
 
     textarea.focus();
-    viewport.dispatchEvent(new Event("resize"));
+    resizePage();
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(container.querySelector(".chat-composer"));
 
