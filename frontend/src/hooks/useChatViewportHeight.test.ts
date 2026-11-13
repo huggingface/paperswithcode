@@ -8,7 +8,7 @@ afterEach(() => {
 });
 
 it("fills the visible viewport as browser chrome, keyboard, and header sizes change", () => {
-  const viewport = Object.assign(new EventTarget(), { height: 740 });
+  const viewport = Object.assign(new EventTarget(), { height: 740, scale: 1 });
   vi.stubGlobal("visualViewport", viewport);
   const header = document.createElement("header");
   header.className = "app-header";
@@ -37,6 +37,19 @@ it("fills the visible viewport as browser chrome, keyboard, and header sizes cha
   unmount();
   expect(disconnect).toHaveBeenCalledOnce();
   expect(remove).toHaveBeenCalledWith("resize", expect.any(Function));
+});
+
+it("keeps the chat height steady while the page is pinch-zoomed", () => {
+  const viewport = Object.assign(new EventTarget(), { height: 800, scale: 1 });
+  vi.stubGlobal("visualViewport", viewport);
+  const { result } = renderHook(() => useChatViewportHeight(true));
+  expect(result.current).toBe("800px");
+  act(() => {
+    viewport.height = 400;
+    viewport.scale = 2;
+    viewport.dispatchEvent(new Event("resize"));
+  });
+  expect(result.current).toBe("800px");
 });
 
 it("uses innerHeight when VisualViewport is unavailable", () => {

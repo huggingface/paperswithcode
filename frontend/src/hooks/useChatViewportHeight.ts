@@ -1,6 +1,10 @@
 import { useLayoutEffect, useState } from "react";
 
-/** Keep standalone chat inside the visible viewport, including the mobile keyboard. */
+/**
+ * Keep standalone chat inside the visible viewport, including the mobile keyboard.
+ * Pinch zoom also shrinks the visual viewport, so undo its scale: zooming should
+ * magnify the page, not resize the chat to the zoomed-in region.
+ */
 export function useChatViewportHeight(enabled: boolean): string {
   const [height, setHeight] = useState("calc(100dvh - 60px)");
 
@@ -9,7 +13,7 @@ export function useChatViewportHeight(enabled: boolean): string {
     const header = document.querySelector<HTMLElement>(".app-header");
     const viewport = window.visualViewport;
     const update = () => {
-      const visibleHeight = viewport?.height ?? window.innerHeight;
+      const visibleHeight = viewport ? viewport.height * viewport.scale : window.innerHeight;
       setHeight(`${Math.max(0, visibleHeight - (header?.offsetHeight ?? 0))}px`);
     };
     update();
