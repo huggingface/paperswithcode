@@ -122,7 +122,6 @@ const SharedChatView: React.FC = () => {
           {query.data.model_provider === "openrouter" && <span>
             Powered by <a href="https://openrouter.ai" target="_blank" rel="noreferrer">OpenRouter</a>
           </span>}
-          {query.data.model_provider === "openai" && <span>Powered by OpenAI</span>}
         </div>}
         <section className="shared-chat-fresh" aria-labelledby="shared-chat-fresh-title">
           <h2 id="shared-chat-fresh-title">Start a new conversation</h2>
