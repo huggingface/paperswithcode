@@ -171,6 +171,23 @@
   margin-top: 9px;
 }
 .chat-provider-attribution { white-space: nowrap; }
+/* Follow-up composer: the text field shares one row with the buttons. Notices and
+   chips span the full width; dense placement pulls the buttons up beside the text. */
+.chat-composer-wrap .chat-composer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-auto-flow: row dense;
+}
+.chat-composer-wrap .chat-composer > * { grid-column: 1 / -1; }
+.chat-composer-wrap .chat-composer > .chat-composer-textarea-wrap { grid-column: 1; }
+.chat-composer-wrap .chat-composer > .chat-composer-row {
+  grid-column: 2;
+  align-self: end;
+  padding: 0 0 0 4px;
+}
+.chat-composer-wrap .chat-composer textarea,
+.chat-composer-wrap .chat-paper-highlight-layer-composer { padding: 9px 6px 9px 10px; }
+.chat-composer-wrap .chat-composer-tools { display: none; }
 .chat-send {
   display: flex;
   align-items: center;
