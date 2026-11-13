@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import LatexTitle from "@/components/LatexTitle";
@@ -95,7 +95,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   };
 
   // Enter hands the query to the AI assistant on /chat; browsing the live
-  // results below remains click/tab-driven as before.
+  // result links below open with Tab + Enter.
   const askAssistant = () => {
     const q = query.trim();
     if (q) go(`/chat?q=${encodeURIComponent(q)}`);
@@ -147,10 +147,11 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
               {matchedTasks.map((t) => {
                 const c = chipColors(hueFromSlug(t.slug || ""));
                 return (
-                  <div
+                  <Link
                     key={t.id}
                     className="search-result-tag"
-                    onClick={() => go(`/tasks/${t.slug}`)}
+                    to={`/tasks/${t.slug}`}
+                    onClick={onClose}
                   >
                     <span
                       className="dot"
@@ -158,7 +159,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
                     ></span>
                     <span className="name">{displayTaskName(t.name, t.slug)}</span>
                     {t.paper_count != null && <span className="count">{t.paper_count} papers</span>}
-                  </div>
+                  </Link>
                 );
               })}
             </>
@@ -167,14 +168,15 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
             <>
               <div className="search-section-label">Methods · {matchedMethods.length}</div>
               {matchedMethods.map((m) => (
-                <div
+                <Link
                   key={m.id}
                   className="search-result-tag"
-                  onClick={() => go(`/methods/${m.slug || m.id}`)}
+                  to={`/methods/${m.slug || m.id}`}
+                  onClick={onClose}
                 >
                   <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>{m.name}</span>
                   {m.paper_count != null && <span className="count">{m.paper_count} papers</span>}
-                </div>
+                </Link>
               ))}
             </>
           )}
@@ -182,16 +184,17 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
             <>
               <div className="search-section-label">Benchmarks · {matchedBenchmarks.length}</div>
               {matchedBenchmarks.map((d) => (
-                <div
+                <Link
                   key={d.id}
                   className="search-result-tag"
-                  onClick={() => go(`/benchmark/${d.slug || d.id}`)}
+                  to={`/benchmark/${d.slug || d.id}`}
+                  onClick={onClose}
                 >
                   <span className="name">{d.name}</span>
                   {d.paper_count != null && d.paper_count > 0 && (
                     <span className="count">{d.paper_count} entries</span>
                   )}
-                </div>
+                </Link>
               ))}
             </>
           )}
@@ -199,15 +202,16 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
             <>
               <div className="search-section-label">Authors · {matchedAuthors.length}</div>
               {matchedAuthors.map((a) => (
-                <div
+                <Link
                   key={a.id}
                   className="search-result-tag"
-                  onClick={() => go(`/authors/${a.id}`)}
+                  to={`/authors/${a.id}`}
+                  onClick={onClose}
                 >
                   <span className="name">{a.full_name}</span>
                   {a.hf_username && <span className="handle">@{a.hf_username}</span>}
                   {a.paper_count > 0 && <span className="count">{a.paper_count} papers</span>}
-                </div>
+                </Link>
               ))}
             </>
           )}
@@ -217,17 +221,18 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
                 Organizations · {matchedOrganizations.length}
               </div>
               {matchedOrganizations.map((o) => (
-                <div
+                <Link
                   key={o.id}
                   className="search-result-tag"
-                  onClick={() => go(`/orgs/${o.slug}`)}
+                  to={`/orgs/${o.slug}`}
+                  onClick={onClose}
                 >
                   {o.logo_url && <img className="logo" src={o.logo_url} alt="" loading="lazy" />}
                   <span className="name">{o.name}</span>
                   {o.paper_count != null && o.paper_count > 0 && (
                     <span className="count">{o.paper_count} papers</span>
                   )}
-                </div>
+                </Link>
               ))}
             </>
           )}
@@ -235,7 +240,12 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
             <>
               <div className="search-section-label">Papers · {matchedPapers.length}</div>
               {matchedPapers.map((p) => (
-                <div key={p.id} className="search-result" onClick={() => go(`/paper/${p.arxiv_id || p.id}`)}>
+                <Link
+                  key={p.id}
+                  className="search-result"
+                  to={`/paper/${p.arxiv_id || p.id}`}
+                  onClick={onClose}
+                >
                   <div className="search-result-title">
                     <LatexTitle title={p.title} />
                   </div>
@@ -254,7 +264,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
                       </>
                     )}
                   </div>
-                </div>
+                </Link>
               ))}
             </>
           )}
