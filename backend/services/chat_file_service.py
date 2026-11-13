@@ -451,14 +451,17 @@ class ChatFileService:
                 )
             if uploaded.exception() is None:
                 openai_file_id = uploaded.result()
-            stored.result()
-            uploaded.result()
+            failure = stored.exception() or uploaded.exception()
+            if failure is not None:
+                raise failure
             # Record the OpenAI id at once: it is the only handle that can
             # delete that copy. If the chat was deleted meanwhile, this fails.
             row.openai_file_id = openai_file_id
             row.state = "ready"
             self.db.commit()
-        except (httpx.HTTPError, OSError, ValueError, SQLAlchemyError) as error:
+        except Exception as error:
+            # Either side may have finished while the other failed in any way,
+            # so the copies are always removed before the error moves on.
             self.db.rollback()
             self._discard(
                 FileCleanup(
@@ -470,9 +473,13 @@ class ChatFileService:
                 delete(ChatUploadedFile).where(ChatUploadedFile.id == file_id)
             )
             self.db.commit()
-            raise ChatServiceError(
-                "file_upload_failed", 502, "The file could not be stored; try again"
-            ) from error
+            if isinstance(
+                error, (httpx.HTTPError, OSError, ValueError, SQLAlchemyError)
+            ):
+                raise ChatServiceError(
+                    "file_upload_failed", 502, "The file could not be stored; try again"
+                ) from error
+            raise
         return row
 
     def delete_file(

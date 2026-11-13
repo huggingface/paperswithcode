@@ -527,3 +527,24 @@ def test_bucket_storage_client_is_shared_per_process():
     assert chat_file_storage_from_settings(settings) is chat_file_storage_from_settings(
         settings
     )
+
+
+def test_unexpected_failure_still_removes_both_copies(db, settings):
+    session_id = _session(db)
+
+    class BrokenStorage(LocalChatFileStorage):
+        def write(self, key, data):
+            raise RuntimeError("unexpected client bug")
+
+    openai = FakeOpenAIFiles()
+    service = ChatFileService(
+        db,
+        settings,
+        storage=BrokenStorage(Path(settings.chat_file_local_dir)),
+        openai_files=openai,
+    )
+
+    with pytest.raises(RuntimeError):
+        service.upload(OWNER, session_id, filename="a.txt", data=b"hello")
+    assert openai.deleted == list(openai.uploaded) and openai.deleted
+    assert db.scalars(select(ChatUploadedFile)).all() == []
