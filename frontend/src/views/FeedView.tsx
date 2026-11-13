@@ -224,11 +224,6 @@ export const AskAssistant: React.FC = () => {
 
   return (
     <>
-      {!mirror && (
-        <div className="ask-home-new">
-          Hint: type @ to bring papers into context, or press Tab to use a suggestion
-        </div>
-      )}
       <div className="ask-home">
         <div className="ask-home-row">
           <div className="ask-home-textarea-wrap">

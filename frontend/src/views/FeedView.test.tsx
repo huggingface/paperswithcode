@@ -62,14 +62,6 @@ const renderAskAssistant = () => {
 };
 
 describe("AskAssistant", () => {
-  it("shows the paper mention hint above the chat window", () => {
-    renderAskAssistant();
-
-    expect(screen.getByText(
-      "Hint: type @ to bring papers into context, or press Tab to use a suggestion",
-    )).toBeVisible();
-  });
-
   it("fills the empty box with the shown suggestion on Tab", async () => {
     const user = userEvent.setup();
     renderAskAssistant();
@@ -137,7 +129,6 @@ describe("AskAssistant", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     renderAskAssistant();
 
-    expect(screen.queryByText("Hint: type @ to bring papers into context")).not.toBeInTheDocument();
     const textarea = screen.getByRole("textbox", { name: "Ask the assistant" });
     fireEvent.change(textarea, { target: { value: "What is new in diffusion?" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
