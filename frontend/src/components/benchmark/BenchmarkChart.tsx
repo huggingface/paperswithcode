@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { formatMetricValue } from "@/lib/utils";
@@ -89,6 +89,9 @@ function buildChartTimeTicks(xMin: number, xMax: number): ChartTimeTick[] {
 const BenchmarkChart: React.FC<BenchmarkChartProps> = ({ points: dataPoints, metric }) => {
   const navigate = useNavigate();
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  // Halo via filter, not a text stroke: browsers paint a stroked label's
+  // stroke in the find-in-page highlight color, turning matches into blobs.
+  const labelHaloId = `${useId()}-label-halo`;
   const W = 880;
   const H = 320;
   const padL = 60;
@@ -213,6 +216,17 @@ const BenchmarkChart: React.FC<BenchmarkChartProps> = ({ points: dataPoints, met
 
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block" }}>
+      <defs>
+        <filter id={labelHaloId} x="-10%" y="-30%" width="120%" height="160%">
+          <feMorphology in="SourceAlpha" operator="dilate" radius="1.5" result="halo" />
+          <feFlood style={{ floodColor: "var(--bg-elevated)" }} />
+          <feComposite in2="halo" operator="in" />
+          <feMerge>
+            <feMergeNode />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
       <text
         x={padL - 38}
         y={padT + innerH / 2}
@@ -297,7 +311,7 @@ const BenchmarkChart: React.FC<BenchmarkChartProps> = ({ points: dataPoints, met
           fill="var(--ink-soft)"
           textAnchor={l.anchor}
           pointerEvents="none"
-          style={{ paintOrder: "stroke", stroke: "var(--bg-elevated)", strokeWidth: 3, strokeLinejoin: "round" }}
+          filter={`url(#${labelHaloId})`}
         >
           {l.text}
         </text>
