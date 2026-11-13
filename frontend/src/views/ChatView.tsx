@@ -122,6 +122,13 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   const [queuedLaunch] = useState(readQueuedChatLaunch);
   const routeSessionIdRef = useRef(routeSessionId);
   routeSessionIdRef.current = routeSessionId;
+  // A chat created for uploads before its first turn; it belongs to this route.
+  const uploadSessionRef = useRef<string | null>(null);
+  const creatingUploadSessionRef = useRef<Promise<string> | null>(null);
+  useEffect(() => {
+    uploadSessionRef.current = null;
+    creatingUploadSessionRef.current = null;
+  }, [routeSessionId]);
   // Queued launch controls belong to the chat the launch returns to.
   const model = useChatModelSelection({
     userId,
@@ -172,7 +179,11 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
         webSearchEnabled: configuration?.webSearchEnabled ?? webSearchEnabled,
         reasoningEffort: configuration?.reasoningEffort ?? reasoningEffort,
       });
-      if ((routeSessionIdRef.current ?? null) === originSessionId && id !== originSessionId) {
+      const route = routeSessionIdRef.current ?? null;
+      // A turn on the chat created for uploads still starts from this route.
+      const fromUploadSession = route === null && uploadSessionRef.current !== null
+        && (id === uploadSessionRef.current || originSessionId === uploadSessionRef.current);
+      if ((route === originSessionId || fromUploadSession) && id !== route) {
         if (mode === "paper") onReaderSessionId?.(id);
         else navigate(`/chat/${id}`, { replace: true });
       }
@@ -222,7 +233,11 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
 
   const readerOwnsSelection = Boolean(onPaperSelectionChange);
   const send = useCallback(async (nextDraft: ChatDraft) => {
-    const payload = withReaderSelection(nextDraft, readerOwnsSelection, paperSelection);
+    const selected = withReaderSelection(nextDraft, readerOwnsSelection, paperSelection);
+    // Send into the chat created for an upload, even if that upload failed or was removed.
+    const payload = !routeSessionIdRef.current && !selected.fileSessionId && uploadSessionRef.current
+      ? { ...selected, fileSessionId: uploadSessionRef.current }
+      : selected;
     const authorized = authorizeSend(payload, Boolean(user));
     if (authorized !== true && !(await authorized)) return;
     stopChatAutoSend();
@@ -239,15 +254,19 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   // A new chat is created before its first upload; the first turn then targets it.
   const fileUploads = useMemo<ComposerFileUploads>(() => ({
     upload: async (file, pendingSessionId) => {
-      let sessionId = routeSessionIdRef.current ?? pendingSessionId;
+      let sessionId = routeSessionIdRef.current ?? pendingSessionId ?? uploadSessionRef.current;
       if (!sessionId) {
-        const session = await chatApi.createSession(
+        // Parallel picks share one new chat.
+        creatingUploadSessionRef.current ??= chatApi.createSession(
           selectedModel,
           reasoningEffort,
           mode === "paper" ? primaryPaper?.routeId : undefined,
-        );
-        sessionId = session.id;
-        void refreshSessions();
+        ).then((session) => {
+          uploadSessionRef.current = session.id;
+          void refreshSessions();
+          return session.id;
+        }).finally(() => { creatingUploadSessionRef.current = null; });
+        sessionId = await creatingUploadSessionRef.current;
       }
       return { sessionId, file: await chatApi.uploadFile(sessionId, file) };
     },

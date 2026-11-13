@@ -306,7 +306,7 @@ const Composer: React.FC<ComposerProps> = ({
                 type="button"
                 className="chat-attach"
                 onClick={() => fileInputRef.current?.click()}
-                disabled={disabled || busy || files.length >= MAX_CHAT_FILES}
+                disabled={disabled || busy || uploading > 0 || files.length >= MAX_CHAT_FILES}
                 aria-label="Attach files"
                 title="Attach PDF, image, or text files"
               >
