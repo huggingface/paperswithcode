@@ -29,8 +29,13 @@ vi.mock("@/components/chat/ChatComposerSurface", () => ({
     <button onClick={() => props.onSend({ text: "New question", paperMentions: [] })} disabled={props.disabled || props.busy}>Send test prompt</button>
     {props.busy && <button onClick={props.onStop}>Stop selected turn</button>}
     <output data-testid="draft">{props.draft?.text}</output>
+    <output data-testid="draft-files">{props.draft?.files?.map((file) => file.id).join(",")}</output>
     {props.fileUploads && <button onClick={() => {
-      void props.fileUploads!.upload(new File(["%PDF"], "notes.pdf")).then((result) => { mocks.upload = result; }, () => undefined);
+      const before = props.draft ?? { text: "", paperMentions: [] };
+      void props.fileUploads!.upload(new File(["%PDF"], "notes.pdf")).then((result) => {
+        mocks.upload = result;
+        props.onDraftChange?.({ ...before, files: [result.file], fileSessionId: result.sessionId });
+      }, () => undefined);
     }}>Attach test file</button>}
     <button onClick={() => mocks.upload && props.onSend({
       text: "About the file", paperMentions: [], files: [mocks.upload.file], fileSessionId: mocks.upload.sessionId,
@@ -429,5 +434,22 @@ describe("uploads before the first turn", () => {
     expect(upload).not.toHaveBeenCalled();
     expect(mocks.upload).toBeNull();
     expect(mocks.stream.mock.calls[0][0]).toMatchObject({ session_id: null });
+  });
+
+  it("keeps an upload that resolves during navigation out of the next chat's composer", async () => {
+    enableUploads();
+    const uploading = deferred<typeof file>();
+    vi.spyOn(chatApi, "uploadFile").mockReturnValue(uploading.promise);
+    render(element("/chat/a"));
+    await screen.findByText("a saved question");
+    fireEvent.click(screen.getByText("Attach test file"));
+    await waitFor(() => expect(chatApi.uploadFile).toHaveBeenCalledOnce());
+    await act(async () => {
+      fireEvent.click(screen.getByText("Visit b"));
+      uploading.resolve(file);
+    });
+    await screen.findByText("b saved question");
+
+    expect(screen.getByTestId("draft-files")).toBeEmptyDOMElement();
   });
 });

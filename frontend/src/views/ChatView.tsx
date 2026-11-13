@@ -132,7 +132,13 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     uploadSessionRef.current = null;
     creatingUploadSessionRef.current = null;
   }, []);
-  useEffect(() => { resetUploadSession(); }, [routeSessionId, resetUploadSession]);
+  // Reset during render, not in an effect, so an upload resolving right after
+  // navigation already sees the new generation.
+  const uploadRouteRef = useRef(routeSessionId);
+  if (uploadRouteRef.current !== routeSessionId) {
+    uploadRouteRef.current = routeSessionId;
+    resetUploadSession();
+  }
   // Queued launch controls belong to the chat the launch returns to.
   const model = useChatModelSelection({
     userId,
@@ -406,11 +412,16 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     || publicShare.pending
   ));
   const routeSessionError = !routeReady && !isRouteSessionLoading && routeQuery.error?.message;
+  // Uploads belong to one chat; a draft carried to another chat leaves them behind.
+  const composerDraft = !draft.fileSessionId
+    || draft.fileSessionId === (routeSessionId ?? uploadSessionRef.current)
+    ? draft
+    : { ...draft, files: undefined, fileSessionId: undefined };
   const composerProps = {
     onSend: send,
     busy: selectedTurn,
     onStop: chat.stop,
-    draft: withReaderSelection(draft, readerOwnsSelection, paperSelection),
+    draft: withReaderSelection(composerDraft, readerOwnsSelection, paperSelection),
     onDraftChange: (next: ChatDraft) => {
       if (onPaperSelectionChange) {
         setDraft(withoutSelection(next));
