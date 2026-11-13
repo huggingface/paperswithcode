@@ -503,6 +503,20 @@ def test_remote_add_evals_requires_configured_leaderboard_search():
     assert "taxonomy command returns only tasks and methods" in normalized_runner
 
 
+def test_remote_add_evals_fills_parameter_count_and_hub_url():
+    skill = " ".join(
+        Path(".agents/skills/remote-paper-curation/SKILL.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+
+    # Scheduled add-evals rows were stored without sizes because only
+    # benchmark-gap rows were told about these fields.
+    assert "Set `num_parameters` and `hf_model_url` on every new evaluation" in skill
+    assert "raw integer `safetensors.total`" in skill
+    assert "never copy them from a sibling size, a base model, or a headline" in skill
+
+
 def test_add_evals_skill_treats_existing_equivalent_rows_as_satisfied():
     skill = Path(".agents/skills/add-evals/SKILL.md").read_text(encoding="utf-8")
     normalized = " ".join(skill.split())

@@ -200,6 +200,16 @@ Always include `evaluation_removals`, `validation_evidence`, and
 consolidation additionally requires every matched row ID and the canonical-row
 selection reason. Remove an invalid row only with its full before-state and
 unambiguous primary-paper evidence.
+Set `num_parameters` and `hf_model_url` on every new evaluation whose exact
+model variant has an official Hugging Face model repository, such as one in the
+paper's `hf_models` or the pinned model card. `hf_model_url` is that
+repository root (`https://huggingface.co/<org>/<name>`). `num_parameters` is
+the raw integer `safetensors.total` from that repository's Hub API, for example
+`852985920` rather than `800M`. Without safetensors, use the size that the
+paper or model card states for that exact variant, converted to a raw integer.
+Use total, not active, parameters for MoE models. Leave both fields unset when
+no official source covers that exact variant; never copy them from a sibling
+size, a base model, or a headline.
 Use only configured leaderboard IDs and exact metric names returned by the
 `leaderboards` command; IDs from papers or web sources are not database IDs.
 Never invent IDs, create benchmark metadata, or import comparator rows. Submit
