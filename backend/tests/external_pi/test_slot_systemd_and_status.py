@@ -44,6 +44,7 @@ def test_dedicated_worker_environment_contains_only_token_and_tool_flag(
         + "t" * 32
         + "\n"
         + f"PWC_CHAT_PWC_MCP_ENABLED={mcp_enabled or 'false'}\n"
+        + "PWC_CHAT_SHOW_REASONING=true\n"
     )
     assert worker_environment.stat().st_mode & 0o777 == 0o640
     assert ownership == [(0, 1234)]

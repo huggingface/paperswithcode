@@ -67,4 +67,9 @@ Object.defineProperties(Element.prototype, {
     configurable: true,
     value: () => {},
   },
+  scrollIntoView: {
+    configurable: true,
+    writable: true,
+    value: () => {},
+  },
 });

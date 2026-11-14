@@ -243,6 +243,8 @@ def node_environment(
         "PWC_EXTERNAL_PI_PROMPT_PATH": str(resolved.prompt),
         "PWC_EXTERNAL_PI_TOOL_NAMES": "[]",
         "PWC_CHAT_PWC_MCP_ENABLED": protected.get("PWC_CHAT_PWC_MCP_ENABLED", "false"),
+        # Matches the backend's chat_show_reasoning default.
+        "PWC_CHAT_SHOW_REASONING": protected.get("PWC_CHAT_SHOW_REASONING", "true"),
         # The worker refreshes the prompt's task index from the environment's
         # loopback catalog bridge in the background, outside any turn budget.
         "PWC_API_URL": MCP_API_URLS[resolved.worker_id.split("-", 1)[0]],
@@ -849,7 +851,7 @@ SELECT json_build_object(
 
 
 def sync_worker_environment(environment: str) -> None:
-    """Publish the worker token and reviewed non-secret tool configuration."""
+    """Publish the worker token and reviewed non-secret chat configuration."""
     protected = _protected_environment_values(environment)
     token = protected.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
     if len(token) < 32 or "\n" in token or "\r" in token:
@@ -857,6 +859,9 @@ def sync_worker_environment(environment: str) -> None:
     mcp_enabled = protected.get("PWC_CHAT_PWC_MCP_ENABLED", "false")
     if mcp_enabled not in {"true", "false"}:
         raise ValueError("external Pi MCP flag must be true or false")
+    show_reasoning = protected.get("PWC_CHAT_SHOW_REASONING", "true")
+    if show_reasoning not in {"true", "false"}:
+        raise ValueError("external Pi reasoning flag must be true or false")
     worker_config = (
         WORKER_CONFIG
         if environment == "staging"
@@ -869,6 +874,7 @@ def sync_worker_environment(environment: str) -> None:
             os.fchmod(handle.fileno(), 0o640)
             handle.write(f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={token}\n")
             handle.write(f"PWC_CHAT_PWC_MCP_ENABLED={mcp_enabled}\n")
+            handle.write(f"PWC_CHAT_SHOW_REASONING={show_reasoning}\n")
         os.chown(temporary, 0, grp.getgrnam(WORKER_USERS[environment]).gr_gid)
         os.replace(temporary, worker_config)
     except OSError:
