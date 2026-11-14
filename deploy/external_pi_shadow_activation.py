@@ -186,7 +186,7 @@ def _validate_worker_environment(values: dict[str, str]) -> None:
         )
     if values.get("PWC_CHAT_PWC_MCP_ENABLED", "false") not in {"true", "false"}:
         raise ShadowActivationError("external Pi MCP flag must be true or false")
-    if values.get("PWC_CHAT_SHOW_REASONING", "true") not in {"true", "false"}:
+    if values.get("PWC_CHAT_SHOW_REASONING", "false") not in {"true", "false"}:
         raise ShadowActivationError("external Pi reasoning flag must be true or false")
 
 
