@@ -176,12 +176,18 @@ def _atomic_write(path: Path, content: bytes, mode: int) -> None:
 
 
 def _validate_worker_environment(values: dict[str, str]) -> None:
-    if set(values) - {TOKEN_KEY, "PWC_CHAT_PWC_MCP_ENABLED"}:
+    if set(values) - {
+        TOKEN_KEY,
+        "PWC_CHAT_PWC_MCP_ENABLED",
+        "PWC_CHAT_SHOW_REASONING",
+    }:
         raise ShadowActivationError(
             "external Pi worker environment has unapproved keys"
         )
     if values.get("PWC_CHAT_PWC_MCP_ENABLED", "false") not in {"true", "false"}:
         raise ShadowActivationError("external Pi MCP flag must be true or false")
+    if values.get("PWC_CHAT_SHOW_REASONING", "true") not in {"true", "false"}:
+        raise ShadowActivationError("external Pi reasoning flag must be true or false")
 
 
 def _ensure_worker_environment(path: Path, token: str) -> None:

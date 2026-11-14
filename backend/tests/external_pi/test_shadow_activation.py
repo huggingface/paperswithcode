@@ -151,7 +151,14 @@ def test_temporary_qualification_uses_explicit_replica_identity(tmp_path: Path):
     assert observed == ["staging-blue-00", "staging-blue-00"]
 
 
-@pytest.mark.parametrize("mcp_flag", ["", "PWC_CHAT_PWC_MCP_ENABLED=true\n"])
+@pytest.mark.parametrize(
+    "mcp_flag",
+    [
+        "",
+        "PWC_CHAT_PWC_MCP_ENABLED=true\n",
+        "PWC_CHAT_PWC_MCP_ENABLED=true\nPWC_CHAT_SHOW_REASONING=true\n",
+    ],
+)
 def test_guard_enables_only_shadow_lifecycle_and_preserves_token(
     tmp_path: Path, mcp_flag: str
 ):
@@ -532,7 +539,14 @@ def test_temporary_qualification_pre_stop_failure_still_runs_final_cleanup(
     assert events == ["stop", "stop"]
 
 
-@pytest.mark.parametrize("mcp_flag", ["", "PWC_CHAT_PWC_MCP_ENABLED=true\n"])
+@pytest.mark.parametrize(
+    "mcp_flag",
+    [
+        "",
+        "PWC_CHAT_PWC_MCP_ENABLED=true\n",
+        "PWC_CHAT_PWC_MCP_ENABLED=true\nPWC_CHAT_SHOW_REASONING=true\n",
+    ],
+)
 def test_disable_drains_active_units_before_flags_false_and_refresh(
     tmp_path: Path, mcp_flag: str
 ):
