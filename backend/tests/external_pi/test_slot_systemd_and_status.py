@@ -14,15 +14,20 @@ import deploy.external_pi_slot_lifecycle as lifecycle
 import deploy.install_host_layout as install_host_layout
 
 
+@pytest.mark.parametrize("show_reasoning", [None, "true"])
 @pytest.mark.parametrize("mcp_enabled", [None, "false", "true"])
 def test_dedicated_worker_environment_contains_only_token_and_tool_flag(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mcp_enabled: str | None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mcp_enabled: str | None,
+    show_reasoning: str | None,
 ):
     (tmp_path / "staging.env").write_text(
         "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=" + "t" * 32 + "\n"
         "PWC_DB_PASSWORD=must-not-leak\n"
         "PWC_OPENAI_API_KEY=must-not-leak\n"
         + (f"PWC_CHAT_PWC_MCP_ENABLED={mcp_enabled}\n" if mcp_enabled else "")
+        + (f"PWC_CHAT_SHOW_REASONING={show_reasoning}\n" if show_reasoning else "")
     )
     worker_environment = tmp_path / "external-pi-worker.env"
     monkeypatch.setattr(lifecycle, "CONFIG_ROOT", tmp_path)
@@ -44,7 +49,7 @@ def test_dedicated_worker_environment_contains_only_token_and_tool_flag(
         + "t" * 32
         + "\n"
         + f"PWC_CHAT_PWC_MCP_ENABLED={mcp_enabled or 'false'}\n"
-        + "PWC_CHAT_SHOW_REASONING=true\n"
+        + f"PWC_CHAT_SHOW_REASONING={show_reasoning or 'false'}\n"
     )
     assert worker_environment.stat().st_mode & 0o777 == 0o640
     assert ownership == [(0, 1234)]
