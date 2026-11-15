@@ -156,15 +156,28 @@ const ReasoningBlockView: React.FC<{
         <div className="chat-reason-live-head">
           <Spinner /> <span>Thinking…</span>
         </div>
-        <div className="chat-reason-live-body chat-answer chat-reason-markdown">
-          <ChatMarkdown
-            text={block.text}
-            streaming
-            papers={papers}
-            citations={citations}
-            webCitations={webCitations}
-          />
-          <Caret />
+        {block.text.trim() && (
+          <div className="chat-reason-live-body chat-answer chat-reason-markdown">
+            <ChatMarkdown
+              text={block.text}
+              streaming
+              papers={papers}
+              citations={citations}
+              webCitations={webCitations}
+            />
+            <Caret />
+          </div>
+        )}
+      </div>
+    );
+  }
+  // The provider often reasons without a summary; show only how long it took.
+  if (!block.text.trim()) {
+    return (
+      <div className="chat-reason-done">
+        <div className="chat-reason-done-head chat-reason-done-head-static">
+          <CheckIcon />
+          <span>{reasoningDoneLabel(block)}</span>
         </div>
       </div>
     );
