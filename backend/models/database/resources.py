@@ -128,9 +128,9 @@ class RepositoryStarHistory(Base):
     # Constraints and indexes
     __table_args__ = (
         UniqueConstraint("repository_id", "snapshot_at", name="uq_repo_snapshot_time"),
+        # uq_repo_snapshot_time also serves newest-first reads per repository,
+        # and idx_star_history_recent (migration) serves snapshot_at scans.
         Index("idx_star_history_repository_id", "repository_id"),
-        Index("idx_star_history_snapshot_at", "snapshot_at"),
-        Index("idx_star_history_repo_time", "repository_id", "snapshot_at"),
     )
 
     def __repr__(self) -> str:
