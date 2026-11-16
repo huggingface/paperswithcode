@@ -817,3 +817,65 @@ def test_coverage_only_query_without_write_timestamp_trusts_the_run_log():
         )
     assert evaluated["output_health"]["status"] == "healthy"
     assert "no database writes recorded" not in evaluated["output_health"]["reason"]
+
+
+def _digest_health(db_metrics: dict) -> dict:
+    job = _job("send_research_digests")
+    recent = datetime.now(timezone.utc) - timedelta(minutes=5)
+    with patch("backend.services.cron_health.is_process_running", return_value=False):
+        return evaluate_job_health(
+            job,
+            {"status": "unknown", "last_run": None, "is_running": False},
+            db_metrics=db_metrics,
+            lock_state={"exists": False, "stale": False},
+            systemd_status={"result": "success", "last_started_at": recent},
+        )["output_health"]
+
+
+_DIGEST_WEEK = {
+    "current_window_age_minutes": 554,
+    "current_window_digests": 20,
+    "current_window_sent": 12,
+    "previous_window_digests": 17,
+    "uncertain_digests": 0,
+    "overdue_pending_digests": 0,
+}
+
+
+def test_research_digests_window_coverage_is_healthy_output():
+    job = _job("send_research_digests")
+    assert job.output_evaluator == "research_digests"
+    assert job.db_freshness_reports_writes is False
+
+    output = _digest_health(dict(_DIGEST_WEEK))
+
+    assert output["status"] == "healthy"
+    assert "20 digest(s), 12 sent" in output["reason"]
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"current_window_digests": 0, "current_window_sent": 0}, "no digests"),
+        ({"uncertain_digests": 2}, "reconcile with the provider"),
+        ({"overdue_pending_digests": 1}, "pending after the retry window"),
+    ],
+)
+def test_research_digests_flags_missing_uncertain_or_stuck_digests(override, message):
+    output = _digest_health(_DIGEST_WEEK | override)
+
+    assert output["status"] == "degraded"
+    assert message in output["reason"]
+
+
+def test_research_digests_without_followers_is_not_a_missing_window():
+    output = _digest_health(
+        _DIGEST_WEEK
+        | {
+            "current_window_digests": 0,
+            "current_window_sent": 0,
+            "previous_window_digests": 0,
+        }
+    )
+
+    assert output["status"] == "healthy"

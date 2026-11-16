@@ -251,9 +251,42 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule_policies=(SchedulePolicy.fixed(60),),
         systemd_timer="pwc-cron-send-research-digests.timer",
         systemd_service="pwc-cron-send-research-digests.service",
-        output_evaluator="generic",
+        output_evaluator="research_digests",
         workflow_freshness_required=False,
         enablement_settings=("research_email_enabled",),
+        # Digests are written once a week (Monday 08:00 UTC window), so the
+        # hourly job's output is judged by window coverage, not write age.
+        # Aggregates only: never recipients or payloads.
+        db_freshness_query="""
+            WITH windows AS (
+              SELECT
+                date_trunc('week', (now() AT TIME ZONE 'UTC') - interval '8 hours')
+                  + interval '8 hours' AS current_utc
+            ),
+            bounds AS (
+              SELECT current_utc AT TIME ZONE 'UTC' AS current_window,
+                     (current_utc - interval '7 days') AT TIME ZONE 'UTC' AS previous_window
+              FROM windows
+            )
+            SELECT
+              floor(extract(epoch FROM now() - b.current_window) / 60)::bigint
+                AS current_window_age_minutes,
+              count(d.*) FILTER (WHERE d.window_end = b.current_window) AS current_window_digests,
+              count(d.*) FILTER (
+                WHERE d.window_end = b.current_window AND d.status = 'sent'
+              ) AS current_window_sent,
+              count(d.*) FILTER (WHERE d.window_end = b.previous_window) AS previous_window_digests,
+              count(d.*) FILTER (
+                WHERE d.status = 'uncertain' AND d.window_end >= b.previous_window
+              ) AS uncertain_digests,
+              count(d.*) FILTER (
+                WHERE d.status = 'pending' AND d.window_end < now() - interval '24 hours'
+              ) AS overdue_pending_digests
+            FROM bounds b
+            LEFT JOIN research_digests d ON d.window_end >= b.previous_window
+            GROUP BY b.current_window
+        """,
+        db_freshness_reports_writes=False,
     ),
     CronJobDefinition(
         id="paper_markdown_backfill",
