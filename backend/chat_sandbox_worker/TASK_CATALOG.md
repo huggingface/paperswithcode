@@ -277,6 +277,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `multimodal-sentiment-analysis` — Multimodal Sentiment Analysis
 - `named-entity-recognition` — Named Entity Recognition
 - `natural-language-inference` — Natural Language Inference
+- `neural-architecture-search` — Neural Architecture Search
 - `no-reference-image-quality-assessment` — No-Reference Image Quality Assessment
 - `node-classification` — Node Classification
 - `non-rigid-3d-shape-correspondence` — Non-rigid 3D Shape Correspondence
