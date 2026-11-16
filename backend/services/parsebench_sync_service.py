@@ -593,7 +593,14 @@ _MISTRAL_OCR_4_1 = external(
 # ParseBench-2 `Provider` labels with their reviewed paper and, for open-weight
 # models, the Hub checkpoint (the v2 CSV has no HF_Model_ID column). Seeded
 # from the reviewed one-time import of 2026-11-16.
+_MUSE_EMBER = external(
+    "https://research.meta.ai/blog/muse-ember",
+    "Introducing Our Smallest, Most Efficient Model: Muse Ember",
+    "2026-11-09",
+)
+
 PARSEBENCH_2_MODELS: dict[str, tuple[PaperIdentity, str | None]] = {
+    "Muse Ember 1.0 (low)": (_MUSE_EMBER, None),
     # The ParseBench-2 report is LlamaIndex's own report on LlamaParse.
     "LlamaParse (Agentic Plus)": (_PARSEBENCH_2, None),
     "LlamaParse (Agentic)": (_PARSEBENCH_2, None),

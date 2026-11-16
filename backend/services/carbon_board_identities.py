@@ -8,6 +8,9 @@ from backend.services.live_leaderboard_sync import ModelIdentity
 
 IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
     "vals-index-v2-2": {
+        "Muse Ember": ModelIdentity(
+            "Muse Ember", source_url="https://research.meta.ai/blog/muse-ember"
+        ),
         "Claude Sonnet 5.5": ModelIdentity(
             "Claude Sonnet 5.5",
             source_url="https://www.anthropic.com/claude-sonnet-5-5",
@@ -1032,6 +1035,9 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
     },
     "critpt-v2": {
+        "Muse Ember (max)": ModelIdentity(
+            "Muse Ember (max)", source_url="https://research.meta.ai/blog/muse-ember"
+        ),
         # A later checkpoint of Ling-3.1-flash, like DeepSeek V4.1 Flash 1017.
         "Ling 3.1 Flash 1019": ModelIdentity(
             "Ling-3.1-Flash-1019",
