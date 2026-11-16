@@ -83,6 +83,24 @@ def test_apply_preflight_does_not_send_trace_or_consume_attempt(tmp_path, monkey
     assert calls == []
 
 
+def test_rejected_query_exits_with_one_readable_line(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["curation_api.py", "taxonomy", "latency"])
+
+    def rejected(path, *args, **kwargs):
+        raise RuntimeError(
+            f"Curation API rejected GET {path} (HTTP 429): Scoped query limit reached"
+        )
+
+    monkeypatch.setattr(curation_api, "request", rejected)
+    with pytest.raises(SystemExit) as exit_info:
+        curation_api.main()
+    assert str(exit_info.value) == (
+        "error: Curation API rejected GET taxonomy?q=latency (HTTP 429): "
+        "Scoped query limit reached"
+    )
+    assert exit_info.value.__suppress_context__
+
+
 def board(task_id, dataset_id, *metrics):
     return {
         "task": {"id": task_id},

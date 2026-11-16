@@ -344,6 +344,14 @@ def main() -> None:
     thumbnail_status.add_argument("--wait-seconds", type=int, default=240)
     thumbnail_status.add_argument("--poll-seconds", type=int, default=5)
     args = parser.parse_args()
+    try:
+        run(args)
+    except RuntimeError as error:
+        # One readable line instead of a traceback that leads with "HTTP Error".
+        raise SystemExit(f"error: {error}") from None
+
+
+def run(args: argparse.Namespace) -> None:
     if args.command == "context":
         request("context")
     elif args.command == "taxonomy":

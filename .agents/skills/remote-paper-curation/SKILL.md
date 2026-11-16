@@ -9,8 +9,12 @@ This Job has no PostgreSQL credentials. Never read `backend/keys.env`, run SQL,
 or edit repository files. Fetch the job-scoped paper context with:
 
 ```bash
-python jobs/curation_api.py context
+python3 jobs/curation_api.py context
 ```
+
+Runner images differ: call `python3` (there may be no `python`), and fetch web
+pages with `python3` and `urllib.request`, since `curl` and `wget` may be
+missing.
 
 Read the validated `paper_markdown` or `paper_pdf` in the source manifest.
 When a source document supplies `local_path`, read that file and verify its
@@ -87,14 +91,22 @@ separately. Follow the enrichment instructions below for links and taxonomy.
 Search existing task/method taxonomy with:
 
 ```bash
-python jobs/curation_api.py taxonomy "image generation"
+python3 jobs/curation_api.py taxonomy "image generation"
 ```
+
+Each job has a budget of 30 `taxonomy` searches, and one search returns the
+matching tasks, methods, and organizations together. Search the specific names
+the paper uses (its task, the methods it introduces or builds on, its
+affiliations), not generic words such as `efficiency` or `latency`, and run
+related searches in one shell command. Past the budget the command fails with
+HTTP 429 `Scoped query limit reached`. That is final for the job, not a rate
+limit: never sleep or retry; continue with the IDs you already have.
 
 For every benchmark name found in an evaluation table, search the configured
 leaderboards with:
 
 ```bash
-python jobs/curation_api.py leaderboards "GenEval"
+python3 jobs/curation_api.py leaderboards "GenEval"
 ```
 
 This returns the authorized task and dataset IDs, configured metrics, ranking
@@ -167,7 +179,8 @@ Prefer a text table whenever both carry the same score; images fill gaps.
 Report which values came from images in the audit.
 
 Each job has a budget of 150 `leaderboards` lookups; past it the command
-fails with HTTP 429 `Scoped query limit reached`. Look up the headline
+fails with HTTP 429 `Scoped query limit reached`, which is final for the job:
+never sleep or retry. Look up the headline
 benchmarks of the release page or main results table first, then the long
 tail (for example a model card's base-model table). If you hit the limit,
 keep going: submit every eligible result whose leaderboard you already
@@ -193,7 +206,7 @@ probe is not a model introduced by the paper.
 
 For `add-evals`, follow the conservative rules in `add-evals/SKILL.md`, but
 write a JSON payload containing `evaluations` (each has this job's
-`paper_id`) and submit it with `python jobs/curation_api.py apply payload.json`.
+`paper_id`) and submit it with `python3 jobs/curation_api.py apply payload.json`.
 Always include `evaluation_removals`, `validation_evidence`, and
 `benchmark_gaps` arrays. Updating an existing row requires its exact context
 `before_state`, a field-level diff, and primary-paper evidence. Duplicate
@@ -364,7 +377,7 @@ it does not mean the thumbnail has been regenerated. After an apply that
 requests a thumbnail, wait for the VPS-owned worker with:
 
 ```bash
-python jobs/curation_api.py thumbnail-status --wait-seconds 240
+python3 jobs/curation_api.py thumbnail-status --wait-seconds 240
 ```
 
 The terminal response reports the old and generated dimensions, public URL,
@@ -428,7 +441,7 @@ with the taxonomy search, whose `organizations` results give the ID, name, slug,
 and HF handle:
 
 ```bash
-python jobs/curation_api.py taxonomy "Stanford"
+python3 jobs/curation_api.py taxonomy "Stanford"
 ```
 
 Try the short name, the full name, and the HF handle before you decide an
@@ -477,7 +490,7 @@ instead of printing it whole. Search datasets (configured or not), tasks, and
 metrics with:
 
 ```bash
-python jobs/curation_api.py catalog "ScanObjectNN"
+python3 jobs/curation_api.py catalog "ScanObjectNN"
 ```
 
 ### `review-benchmark-gaps`: the daily overseer
@@ -543,7 +556,7 @@ differently from one another, as a reviewer would.
 
 Build the proposal with a short Python script that walks `/tmp/context.json`
 and holds your hand-written decision and reason for every candidate id, so
-none is dropped. `python jobs/curation_api.py apply` runs the server's
+none is dropped. `python3 jobs/curation_api.py apply` runs the server's
 template check first and, without using up an apply, lists every group of
 candidate ids whose reasons clash; rewrite all of them and apply again.
 
