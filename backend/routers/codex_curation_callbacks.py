@@ -124,6 +124,10 @@ def _leaderboard_inventory(db: Session, query: str) -> list[dict]:
 # name plus common variants, so leaderboard lookups need a larger budget than
 # taxonomy searches. Paper 131976 (Ripple-65B) ran out at 30 and got no evals.
 QUERY_LIMITS = {"taxonomy_query_count": 30, "leaderboard_query_count": 150}
+QUERY_LABELS = {
+    "taxonomy_query_count": "taxonomy and catalog searches",
+    "leaderboard_query_count": "leaderboard lookups",
+}
 
 
 def _consume_query(db: Session, row: PaperCurationJob, field: str) -> None:
@@ -131,7 +135,16 @@ def _consume_query(db: Session, row: PaperCurationJob, field: str) -> None:
     value = getattr(row, field)
     if value >= QUERY_LIMITS[field]:
         db.rollback()
-        raise HTTPException(status_code=429, detail="Scoped query limit reached")
+        # Agents read a bare 429 as a rate limit and sleep; say it is final.
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Scoped query limit reached: this job's {QUERY_LIMITS[field]} "
+                f"{QUERY_LABELS[field]} are used up. The limit is final for the "
+                "job, not a rate limit: do not wait or retry; continue with the "
+                "results you already have."
+            ),
+        )
     setattr(row, field, value + 1)
     db.commit()
 

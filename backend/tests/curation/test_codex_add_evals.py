@@ -1119,6 +1119,10 @@ def test_leaderboard_lookups_have_a_larger_budget_than_taxonomy():
     with pytest.raises(HTTPException) as taxonomy_limit:
         codex_curation_callbacks._consume_query(Session(), row, "taxonomy_query_count")
     assert taxonomy_limit.value.status_code == 429
+    detail = taxonomy_limit.value.detail
+    assert detail.startswith("Scoped query limit reached")
+    assert "30 taxonomy and catalog searches" in detail
+    assert "not a rate limit" in detail
 
     row.leaderboard_query_count = 150
     with pytest.raises(HTTPException):
