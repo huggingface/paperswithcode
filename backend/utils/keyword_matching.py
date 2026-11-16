@@ -54,6 +54,16 @@ def _keyword_pattern(keyword: str) -> re.Pattern[str]:
     return re.compile(r"\b" + re.escape(keyword) + r"s?\b", flags)
 
 
+# re.IGNORECASE treats these as case variants of ASCII "i", but casefold()
+# does not map them to "i". They are the only such characters in Python 3.12.
+_IGNORECASE_ONLY_FOLDS = str.maketrans({"İ": "i", "ı": "i"})
+
+
+def fold_for_keyword_prefilter(text: str) -> str:
+    """Fold text so every IGNORECASE match of an ASCII keyword is a substring."""
+    return text.translate(_IGNORECASE_ONLY_FOLDS).casefold()
+
+
 def _keyword_matches_simple(
     text: str, keyword: str, folded_text: str | None = None
 ) -> bool:
@@ -62,13 +72,15 @@ def _keyword_matches_simple(
     A plain substring test skips the regex for the vast majority of keywords
     that do not occur at all. It is a necessary condition for ASCII keywords:
     a case-sensitive match contains the keyword verbatim, and an IGNORECASE
-    match of an ASCII keyword is contained in the casefolded text.
+    match of an ASCII keyword is contained in the folded text.
     """
     if keyword.isascii():
         if is_case_sensitive_keyword(keyword):
             if keyword not in text:
                 return False
-        elif keyword.casefold() not in (folded_text or text.casefold()):
+        elif keyword.casefold() not in (
+            folded_text or fold_for_keyword_prefilter(text)
+        ):
             return False
     return _keyword_pattern(keyword).search(text) is not None
 
@@ -501,7 +513,7 @@ def find_matching_items_simple(
         return set()
 
     matched_items = set()
-    folded_text = text.casefold()
+    folded_text = fold_for_keyword_prefilter(text)
 
     # Find case-sensitive matches.
     # Word-boundary matching (with optional trailing 's' for plurals) keeps

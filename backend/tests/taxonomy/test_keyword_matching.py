@@ -264,3 +264,26 @@ def test_ignorecase_match_survives_unicode_case_folding() -> None:
     # U+017F (long s) folds to "s"; re.IGNORECASE matches it, so the
     # casefolded prefilter must not reject it.
     assert _simple("Long ſequence modeling", "sequence modeling") == {1}
+
+
+def test_ignorecase_match_survives_turkish_dotted_and_dotless_i() -> None:
+    # re.IGNORECASE matches U+0130 and U+0131 to "i", but casefold() does not.
+    assert _simple("VİDEO GENERATION benchmark", "video generation") == {1}
+    assert _simple("Vıdeo generation benchmark", "video generation") == {1}
+
+
+def test_prefilter_folding_covers_every_ignorecase_variant_of_ascii_letters() -> None:
+    import re
+    import string
+    import sys
+
+    from backend.utils.keyword_matching import fold_for_keyword_prefilter
+
+    ascii_letter = re.compile("[a-z]", re.IGNORECASE)
+    for codepoint in range(sys.maxunicode + 1):
+        char = chr(codepoint)
+        if 0xD800 <= codepoint <= 0xDFFF or not ascii_letter.fullmatch(char):
+            continue
+        folded = fold_for_keyword_prefilter(char)
+        assert folded in string.ascii_lowercase, hex(codepoint)
+        assert re.fullmatch(folded, char, re.IGNORECASE), hex(codepoint)
