@@ -262,6 +262,7 @@ class PaperCurationJob(Base):
     )
     context_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     pair_diff: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    pair_judgment: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     audit_status: Mapped[str] = mapped_column(
         String(24), nullable=False, default="unreviewed", server_default="unreviewed"
     )
