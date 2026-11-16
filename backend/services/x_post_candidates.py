@@ -95,6 +95,17 @@ PAPER_POST_KINDS = ("new_sota", "open_sota", "open_release", "trending_paper")
 # results than the 3-day window of x_insight_post_service, which left it about two at a time.
 SOTA_LIMIT = 20
 SOTA_WINDOW = timedelta(days=7)
+# Artificial Analysis also indexes evals, so the account never posts about its
+# boards: its indexes and arena, "-AA" benchmarks, and CritPt (hosted by it).
+COMPETITOR_BOARD = re.compile(
+    r"artificial analysis|(^|[\s(-])AA\b|critpt", re.IGNORECASE
+)
+
+
+def competitor_board(dataset: Dataset) -> bool:
+    return bool(COMPETITOR_BOARD.search(dataset.name or ""))
+
+
 OPEN_RELEASE_DAYS = 21
 OPEN_RELEASE_PAPERS = 25
 OPEN_RELEASE_BOARDS = 12
@@ -241,13 +252,16 @@ def leaderboard_wins(
     *,
     now: datetime,
     fetch_org_handle: Callable[[str], str | None] = hf_org_x_handle,
+    skip: frozenset[str] = frozenset(),
 ) -> list[Candidate]:
     """New overall and open-weights firsts from recently added results.
 
     A result counts when its paper is at most `SOTA_PAPER_AGE_DAYS` old, it
     was added in the last `SOTA_WINDOW`, and its leaderboard (all tasks, see
     `leaderboard_rows`) has `SOTA_MIN_ENTRIES` or more entries. Bigger
-    leaderboards score higher.
+    leaderboards score higher. Subjects in `skip` (the agent already turned
+    them down) and competitor boards are left out before the `SOTA_LIMIT` cut,
+    so they don't crowd out fresh results.
     """
     since = now - SOTA_WINDOW
     published_after = now.date() - timedelta(days=SOTA_PAPER_AGE_DAYS)
@@ -271,6 +285,8 @@ def leaderboard_wins(
         if (dataset.id, metric, paper.id) in seen:
             continue
         seen.add((dataset.id, metric, paper.id))
+        if competitor_board(dataset):
+            continue
         board = load_board(db, dataset.id, metric)
         if len(board.rows) < SOTA_MIN_ENTRIES:
             continue
@@ -287,6 +303,8 @@ def leaderboard_wins(
             subject = f"open:{subject}"
             if recently_posted(db, kind, subject, now, ever=True):
                 continue
+        if subject in skip:
+            continue
         facts: dict[str, Any] = {
             "benchmark": dataset.name,
             "task": task.name,
@@ -578,6 +596,8 @@ def open_releases(
             if place is None:
                 continue
             dataset = db.get(Dataset, dataset_id)
+            if competitor_board(dataset):
+                continue
             place = {"benchmark": dataset.name, "metric": metric, **place}
             placements.append(place)
             boards[id(place)] = (board, dataset)
@@ -919,10 +939,13 @@ def league_text(leaders: list[str], count: int, boards: int) -> str:
 # --- All candidates ---------------------------------------------------------
 
 
-def gather(db: Session, *, now: datetime | None = None) -> list[Candidate]:
-    """Every candidate for this run, best first within each kind."""
+def gather(
+    db: Session, *, now: datetime | None = None, skip: frozenset[str] = frozenset()
+) -> list[Candidate]:
+    """Every candidate for this run, best first within each kind. SOTA subjects
+    in `skip` are left out."""
     now = now or datetime.now(UTC)
-    candidates = leaderboard_wins(db, now=now)
+    candidates = leaderboard_wins(db, now=now, skip=skip)
     candidates.extend(open_releases(db, now=now))
     candidates.extend(trending_papers(db, now=now))
     if now.day <= ROUNDUP_CATCH_UP_DAYS:
