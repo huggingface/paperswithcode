@@ -275,6 +275,107 @@ def test_preflight_dead_project_page_keeps_paper_evidence(monkeypatch, project_s
     assert result["errors"][0]["http_status"] == project_status
 
 
+def test_preflight_oversized_project_page_keeps_paper_evidence(monkeypatch):
+    # 2611.18529: the project page is 23.6 MB of HTML with inlined images.
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+
+    def fetch(url: str, limit: int):
+        if "/api/papers/" in url:
+            return json.dumps(
+                {"projectPage": "https://example.github.io/huge"}
+            ).encode(), url
+        if url.endswith(".md"):
+            return PAPER_TEXT, url
+        raise url_preflight.ResponseTooLarge(f"response exceeds {limit} bytes")
+
+    context = _context(project_page=False)
+    context["paper"]["repositories"] = []
+    result = url_preflight.extract_candidates(context, fetch=fetch)
+
+    assert result["complete"] is True
+    assert result["errors"][0]["error"] == "ResponseTooLarge"
+
+
+def test_preflight_oversized_project_page_blocks_without_paper_text(monkeypatch):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+
+    def fetch(url: str, limit: int):
+        if "/api/papers/" in url:
+            return json.dumps(
+                {"projectPage": "https://example.github.io/huge"}
+            ).encode(), url
+        if "/papers/" in url or "/pdf/" in url or "/resolve/" in url:
+            raise urllib.error.HTTPError(url, 404, "not found", {}, None)
+        raise url_preflight.ResponseTooLarge(f"response exceeds {limit} bytes")
+
+    context = _context(project_page=False)
+    context["paper"]["repositories"] = []
+    result = url_preflight.extract_candidates(context, fetch=fetch)
+
+    assert result["complete"] is False
+
+
+def test_preflight_skips_arxiv_pdf_listed_as_project_page(monkeypatch):
+    # 2611.08538: Hugging Face lists the paper's own arXiv PDF as projectPage.
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+    fetched = []
+
+    def fetch(url: str, _limit: int):
+        fetched.append(url)
+        if "/api/papers/" in url:
+            return json.dumps(
+                {"projectPage": "https://arxiv.org/pdf/2611.08538v1"}
+            ).encode(), url
+        if url.endswith(".md"):
+            return PAPER_TEXT, url
+        raise AssertionError(f"unexpected fetch {url}")
+
+    context = _context(project_page=False)
+    context["paper"]["repositories"] = []
+    context["paper"]["project_pages"] = [{"url": "https://arxiv.org/pdf/2611.08538v1"}]
+    result = url_preflight.extract_candidates(context, fetch=fetch)
+
+    assert result["complete"] is True
+    assert "https://arxiv.org/pdf/2611.08538v1" not in fetched
+
+
+def test_fetch_raises_response_too_large_for_oversized_html(monkeypatch):
+    class _Big:
+        headers = {"Content-Length": str(url_preflight.MAX_TEXT_BYTES + 1)}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def geturl(self):
+            return "https://example.github.io/huge"
+
+        def read(self, _size=-1):
+            return b"<html>"
+
+    monkeypatch.setattr(
+        url_preflight.urllib.request, "urlopen", lambda *_a, **_k: _Big()
+    )
+    with pytest.raises(url_preflight.ResponseTooLarge):
+        url_preflight._fetch(
+            "https://example.github.io/huge", url_preflight.MAX_PDF_BYTES
+        )
+
+
 def test_preflight_does_not_fetch_pdf_when_hf_markdown_is_available(monkeypatch):
     monkeypatch.setattr(
         url_preflight.urllib.request,

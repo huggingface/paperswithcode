@@ -109,6 +109,10 @@ def validate_paper_text(body: bytes) -> None:
         raise ValueError("paper text is an image or HTML error page")
 
 
+class ResponseTooLarge(ValueError):
+    """A response exceeds its byte budget; the URL itself may be fine."""
+
+
 def _fetch(url: str, limit: int) -> tuple[bytes, str]:
     request = urllib.request.Request(
         url, headers={"User-Agent": "PapersWithCode-Curation/1.0"}
@@ -122,10 +126,10 @@ def _fetch(url: str, limit: int) -> tuple[bytes, str]:
             limit = min(limit, MAX_TEXT_BYTES)
         content_length = int(response.headers.get("Content-Length") or 0)
         if content_length > limit:
-            raise ValueError(f"response exceeds {limit} bytes")
+            raise ResponseTooLarge(f"response exceeds {limit} bytes")
         body = prefix + response.read(limit + 1 - len(prefix))
         if len(body) > limit:
-            raise ValueError(f"response exceeds {limit} bytes")
+            raise ResponseTooLarge(f"response exceeds {limit} bytes")
         return body, final_url
 
 
@@ -178,10 +182,10 @@ def _fetch_bucket_markdown(
     with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
         content_length = int(response.headers.get("Content-Length") or 0)
         if content_length > limit:
-            raise ValueError(f"response exceeds {limit} bytes")
+            raise ResponseTooLarge(f"response exceeds {limit} bytes")
         body = response.read(limit + 1)
         if len(body) > limit:
-            raise ValueError(f"response exceeds {limit} bytes")
+            raise ResponseTooLarge(f"response exceeds {limit} bytes")
         # Do not persist the signed CDN URL after redirecting from the bucket.
         return body, url
 
@@ -230,6 +234,13 @@ def normalize_candidate(raw: str, base_url: str | None = None) -> str | None:
     if re.search(r"\.(?:svg|png|jpe?g|webp|gif|pdf)$", path, re.I):
         return None
     return urllib.parse.urlunsplit(("https", host, path, "", ""))
+
+
+_ARXIV_HOSTS = frozenset({"arxiv.org", "www.arxiv.org", "export.arxiv.org"})
+
+
+def _is_arxiv_url(url: str) -> bool:
+    return (urllib.parse.urlsplit(url).hostname or "").lower() in _ARXIV_HOSTS
 
 
 def _kind(url: str) -> str:
@@ -570,6 +581,11 @@ def extract_candidates(
             if item["kind"] == "project_page" and item["live"]
         )
         for project_url in dict.fromkeys(project_pages):
+            # Hugging Face sometimes lists the paper's own arXiv PDF as its
+            # project page (2611.08538). The paper text sources above already
+            # cover it, and a large PDF would only fail the size budget.
+            if _is_arxiv_url(project_url):
+                continue
             try:
                 html, final_url = fetch(project_url, MAX_PDF_BYTES)
                 if html.startswith(b"%PDF-"):
@@ -715,7 +731,12 @@ def extract_candidates(
         if source == "results_image":
             # The page Markdown still names the image; the agent can fetch it.
             return True
-        if source == "project_page_html" and error.get("http_status") in {404, 410}:
+        if source == "project_page_html" and (
+            error.get("http_status") in {404, 410}
+            # A page over the byte budget (e.g. 23.6 MB of inlined images) is
+            # unreadable here, not missing; the agent can still open it.
+            or error.get("error") == "ResponseTooLarge"
+        ):
             return paper_text_available
         return False
 
