@@ -140,6 +140,19 @@ def test_parse_accepts_footnote_markers_after_model_link():
     assert entries[2].model_name == "org/model-3 (variant)"
 
 
+def test_parse_accepts_new_badge_after_model_link():
+    payload = _payload()
+    badge = '<span style="display:inline-block;background:#10b981">NEW</span>'
+    payload["data"][2][1] += badge + "<sup>²</sup>"
+    payload["data"][3][1] += " " + badge
+
+    entries = parse_open_tts_leaderboard(payload)
+
+    assert len(entries) == 15
+    assert entries[2].model_id == "org/model-3"
+    assert entries[3].model_name == "org/model-4 (variant)"
+
+
 def test_parse_and_fetch_default_public_leaderboard_contract():
     payload = _payload()
 

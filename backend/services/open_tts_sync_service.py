@@ -121,6 +121,8 @@ METHODOLOGY_BY_DATASET = {
 
 _MODEL_LINK_RE = re.compile(
     r'<a\b[^>]*\bhref=["\']https://huggingface\.co/([^"\'?#]+)["\'][^>]*>(.*?)</a>'
+    # Display badges such as "NEW" (added upstream 2026-11-14) follow the link.
+    r"(?:\s*<span\b[^>]*>[^<]*</span>)*"
     r"(?:\s*<sup>[^<]*</sup>)?",
     re.IGNORECASE,
 )

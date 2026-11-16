@@ -53,6 +53,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-swe-marathon.timer` | `*-*-* *:26:00` | `sync_swe_marathon` | `.github/workflows/scripts/hourly/sync_swe_marathon.py` |
 | `pwc-cron-sync-jevbench.timer` | `*-*-* *:37:00` | `sync_jevbench` | `.github/workflows/scripts/hourly/sync_jevbench.py` |
 | `pwc-cron-sync-sle.timer` | `*-*-* *:41:00` | `sync_sle` | `.github/workflows/scripts/hourly/sync_sle.py` |
+| `pwc-cron-sync-rsi-exam.timer` | `*-*-* *:49:00` | `sync_rsi_exam` | `.github/workflows/scripts/hourly/sync_rsi_exam.py` |
 | `pwc-cron-sync-frontiercs-2.timer` | `*-*-* *:43:00` | `sync_frontiercs_2` | `.github/workflows/scripts/hourly/sync_frontiercs_2.py` |
 | `pwc-cron-sync-vals-index.timer` | `*-*-* *:03:00` | `sync_vals_index` | `.github/workflows/scripts/hourly/sync_vals_index.py` |
 | `pwc-cron-sync-swe-sweep.timer` | `*-*-* *:08:00` | `sync_swe_sweep` | `.github/workflows/scripts/hourly/sync_swe_sweep.py` |
@@ -559,6 +560,17 @@ site marks with a status ("in progress") is skipped, and so is that model's
 composite. The job fails when an assessment metric changes, the composite stops
 averaging exactly the six current assessments, or the board lists fewer than 3
 or more than 60 models. End-to-end research (0 for every model) has no board.
+
+`sync_rsi_exam.py` keeps the `rsi-exam` benchmark on task `auto-research`
+equal to the Full board on https://rsi-exam.ai/ (all 88 tasks): every model's
+mean frozen normalised hidden-set score, with the coding-agent harness it ran
+in (Claude Code, Codex, Antigravity, ...) and the reasoning effort in the
+methodology. The page renders the board as static SVG; the Public and Private
+panels are not used. Scores are only comparable within one release and task
+set, so the job fails when the page stops naming `RSI-Exam 0.1`, when the Full
+board covers other than 88 tasks, on an unreviewed harness label, broken
+ranks, a score out of rank order, or a board outside 10–100 rows. Models
+without a catalog paper become release-radar signals.
 
 `sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
 official `google-deepmind/physics-IQ-benchmark` README (the

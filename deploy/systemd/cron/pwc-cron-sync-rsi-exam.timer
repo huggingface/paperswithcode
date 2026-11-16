@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync RSI-Exam leaderboard from rsi-exam.ai hourly
+
+[Timer]
+OnCalendar=*-*-* *:49:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-rsi-exam.service
+
+[Install]
+WantedBy=timers.target

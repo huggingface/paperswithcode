@@ -278,6 +278,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync Science's Last Exam leaderboards hourly",
     ),
     TimerSpec(
+        job="sync_rsi_exam",
+        on_calendar=("*-*-* *:49:00",),
+        description="Sync RSI-Exam leaderboard from rsi-exam.ai hourly",
+    ),
+    TimerSpec(
         job="sync_frontiercs_2",
         on_calendar=("*-*-* *:43:00",),
         description="Sync FrontierCS 2 leaderboard hourly",

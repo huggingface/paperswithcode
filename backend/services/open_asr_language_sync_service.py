@@ -46,11 +46,16 @@ from backend.services.open_asr_sync_service import (
     best_runtime_variants,
     display_model_names,
     hub_model_id,
+    model_cell,
 )
 
 MULTILINGUAL_TABLE_API = "/_render_multilingual_combined"
 AVERAGE_VIEW = "Language averages"
 RTFX_COLUMN = "RTFx ⬆️️"
+# The Space renamed "Average WER" to "Average ER" on 2026-11-13 because a few
+# languages (e.g. Chinese) report CER. Every language synced here reports WER,
+# so for a single selected language both labels are that language's WER.
+ERROR_RATE_COLUMNS = ("Average ER ⬇️", "Average WER ⬇️")
 # Label -> the Space's `?languages=<code>` deeplink code. English is the
 # default `open-asr-leaderboard` board.
 LANGUAGE_BOARDS = {
@@ -109,28 +114,29 @@ def parse_language_table(payload: Any, *, label: str) -> list[OpenAsrEntry]:
     rows = payload.get("data")
     if not isinstance(headers, list) or not isinstance(rows, list):
         raise TypeError("Open ASR language response must contain headers and data")
-    required = {"Rank", "Model", "Average WER ⬇️", RTFX_COLUMN, label}
-    if not required.issubset(headers):
+    error_column = next((name for name in ERROR_RATE_COLUMNS if name in headers), None)
+    required = {"Rank", "Model", RTFX_COLUMN, label}
+    if error_column is None or not required.issubset(headers):
         raise ValueError(f"Open ASR {label} response is missing required columns")
     if not MIN_EXPECTED_ENTRIES <= len(rows) <= MAX_EXPECTED_ENTRIES:
         raise ValueError(
             f"Open ASR {label} returned {len(rows)} rows; expected "
             f"{MIN_EXPECTED_ENTRIES}-{MAX_EXPECTED_ENTRIES}"
         )
-    indexes = {name: headers.index(name) for name in required}
+    indexes = {name: headers.index(name) for name in required | {error_column}}
     entries: list[OpenAsrEntry] = []
     names: set[str] = set()
     for row in rows:
         if not isinstance(row, list) or len(row) != len(headers):
             raise ValueError(f"Open ASR {label} response contains a malformed row")
-        link = _MODEL_LINK_RE.fullmatch(str(row[indexes["Model"]]).strip())
+        link = _MODEL_LINK_RE.fullmatch(model_cell(row[indexes["Model"]]))
         if link is None:
             raise ValueError(f"Open ASR {label} row has an invalid model link")
         model_id = html.unescape(_TAG_RE.sub("", link.group(2))).strip()
         if not model_id or len(model_id) > 255 or "/" not in model_id:
             raise ValueError(f"Open ASR {label} row has an invalid model identifier")
         rank = int(_number(row[indexes["Rank"]]))
-        wer = _number(row[indexes["Average WER ⬇️"]])
+        wer = _number(row[indexes[error_column]])
         rtfx = _number(row[indexes[RTFX_COLUMN]], optional=True)
         if (
             rank < 1
