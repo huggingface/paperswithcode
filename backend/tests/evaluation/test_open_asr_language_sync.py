@@ -59,6 +59,18 @@ def test_parse_language_table_reads_links_and_optional_rtfx():
     assert entries[1] == OpenAsrEntry("org/model-a", 2, 9.6, 120.0, True)
 
 
+def test_parse_language_table_accepts_error_rate_column_and_badges():
+    # 2026-11-13: "Average WER" became "Average ER" and open-weights models
+    # gained a trailing badge span after the link.
+    table = _table()
+    table["headers"][2] = "Average ER ⬇️"
+    table["data"][1][1] += ' <span title="Open weights">🤗</span>'
+
+    entries = lang.parse_language_table({"value": table}, label=HINDI)
+
+    assert entries[1] == OpenAsrEntry("org/model-a", 2, 9.6, 120.0, True)
+
+
 def test_parse_language_table_rejects_gaps_and_missing_columns():
     table = _table()
     table["data"][2][0] = 4

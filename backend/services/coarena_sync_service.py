@@ -152,7 +152,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
 class CoArenaEntry:
     id: str
     name: str
-    model: str
     effort: str | None
     elo: float
     online_elo: float
@@ -215,14 +214,11 @@ def parse_coarena_leaderboard(payload: Any) -> list[CoArenaEntry]:
             raise TypeError("CoArena entries must be JSON objects")
         model_id = raw.get("id")
         name = raw.get("name")
-        model = raw.get("model")
         effort = raw.get("effort")
         company = raw.get("company")
-        for field_name, value in (
-            ("id", model_id),
-            ("name", name),
-            ("model", model),
-        ):
+        # Upstream dropped its provider `model` field on 2026-11-13; the
+        # stable `id` is the paper-identity key and `name` the display label.
+        for field_name, value in (("id", model_id), ("name", name)):
             if not isinstance(value, str) or not value.strip() or len(value) > 255:
                 raise ValueError(f"CoArena row has an invalid {field_name}")
         # Company is display metadata, and upstream may omit it for a rated
@@ -265,7 +261,6 @@ def parse_coarena_leaderboard(payload: Any) -> list[CoArenaEntry]:
             CoArenaEntry(
                 id=model_id,
                 name=name,
-                model=model,
                 effort=effort,
                 elo=elo,
                 online_elo=online_elo,
