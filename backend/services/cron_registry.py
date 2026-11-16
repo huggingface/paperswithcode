@@ -1360,6 +1360,49 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_sle",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=41),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-sle.timer",
+        systemd_service="pwc-cron-sync-sle.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync Science's Last Exam Leaderboards",
+        category="hourly",
+        schedule="41 * * * * (hourly)",
+        script_path="hourly/sync_sle.py",
+        log_name="sync_sle",
+        process_patterns=("scripts.hourly.sync_sle",),
+        lock_file=("/var/lib/paperswithcode/production/cron-locks/sync_sle.lock"),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug IN (
+                    'science-s-last-exam-sle',
+                    'sle-hypothesis-discovery',
+                    'sle-protocol-planning',
+                    'sle-scientific-computing',
+                    'sle-scientific-software-operation',
+                    'sle-experiment-observation'
+                  )
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Science''s Last Exam live sync.%'
+        """,
+        workflow_file="cron-sync-sle.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_rsi_exam",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=49),),

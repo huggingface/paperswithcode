@@ -52,6 +52,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-surge-chartography.timer` | `*-*-* *:38:00` | `sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
 | `pwc-cron-sync-swe-marathon.timer` | `*-*-* *:26:00` | `sync_swe_marathon` | `.github/workflows/scripts/hourly/sync_swe_marathon.py` |
 | `pwc-cron-sync-jevbench.timer` | `*-*-* *:37:00` | `sync_jevbench` | `.github/workflows/scripts/hourly/sync_jevbench.py` |
+| `pwc-cron-sync-sle.timer` | `*-*-* *:41:00` | `sync_sle` | `.github/workflows/scripts/hourly/sync_sle.py` |
 | `pwc-cron-sync-rsi-exam.timer` | `*-*-* *:49:00` | `sync_rsi_exam` | `.github/workflows/scripts/hourly/sync_rsi_exam.py` |
 | `pwc-cron-sync-frontiercs-2.timer` | `*-*-* *:43:00` | `sync_frontiercs_2` | `.github/workflows/scripts/hourly/sync_frontiercs_2.py` |
 | `pwc-cron-sync-vals-index.timer` | `*-*-* *:03:00` | `sync_vals_index` | `.github/workflows/scripts/hourly/sync_vals_index.py` |
@@ -545,6 +546,20 @@ method label leaves `v1.7`, as well as on broken ranks, a composite out of rank
 order, or a board outside 20–300 rows. General LLMs measured as decision
 models keep their best reasoning setting; vendor systems without a catalog
 paper become release-radar signals, with the vendor taken from the source host.
+
+`sync_sle.py` keeps six Science's Last Exam benchmarks on task
+`scientific-reasoning` equal to https://sciences-last-exam.org/leaderboard:
+the composite (`science-s-last-exam-sle`, Composite Score) and the Hypothesis
+Discovery (Inspire Rate), Protocol Planning (Mean score), Scientific Computing,
+Scientific Software Operation and Experiment Observation (Pass Rate)
+assessments. The page renders from a `window.SLE = {leaderboard: {...}}`
+object in its hashed `assets/data.<hash>.js` bundle, which the job finds on the
+page and decodes as plain data. Each row carries the model's agent harness
+(Codex, Claude Code), or DiscoveryRSI for Hypothesis Discovery. A score the
+site marks with a status ("in progress") is skipped, and so is that model's
+composite. The job fails when an assessment metric changes, the composite stops
+averaging exactly the six current assessments, or the board lists fewer than 3
+or more than 60 models. End-to-end research (0 for every model) has no board.
 
 `sync_rsi_exam.py` keeps the `rsi-exam` benchmark on task `auto-research`
 equal to the Full board on https://rsi-exam.ai/ (all 88 tasks): every model's

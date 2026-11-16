@@ -452,6 +452,16 @@ COMMANDS: dict[str, Job] = {
             "Heaven's validated API board; never creates papers"
         ),
     ),
+    "sync_sle": job(
+        "-m",
+        "scripts.hourly.sync_sle",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Science's Last Exam evaluation rows on "
+            "six boards from the validated sciences-last-exam.org leaderboard "
+            "bundle; never creates papers"
+        ),
+    ),
     "sync_rsi_exam": job(
         "-m",
         "scripts.hourly.sync_rsi_exam",
