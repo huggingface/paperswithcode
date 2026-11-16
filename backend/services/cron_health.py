@@ -1703,10 +1703,19 @@ def _hot_github_trending_contract(
             status = "degraded"
         reasons.append(f"rate-limit reserve stopped {reserve_stops} run(s)")
     if remaining is not None and reserve is not None and int(remaining) < int(reserve):
-        status = _worse_output(status, "broken")
-        reasons.append(
-            f"rate-limit reserve violated ({remaining} remaining < {reserve})"
-        )
+        if reserve_stops:
+            # The job stops at the reserve before each call, so a reading below
+            # it after a stop means another job sharing the token spent the
+            # budget: the reserve worked, the token is contended.
+            status = _worse_output(status, "degraded")
+            reasons.append(
+                f"shared GitHub budget below reserve ({remaining} remaining < {reserve})"
+            )
+        else:
+            status = _worse_output(status, "broken")
+            reasons.append(
+                f"rate-limit reserve violated ({remaining} remaining < {reserve})"
+            )
     return status, reasons
 
 
@@ -2574,7 +2583,7 @@ def evaluate_job_health(
             db_reason = (
                 f"database freshness query failed: {db_metrics['freshness_error']}"
             )
-        else:
+        elif job.db_freshness_reports_writes:
             db_stale, db_reason = _db_is_stale(
                 db_metrics, job.stale_after_minutes, now=now
             )
@@ -2631,7 +2640,7 @@ def evaluate_job_health(
         status = "healthy"
         reasons.append("completed with no work (allowed for this job)")
     else:
-        if output_policy.refresh_db_freshness:
+        if output_policy.refresh_db_freshness and job.db_freshness_reports_writes:
             db_stale, db_reason = _db_is_stale(
                 db_metrics, job.stale_after_minutes, now=now
             )

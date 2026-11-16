@@ -94,6 +94,9 @@ class CronJobDefinition:
     critical: bool
     healthy_no_work_allowed: bool
     db_freshness_query: Optional[str] = None
+    # False when the query reports coverage only: its tables carry no write
+    # timestamp, so a missing `last_write` is not evidence of stale output.
+    db_freshness_reports_writes: bool = True
     workflow_file: Optional[str] = None
     workflow_jobs: Tuple[str, ...] = ()
     workflow_freshness_required: bool = True
@@ -994,6 +997,22 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                           'Managed by the Papers with Code Artificial Analysis Decision Index live sync.%'
                     )
                   )
+            ),
+            -- The sync skips an index Artificial Analysis withdraws entirely
+            -- (Agentic since 2026-10-29), so it is expected only while it
+            -- still has managed rows.
+            expected_datasets AS (
+              SELECT slug
+              FROM (
+                VALUES
+                  ('artificial-analysis-intelligence-index'),
+                  ('artificial-analysis-provider-voice-tts-arena'),
+                  ('artificial-analysis-decision-index')
+              ) AS always_published(slug)
+              UNION
+              SELECT DISTINCT dataset_slug
+              FROM managed_evaluations
+              WHERE dataset_slug = 'artificial-analysis-agentic-index'
             )
             SELECT max(updated_at) AS last_write,
                    count(*) FILTER (
@@ -1004,8 +1023,15 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                      WHERE updated_at IS NULL
                         OR updated_at <= now() - interval '3 hours'
                    ) AS stale_evaluations,
-                   4 - count(DISTINCT dataset_slug) FILTER (
-                     WHERE updated_at > now() - interval '3 hours'
+                   (
+                     SELECT count(*)
+                     FROM expected_datasets expected
+                     WHERE NOT EXISTS (
+                       SELECT 1
+                       FROM managed_evaluations fresh
+                       WHERE fresh.dataset_slug = expected.slug
+                         AND fresh.updated_at > now() - interval '3 hours'
+                     )
                    ) AS missing_fresh_datasets
             FROM managed_evaluations
         """,
@@ -2731,6 +2757,8 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             JOIN papers p ON p.id = po.paper_id
             WHERE po.source = 'openalex'
         """,
+        # paper_organizations has no timestamp; the run log is the output proof.
+        db_freshness_reports_writes=False,
         workflow_file="cron-link-openalex-organizations.yml",
         workflow_jobs=("run",),
     ),
