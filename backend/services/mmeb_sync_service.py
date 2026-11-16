@@ -43,6 +43,8 @@ MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("MMEB")
 
 LANES = {
     "v2": ("mmeb-v2", "MMEB-v2 Score", "Overall-V2"),
+    # The Space ranks v3 by "Overall" (all V3 datasets). "Overall-V3🆕" averages
+    # only the datasets new in V3, a subset, so it is not the board score.
     "v3": ("mmeb-v3", "MMEB-v3 Score", "Overall"),
 }
 

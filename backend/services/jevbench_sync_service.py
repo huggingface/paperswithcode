@@ -114,6 +114,14 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "DeepSeek V4.1 Flash (thinking default)": ModelIdentity(
         "DeepSeek V4.1 Flash", arxiv_id="2609.19969", is_open=True
     ),
+    # The Gemini Decisions API post introduces "our new Gemini Decision 1 model".
+    "Gemini Decision 1": ModelIdentity(
+        "Gemini Decision 1",
+        source_url=(
+            "https://blog.google/innovation-and-ai/technology/developers-tools/"
+            "gemini-decisions-api/"
+        ),
+    ),
 }
 
 

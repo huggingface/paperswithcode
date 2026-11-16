@@ -170,6 +170,18 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "Claude Code (Opus 5.5 Evidence)": _OPUS_5_5,
     "Claude Code (Opus 4.8 Evidence)": _OPUS_4_8,
     "Claude Code (Opus 4.8)": _OPUS_4_8,
+    "Claude Code (Opus 4.8 No-Evidence)": _OPUS_4_8,
+    "Claude Code (Opus 5.5)": _OPUS_5_5,
+    "Claude Code (Sonnet 5.5)": _SONNET_5_5,
+    "Codex (GPT-5.5 No-Evidence)": _GPT_5_5,
+    "Codex (GPT-5.6 Luna)": _GPT_5_6,
+    "Codex (GPT-5.6 Sol)": _GPT_5_6,
+    "Codex (GPT-5.6 Terra)": _GPT_5_6,
+    "Codex (GPT-6 Luna)": _GPT_6_SOL_LUNA,
+    "Codex (GPT-6 Sol)": _GPT_6_SOL_LUNA,
+    "Codex (GPT-6.1 Sol)": _GPT_6_1_SOL,
+    "Codex (GPT-6.1 Terra)": _GPT_6_1_TERRA,
+    "LlamaExtract Agentic Plus (Max Effort)": _LLAMAEXTRACT,
     "Codex (GPT-6.1 Sol Evidence)": _GPT_6_1_SOL,
     "Codex (GPT-6.1 Terra Evidence)": _GPT_6_1_TERRA,
     "Codex (GPT-6 Sol Evidence)": _GPT_6_SOL_LUNA,
@@ -287,8 +299,15 @@ EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
         "Extend Extract",
         "Extend (Max Context)",
         "Datalab (Accurate + Balanced)",
-        # A third-party extraction harness around GPT-5.4, not a model release.
+        "Datalab Balanced",
+        "Extend Max Context + Review Agent",
+        "Extend Performance + Review Agent",
+        "Parseur",
+        # Third-party extraction harnesses around a model, not model releases.
         "KYNEX (GPT-5.4)",
+        "KYNEX (GPT-5.5)",
+        "KYNEX (GPT-6.1 Sol)",
+        "Pi (Tencent Hy4)",
     }
 )
 
