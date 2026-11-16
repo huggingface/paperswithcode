@@ -192,6 +192,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `face-detection` — Face Detection
 - `face-recognition` — Face Recognition
 - `face-verification` — Face Verification
+- `facial-action-unit-detection` — Facial Action Unit Detection
 - `facial-expression-recognition` — Facial Expression Recognition
 - `facial-landmark-detection` — Facial Landmark Detection
 - `fake-news-detection` — Fake News Detection
