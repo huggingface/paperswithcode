@@ -75,9 +75,16 @@ elif args[:2] == ['buckets', 'cp']:
 elif args[:2] == ['buckets', 'list']:
     remote = json.loads(os.environ['TEST_REMOTE'])
     if remote is None:
-        remote = [p.name for p in pathlib.Path(os.environ['PWC_POSTGRES_BACKUP_DIR']).iterdir()]
-    for name in remote:
-        print('postgres/' + name)
+        backup_dir = pathlib.Path(os.environ['PWC_POSTGRES_BACKUP_DIR'])
+        remote = {p.name: p.stat().st_size for p in backup_dir.iterdir()}
+    if '--format' in args and args[args.index('--format') + 1] == 'json':
+        print(json.dumps([
+            {'type': 'file', 'path': 'postgres/' + name, 'size': size}
+            for name, size in remote.items()
+        ]))
+    else:
+        for name in remote:
+            print('postgres/' + name)
 elif name == 'df':
     print('Avail')
     print(os.environ['TEST_AVAILABLE'])
@@ -179,7 +186,7 @@ def test_uploaded_old_dump_is_pruned_before_the_new_dump(tmp_path):
 def test_old_dump_missing_from_the_bucket_is_kept(tmp_path):
     old = _old_dump(tmp_path, "22")
     result, _, _ = run_backup(
-        tmp_path, ['{"private": true}'], keep="1", existing=[(old, 100)], remote=[]
+        tmp_path, ['{"private": true}'], keep="1", existing=[(old, 100)], remote={}
     )
     # The upload of the new dump then fails verification, but the old local
     # dump, never uploaded, is still there when pg_dump runs.
@@ -199,3 +206,34 @@ def test_dump_refuses_to_start_without_room_for_another_dump(tmp_path):
     assert result.returncode != 0
     assert "Not enough free disk for a dump" in result.stderr
     assert "dump" not in calls
+
+
+def test_dump_without_local_copy_sizes_from_the_bucket(tmp_path):
+    # Production keeps no local dump, so the bucket's newest dump is the only
+    # size estimate; without it the guard used to be skipped entirely.
+    old = _old_dump(tmp_path, "22")
+    result, calls, _ = run_backup(
+        tmp_path,
+        ['{"private": true}'],
+        keep="0",
+        remote={old: 1000, f"{old}.sha256": 10},
+        available=1050,
+    )
+    assert result.returncode != 0
+    assert "Not enough free disk for a dump" in result.stderr
+    assert "dump" not in calls
+
+
+def test_dump_without_local_copy_runs_when_bucket_dump_fits(tmp_path):
+    old = _old_dump(tmp_path, "22")
+    result, calls, _ = run_backup(
+        tmp_path,
+        ['{"private": true}'],
+        keep="0",
+        remote={old: 1000, f"{old}.sha256": 10},
+        available=10**6,
+    )
+    # Verification fails because the stub bucket never gains the new dump,
+    # but the dump itself was allowed to start.
+    assert "dump" in calls
+    assert "Not enough free disk" not in result.stderr

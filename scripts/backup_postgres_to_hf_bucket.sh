@@ -144,6 +144,25 @@ newest_local_dump_bytes() {
     stat -c %s "$newest"
 }
 
+newest_remote_dump_bytes() {
+    # With LOCAL_KEEP_COUNT=0 no local dump survives, so the bucket's newest
+    # dump is the only size estimate for the next one.
+    run_hf buckets list "$REMOTE_BUCKET/$REMOTE_PREFIX" --recursive --format json \
+        | python3 -c '
+import json
+import sys
+
+name_prefix = sys.argv[1]
+dumps = sorted(
+    (entry["path"], entry["size"])
+    for entry in json.load(sys.stdin)
+    if entry["path"].rsplit("/", 1)[-1].startswith(name_prefix)
+    and entry["path"].endswith(".dump")
+)
+print(dumps[-1][1] if dumps else 0)
+' "${PWC_DB_NAME}_"
+}
+
 list_remote_files() {
     run_hf buckets list "$REMOTE_BUCKET/$REMOTE_PREFIX" --recursive --format quiet
 }
@@ -238,8 +257,11 @@ main() {
     local timestamp backup_name dump_path checksum_path remote_listing
     timestamp="$(date -u +%Y%m%d_%H%M%S)"
     backup_name="${PWC_DB_NAME}_${timestamp}.dump"
-    local expected_bytes
+    local expected_bytes remote_bytes
     expected_bytes="$(newest_local_dump_bytes)"
+    remote_bytes="$(newest_remote_dump_bytes)" \
+        || die "Could not read the newest bucket dump size; refusing to dump blind"
+    (( remote_bytes > expected_bytes )) && expected_bytes="$remote_bytes"
     prune_uploaded_local_backups_before_dump
     require_space_for_dump "$expected_bytes"
 
