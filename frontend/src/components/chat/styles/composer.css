@@ -177,6 +177,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   grid-auto-flow: row dense;
+  padding: 5px;
 }
 .chat-composer-wrap .chat-composer > * { grid-column: 1 / -1; }
 .chat-composer-wrap .chat-composer > .chat-composer-textarea-wrap { grid-column: 1; }
@@ -185,8 +186,11 @@
   align-self: end;
   padding: 0 0 0 4px;
 }
+/* One text line is exactly as tall as the 38px buttons, so the text and the
+   icons share a center line; display: block drops the inline baseline gap. */
+.chat-composer-wrap .chat-composer textarea { display: block; }
 .chat-composer-wrap .chat-composer textarea,
-.chat-composer-wrap .chat-paper-highlight-layer-composer { padding: 9px 6px 9px 10px; }
+.chat-composer-wrap .chat-paper-highlight-layer-composer { padding: calc((38px - 1.45em) / 2) 6px calc((38px - 1.45em) / 2) 10px; }
 .chat-composer-wrap .chat-composer-tools { display: none; }
 .chat-send {
   display: flex;
