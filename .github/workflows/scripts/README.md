@@ -45,6 +45,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-open-asr.timer` | `*-*-* *:15:00` | `sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
 | `pwc-cron-sync-open-tts.timer` | `*-*-* *:18:00` | `sync_open_tts` | `.github/workflows/scripts/hourly/sync_open_tts.py` |
 | `pwc-cron-sync-parsebench.timer` | `*-*-* *:20:00` | `sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |
+| `pwc-cron-sync-parsebench-2.timer` | `*-*-* *:24:00` | `sync_parsebench_2` | `.github/workflows/scripts/hourly/sync_parsebench_2.py` |
 | `pwc-cron-sync-deepswe.timer` | `*-*-* *:25:00` | `sync_deepswe` | `.github/workflows/scripts/hourly/sync_deepswe.py` |
 | `pwc-cron-sync-extractbench.timer` | `*-*-* *:32:00` | `sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
 | `pwc-cron-sync-vals-finance-agent.timer` | `*-*-* *:47:00` | `sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
@@ -436,6 +437,17 @@ only rows whose exact upstream provider label is mapped to a reviewed paper or
 official release page, stores the overall score plus the five dimension scores,
 owns only its managed-prefix rows, and logs unreviewed provider labels as a
 warning instead of failing.
+
+`sync_parsebench_2.py` applies the same contract to `leaderboard-v2.csv` in the
+same repository, keeping the `parsebench-2` benchmark on task `ocr`: Overall
+(ParseBench-2) plus the Text, Formatting, Tables, Charts, Visual Grounding and
+Forms scores. ParseBench-2 provider labels differ from v1 ("Claude Opus 5.5",
+"LightOnOCR-3 4B"), so the board has its own reviewed map, which also carries
+each open-weight row's Hub checkpoint (the v2 CSV has no `HF_Model_ID`
+column). Commercial parsers are reviewed exclusions; other `Vision Models` and
+`Open Weight` rows auto-match an indexed paper or become release-radar
+signals. A hand-imported row with the same paper and provider label is adopted
+rather than duplicated.
 
 `sync_extractbench.py` applies the same reviewed-label contract to the official
 `leaderboard.csv` in `run-llama/ExtractBench`. It stores unified value F1 plus

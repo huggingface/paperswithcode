@@ -1,6 +1,7 @@
 """Validation and idempotency tests for the ParseBench live sync."""
 
 import asyncio
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 
@@ -96,6 +97,12 @@ def _identities(count: int = 40) -> dict[str, pb.PaperIdentity]:
         )
         for index in range(count)
     }
+
+
+def _board(
+    identities: dict[str, pb.PaperIdentity], excluded: frozenset[str] = frozenset()
+) -> pb.ParseBenchBoard:
+    return replace(pb.PARSEBENCH, identities=identities, excluded=excluded)
 
 
 def _session() -> Session:
@@ -199,12 +206,11 @@ def test_parser_rejects_malformed_upstream_data():
         parse_parsebench_leaderboard(_csv() + _row("bad-hf", 10, hf="no-slash"))
 
 
-def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
+def test_sync_upserts_managed_rows_and_preserves_manual_rows():
     session = _session()
     identities = _identities()
     identities.pop("model-39")
-    monkeypatch.setattr(pb, "MODEL_PAPER_IDENTITIES", identities)
-    monkeypatch.setattr(pb, "EXCLUDED_PROVIDERS", frozenset({"model-39"}))
+    board = _board(identities, frozenset({"model-39"}))
     session.add_all(
         [
             Evaluation(
@@ -248,12 +254,13 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
     )
     entries = parse_parsebench_leaderboard(csv_text)
 
-    first = ParseBenchSyncService(session).sync(entries, discovery=_discovery())
+    first = ParseBenchSyncService(session, board).sync(entries, discovery=_discovery())
     assert first.to_dict() == {
         "fetched": 41,
         "matched": 39,
         "created": 38,
         "updated": 1,
+        "adopted": 0,
         "deleted": 1,
         "excluded": 1,
         "auto_matched": [],
@@ -278,16 +285,16 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
     assert updated.best_rank == 2
     assert session.query(PaperTask).count() == 39
 
-    second = ParseBenchSyncService(session).sync(entries, discovery=_discovery())
+    second = ParseBenchSyncService(session, board).sync(entries, discovery=_discovery())
     assert second.created == 0
     assert second.updated == 39
     assert second.deleted == 0
     assert session.query(Evaluation).count() == 40
 
 
-def test_unknown_models_match_announcements_or_become_radar_signals(monkeypatch):
+def test_unknown_models_match_announcements_or_become_radar_signals():
     session = _session()
-    monkeypatch.setattr(pb, "MODEL_PAPER_IDENTITIES", _identities())
+    board = _board(_identities())
     session.add(
         Paper(
             id=2000,
@@ -308,8 +315,8 @@ def test_unknown_models_match_announcements_or_become_radar_signals(monkeypatch)
         + _row("Acme Parse", 83, category="Commercial - Startup APIs")
     )
 
-    first = ParseBenchSyncService(session).sync(entries, discovery=_discovery())
-    second = ParseBenchSyncService(session).sync(entries, discovery=_discovery())
+    first = ParseBenchSyncService(session, board).sync(entries, discovery=_discovery())
+    second = ParseBenchSyncService(session, board).sync(entries, discovery=_discovery())
 
     assert first.auto_matched == second.auto_matched == ["NovaOCR-3"]
     assert first.unreviewed == ["Acme Parse", "Ear-OCR-2", "Anthropic Opus 9"]
@@ -327,27 +334,26 @@ def test_unknown_models_match_announcements_or_become_radar_signals(monkeypatch)
     assert signals == {"Ear-OCR-2": "ear-lab", "Opus 9": "Anthropic"}
 
 
-def test_sync_refuses_when_reviewed_coverage_collapses(monkeypatch):
+def test_sync_refuses_when_reviewed_coverage_collapses():
     session = _session()
-    monkeypatch.setattr(pb, "MODEL_PAPER_IDENTITIES", _identities(10))
     with pytest.raises(RuntimeError, match="only 10 reviewed rows"):
-        ParseBenchSyncService(session).sync(
+        ParseBenchSyncService(session, _board(_identities(10))).sync(
             parse_parsebench_leaderboard(_csv()), discovery=_discovery()
         )
     assert session.query(Evaluation).count() == 0
 
 
-def test_sync_requires_resolved_papers_unless_dry_run(monkeypatch):
+def test_sync_requires_resolved_papers_unless_dry_run():
     session = _session()
-    monkeypatch.setattr(pb, "MODEL_PAPER_IDENTITIES", _identities())
+    board = _board(_identities())
     entries = parse_parsebench_leaderboard(_csv())
     partial = _discovery(39)
 
     with pytest.raises(RuntimeError, match="No reviewed paper resolved for 'model-39'"):
-        ParseBenchSyncService(session).sync(entries, discovery=partial)
+        ParseBenchSyncService(session, board).sync(entries, discovery=partial)
     assert session.query(Evaluation).count() == 0
 
-    stats = ParseBenchSyncService(session).sync(
+    stats = ParseBenchSyncService(session, board).sync(
         entries, discovery=partial, commit=False
     )
     assert stats.missing_papers == ["model-39"]
@@ -355,11 +361,9 @@ def test_sync_requires_resolved_papers_unless_dry_run(monkeypatch):
     assert session.query(Evaluation).count() == 0
 
 
-def test_discovery_reuses_existing_and_indexes_missing_external_papers(monkeypatch):
+def test_discovery_reuses_existing_and_indexes_missing_external_papers():
     session = _session()
-    monkeypatch.setattr(
-        pb,
-        "MODEL_PAPER_IDENTITIES",
+    board = _board(
         {
             "Existing A": pb.external(
                 "https://example.com/model-0", "Model 0", "2026-08-01"
@@ -370,7 +374,7 @@ def test_discovery_reuses_existing_and_indexes_missing_external_papers(monkeypat
             "New Model": pb.external(
                 "https://example.com/new", "New Model", "2026-08-01"
             ),
-        },
+        }
     )
 
     class External:
@@ -389,15 +393,17 @@ def test_discovery_reuses_existing_and_indexes_missing_external_papers(monkeypat
             return SimpleNamespace(paper=SimpleNamespace(id=paper.id))
 
     dry = asyncio.run(
-        ParseBenchPaperDiscoveryService(session, external_service=External()).discover(
-            persist=False
-        )
+        ParseBenchPaperDiscoveryService(
+            session, board=board, external_service=External()
+        ).discover(persist=False)
     )
     assert dry.papers == {"https://example.com/model-0": 1000}
     assert dry.would_index == ["https://example.com/new"]
 
     result = asyncio.run(
-        ParseBenchPaperDiscoveryService(session, external_service=External()).discover()
+        ParseBenchPaperDiscoveryService(
+            session, board=board, external_service=External()
+        ).discover()
     )
     assert result.papers["https://example.com/model-0"] == 1000
     assert result.papers["https://example.com/new"]
@@ -428,3 +434,163 @@ def test_new_upstream_providers_resolve_to_their_release(provider, key):
 
 def test_upstage_api_snapshot_is_a_reviewed_exclusion():
     assert "Upstage Document Parse 2 (Enhanced)" in EXCLUDED_PROVIDERS
+
+
+V2_HEADER = (
+    "Provider,Category,Overall,Text,Formatting,Tables,Charts,Visual_Grounding,"
+    "Forms,Cost_Per_Page,Verified\n"
+)
+
+
+def _v2_row(provider: str, overall: float, category: str = "Open Weight") -> str:
+    return (
+        f"{provider},{category},{overall},{overall + 1},{overall},{overall},"
+        f"{overall},{overall},{overall - 1},,yes\n"
+    )
+
+
+def _v2_csv(count: int = 40) -> str:
+    return V2_HEADER + "".join(
+        _v2_row(f"model-{index}", 50 + index / 10) for index in range(count)
+    )
+
+
+def _v2_session() -> Session:
+    session = _session()
+    session.add(Dataset(id=3422, name="ParseBench-2", slug="parsebench-2"))
+    metrics = [
+        Metric(id=200 + index, name=name, direction="higher_is_better")
+        for index, name in enumerate(pb.PARSEBENCH_2.metric_names)
+    ]
+    session.add_all(metrics)
+    session.add(TaskDataset(task_id=4, dataset_id=3422))
+    session.add_all(
+        TaskDatasetMetric(task_id=4, dataset_id=3422, metric_id=metric.id)
+        for metric in metrics
+    )
+    session.commit()
+    return session
+
+
+def test_parsebench_2_reviewed_map_is_well_formed():
+    board = pb.PARSEBENCH_2
+    assert len(board.identities) == 40
+    assert not set(board.identities) & board.excluded
+    assert set(board.hf_model_ids) <= set(board.identities)
+    # Open-weight rows carry their Hub checkpoint; API models do not.
+    for label, identity in board.identities.items():
+        assert (label in board.hf_model_ids) == identity.is_open, label
+    assert board.identities["LlamaParse (Agentic Plus)"].title == (
+        "ParseBench-2: Severity-Aware Evaluation of Document Parsing"
+    )
+    assert "Muse Ember 1.0 (low)" not in board.identities
+
+
+def test_kdl_nano_v2_is_bound_to_the_kdl_release_on_both_boards():
+    kdl = "https://huggingface.co/KDLAI/KDL-Frontier-Parser-nano"
+    assert MODEL_PAPER_IDENTITIES["KDL-Frontier-Parser-nano-v2"].key == kdl
+    assert pb.PARSEBENCH_2.identities["KDL-Frontier-Parser-nano-v2"].key == kdl
+
+
+def test_parse_parsebench_2_csv():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert str(request.url) == pb.PARSEBENCH_2_CSV_URL
+        return httpx.Response(200, text=_v2_csv())
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        entries = fetch_parsebench_leaderboard(client, pb.PARSEBENCH_2)
+
+    assert len(entries) == 40
+    assert entries[0].hf_model_id is None
+    assert entries[0].metrics == {
+        "Overall (ParseBench-2)": 50,
+        "Text (ParseBench-2)": 51,
+        "Formatting (ParseBench-2)": 50,
+        "Tables (ParseBench-2)": 50,
+        "Charts (ParseBench-2)": 50,
+        "Visual Grounding (ParseBench-2)": 50,
+        "Forms (ParseBench-2)": 49,
+    }
+    with pytest.raises(ValueError, match="ParseBench-2 CSV is missing columns"):
+        parse_parsebench_leaderboard(HEADER + _row("x", 1), pb.PARSEBENCH_2)
+
+
+def test_parsebench_2_adopts_hand_imported_rows_and_leaves_v1_alone():
+    session = _v2_session()
+    identities = _identities()
+    board = replace(
+        pb.PARSEBENCH_2,
+        identities=identities,
+        excluded=frozenset({"Reducto"}),
+        hf_model_ids={"model-1": "org/model-1"},
+    )
+    session.add_all(
+        [
+            # The reviewed one-time import: same paper and label.
+            Evaluation(
+                paper_id=1000,
+                task_id=4,
+                dataset_id=3422,
+                model_name="model-0",
+                methodology="Imported 2026-11-16 from the official leaderboard.",
+                metrics={"Overall (ParseBench-2)": 1},
+                best_metric="Overall (ParseBench-2)",
+            ),
+            # Same label on another paper stays a separate manual row.
+            Evaluation(
+                paper_id=1002,
+                task_id=4,
+                dataset_id=3422,
+                model_name="model-1",
+                methodology="Human curated",
+                metrics={"Overall (ParseBench-2)": 2},
+                best_metric="Overall (ParseBench-2)",
+            ),
+            # The v1 board's managed rows are never touched by the v2 sync.
+            Evaluation(
+                paper_id=1000,
+                task_id=4,
+                dataset_id=847,
+                model_name="model-0",
+                methodology=f"{MANAGED_METHODOLOGY_PREFIX} provider=model-0; x",
+                metrics={PRIMARY_METRIC_NAME: 3},
+                best_metric=PRIMARY_METRIC_NAME,
+            ),
+        ]
+    )
+    session.commit()
+    entries = parse_parsebench_leaderboard(
+        _v2_csv()
+        + _v2_row("Reducto", 90, category="Document Parsers")
+        + _v2_row("Acme Parse", 80, category="Document Parsers"),
+        board,
+    )
+
+    first = ParseBenchSyncService(session, board).sync(entries, discovery=_discovery())
+    second = ParseBenchSyncService(session, board).sync(entries, discovery=_discovery())
+
+    assert (first.adopted, first.created, first.updated) == (1, 39, 0)
+    assert (second.adopted, second.created, second.updated) == (0, 0, 40)
+    assert first.excluded == 1
+    assert first.unreviewed == ["Acme Parse"]
+    v2_rows = session.query(Evaluation).filter(Evaluation.dataset_id == 3422).all()
+    assert len(v2_rows) == 41
+    adopted = next(
+        row for row in v2_rows if row.model_name == "model-0" and row.paper_id == 1000
+    )
+    assert adopted.metrics["Overall (ParseBench-2)"] == 50
+    assert adopted.best_metric == "Overall (ParseBench-2)"
+    assert adopted.methodology.startswith(
+        "Managed by the Papers with Code ParseBench-2 live sync. provider=model-0;"
+    )
+    assert "six ParseBench-2 dimension scores" in adopted.methodology
+    managed_1 = next(
+        row for row in v2_rows if row.model_name == "model-1" and row.paper_id == 1001
+    )
+    assert managed_1.hf_model_url == "https://huggingface.co/org/model-1"
+    manual = next(
+        row for row in v2_rows if row.paper_id == 1002 and row.model_name == "model-1"
+    )
+    assert manual.methodology == "Human curated"
+    v1 = session.query(Evaluation).filter(Evaluation.dataset_id == 847).one()
+    assert v1.metrics == {PRIMARY_METRIC_NAME: 3}

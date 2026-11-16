@@ -1093,6 +1093,45 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_parsebench_2",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=24),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-parsebench-2.timer",
+        systemd_service="pwc-cron-sync-parsebench-2.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync ParseBench-2 Leaderboard",
+        category="hourly",
+        schedule="24 * * * * (hourly)",
+        script_path="hourly/sync_parsebench_2.py",
+        log_name="sync_parsebench_2",
+        process_patterns=("scripts.hourly.sync_parsebench_2",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_parsebench_2.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'parsebench-2'
+              AND e.best_metric = 'Overall (ParseBench-2)'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code ParseBench-2 live sync.%'
+        """,
+        workflow_file="cron-sync-parsebench-2.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_extractbench",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=32),),
