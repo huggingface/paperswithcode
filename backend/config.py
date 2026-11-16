@@ -299,6 +299,9 @@ class Settings(BaseSettings, ChatSettings):
     curation_pi_provider: str = Field(default="novita")
     curation_pi_thinking: str = Field(default="high")
     curation_pi_cli_version: str = Field(default="1.3.0")
+    # Grades the disagreements between paired Codex and Pi shadow proposals.
+    curation_judge_anthropic_api_key: str = Field(default="")
+    curation_judge_model: str = Field(default="claude-opus-5-5")
 
     # Hugging Face OAuth configuration (for "Sign in with Hugging Face")
     hf_oauth_client_id: str = Field(
