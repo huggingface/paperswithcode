@@ -109,6 +109,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `parsebench` on task `ocr`; Overall (ParseBench) plus Tables, Charts, Content Faithfulness, Semantic Formatting, Visual Grounding; official `leaderboard.csv` in `run-llama/parsebench`; typically 40–400 upstream rows, of which only reviewed provider labels are published.
 - **Proof:** Diff the current CSV against managed rows (model label, six scores, `hf_model_url`); confirm `parsebench_unreviewed` warnings are either mapped or added to the reviewed exclusions; verify stale managed rows were deleted and ranks recomputed on Overall (ParseBench).
 
+## `sync_parsebench_2`
+
+- **Contract:** `parsebench-2` on task `ocr`; Overall (ParseBench-2) = mean of Text, Formatting, Tables, Charts, Visual Grounding, Forms (each suffixed ` (ParseBench-2)`); official `leaderboard-v2.csv` in `run-llama/parsebench`; typically 40–400 upstream rows (55 on 2026-11-16, 40 published, 14 commercial exclusions).
+- **Proof:** Diff the current CSV against managed rows (provider label, seven scores, `hf_model_url` from `PARSEBENCH_2_MODELS`); confirm `parsebench_2_unreviewed` warnings are either mapped, excluded, or radar signals; verify stale managed rows were deleted and ranks recomputed on Overall (ParseBench-2).
+
 ## `sync_extractbench`
 
 - **Contract:** `extractbench` on task `document-understanding`; Value F1 plus Word Grounding F1 and Page Grounding F1 (omitted when upstream reports 0.00 for both); official `leaderboard.csv` in `run-llama/ExtractBench`; typically 30–400 upstream rows, of which only reviewed provider labels are published.

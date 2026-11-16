@@ -40,6 +40,17 @@ def test_process_detection_finds_an_independent_worker():
         assert is_process_running(("backfill_method_references",))
 
 
+def test_process_detection_does_not_match_a_longer_job_name():
+    output = _processes("200 1 python -m scripts.hourly.sync_parsebench_2")
+
+    with (
+        patch("backend.services.cron_health.os.getpid", return_value=100),
+        patch("backend.services.cron_health.subprocess.run", return_value=output),
+    ):
+        assert not is_process_running(("scripts.hourly.sync_parsebench",))
+        assert is_process_running(("scripts.hourly.sync_parsebench_2",))
+
+
 def test_old_unlocked_persistent_file_is_not_stale(tmp_path):
     lock = tmp_path / "persistent.lock"
     lock.touch()
