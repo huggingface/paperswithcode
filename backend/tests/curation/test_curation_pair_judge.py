@@ -41,7 +41,12 @@ def _job(kind, pair_diff=None, proposal=None, **overrides):
         pair_diff=pair_diff,
         pair_judgment=None,
         context_snapshot={
-            "paper": {"id": 7, "title": "A paper", "arxiv_id": "2611.00001"}
+            "paper": {
+                "id": 7,
+                "title": "A paper",
+                "arxiv_id": "2611.00001",
+                "abstract": "We study X.",
+            }
         },
         **overrides,
     )
@@ -209,7 +214,9 @@ def test_judge_pair_unblinds_verdicts_and_marks_missing_ones_unsure(monkeypatch)
     assert graded[first]["verdict"] == "incorrect"
     assert {c["verdict"] for c in graded.values() if c["id"] != first} == {"unsure"}
     assert graded[first]["origin"] in {"codex", "pi"}
-    assert "Disputed candidates" in messages.calls[0]["messages"][0]["content"]
+    prompt = messages.calls[0]["messages"][0]["content"]
+    assert "Disputed candidates" in prompt
+    assert "Abstract: We study X." in prompt
 
 
 def test_judge_pair_skips_the_model_without_disagreements():

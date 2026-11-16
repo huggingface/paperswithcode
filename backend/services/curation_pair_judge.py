@@ -240,6 +240,7 @@ def build_prompt(paper: dict, paper_text: str, candidates: list[dict]) -> str:
         [
             f"Paper: {paper.get('title')}",
             f"arXiv: {paper.get('arxiv_id') or 'none'}",
+            f"Abstract: {paper.get('abstract') or '(none)'}",
             "Known links: " + ", ".join(link for link in links if link),
             "",
             "Disputed candidates:",
