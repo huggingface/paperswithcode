@@ -141,9 +141,19 @@ def _patterns_are_running(
     for pid, _parent_pid, command in processes:
         if pid in diagnostic_ancestry or "python" not in command or "grep" in command:
             continue
-        if any(pattern in command for pattern in patterns):
+        if any(_names_process(pattern, command) for pattern in patterns):
             return True
     return False
+
+
+def _names_process(pattern: str, command: str) -> bool:
+    """Whether ``command`` contains ``pattern`` as a whole name.
+
+    ``scripts.hourly.sync_parsebench`` must not match the command of
+    ``scripts.hourly.sync_parsebench_2``, so the pattern may not run on into
+    further identifier characters.
+    """
+    return re.search(re.escape(pattern) + r"(?![A-Za-z0-9_])", command) is not None
 
 
 def is_process_running(patterns: tuple[str, ...]) -> bool:
