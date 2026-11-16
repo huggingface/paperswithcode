@@ -193,8 +193,9 @@ def test_targeted_rescore_keeps_hourly_x_lift(monkeypatch):
 
     assert lifted == 100.0
     assert targeted[0]["score"] == 100.0
-    # The hourly run recomputes the lift from its own settings (here: weight 0).
-    assert next(u for u in full if u["id"] == 2)["score"] == 25.0
+    # The hourly run recomputes the lift from its own settings (here: weight 0):
+    # 2 stars/hour ranks first of two above-floor velocities -> G = 0.55.
+    assert next(u for u in full if u["id"] == 2)["score"] == 27.5
 
 
 def test_targeted_rescore_keeps_pinned_paper_without_live_signal():

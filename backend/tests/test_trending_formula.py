@@ -1,15 +1,17 @@
 """Unit tests for the composite paper trending formula.
 
 These exercise the pure formula in ``backend/utils/trending.py`` (no DB):
-quantile normalization, HF soft-OR aggregation, kind weights, diminishing
-returns, and the GitHub/HF blend, including a DeepSeek-like scenario where a
+quantile normalization, floored ranks, best-led HF aggregation, kind weights,
+capped extra-artifact returns, and the GitHub/HF blend, including a DeepSeek-like scenario where a
 paper trends purely on its Hugging Face models.
 """
 
 import pytest
 
 from backend.utils.trending import (
+    BELOW_FLOOR_SHARE,
     GITHUB_WEIGHT,
+    HF_EXTRA_ARTIFACT_SHARE,
     HF_MAX_ARTIFACT_PAPERS,
     HF_WEIGHT,
     SCORE_SCALE,
@@ -19,6 +21,7 @@ from backend.utils.trending import (
     x_component,
     x_corpus,
     decaying_pin_floor,
+    floored_rank,
     github_component,
     hf_component,
     is_hf_aggregator,
@@ -50,11 +53,38 @@ def test_quantile_rank_bounds_and_monotonicity():
     assert quantile_rank(corpus, 9999) == 1.0
 
 
-def test_github_component_uses_quantile():
+def test_floored_rank_splits_the_corpus_into_tiers():
+    corpus = sorted_positive([0.1, 0.2, 0.3, 0.5, 1, 2, 5, 10])
+    assert floored_rank(corpus, 0, 1.0) == 0.0
+    assert floored_rank([], 5, 1.0) == 0.0
+    # Below the floor: ranked among the four low values, within [0, share].
+    assert floored_rank(corpus, 0.2, 1.0) == pytest.approx(BELOW_FLOOR_SHARE / 2)
+    assert floored_rank(corpus, 0.9, 1.0) == pytest.approx(BELOW_FLOOR_SHARE)
+    # At or above the floor: ranked among the four high values, within [share, 1].
+    assert floored_rank(corpus, 1, 1.0) == pytest.approx(
+        BELOW_FLOOR_SHARE + (1 - BELOW_FLOOR_SHARE) / 4
+    )
+    assert floored_rank(corpus, 10, 1.0) == 1.0
+    ranks = [floored_rank(corpus, x, 1.0) for x in corpus]
+    assert ranks == sorted(ranks)
+    # An empty tier (value outside the corpus) cannot divide by zero.
+    assert floored_rank([2.0, 3.0], 0.5, 1.0) == pytest.approx(BELOW_FLOOR_SHARE)
+    assert floored_rank([0.2, 0.3], 4.0, 1.0) == 1.0
+
+
+def test_github_component_uses_floored_rank():
     corpus = sorted_positive([0.5, 1, 2, 5, 10, 20])
     assert github_component(20, corpus) == 1.0
-    assert github_component(2, corpus) == 0.5
+    assert github_component(2, corpus, 1.0) == pytest.approx(0.1 + 0.9 * 2 / 5)
+    assert github_component(0.5, corpus, 1.0) == pytest.approx(BELOW_FLOOR_SHARE)
     assert github_component(0, corpus) == 0.0
+
+
+def test_fresh_repo_with_few_stars_stays_below_the_floor_tier():
+    """3 stars in a repo's first hours tops a corpus of near-zero velocities."""
+    corpus = sorted_positive([0.001] * 90 + [0.86] + [1.5, 3, 8, 20, 50])
+    assert quantile_rank(corpus, 0.86) > 0.9
+    assert github_component(0.86, corpus, 1.0) <= BELOW_FLOOR_SHARE
 
 
 def test_hf_component_empty_is_zero():
@@ -63,18 +93,30 @@ def test_hf_component_empty_is_zero():
     assert hf_component([("dataset", 5)], {"model": [1.0, 2.0]}) == 0.0
 
 
-def test_hf_component_soft_or_and_diminishing_returns():
-    models = sorted_positive([1, 4, 46, 102])
+def test_hf_component_is_led_by_the_best_artifact():
+    models = sorted_positive([1, 4, 12, 46, 102])
     by_kind = {"model": models, "dataset": [], "space": []}
     # Single top model -> rank 1.0 -> H = 1.0.
-    single = hf_component([("model", 102)], by_kind)
-    assert single == 1.0
-    # Two mid models: soft-OR exceeds each but stays < 1.
-    two = hf_component([("model", 4), ("model", 1)], by_kind)
-    r4 = quantile_rank(models, 4)  # 0.5
-    r1 = quantile_rank(models, 1)  # 0.25
-    assert two == 1 - (1 - r4) * (1 - r1)
-    assert r4 < two < 1.0
+    assert hf_component([("model", 102)], by_kind, min_trending_score=10) == 1.0
+    # Extra artifacts fill part of the headroom above the best one.
+    best = floored_rank(models, 46, 10)
+    other = floored_rank(models, 12, 10)
+    two = hf_component([("model", 12), ("model", 46)], by_kind, min_trending_score=10)
+    assert two == pytest.approx(best + HF_EXTRA_ARTIFACT_SHARE * (1 - best) * other)
+    assert best < two < 1.0
+
+
+def test_many_small_checkpoints_do_not_saturate_hf():
+    """Six checkpoints with ~10 recent likes each must not look like a top model."""
+    models = sorted_positive(
+        [1] * 300 + [2] * 300 + [5] * 200 + [8, 9, 9, 9] + list(range(10, 200))
+    )
+    by_kind = {"model": models, "dataset": [], "space": []}
+    family = [("model", s) for s in (10, 9, 9, 9, 8, 8)]
+    h = hf_component(family, by_kind, min_trending_score=10)
+    best = floored_rank(models, 10, 10)
+    assert h <= best + HF_EXTRA_ARTIFACT_SHARE * (1 - best)
+    assert h < hf_component([("model", 199)], by_kind, min_trending_score=10) / 2
 
 
 def test_hf_component_applies_kind_weights():

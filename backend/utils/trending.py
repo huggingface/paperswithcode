@@ -12,10 +12,12 @@ the ranking. Instead we map each signal through its own **empirical quantile
 rank** over the live corpus, which puts both on a comparable, saturation-free
 [0, 1] scale regardless of distribution shape:
 
-    G = quantile_rank(best official repo stars/hour, all live repo velocities)
+    G = floored_rank(best official repo stars/hour, live repo velocities,
+                     GITHUB_MIN_STARS_PER_HOUR)
 
-    a_i = kind_weight_i * quantile_rank(hf_trending_score_i, all live scores of that kind)
-    H   = 1 - prod(1 - a_i)        # weighted soft-OR: diminishing returns, stays in [0, 1]
+    a_i = kind_weight_i * floored_rank(hf_trending_score_i, live scores of that kind,
+                                       HF_MIN_TRENDING_SCORE)
+    H   = a_best + HF_EXTRA_ARTIFACT_SHARE * (1 - a_best) * (1 - prod_rest(1 - a_i))
 
     X   = quantile_rank(fastest linked X post likes/hour, all live post velocities)
 
@@ -30,13 +32,27 @@ the top on its own. The X weight ``w_x`` scales that lift
 of the X corpus: the corpus is small and pre-selected for notable papers, so a
 slow post would otherwise rank mid-table.
 
+GitHub and HF ranks are floored. Most live values are tiny (median repo
+velocity ~0.01 stars/hour, median Hub trendingScore ~2), so a plain quantile
+puts a repo with 3 stars in its first hours or a model with 10 recent likes in
+the top few percent. ``floored_rank`` ranks values below the floor
+(``GITHUB_MIN_STARS_PER_HOUR``, ``HF_MIN_TRENDING_SCORE``) only among
+themselves, within ``[0, BELOW_FLOOR_SHARE]``, and values at or above it among
+themselves, within ``[BELOW_FLOOR_SHARE, 1]``. Small signals still order the
+long tail of papers, but cannot rank with real momentum.
+
+H is led by the paper's best artifact. Its other artifacts can add at most
+``HF_EXTRA_ARTIFACT_SHARE`` of the remaining headroom, so a model family
+released as many small checkpoints cannot saturate H the way one top-of-Hub
+model does.
+
 Consequences (with X off):
 - A paper at the very top of GitHub velocity (G=1) and a paper with a top-of-Hub
   model (H=1) both reach SCORE_SCALE * 0.5 -> they rank together at the top, so a
   paper can trend purely on its Hugging Face artifacts (the DeepSeek-V4 case).
 - A paper strong on BOTH signals beats either alone (up to SCORE_SCALE).
-- Extra HF artifacts help with diminishing returns and can never push a paper
-  past the single-signal ceiling on their own.
+- Extra HF artifacts help with diminishing returns, capped at
+  ``HF_EXTRA_ARTIFACT_SHARE`` of the headroom above the best artifact.
 
 Aggregator artifacts (paper feeds, awesome lists, leaderboards) cite hundreds of
 papers, and the Hub links each of them back. They say nothing about one paper
@@ -63,6 +79,15 @@ DEFAULT_X_WEIGHT = 0.0
 DEFAULT_X_MIN_LIKES_PER_HOUR = 1.0
 # Only posts from the last week count; refresh_x_post_likes stops reading them.
 X_POST_WINDOW_DAYS = 7
+
+# Slowest repo star velocity (stars/hour, EMA) that ranks above the floor tier of G.
+GITHUB_MIN_STARS_PER_HOUR = 1.0
+# Lowest Hub trendingScore that ranks above the floor tier of H.
+HF_MIN_TRENDING_SCORE = 10.0
+# Share of each floored component reserved for values below the floor.
+BELOW_FLOOR_SHARE = 0.1
+# Share of the headroom above the best artifact that the other artifacts can fill.
+HF_EXTRA_ARTIFACT_SHARE = 0.25
 
 # Per-kind importance of HF artifacts (applied to the quantile rank).
 KIND_WEIGHTS: Dict[str, float] = {
@@ -176,47 +201,71 @@ def quantile_rank(sorted_values: Sequence[float], x: float) -> float:
     return idx / len(sorted_values)
 
 
-def github_component(github_raw: float, github_sorted: Sequence[float]) -> float:
-    """Quantile-rank GitHub component G for a paper's best official-repo velocity."""
-    return quantile_rank(github_sorted, github_raw or 0.0)
+def floored_rank(sorted_values: Sequence[float], x: float, floor: float) -> float:
+    """Quantile rank of ``x`` within its tier of ``sorted_values`` (0..1).
+
+    Values below ``floor`` rank among the corpus values below it, scaled into
+    ``[0, BELOW_FLOOR_SHARE]``; values at or above it rank among the corpus
+    values at or above it, scaled into ``[BELOW_FLOOR_SHARE, 1]``.
+    """
+    if x is None or x <= 0 or not sorted_values:
+        return 0.0
+    split = bisect.bisect_left(sorted_values, floor)
+    idx = bisect.bisect_right(sorted_values, x)
+    if x < floor:
+        return BELOW_FLOOR_SHARE * (min(idx / split, 1.0) if split else 1.0)
+    above = len(sorted_values) - split
+    tier_rank = min((idx - split) / above, 1.0) if above else 1.0
+    return BELOW_FLOOR_SHARE + (1.0 - BELOW_FLOOR_SHARE) * tier_rank
+
+
+def github_component(
+    github_raw: float,
+    github_sorted: Sequence[float],
+    min_stars_per_hour: float = GITHUB_MIN_STARS_PER_HOUR,
+) -> float:
+    """Floored-rank GitHub component G for a paper's best official-repo velocity."""
+    return floored_rank(github_sorted, github_raw or 0.0, min_stars_per_hour)
 
 
 def hf_component(
     artifact_scores: Iterable[Tuple[str, float]],
     sorted_by_kind: Dict[str, Sequence[float]],
     kind_weights: Dict[str, float] = KIND_WEIGHTS,
+    min_trending_score: float = HF_MIN_TRENDING_SCORE,
 ) -> float:
-    """Aggregate HF artifacts into component H via weighted soft-OR.
+    """Aggregate HF artifacts into component H, led by the best artifact.
 
     Args:
         artifact_scores: iterable of ``(kind, raw_trending_score)`` tuples.
         sorted_by_kind: ascending-sorted positive trending scores per kind.
-        kind_weights: per-kind weight applied to the quantile rank.
+        kind_weights: per-kind weight applied to the floored rank.
+        min_trending_score: floor between the low and high rank tiers.
 
-    Each artifact contributes ``a_i = weight * quantile_rank``; the combined
-    ``H = 1 - prod(1 - a_i)`` stays within [0, 1] and rewards additional
-    artifacts with diminishing returns.
+    Each artifact contributes ``a_i = weight * floored_rank``. H is the best
+    ``a_i`` plus at most ``HF_EXTRA_ARTIFACT_SHARE`` of the remaining headroom,
+    filled by the soft-OR of the other artifacts, so H stays within [0, 1].
     """
-    product = 1.0
-    saw_any = False
+    ranks = []
     for kind, raw in artifact_scores:
         if raw is None or raw <= 0:
             continue
         weight = kind_weights.get(kind, 0.0)
-        if weight <= 0:
-            continue
         corpus = sorted_by_kind.get(kind)
-        if not corpus:
+        if weight <= 0 or not corpus:
             continue
-        rank = weight * quantile_rank(corpus, raw)
-        if rank <= 0:
-            continue
-        product *= 1.0 - min(rank, 1.0)
-        saw_any = True
+        rank = min(weight * floored_rank(corpus, raw, min_trending_score), 1.0)
+        if rank > 0:
+            ranks.append(rank)
 
-    if not saw_any:
+    if not ranks:
         return 0.0
-    return 1.0 - product
+    ranks.sort(reverse=True)
+    best = ranks[0]
+    rest_product = 1.0
+    for rank in ranks[1:]:
+        rest_product *= 1.0 - rank
+    return best + HF_EXTRA_ARTIFACT_SHARE * (1.0 - best) * (1.0 - rest_product)
 
 
 def x_corpus(velocities: Iterable[float], min_likes_per_hour: float) -> List[float]:
