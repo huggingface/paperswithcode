@@ -470,9 +470,7 @@ function stopMessages(messages: ChatMessage[]): ChatMessage[] {
       if (block.kind === "tool" && block.status === "running") {
         return [{ ...block, status: "error", open: true }];
       }
-      if (block.kind === "reasoning" && block.active) {
-        return block.text ? [endReasoning(block)] : [];
-      }
+      if (block.kind === "reasoning" && block.active) return [endReasoning(block)];
       if (block.kind === "answer") return [{ ...block, done: true }];
       return [block];
     });
