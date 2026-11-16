@@ -273,6 +273,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync JevBench leaderboard from Benchmark Heaven hourly",
     ),
     TimerSpec(
+        job="sync_sle",
+        on_calendar=("*-*-* *:41:00",),
+        description="Sync Science's Last Exam leaderboards hourly",
+    ),
+    TimerSpec(
         job="sync_frontiercs_2",
         on_calendar=("*-*-* *:43:00",),
         description="Sync FrontierCS 2 leaderboard hourly",
