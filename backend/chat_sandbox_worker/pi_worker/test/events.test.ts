@@ -332,6 +332,44 @@ test("closes visible reasoning before answer", () => {
   );
 });
 
+test("opens visible reasoning when thinking starts, even without summary text", () => {
+  const semantic: string[] = [];
+  const adapter = new PiEventAdapter(true, (kind) => semantic.push(kind));
+  const thinking = (type: string, delta?: string) => adapter.feed({
+    type: "message_update",
+    assistantMessageEvent: delta === undefined ? { type } : { type, delta },
+  });
+  assert.deepEqual(thinking("thinking_start"), [{ type: "reasoning_start" }]);
+  assert.deepEqual(thinking("thinking_end"), []);
+  assert.deepEqual(thinking("thinking_start"), []);
+  assert.deepEqual(
+    adapter.feed({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "y" } }),
+    [{ type: "reasoning_end" }, { type: "answer_delta", text: "y" }],
+  );
+  assert.deepEqual(semantic, ["answer"]);
+});
+
+test("joins consecutive reasoning summaries into one block", () => {
+  const adapter = new PiEventAdapter(true);
+  const thinking = (type: string, delta?: string) => adapter.feed({
+    type: "message_update",
+    assistantMessageEvent: delta === undefined ? { type } : { type, delta },
+  });
+  assert.deepEqual(thinking("thinking_start"), [{ type: "reasoning_start" }]);
+  assert.deepEqual(thinking("thinking_delta", "first"), [{ type: "reasoning_delta", text: "first" }]);
+  assert.deepEqual(thinking("thinking_end"), []);
+  assert.deepEqual(thinking("thinking_start"), []);
+  assert.deepEqual(thinking("thinking_delta", "second"), [{ type: "reasoning_delta", text: "\n\nsecond" }]);
+});
+
+test("keeps reasoning hidden when thinking starts and visibility is off", () => {
+  const adapter = new PiEventAdapter(false);
+  assert.deepEqual(
+    adapter.feed({ type: "message_update", assistantMessageEvent: { type: "thinking_start" } }),
+    [],
+  );
+});
+
 test("measures each tool from execution start to end", () => {
   let now = 100;
   const adapter = new PiEventAdapter(false, undefined, () => now);

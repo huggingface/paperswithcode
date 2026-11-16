@@ -239,6 +239,7 @@
 .chat-reason-done-head svg:first-child { color: var(--positive-text); flex: none; }
 .chat-reason-done-head .chat-chev { margin-left: auto; }
 .chat-reason-done-head:hover { color: var(--ink); }
+.chat-reason-done-head-static:hover { color: var(--ink-soft); }
 .chat-reason-done-body {
   padding: 2px 16px 16px 39px;
   font-family: var(--serif);

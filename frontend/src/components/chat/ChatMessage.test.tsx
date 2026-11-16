@@ -674,6 +674,29 @@ describe("AssistantMessage", () => {
     expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
   });
 
+  it("shows only the duration for reasoning without summary text", () => {
+    renderAssistant({
+      id: "assistant-1",
+      role: "assistant",
+      blocks: [{ kind: "reasoning", text: "", active: false, open: true, startedAt: 1_000, endedAt: 4_000 }],
+    });
+
+    expect(screen.getByText("Thought for 3 seconds")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Thought for 3 seconds" })).not.toBeInTheDocument();
+  });
+
+  it("shows a bare thinking header while summary-less reasoning streams", () => {
+    const { container } = renderAssistant({
+      id: "assistant-1",
+      role: "assistant",
+      streaming: true,
+      blocks: [{ kind: "reasoning", text: "", active: true, open: true }],
+    });
+
+    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+    expect(container.querySelector(".chat-reason-live-body")).toBeNull();
+  });
+
   it("does not reuse the workspace status after streamed work has started", () => {
     renderAssistant({
       id: "assistant-1",

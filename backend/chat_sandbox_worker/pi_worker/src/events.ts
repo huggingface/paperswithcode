@@ -79,6 +79,8 @@ export function reasoningIsVisible(value: string | undefined): boolean {
 
 export class PiEventAdapter {
   private reasoningOpen = false;
+  private reasoningHasText = false;
+  private reasoningSeparatorPending = false;
   private answerStarted = false;
   private terminalFailure = false;
   private overflowPending = false;
@@ -106,6 +108,8 @@ export class PiEventAdapter {
   private closeReasoning(): PwCEvent[] {
     if (!this.reasoningOpen) return [];
     this.reasoningOpen = false;
+    this.reasoningHasText = false;
+    this.reasoningSeparatorPending = false;
     return this.showReasoning ? [{ type: "reasoning_end" }] : [];
   }
 
@@ -160,6 +164,18 @@ export class PiEventAdapter {
     }
     if (type === "message_update") {
       const update = record(event.assistantMessageEvent);
+      if (update.type === "thinking_start") {
+        // Open the block when the model starts reasoning, not at its first
+        // summary text: providers often send no summary, and the browser times
+        // "Thought for N seconds" from this event.
+        if (!this.showReasoning) return [];
+        if (this.reasoningOpen) {
+          this.reasoningSeparatorPending = this.reasoningHasText;
+          return [];
+        }
+        this.reasoningOpen = true;
+        return [{ type: "reasoning_start" }];
+      }
       if (update.type === "thinking_delta") {
         this.onSemantic?.("reasoning");
         if (!this.showReasoning) return [];
@@ -169,7 +185,10 @@ export class PiEventAdapter {
           output.push({ type: "reasoning_start" });
         }
         if (typeof update.delta === "string" && update.delta) {
-          output.push({ type: "reasoning_delta", text: update.delta });
+          const separator = this.reasoningSeparatorPending ? "\n\n" : "";
+          this.reasoningSeparatorPending = false;
+          this.reasoningHasText = true;
+          output.push({ type: "reasoning_delta", text: separator + update.delta });
         }
         return output;
       }
