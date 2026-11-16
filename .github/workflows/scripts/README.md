@@ -52,6 +52,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-surge-chartography.timer` | `*-*-* *:38:00` | `sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
 | `pwc-cron-sync-swe-marathon.timer` | `*-*-* *:26:00` | `sync_swe_marathon` | `.github/workflows/scripts/hourly/sync_swe_marathon.py` |
 | `pwc-cron-sync-jevbench.timer` | `*-*-* *:37:00` | `sync_jevbench` | `.github/workflows/scripts/hourly/sync_jevbench.py` |
+| `pwc-cron-sync-rsi-exam.timer` | `*-*-* *:49:00` | `sync_rsi_exam` | `.github/workflows/scripts/hourly/sync_rsi_exam.py` |
 | `pwc-cron-sync-frontiercs-2.timer` | `*-*-* *:43:00` | `sync_frontiercs_2` | `.github/workflows/scripts/hourly/sync_frontiercs_2.py` |
 | `pwc-cron-sync-vals-index.timer` | `*-*-* *:03:00` | `sync_vals_index` | `.github/workflows/scripts/hourly/sync_vals_index.py` |
 | `pwc-cron-sync-swe-sweep.timer` | `*-*-* *:08:00` | `sync_swe_sweep` | `.github/workflows/scripts/hourly/sync_swe_sweep.py` |
@@ -544,6 +545,17 @@ method label leaves `v1.7`, as well as on broken ranks, a composite out of rank
 order, or a board outside 20–300 rows. General LLMs measured as decision
 models keep their best reasoning setting; vendor systems without a catalog
 paper become release-radar signals, with the vendor taken from the source host.
+
+`sync_rsi_exam.py` keeps the `rsi-exam` benchmark on task `auto-research`
+equal to the Full board on https://rsi-exam.ai/ (all 88 tasks): every model's
+mean frozen normalised hidden-set score, with the coding-agent harness it ran
+in (Claude Code, Codex, Antigravity, ...) and the reasoning effort in the
+methodology. The page renders the board as static SVG; the Public and Private
+panels are not used. Scores are only comparable within one release and task
+set, so the job fails when the page stops naming `RSI-Exam 0.1`, when the Full
+board covers other than 88 tasks, on an unreviewed harness label, broken
+ranks, a score out of rank order, or a board outside 10–100 rows. Models
+without a catalog paper become release-radar signals.
 
 `sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
 official `google-deepmind/physics-IQ-benchmark` README (the

@@ -21,6 +21,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from backend.services import jevbench_sync_service as jevbench
+from backend.services import rsi_exam_sync_service as rsi_exam
 from backend.services import surge_chartography_sync_service as surge_chartography
 from backend.services import swe_marathon_sync_service as swe_marathon
 from backend.services import vals_finance_agent_sync_service as vals_finance_agent
@@ -622,7 +623,7 @@ CRITPT_SELF_REPORTED = {
 # --- Board registry -----------------------------------------------------------
 # Every board on the shared engine, including the ones defined in their own
 # modules (Vals AI Finance Agent v2, Surge AI Chartography, SWE-Marathon,
-# JevBench).
+# JevBench, RSI-Exam).
 
 
 @dataclass(frozen=True)
@@ -841,4 +842,5 @@ BOARD_SYNCS: dict[str, BoardSync] = {
     ),
     "sync_swe_marathon": BoardSync(swe_marathon.BOARD, swe_marathon.fetch_swe_marathon),
     "sync_jevbench": BoardSync(jevbench.BOARD, jevbench.fetch_jevbench),
+    "sync_rsi_exam": BoardSync(rsi_exam.BOARD, rsi_exam.fetch_rsi_exam),
 }
