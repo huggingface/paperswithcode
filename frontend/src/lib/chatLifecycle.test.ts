@@ -139,6 +139,21 @@ describe("chatLifecycleReducer", () => {
     ]);
   });
 
+  it("keeps summary-less reasoning timed when the user stops", () => {
+    const started = chatLifecycleReducer(initialChatLifecycle(), {
+      type: "start",
+      messages: [{
+        ...streaming()[0],
+        blocks: [{ kind: "reasoning", text: "", active: true, open: true, startedAt: 1_000 }],
+      }],
+      sessionId: "session-1",
+    });
+
+    expect(chatLifecycleReducer(started, { type: "stop" }).messages[0].blocks).toEqual([
+      { kind: "reasoning", text: "", active: false, open: false, startedAt: 1_000, endedAt: expect.any(Number) },
+    ]);
+  });
+
   it("updates parallel streamed tool arguments in place and finalizes authoritatively", () => {
     let state = chatLifecycleReducer(initialChatLifecycle(), {
       type: "start", messages: streaming(), sessionId: "session-1",
