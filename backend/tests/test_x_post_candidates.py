@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from backend.models.database import Dataset
 from backend.services import x_post_candidates as service
 from backend.services.x_post_candidates import (
     Board,
@@ -118,7 +119,7 @@ def test_league_text_handles_ties():
 
 def test_gather_adds_roundups_only_early_in_the_period(monkeypatch):
     calls = []
-    monkeypatch.setattr(service, "leaderboard_wins", lambda db, now: [])
+    monkeypatch.setattr(service, "leaderboard_wins", lambda db, now, skip: [])
     monkeypatch.setattr(service, "open_releases", lambda db, now: [])
     monkeypatch.setattr(service, "trending_papers", lambda db, now: [])
     monkeypatch.setattr(service, "lab_league", lambda db, now: None)
@@ -134,6 +135,36 @@ def test_gather_adds_roundups_only_early_in_the_period(monkeypatch):
     calls.clear()
     assert service.gather(None, now=datetime(2026, 6, 11, tzinfo=UTC)) == []  # Thursday
     assert calls == []
+
+
+def test_gather_passes_rejected_subjects_to_leaderboard_wins(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        service, "leaderboard_wins", lambda db, now, skip: seen.update(skip=skip) or []
+    )
+    for name in ("open_releases", "trending_papers", "concepts"):
+        monkeypatch.setattr(service, name, lambda db, now: [])
+    monkeypatch.setattr(service, "lab_league", lambda db, now: None)
+    skip = frozenset({"open:12:Accuracy:34"})
+    service.gather(None, now=datetime(2026, 6, 11, tzinfo=UTC), skip=skip)
+    assert seen["skip"] == skip
+
+
+@pytest.mark.parametrize(
+    ("name", "competitor"),
+    [
+        ("Artificial Analysis Intelligence Index", True),
+        ("AutomationBench-AA", True),
+        ("Harvey LAB-AA (v1.1)", True),
+        ("AA-LCR", True),
+        ("CritPt v2", True),
+        ("LongBench v2", False),
+        ("AIME 2026", False),
+        ("AAAI benchmark", False),
+    ],
+)
+def test_competitor_board(name, competitor):
+    assert service.competitor_board(Dataset(name=name)) is competitor
 
 
 class FakeDb:

@@ -44,7 +44,14 @@ from backend.services.x_post_requests import (
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("list", help="Print every candidate as JSON")
+    list_parser = commands.add_parser("list", help="Print every candidate as JSON")
+    list_parser.add_argument(
+        "--skip",
+        nargs="*",
+        default=[],
+        metavar="SUBJECT_KEY",
+        help="SOTA subjects the agent rejected; left out before the SOTA cap",
+    )
     record_parser = commands.add_parser("record", help="Record a posted subject")
     record_parser.add_argument("--kind", choices=KINDS, required=True)
     record_parser.add_argument("--subject-key", required=True)
@@ -62,7 +69,7 @@ def main() -> int:
         if args.command == "list":
             now = datetime.now(UTC)
             candidates = []
-            for candidate in gather(db, now=now):
+            for candidate in gather(db, now=now, skip=frozenset(args.skip)):
                 item = candidate.to_dict()
                 item["image_png_base64"] = (
                     base64.b64encode(candidate.image).decode()
