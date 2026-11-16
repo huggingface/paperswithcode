@@ -238,3 +238,52 @@ def test_classic_rl_paper_drops_llm_reinforcement_learning() -> None:
         "Sample-Efficient PPO on Atari",
         "We study reinforcement learning with PPO on Atari games.",
     ) == {9}
+
+
+def _simple(text: str, keywords: str) -> set[int]:
+    case_sensitive, case_insensitive = create_keyword_patterns(
+        [{"id": 1, "keywords": keywords}]
+    )
+    return find_matching_items_simple(text, case_sensitive, case_insensitive)
+
+
+def test_substring_prefilter_keeps_case_insensitive_and_plural_matches() -> None:
+    assert _simple("Large Language Models for code", "large language model") == {1}
+    assert _simple("A SURVEY OF OBJECT DETECTION", "object detection") == {1}
+    # The keyword occurs as a substring but not as a word: still rejected.
+    assert _simple("Images were transformed twice", "transformer") == set()
+
+
+def test_substring_prefilter_keeps_case_sensitive_word_boundaries() -> None:
+    assert _simple("We train VLMs on charts", "VLM") == {1}
+    assert _simple("A FINER-grained evaluation", "NER") == set()
+    assert _simple("We use clip features", "CLIP") == set()
+
+
+def test_ignorecase_match_survives_unicode_case_folding() -> None:
+    # U+017F (long s) folds to "s"; re.IGNORECASE matches it, so the
+    # casefolded prefilter must not reject it.
+    assert _simple("Long ſequence modeling", "sequence modeling") == {1}
+
+
+def test_ignorecase_match_survives_turkish_dotted_and_dotless_i() -> None:
+    # re.IGNORECASE matches U+0130 and U+0131 to "i", but casefold() does not.
+    assert _simple("VİDEO GENERATION benchmark", "video generation") == {1}
+    assert _simple("Vıdeo generation benchmark", "video generation") == {1}
+
+
+def test_prefilter_folding_covers_every_ignorecase_variant_of_ascii_letters() -> None:
+    import re
+    import string
+    import sys
+
+    from backend.utils.keyword_matching import fold_for_keyword_prefilter
+
+    ascii_letter = re.compile("[a-z]", re.IGNORECASE)
+    for codepoint in range(sys.maxunicode + 1):
+        char = chr(codepoint)
+        if 0xD800 <= codepoint <= 0xDFFF or not ascii_letter.fullmatch(char):
+            continue
+        folded = fold_for_keyword_prefilter(char)
+        assert folded in string.ascii_lowercase, hex(codepoint)
+        assert re.fullmatch(folded, char, re.IGNORECASE), hex(codepoint)
