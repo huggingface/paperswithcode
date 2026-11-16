@@ -24,8 +24,9 @@ Case-Sensitivity Rules:
 """
 
 import re
-from typing import Dict, List, Set, Tuple
 from collections import defaultdict
+from functools import lru_cache
+from typing import Dict, List, Set, Tuple
 
 
 def is_case_sensitive_keyword(keyword: str) -> bool:
@@ -44,11 +45,32 @@ def is_case_sensitive_keyword(keyword: str) -> bool:
     return any(c.isupper() for c in keyword)
 
 
-def _keyword_matches_simple(text: str, keyword: str) -> bool:
-    """Match one task keyword with the same rules as the simple matcher."""
-    pattern = r"\b" + re.escape(keyword) + r"s?\b"
+@lru_cache(maxsize=None)
+def _keyword_pattern(keyword: str) -> re.Pattern[str]:
+    # Compile once per keyword. With thousands of task keywords, relying on
+    # `re`'s ~512-entry cache recompiled every pattern for every paper and
+    # pushed the weekly linker past its 6-hour timeout on 2026-11-15.
     flags = 0 if is_case_sensitive_keyword(keyword) else re.IGNORECASE
-    return re.search(pattern, text, flags) is not None
+    return re.compile(r"\b" + re.escape(keyword) + r"s?\b", flags)
+
+
+def _keyword_matches_simple(
+    text: str, keyword: str, folded_text: str | None = None
+) -> bool:
+    """Match one task keyword with the same rules as the simple matcher.
+
+    A plain substring test skips the regex for the vast majority of keywords
+    that do not occur at all. It is a necessary condition for ASCII keywords:
+    a case-sensitive match contains the keyword verbatim, and an IGNORECASE
+    match of an ASCII keyword is contained in the casefolded text.
+    """
+    if keyword.isascii():
+        if is_case_sensitive_keyword(keyword):
+            if keyword not in text:
+                return False
+        elif keyword.casefold() not in (folded_text or text.casefold()):
+            return False
+    return _keyword_pattern(keyword).search(text) is not None
 
 
 def create_keyword_patterns(
@@ -479,6 +501,7 @@ def find_matching_items_simple(
         return set()
 
     matched_items = set()
+    folded_text = text.casefold()
 
     # Find case-sensitive matches.
     # Word-boundary matching (with optional trailing 's' for plurals) keeps
@@ -496,7 +519,7 @@ def find_matching_items_simple(
     # the common English plural so e.g. keyword "large language model" still
     # tags a paper that writes "Large Language Models" in its abstract.
     for keyword_lower, item_ids in case_insensitive_patterns.items():
-        if _keyword_matches_simple(text, keyword_lower):
+        if _keyword_matches_simple(text, keyword_lower, folded_text):
             matched_items.update(item_ids)
 
     return matched_items
