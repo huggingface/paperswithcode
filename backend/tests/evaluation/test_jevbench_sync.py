@@ -164,7 +164,8 @@ def test_parse_keeps_the_ranked_api_board_in_official_order():
     assert not any(
         name.startswith("Microsoft-Decision-1 (Azure Foundry) —") for name in by_name
     )
-    assert set(MODEL_IDENTITIES) <= set(by_name)
+    # Gemini Decision 1 joined the board after this v1.8.9 fixture was saved.
+    assert set(MODEL_IDENTITIES) - {"Gemini Decision 1"} <= set(by_name)
     values = [entry.value for entry in entries]
     assert values == sorted(values, reverse=True)
 

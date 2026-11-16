@@ -8,6 +8,9 @@ from backend.services.live_leaderboard_sync import ModelIdentity
 
 IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
     "vals-index-v2-2": {
+        "Muse Ember": ModelIdentity(
+            "Muse Ember", source_url="https://research.meta.ai/blog/muse-ember"
+        ),
         "Claude Sonnet 5.5": ModelIdentity(
             "Claude Sonnet 5.5",
             source_url="https://www.anthropic.com/claude-sonnet-5-5",
@@ -938,6 +941,11 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
     },
     "critpt": {
+        # A later checkpoint of Ling-3.1-flash, like DeepSeek V4.1 Flash 1017.
+        "Ling 3.1 Flash 1019": ModelIdentity(
+            "Ling-3.1-Flash-1019",
+            source_url="https://developer.ant-ling.com/en/docs/models/ling#ling-31-flash",
+        ),
         "Claude Fable 5.1 (max)": ModelIdentity(
             "Claude Fable 5.1 (max)",
             source_url="https://www.anthropic.com/claude-fable-and-mythos-5-1",
@@ -1027,6 +1035,20 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
     },
     "critpt-v2": {
+        "Muse Ember (max)": ModelIdentity(
+            "Muse Ember (max)", source_url="https://research.meta.ai/blog/muse-ember"
+        ),
+        # A later checkpoint of Ling-3.1-flash, like DeepSeek V4.1 Flash 1017.
+        "Ling 3.1 Flash 1019": ModelIdentity(
+            "Ling-3.1-Flash-1019",
+            source_url="https://developer.ant-ling.com/en/docs/models/ling#ling-31-flash",
+        ),
+        # The full Hy4 release (2026-11-04), not the August Hy4 Preview.
+        "Tencent Hy4": ModelIdentity(
+            "Hy4",
+            source_url="https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/",
+            is_open=True,
+        ),
         "Beam 1.0": ModelIdentity(
             "Beam 1.0",
             source_url="https://reflection.ai/documents/beam-model-tech-report.pdf",

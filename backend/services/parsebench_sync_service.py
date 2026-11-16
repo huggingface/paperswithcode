@@ -308,7 +308,15 @@ _JINA_OCR_V1 = arxiv("2609.03181")
 # Exact upstream `Provider` labels are the trust boundary between a leaderboard
 # row and its reviewed introducing paper or official release page. Rows whose
 # label is not reviewed here stay unpublished and are reported by the job.
+_HY4 = external(
+    "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/",
+    "Hy4",
+    "2026-11-04",
+    is_open=True,
+)
+
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "Tencent Hy4 (Thinking High)": _HY4,
     "HPD-Parsing": arxiv("2607.18839"),
     "HunyuanOCR 1.5": arxiv("2607.04884"),
     "TeleOCR": _TELEOCR,
@@ -585,7 +593,14 @@ _MISTRAL_OCR_4_1 = external(
 # ParseBench-2 `Provider` labels with their reviewed paper and, for open-weight
 # models, the Hub checkpoint (the v2 CSV has no HF_Model_ID column). Seeded
 # from the reviewed one-time import of 2026-11-16.
+_MUSE_EMBER = external(
+    "https://research.meta.ai/blog/muse-ember",
+    "Introducing Our Smallest, Most Efficient Model: Muse Ember",
+    "2026-11-09",
+)
+
 PARSEBENCH_2_MODELS: dict[str, tuple[PaperIdentity, str | None]] = {
+    "Muse Ember 1.0 (low)": (_MUSE_EMBER, None),
     # The ParseBench-2 report is LlamaIndex's own report on LlamaParse.
     "LlamaParse (Agentic Plus)": (_PARSEBENCH_2, None),
     "LlamaParse (Agentic)": (_PARSEBENCH_2, None),

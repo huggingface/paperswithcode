@@ -474,7 +474,7 @@ def _v2_session() -> Session:
 
 def test_parsebench_2_reviewed_map_is_well_formed():
     board = pb.PARSEBENCH_2
-    assert len(board.identities) == 40
+    assert len(board.identities) == 41
     assert not set(board.identities) & board.excluded
     assert set(board.hf_model_ids) <= set(board.identities)
     # Open-weight rows carry their Hub checkpoint; API models do not.
@@ -483,7 +483,10 @@ def test_parsebench_2_reviewed_map_is_well_formed():
     assert board.identities["LlamaParse (Agentic Plus)"].title == (
         "ParseBench-2: Severity-Aware Evaluation of Document Parsing"
     )
-    assert "Muse Ember 1.0 (low)" not in board.identities
+    # Reviewed once its release post was indexed (paper 133391, 2026-11-16).
+    assert board.identities["Muse Ember 1.0 (low)"].source_url == (
+        "https://research.meta.ai/blog/muse-ember"
+    )
 
 
 def test_kdl_nano_v2_is_bound_to_the_kdl_release_on_both_boards():
