@@ -690,3 +690,14 @@ def test_new_best_runtime_variant_takes_over_the_existing_row():
     row = session.query(Evaluation).one()
     assert (row.id, row.paper_id, row.model_name) == (77, 3, "echo (gpu)")
     assert row.metrics == {"WER": 5.0, "RTFx": 900.0}
+
+
+def test_parse_ignores_open_weights_badge_after_model_link():
+    # Since 2026-11-13 open-weights rows end in a badge span; it must not leak
+    # into the model identifier.
+    payload = _payload()
+    payload["data"][3][1] += ' <span title="Open weights">🤗</span>'
+
+    entries = parse_open_asr_leaderboard(payload)
+
+    assert entries[3].model_id == "org/model-4"

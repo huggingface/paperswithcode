@@ -113,7 +113,6 @@ def _payload_row(index: int) -> dict:
     return {
         "id": f"model-{index}",
         "name": f"Model {index}",
-        "model": f"provider-model-{index}",
         "effort": "medium",
         "onlineElo": 1000 + index,
         "elo": 1005 + index,
@@ -131,7 +130,6 @@ def _entry(model_id: str, name: str, elo: float) -> CoArenaEntry:
     return CoArenaEntry(
         id=model_id,
         name=name,
-        model=model_id,
         effort="medium",
         elo=elo,
         online_elo=elo + 1,
@@ -352,3 +350,12 @@ def test_unknown_models_match_announcements_or_become_radar_signals():
     assert (second.created, second.updated, second.deleted) == (0, 1, 0)
     assert session.query(Evaluation).filter(Evaluation.paper_id == 3).count() == 1
     assert session.query(ModelReleaseSignal).one().sightings == 2
+
+
+def test_parse_accepts_rows_without_provider_model_field():
+    # CoArena removed `model` from every entry on 2026-11-13.
+    payload = {"entries": [_payload_row(index) for index in range(6)]}
+    for row in payload["entries"]:
+        row.pop("model", None)
+    entries = parse_coarena_leaderboard(payload)
+    assert [entry.id for entry in entries] == [f"model-{i}" for i in range(6)]

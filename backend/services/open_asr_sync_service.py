@@ -131,6 +131,16 @@ MODEL_DISPLAY_NAMES: dict[str, str] = {
 }
 
 _TAG_RE = re.compile(r"<[^>]+>")
+# Badges after the model link, e.g. <span title="Open weights">🤗</span>
+# (added upstream 2026-11-13); they are display markers, not identity.
+_BADGE_RE = re.compile(r"\s*<span\b[^>]*>[^<]*</span>", re.IGNORECASE)
+
+
+def model_cell(value: Any) -> str:
+    """The model cell without trailing display badges."""
+    return _BADGE_RE.sub("", str(value)).strip()
+
+
 _NUMBER_RE = re.compile(r"^-?\d+(?:\.\d+)?")
 _LEGACY_MODEL_RE = re.compile(r"sourced from ([^/]+/[^/]+)/\.eval_results")
 _MANAGED_MODEL_RE = re.compile(
@@ -361,7 +371,8 @@ def parse_open_asr_leaderboard(payload: Any) -> list[OpenAsrEntry]:
     for row in rows:
         if not isinstance(row, list) or len(row) != len(headers):
             raise ValueError("Open ASR response contains a malformed row")
-        model_id = html.unescape(_TAG_RE.sub("", str(row[indexes["model"]]))).strip()
+        model_id = html.unescape(_TAG_RE.sub("", model_cell(row[indexes["model"]])))
+        model_id = model_id.strip()
         rank_value = _number(row[indexes["Rank"]])
         wer = _number(row[indexes["Average WER ⬇️"]])
         rtfx = _number(row[indexes["RTFx ⬆️️"]], optional=True)
