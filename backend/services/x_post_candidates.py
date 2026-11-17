@@ -143,8 +143,11 @@ OPEN_RELEASE_DAYS = 21
 OPEN_RELEASE_PAPERS = 25
 OPEN_RELEASE_BOARDS = 12
 OPEN_RELEASE_LIMIT = 4
-TRENDING_PAPER_LIMIT = 6
-TRENDING_FEED_DEPTH = 30
+# The X queue holds 20 posts and, on days without SOTA results, fills with trending
+# papers in homepage order (Niels, 2026-11-17), so offer enough of them; queued drafts
+# are not posted yet and still count against the limit.
+TRENDING_PAPER_LIMIT = 24
+TRENDING_FEED_DEPTH = 60
 HOMEPAGE_RANGE_DAYS = 7
 CONCEPT_LIMIT = 12
 _MARKDOWN_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
