@@ -76,11 +76,11 @@ _BRAND_TLDS = frozenset(
 # Hub hosts whose repository pages (model cards) alone do not make a paper.
 _HUB_HOSTS = frozenset({"huggingface.co", "hf.co", "modelscope.cn"})
 # Hub pages that are written announcements rather than repositories.
-_HUB_ARTICLE_PREFIXES = frozenset({"blog", "papers"})
+_HUB_ARTICLE_PREFIXES = frozenset({"blog"})
 # A Hub repository id such as "owensong/Inflect-Mini-v3".
 _REPO_ID_TITLE = re.compile(r"[\w.-]+/[\w.-]+")
 _ORGANIZATION_PATH_PREFIXES = frozenset(
-    {"models", "datasets", "spaces", "collections", "organizations"}
+    {"models", "datasets", "spaces", "collections", "organizations", "blog"}
 )
 _GENERIC_TOKENS = frozenset(
     {
@@ -317,7 +317,8 @@ def _host_tokens(url: str) -> tuple[set[str], bool]:
     host = (parts.hostname or "").casefold().removeprefix("www.")
     if host in _ORGANIZATION_HOSTS:
         segments = [segment for segment in parts.path.split("/") if segment]
-        # huggingface.co/collections/<org>/..., modelscope.cn/models/<org>/...
+        # huggingface.co/collections/<org>/..., huggingface.co/blog/<org>/...,
+        # modelscope.cn/models/<org>/...
         if segments and segments[0] in _ORGANIZATION_PATH_PREFIXES:
             segments = segments[1:]
         return _identity_tokens(segments[0] if segments else None), True

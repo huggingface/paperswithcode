@@ -753,6 +753,17 @@ def test_model_card_with_first_party_repository_is_created(db, fake_external):
     assert fake_external.created == [{"source_url": source}]
 
 
+def test_model_card_with_first_party_hub_blog_is_created(db, fake_external):
+    row = _signal_row(db, "owensong/Inflect-Mini-v3")
+    source = "https://huggingface.co/owensong/Inflect-Mini-v3"
+    mutation = _hub_only_accept(source)
+    mutation.evidence_urls.append("https://huggingface.co/blog/owensong/inflect")
+    result = signals.ReleaseSignalResolutionService(db).apply(
+        row.id, mutation, commit=False
+    )
+    assert result["status"] == "resolved"
+
+
 def test_repository_id_title_is_refused(db, fake_external):
     row = _signal_row(db, "owensong/Inflect-Mini-v3")
     source = "https://huggingface.co/owensong/Inflect-Mini-v3"
@@ -771,7 +782,7 @@ def test_repository_id_title_is_refused(db, fake_external):
         ("https://www.modelscope.cn/models/qwen/Qwen4", True),
         ("https://huggingface.co/collections/owensong/inflect", True),
         ("https://huggingface.co/blog/owensong/inflect", False),
-        ("https://huggingface.co/papers/2611.01234", False),
+        ("https://huggingface.co/papers/2611.01234", True),
         ("https://github.com/owensong/inflect", False),
     ],
 )
