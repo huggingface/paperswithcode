@@ -407,12 +407,17 @@ def _release_git_revision(root: Path) -> str | None:
     return revision if isinstance(revision, str) and len(revision) == 40 else None
 
 
-def _runner_fields(settings: Settings, runner: str) -> dict[str, str]:
+def _runner_fields(settings: Settings, runner: str, kind: str) -> dict[str, str]:
     """Model, effort, and harness version recorded on a job of each runner."""
     if runner == "pi":
+        thinking = (
+            settings.curation_pi_enrich_thinking
+            if kind == "enrich-paper"
+            else settings.curation_pi_thinking
+        )
         return {
             "model": settings.curation_pi_model,
-            "reasoning_effort": settings.curation_pi_thinking,
+            "reasoning_effort": thinking,
             "codex_cli_version": f"pi@{settings.curation_pi_cli_version}",
         }
     return {
@@ -1301,7 +1306,7 @@ class CodexPaperJobService:
                 runner="pi",
                 paired_job_id=codex_row.id,
                 context_snapshot=jsonable_encoder(context),
-                **_runner_fields(settings, "pi"),
+                **_runner_fields(settings, "pi", codex_row.kind),
             )
             db.add(row)
             db.commit()
@@ -1368,7 +1373,7 @@ class CodexPaperJobService:
         row.skill_sha256 = _curator_skill_digest(row.kind)
         row.bootstrap_bundle_sha256 = _store_bootstrap_bundle(db, revision)
         for field, value in _runner_fields(
-            settings, getattr(row, "runner", "codex")
+            settings, getattr(row, "runner", "codex"), row.kind
         ).items():
             setattr(row, field, value)
         row.validator_version = "scheduled-policy-v1"
@@ -1433,7 +1438,7 @@ class CodexPaperJobService:
         image: str,
     ):
         runner = getattr(row, "runner", "codex")
-        defaults = _runner_fields(settings, runner)
+        defaults = _runner_fields(settings, runner, row.kind)
         command = PI_CURATOR_COMMAND if runner == "pi" else CURATOR_COMMAND
         env = {
             "PWC_CURATION_API_URL": settings.codex_jobs_api_url.rstrip("/"),

@@ -205,13 +205,28 @@ def test_pairing_freezes_the_codex_context_and_launches_a_pi_job(monkeypatch):
     assert row.kind == codex.kind
     assert row.repository_sha == codex.repository_sha
     assert row.model == "deepseek-ai/DeepSeek-V4.1-Flash-1017"
-    assert row.reasoning_effort == "high"
+    assert row.reasoning_effort == "medium"
     assert row.codex_cli_version == "pi@1.3.0"
     # The snapshot is JSON-ready and holds no job-specific state.
     assert row.context_snapshot == {
         "source_candidate": None,
         "paper": {"id": 42, "date_published": "2026-01-02"},
     }
+
+
+def test_pi_enrich_thinks_at_medium_and_add_evals_at_high(monkeypatch):
+    service = CodexPaperJobService()
+    monkeypatch.setattr(service, "_dispatch_row", lambda *_args: None)
+    monkeypatch.setattr(
+        CodexCurationCallbackService, "context", lambda _self, _row, _s: {}
+    )
+    db = _PairingDatabase()
+
+    for kind in ("enrich-paper", "add-evals"):
+        service._pair_pi_shadow(db, _pi_settings(), _codex_row(kind=kind))
+
+    efforts = {row.kind: row.reasoning_effort for row in db.added}
+    assert efforts == {"enrich-paper": "medium", "add-evals": "high"}
 
 
 def test_full_pi_pool_skips_the_pair_instead_of_queueing(monkeypatch):

@@ -298,6 +298,9 @@ class Settings(BaseSettings, ChatSettings):
     # Preferred router provider; the runner retries once on automatic routing.
     curation_pi_provider: str = Field(default="novita")
     curation_pi_thinking: str = Field(default="high")
+    # Enrich is tag lookup, not score extraction: high thinking made it 1.6x
+    # slower than Codex while its tag precision already led by 5 points.
+    curation_pi_enrich_thinking: str = Field(default="medium")
     curation_pi_cli_version: str = Field(default="1.3.0")
     # Grades the disagreements between paired Codex and Pi shadow proposals.
     curation_judge_anthropic_api_key: str = Field(default="")
