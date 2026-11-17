@@ -19,7 +19,21 @@ rank** over the live corpus, which puts both on a comparable, saturation-free
 
     X   = quantile_rank(fastest linked X post likes/hour, all live post velocities)
 
-    paper_trending_score = SCORE_SCALE * max(w_g * G + w_h * H, w_x * X)
+    P   = max(quantile_rank(official repo total stars, live papers' stars),
+              quantile_rank(most-liked HF artifact likes, live papers' likes))
+
+    paper_trending_score = SCORE_SCALE * max((w_g * G + w_h * H) * popularity_factor(P),
+                                             w_x * X)
+
+    popularity_factor(P) = 1 - POPULARITY_SHARE * (1 - P) ** POPULARITY_EXPONENT
+
+G and H measure recent momentum only, so a repo with 3 stars in its first hours
+and six checkpoints with ~10 recent likes each can rank with widely adopted
+releases. P measures accumulated adoption and marks such papers down: with the
+defaults, P = 0.9 keeps 99.5% of the momentum score, P = 0.4 keeps 82% and
+P = 0 keeps 50%. Repositories that are official for more than
+``MAX_OFFICIAL_REPO_PAPERS`` papers (shared monorepos) and HF aggregators do
+not count toward P.
 
 X only lifts: few papers have a linked post, so blending it in linearly would
 cap every paper without one below the X-tracked papers. As a lift, a paper
@@ -84,6 +98,14 @@ HF_AGGREGATOR_DENYLIST = frozenset(
         ("dataset", "molmohsen/awesome-ai-agent-papers"),
     }
 )
+
+# Popularity mark-down: at most POPULARITY_SHARE of the momentum score is lost
+# (at P = 0), and the convex exponent spares papers with reasonable adoption.
+POPULARITY_SHARE = 0.5
+POPULARITY_EXPONENT = 2.0
+# A repository official for more papers than this is a shared monorepo whose
+# stars say nothing about one paper.
+MAX_OFFICIAL_REPO_PAPERS = 5
 
 # Final score multiplier (single-signal top ~= 50, both-signal top ~= 100).
 SCORE_SCALE = 100.0
@@ -233,30 +255,53 @@ def x_component(
     return quantile_rank(x_sorted, x_raw)
 
 
+def popularity_component(
+    stars: float,
+    stars_sorted: Sequence[float],
+    likes: float,
+    likes_sorted: Sequence[float],
+) -> float:
+    """Popularity P: the better quantile rank of total repo stars or HF likes."""
+    return max(
+        quantile_rank(stars_sorted, stars or 0.0),
+        quantile_rank(likes_sorted, likes or 0.0),
+    )
+
+
+def popularity_factor(popularity: float) -> float:
+    """Share of the GitHub/HF momentum score a paper keeps at popularity P."""
+    return 1.0 - POPULARITY_SHARE * (1.0 - popularity) ** POPULARITY_EXPONENT
+
+
 def composite_score(
     g_component: float,
     h_component: float,
     x_component: float = 0.0,
     x_weight: float = DEFAULT_X_WEIGHT,
+    popularity: float = 1.0,
 ) -> float:
     """Combine the normalized components into the final paper score."""
     github_hf = GITHUB_WEIGHT * g_component + HF_WEIGHT * h_component
-    return SCORE_SCALE * max(github_hf, x_weight * x_component)
+    momentum = github_hf * popularity_factor(popularity)
+    return SCORE_SCALE * max(momentum, x_weight * x_component)
 
 
 def hourly_lift(
     stored_score: float | None,
     stored_g: float | None,
     stored_h: float | None,
+    popularity: float = 1.0,
 ) -> float:
     """Return the part of a stored score that sits above its GitHub/HF base.
 
     Only the hourly job applies the X lift and decaying pins, so a targeted
     rescore keeps this value instead of recomputing it with its own settings.
+    The base uses the paper's current popularity; it moves slowly, so at worst
+    a targeted rescore keeps the hourly score until the next hourly run.
     """
     if stored_score is None:
         return 0.0
-    base = composite_score(stored_g or 0.0, stored_h or 0.0)
+    base = composite_score(stored_g or 0.0, stored_h or 0.0, popularity=popularity)
     return stored_score if stored_score > base + STORED_SCORE_TOLERANCE else 0.0
 
 
@@ -271,9 +316,10 @@ def compute_paper_score(
     x_sorted: Sequence[float] = (),
     x_weight: float = DEFAULT_X_WEIGHT,
     x_min_likes_per_hour: float = DEFAULT_X_MIN_LIKES_PER_HOUR,
+    popularity: float = 1.0,
 ) -> Tuple[float, float, float, float]:
     """Compute ``(score, g_component, h_component, x_component)`` for one paper."""
     g = github_component(github_raw, github_sorted)
     h = hf_component(artifact_scores, sorted_by_kind, kind_weights)
     x = x_component(x_raw, x_sorted, x_min_likes_per_hour)
-    return composite_score(g, h, x, x_weight), g, h, x
+    return composite_score(g, h, x, x_weight, popularity), g, h, x

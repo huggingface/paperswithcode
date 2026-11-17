@@ -38,6 +38,7 @@ from backend.utils.trending import (
     DEFAULT_X_MIN_LIKES_PER_HOUR,
     DEFAULT_X_WEIGHT,
     KIND_WEIGHTS,
+    MAX_OFFICIAL_REPO_PAPERS,
     X_POST_WINDOW_DAYS,
     apply_decaying_pin,
     compute_paper_score,
@@ -46,6 +47,7 @@ from backend.utils.trending import (
     is_hf_aggregator,
     parse_trending_paper_id_pin_specs,
     parse_trending_pin_specs,
+    popularity_component,
     sorted_positive,
     x_corpus,
 )
@@ -88,25 +90,39 @@ def _optional_float(value) -> float | None:
 
 
 def load_population(session, cutoff):
-    """Return ``{paper_id: {"github_raw", "existing", "artifacts", "x_raw"}}``.
+    """Return ``{paper_id: {"github_raw", "existing", "artifacts", "x_raw", ...}}``.
 
     - ``github_raw``: best fresh official-repo stars/hour (0.0 if none).
+    - ``stars``: total stars of the best official repo that is not shared by
+      more than ``MAX_OFFICIAL_REPO_PAPERS`` papers (0 if none).
+    - ``hf_likes``: likes of the most-liked non-aggregator HF artifact.
     - ``existing``: whether the paper currently has a non-null trending_score.
     - ``artifacts``: list of ``(kind, trending_score)`` for linked HF artifacts,
       excluding aggregators (see ``is_hf_aggregator``).
     - ``x_raw``: likes/hour of the fastest linked X post from the last week.
-    - ``hourly_lift``: the stored X lift or pin score above the GitHub/HF base.
+    - ``stored``: the stored ``(score, g, h)``; ``derive_popularity`` turns it
+      into ``hourly_lift``, the stored X lift or pin score above the base.
     """
     log("Loading paper population (GitHub component)...")
     github_rows = session.execute(
         text("""
+            WITH shared_repos AS MATERIALIZED (
+                SELECT shared.repository_id
+                FROM paper_repositories shared
+                JOIN papers sp ON sp.id = shared.paper_id
+                WHERE shared.is_official = TRUE
+                  AND sp.is_latest_version = TRUE
+                GROUP BY shared.repository_id
+                HAVING COUNT(*) > :max_repo_papers
+            )
             SELECT
                 p.id AS paper_id,
                 (p.trending_score IS NOT NULL) AS existing,
                 p.trending_score AS stored_score,
                 p.github_trending_component AS stored_g,
                 p.hf_trending_component AS stored_h,
-                gh.github_raw
+                gh.github_raw,
+                pop.stars
             FROM papers p
             LEFT JOIN LATERAL (
                 SELECT MAX(r.trending_score) AS github_raw
@@ -118,10 +134,22 @@ def load_population(session, cutoff):
                   AND r.trending_score_updated_at
                       >= NOW() - (:fresh_hours || ' hours')::interval
             ) gh ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT MAX(r.num_stars) AS stars
+                FROM paper_repositories pr
+                JOIN repositories r ON r.id = pr.repository_id
+                WHERE pr.paper_id = p.id
+                  AND pr.is_official = TRUE
+                  AND r.id NOT IN (SELECT repository_id FROM shared_repos)
+            ) pop ON TRUE
             WHERE p.is_latest_version = TRUE
               AND p.date_published >= :cutoff
         """),
-        {"cutoff": cutoff, "fresh_hours": str(GITHUB_FRESHNESS_HOURS)},
+        {
+            "cutoff": cutoff,
+            "fresh_hours": str(GITHUB_FRESHNESS_HOURS),
+            "max_repo_papers": MAX_OFFICIAL_REPO_PAPERS,
+        },
     ).fetchall()
 
     population = {}
@@ -131,7 +159,9 @@ def load_population(session, cutoff):
             "existing": bool(row.existing),
             "artifacts": [],
             "x_raw": 0.0,
-            "hourly_lift": hourly_lift(
+            "stars": float(row.stars or 0),
+            "hf_likes": 0.0,
+            "stored": (
                 _optional_float(row.stored_score),
                 _optional_float(row.stored_g),
                 _optional_float(row.stored_h),
@@ -152,7 +182,7 @@ def load_population(session, cutoff):
                 GROUP BY x.hf_artifact_id
             )
             SELECT pha.paper_id, a.kind, a.repo_id, a.trending_score,
-                   f.linked_papers
+                   a.likes, f.linked_papers
             FROM paper_hf_artifacts pha
             JOIN hf_artifacts a ON a.id = pha.hf_artifact_id
             JOIN fan_out f ON f.hf_artifact_id = a.id
@@ -173,6 +203,7 @@ def load_population(session, cutoff):
             aggregator_links += 1
             continue
         entry["artifacts"].append((row.kind, float(row.trending_score)))
+        entry["hf_likes"] = max(entry["hf_likes"], float(row.likes or 0))
         hf_links += 1
     log(f"HF artifact score links: {hf_links}")
     log(f"HF aggregator links ignored: {aggregator_links}")
@@ -227,6 +258,37 @@ def derive_corpora(population):
     return github_sorted, sorted_by_kind
 
 
+def has_live_signal(entry) -> bool:
+    """Whether a paper has any momentum signal the score can rank."""
+    return (
+        entry["github_raw"] > 0
+        or entry["x_raw"] > 0
+        or any(score > 0 for _kind, score in entry["artifacts"])
+    )
+
+
+def derive_popularity(population):
+    """Set each paper's popularity P and the stored lift above its base.
+
+    P ranks papers against those with live momentum, the papers the score
+    orders. Ranking against the whole window would compare with tens of
+    thousands of papers without a repository or artifact and rate nearly any
+    adoption as popular.
+    """
+    live = [entry for entry in population.values() if has_live_signal(entry)]
+    stars_sorted = sorted_positive(entry["stars"] for entry in live)
+    likes_sorted = sorted_positive(entry["hf_likes"] for entry in live)
+    for entry in population.values():
+        entry["popularity"] = popularity_component(
+            entry["stars"], stars_sorted, entry["hf_likes"], likes_sorted
+        )
+        entry["hourly_lift"] = hourly_lift(*entry["stored"], entry["popularity"])
+    log(
+        f"Popularity corpora: stars n={len(stars_sorted)}, "
+        f"HF likes n={len(likes_sorted)}"
+    )
+
+
 def build_score_changes(
     population,
     github_sorted,
@@ -259,6 +321,7 @@ def build_score_changes(
             x_sorted=x_sorted,
             x_weight=x_weight,
             x_min_likes_per_hour=x_min_likes_per_hour,
+            popularity=entry["popularity"],
         )
         if paper_ids is not None:
             score = max(score, entry["hourly_lift"])
@@ -320,6 +383,7 @@ def calculate_paper_scores(session, paper_ids=None) -> dict:
         return {"population": 0, "selected": 0, "written": 0, "cleared": 0}
 
     github_sorted, sorted_by_kind = derive_corpora(population)
+    derive_popularity(population)
     x_weight, x_min_likes_per_hour = x_settings()
     x_sorted = x_corpus(
         (entry["x_raw"] for entry in population.values()), x_min_likes_per_hour
