@@ -36,6 +36,17 @@ def in_window(moment: datetime) -> bool:
     return moment.hour >= WINDOW_START or moment.hour < WINDOW_END
 
 
+def window_hours_between(start: datetime, end: datetime) -> float:
+    """Hours between start and end that fall inside the posting window (overnight closes don't count)."""
+    start = max(start, end - timedelta(days=7))
+    step = timedelta(minutes=10)
+    inside = 0
+    while start < end:
+        inside += in_window(start)
+        start += step
+    return round(inside * step.total_seconds() / 3600, 1)
+
+
 def performance(directory: Path, script: str) -> dict:
     result = subprocess.run(
         ["python3", str(directory / script), "performance"],
@@ -159,12 +170,16 @@ def report(directory: Path) -> dict:
     gap = hours_since(last_post["at"], now) if last_post else None
     if gap is None:
         flag("broken", "x", "no published post in ledger.jsonl")
-    elif gap > MAX_GAP_HOURS and in_window(now):
-        flag(
-            "warn",
-            "x",
-            f"last X post {gap} h ago, inside the posting window (cadence is every 2 h)",
-        )
+    else:
+        open_hours = window_hours_between(datetime.fromisoformat(last_post["at"]), now)
+        if gap > 24:
+            flag("broken", "x", f"no X post for {gap} h")
+        elif open_hours > MAX_GAP_HOURS:
+            flag(
+                "warn",
+                "x",
+                f"last X post {gap} h ago, {open_hours} h of it inside the posting window (cadence is every 2 h)",
+            )
     queue = (
         json.loads((directory / "queue.json").read_text() or "[]")
         if (directory / "queue.json").exists()
@@ -257,13 +272,19 @@ def report(directory: Path) -> dict:
                 (raw.get("refresh_expires_at", 0) - now.timestamp()) / 86400, 1
             ),
         }
-        if token["refresh_days_left"] < TOKEN_WARN_DAYS:
+        if token["refresh_days_left"] < 0:
+            flag(
+                "broken",
+                "linkedin",
+                "refresh token expired: a page admin must redo auth-url/exchange",
+            )
+        elif token["refresh_days_left"] < TOKEN_WARN_DAYS:
             flag(
                 "warn",
                 "linkedin",
                 "refresh token expires soon: a page admin must redo auth-url/exchange",
             )
-        elif token["access_days_left"] < 0:
+        if token["access_days_left"] < 0:
             flag(
                 "broken",
                 "linkedin",
