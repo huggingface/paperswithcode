@@ -18,22 +18,26 @@ function renderSection({
   hiddenClosedSourceCount,
   evaluationsByTask = [],
   onShowClosedSourceEvals = () => undefined,
+  canEdit = false,
+  onEdit = () => undefined,
 }: {
   hiddenClosedSourceCount: number;
   evaluationsByTask?: EvaluationTaskGroup[];
   onShowClosedSourceEvals?: () => void;
+  canEdit?: boolean;
+  onEdit?: () => void;
 }) {
   render(
     <MemoryRouter>
       <PaperResultsSection
         canCopyBadge={false}
-        canEdit={false}
+        canEdit={canEdit}
         evaluationsByTask={evaluationsByTask}
         evaluationsLoading={false}
         hiddenClosedSourceCount={hiddenClosedSourceCount}
         isAdmin={false}
         onCopyBadge={() => undefined}
-        onEdit={() => undefined}
+        onEdit={onEdit}
         onRefresh={() => undefined}
         onShowClosedSourceEvals={onShowClosedSourceEvals}
         paper={{ id: "131941", title: "Closed model report" } as Paper}
@@ -71,5 +75,20 @@ describe("PaperResultsSection", () => {
 
     expect(screen.getByText("No benchmark results recorded yet.")).toBeInTheDocument();
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
+  });
+
+  it("offers a visible add-results button to editors", async () => {
+    const onEdit = vi.fn();
+    renderSection({ hiddenClosedSourceCount: 0, evaluationsByTask: [openGroup], canEdit: true, onEdit });
+
+    await userEvent.click(screen.getByRole("button", { name: "Add results" }));
+    expect(onEdit).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "edit results" })).toBeInTheDocument();
+  });
+
+  it("hides the add-results button when editing is unavailable", () => {
+    renderSection({ hiddenClosedSourceCount: 0, evaluationsByTask: [openGroup] });
+
+    expect(screen.queryByRole("button", { name: "Add results" })).not.toBeInTheDocument();
   });
 });

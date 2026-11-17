@@ -1,4 +1,4 @@
-import { EyeOff } from "lucide-react";
+import { EyeOff, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { Icon } from "@/components/Icon";
@@ -115,7 +115,7 @@ export function PaperResultsSection({
             )}
             {canEdit && (
               <button type="button" onClick={onEdit} className="edit-link">
-                edit
+                edit results
               </button>
             )}
           </span>
@@ -227,6 +227,16 @@ export function PaperResultsSection({
         <p style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-faint)" }}>
           No benchmark results recorded yet.
         </p>
+      )}
+      {canEdit && !evaluationsLoading && (
+        <div className="results-add">
+          <button type="button" onClick={onEdit} className="results-add-button">
+            <Plus size={14} aria-hidden="true" /> Add results
+          </button>
+          <span className="results-add-hint">
+            Missing a model size or benchmark? Add or correct results with your Hugging Face account.
+          </span>
+        </div>
       )}
     </>
   );
