@@ -529,6 +529,31 @@ class DiscoveryPageService:
             "Method", f"/methods/{slug}", entity.name, description, links, papers
         )
 
+    def benchmark_default_task_slug(self, slug: str) -> tuple[bool, str | None]:
+        """Return whether the benchmark exists and its main leaderboard task.
+
+        The main task holds the most evaluations, so a link whose task filter
+        no longer matches (the board moved tasks) can redirect to the board.
+        """
+        dataset_id = self.db.query(Dataset.id).filter(Dataset.slug == slug).scalar()
+        if dataset_id is None:
+            return False, None
+        task_slug = (
+            self.db.query(Task.slug)
+            .join(TaskDataset, TaskDataset.task_id == Task.id)
+            .outerjoin(
+                Evaluation,
+                (Evaluation.dataset_id == TaskDataset.dataset_id)
+                & (Evaluation.task_id == Task.id),
+            )
+            .filter(TaskDataset.dataset_id == dataset_id, Task.slug.is_not(None))
+            .group_by(Task.id, Task.slug)
+            .order_by(func.count(Evaluation.id).desc(), Task.slug.asc())
+            .limit(1)
+            .scalar()
+        )
+        return True, task_slug
+
     def benchmark(
         self, slug: str, task_slug: str | None = None
     ) -> Optional[DiscoveryPage]:

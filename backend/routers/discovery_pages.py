@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -233,10 +234,28 @@ def method_page(
 def benchmark_page(
     slug: str, request: Request, db: Session = Depends(get_database_session)
 ) -> Response:
-    return _render(
-        DiscoveryPageService(db).benchmark(slug, request.query_params.get("task")),
-        request,
-    )
+    service = DiscoveryPageService(db)
+    task_slug = request.query_params.get("task")
+    page = service.benchmark(slug, task_slug)
+    if page is None and task_slug:
+        # The task is not on this benchmark (e.g. the board moved to another
+        # task): send old links to the board's current task instead of a 404.
+        exists, default_task = service.benchmark_default_task_slug(slug)
+        if exists:
+            params = [
+                (k, v) for k, v in request.query_params.multi_items() if k != "task"
+            ]
+            if default_task:
+                params.insert(0, ("task", default_task))
+            target = f"/benchmark/{slug}"
+            if params:
+                target = f"{target}?{urlencode(params)}"
+            return RedirectResponse(
+                target,
+                status_code=301,
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+    return _render(page, request)
 
 
 @router.api_route(

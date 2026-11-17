@@ -85,7 +85,7 @@ def test_production_robots_blocks_seo_crawlers_in_one_group():
     assert general_group.startswith("User-agent: *\nAllow: /\n")
 
 
-def _query(*, one=None, rows=()):
+def _query(*, one=None, rows=(), scalar=None):
     result = MagicMock()
     for method in (
         "filter",
@@ -98,20 +98,17 @@ def _query(*, one=None, rows=()):
         getattr(result, method).return_value = result
     result.one_or_none.return_value = one
     result.all.return_value = rows
+    result.scalar.return_value = scalar
     return result
 
 
-@pytest.mark.parametrize("linked", [True, False])
-def test_empty_task_benchmark_requires_association(client, linked):
+def test_empty_task_benchmark_renders_when_associated(client):
     """A configured leaderboard can render before its first score is imported."""
-    tasks = [(1, "other-task", "Other task")]
-    if linked:
-        tasks.insert(0, (775, "audio-editing", "Audio editing"))
     db = MagicMock()
     db.query.side_effect = [
         _query(one=SimpleNamespace(id=2590, name="MMAE", description="Audio edits")),
         _query(one=SimpleNamespace(id=775, slug="audio-editing")),
-        _query(rows=tasks),
+        _query(rows=[(775, "audio-editing", "Audio editing")]),
         _query(),  # evaluations
         _query(),  # configured leaderboard metrics
     ]
@@ -119,11 +116,54 @@ def test_empty_task_benchmark_requires_association(client, linked):
 
     response = client.get("/benchmark/mmae?task=audio-editing")
 
-    assert response.status_code == (200 if linked else 404)
-    if linked:
-        assert "MMAE" in response.text
-        assert 'id="root"' in response.text
-        assert "Page not found" not in response.text
+    assert response.status_code == 200
+    assert "MMAE" in response.text
+    assert 'id="root"' in response.text
+    assert "Page not found" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("default_task", "location"),
+    [
+        (
+            "spatial-understanding",
+            "/benchmark/vsi-bench?task=spatial-understanding&eval=5",
+        ),
+        (None, "/benchmark/vsi-bench?eval=5"),
+    ],
+)
+def test_benchmark_with_moved_task_redirects_to_its_board(
+    client, default_task, location
+):
+    """Links to a task the board no longer belongs to redirect, not 404."""
+    db = MagicMock()
+    db.query.side_effect = [
+        _query(one=SimpleNamespace(id=2778, name="VSI-Bench", description="")),
+        _query(one=SimpleNamespace(id=9, slug="video-understanding")),
+        _query(rows=[(912, "spatial-understanding", "Spatial Understanding")]),
+        _query(),  # evaluations
+        _query(scalar=2778),  # benchmark exists
+        _query(scalar=default_task),  # task with the most evaluations
+    ]
+    client.app.dependency_overrides[get_database_session] = lambda: db
+
+    response = client.get(
+        "/benchmark/vsi-bench?task=video-understanding&eval=5",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 301
+    assert response.headers["location"] == location
+
+
+def test_missing_benchmark_with_task_is_not_found(client):
+    db = MagicMock()
+    db.query.side_effect = [_query(), _query(scalar=None)]
+    client.app.dependency_overrides[get_database_session] = lambda: db
+
+    response = client.get("/benchmark/nope?task=video-understanding")
+
+    assert response.status_code == 404
 
 
 def _evaluation(id, paper_id, model, metrics, best_metric, best_rank, task_id=7):
