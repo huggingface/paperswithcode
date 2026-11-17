@@ -254,12 +254,8 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "Muse Wonder: A Frontier Model For Personal & Professional AI Agents",
         "2026-10-12",
     ),
-    "nemotron-3-5-lightning": external(
-        "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Base-BF16",
-        "NVIDIA Nemotron 3.5 Lightning",
-        "2026-08-11",
-        is_open=True,
-    ),
+    # The Nemotron 3.5 Super and Lightning tech report introduces Lightning.
+    "nemotron-3-5-lightning": PaperIdentity(arxiv_id="2610.38095", is_open=True),
     "nvidia-nemotron-3-super-120b-a12b": PaperIdentity(
         arxiv_id="2512.20856", is_open=True
     ),
