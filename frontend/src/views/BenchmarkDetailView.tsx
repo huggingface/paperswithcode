@@ -389,7 +389,7 @@ const BenchmarkDetailView: React.FC = () => {
         )}
 
         <BenchmarkProgression model={model} datasetName={dataset.name} hideClosed={hideClosed}
-          setHideClosed={setHideClosedSourceEvals} setMetric={setMetric} />
+          setHideClosed={setOpenSourceOnly} setMetric={setMetric} />
 
         {highlightedEval && (() => {
           const paperRouteId = highlightedEval.paper_arxiv_id || highlightedEval.paper_id;
