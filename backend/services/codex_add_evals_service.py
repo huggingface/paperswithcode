@@ -26,9 +26,11 @@ from huggingface_hub.errors import HfHubHTTPError
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
+from backend.database.paper_merge import merge_external_release_duplicate
 from backend.models.database import (
     BenchmarkCurationCandidate,
     BenchmarkCurationEvidence,
@@ -2091,6 +2093,24 @@ class CodexPaperJobService:
             state.pause_reason = reason
             logger.error("paper curation dispatch paused condition=%s", condition)
 
+    @staticmethod
+    def _merge_external_release(db: Session, paper_id: int | None) -> None:
+        """Move an earlier launch page's evals onto its ArXiv report first.
+
+        Otherwise add-evals sees the report's scores as duplicates of the
+        launch page and leaves the ArXiv paper without results.
+        """
+        if paper_id is None:
+            return
+        try:
+            stats = merge_external_release_duplicate(db, paper_id)
+        except SQLAlchemyError:
+            # The merge ran in a savepoint; evaluation must still proceed.
+            logger.exception("external release merge failed for paper %s", paper_id)
+            return
+        if stats is not None:
+            logger.info("merged external release into paper %s: %s", paper_id, stats)
+
     def _advance_workflow(
         self, db: Session, row: PaperCurationJob, settings: Settings
     ) -> None:
@@ -2133,6 +2153,7 @@ class CodexPaperJobService:
                 .first()
             )
             if exists is None and workflow.evals_satisfied_by_job_id is None:
+                self._merge_external_release(db, row.paper_id)
                 self.enqueue(
                     db,
                     kind="add-evals",
