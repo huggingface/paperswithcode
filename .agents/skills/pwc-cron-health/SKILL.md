@@ -118,6 +118,8 @@ done
 
 Report scheduled duties outside the dashboard separately. Do not silently redefine them as dashboard jobs, but audit each one's durable effect like a dashboard job. Never treat `Result=success` as proof for them.
 
+`x-post-schedule` and `x-post-watch` (the X growth agent, which also mirrors every X post to LinkedIn) are audited by the `pwc-social-health` skill: run its `scripts/social_report.py` and report its `broken` findings here.
+
 ### Headless-Claude Drive-sheet routines
 
 `x-trending-sheet-import` (09:30 UTC, "AI Papers on X" sheet → `paper_x_trending` and the curation priority queue) and `x-thread-sheet-import` (09:00 UTC, "PwC X threads" sheet → paper X threads) run `handoffs/<name>-routine/run.sh` in the main checkout. That script starts `claude -p` in `dontAsk` mode, which exits 0 even when a tool call is denied and nothing gets applied. A run counts as applied only when:
