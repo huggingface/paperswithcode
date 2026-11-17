@@ -709,3 +709,71 @@ def test_undated_leaderboard_signals_queue_by_first_sighting(db, monkeypatch):
     queued = signals.queue_release_signals(db, SETTINGS, jobs=_Jobs(), now=NOW)
 
     assert queued == [undated]
+
+
+def _hub_only_accept(source, **external):
+    return _accept(
+        source,
+        external_paper={
+            "source_url": source,
+            "title": "Inflect-Mini-v3",
+            "abstract": "Inflect Mini v3 brings English text-to-speech locally.",
+            "date_published": "2026-11-12",
+            **external,
+        },
+        model_release={
+            "canonical_name": "Inflect Mini v3",
+            "publisher": "owensong",
+            "is_open": True,
+            "aliases": [],
+        },
+    )
+
+
+def test_model_card_only_release_is_refused(db, fake_external):
+    row = _signal_row(db, "owensong/Inflect-Mini-v3")
+    with pytest.raises(ValueError, match="only by a Hugging Face or ModelScope"):
+        signals.ReleaseSignalResolutionService(db).apply(
+            row.id,
+            _hub_only_accept("https://huggingface.co/owensong/Inflect-Mini-v3"),
+            commit=False,
+        )
+    assert fake_external.created == []
+
+
+def test_model_card_with_first_party_repository_is_created(db, fake_external):
+    row = _signal_row(db, "owensong/Inflect-Mini-v3")
+    source = "https://huggingface.co/owensong/Inflect-Mini-v3"
+    mutation = _hub_only_accept(source)
+    mutation.evidence_urls.append("https://github.com/owensong/inflect")
+    result = signals.ReleaseSignalResolutionService(db).apply(
+        row.id, mutation, commit=False
+    )
+    assert result["status"] == "resolved"
+    assert fake_external.created == [{"source_url": source}]
+
+
+def test_repository_id_title_is_refused(db, fake_external):
+    row = _signal_row(db, "owensong/Inflect-Mini-v3")
+    source = "https://huggingface.co/owensong/Inflect-Mini-v3"
+    mutation = _hub_only_accept(source, title="owensong/Inflect-Mini-v3")
+    mutation.evidence_urls.append("https://github.com/owensong/inflect")
+    with pytest.raises(ValueError, match="not a Hub repository id"):
+        signals.ReleaseSignalResolutionService(db).apply(row.id, mutation, commit=False)
+    assert fake_external.created == []
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("https://huggingface.co/owensong/Inflect-Mini-v3", True),
+        ("https://hf.co/owensong/Inflect-Mini-v3", True),
+        ("https://www.modelscope.cn/models/qwen/Qwen4", True),
+        ("https://huggingface.co/collections/owensong/inflect", True),
+        ("https://huggingface.co/blog/owensong/inflect", False),
+        ("https://huggingface.co/papers/2611.01234", False),
+        ("https://github.com/owensong/inflect", False),
+    ],
+)
+def test_is_hub_repository_page(url, expected):
+    assert signals.is_hub_repository_page(url) is expected

@@ -73,6 +73,12 @@ _ORGANIZATION_HOSTS = frozenset({"huggingface.co", "github.com", "modelscope.cn"
 _BRAND_TLDS = frozenset(
     {"google", "microsoft", "nvidia", "amazon", "apple", "ibm", "baidu", "alibaba"}
 )
+# Hub hosts whose repository pages (model cards) alone do not make a paper.
+_HUB_HOSTS = frozenset({"huggingface.co", "hf.co", "modelscope.cn"})
+# Hub pages that are written announcements rather than repositories.
+_HUB_ARTICLE_PREFIXES = frozenset({"blog", "papers"})
+# A Hub repository id such as "owensong/Inflect-Mini-v3".
+_REPO_ID_TITLE = re.compile(r"[\w.-]+/[\w.-]+")
 _ORGANIZATION_PATH_PREFIXES = frozenset(
     {"models", "datasets", "spaces", "collections", "organizations"}
 )
@@ -375,6 +381,16 @@ def is_first_party_source(
     )
 
 
+def is_hub_repository_page(url: str) -> bool:
+    """Whether ``url`` is a Hugging Face or ModelScope repository page."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").casefold().removeprefix("www.")
+    if host not in _HUB_HOSTS:
+        return False
+    segments = [segment for segment in parts.path.split("/") if segment]
+    return not segments or segments[0] not in _HUB_ARTICLE_PREFIXES
+
+
 class ReleaseSignalResolutionService:
     """Apply one validated radar-signal resolution transaction."""
 
@@ -510,15 +526,15 @@ class ReleaseSignalResolutionService:
             raise ValueError(
                 "External paper resolution requires matching source evidence"
             )
+        publisher_names = [
+            signal.lab,
+            proposal.publisher,
+            proposal.canonical_name,
+            *proposal.aliases,
+        ]
+        lead_url = None if signal.lead_is_official else signal.lead_url
         if not is_first_party_source(
-            external.source_url,
-            publisher_names=[
-                signal.lab,
-                proposal.publisher,
-                proposal.canonical_name,
-                *proposal.aliases,
-            ],
-            lead_url=None if signal.lead_is_official else signal.lead_url,
+            external.source_url, publisher_names=publisher_names, lead_url=lead_url
         ):
             raise ValueError(
                 "An external paper's source_url must be the publisher's own "
@@ -529,6 +545,12 @@ class ReleaseSignalResolutionService:
                 "External papers must be in English; resolve with the lab's "
                 "English announcement or model card, or reject the release"
             )
+        if _REPO_ID_TITLE.fullmatch(external.title.strip()):
+            raise ValueError(
+                "An external paper's title must be the announcement's headline or "
+                "the release name (for example 'Inflect-Mini-v3'), not a Hub "
+                "repository id such as 'owensong/Inflect-Mini-v3'"
+            )
         if external.date_published > date.today() + timedelta(days=1):
             raise ValueError("External paper date_published is in the future")
         duplicate = self._duplicate_paper(external.source_url, external.title, proposal)
@@ -537,6 +559,19 @@ class ReleaseSignalResolutionService:
                 f"Release is already indexed as paper {duplicate.id} "
                 f"({duplicate.title!r}); resolve to existing_paper_id {duplicate.id} "
                 "with its source in evidence_urls instead of creating a duplicate"
+            )
+        if not any(
+            not is_hub_repository_page(url)
+            and is_first_party_source(
+                url, publisher_names=publisher_names, lead_url=lead_url
+            )
+            for url in evidence
+        ):
+            raise ValueError(
+                "A release documented only by a Hugging Face or ModelScope model "
+                "card is not indexed: reject it unless the publisher also has a "
+                "blog post, tech report, project page, or code repository, and "
+                "include that page in evidence_urls"
             )
         result = ExternalResourceService(self.db).add_external_resource(
             ExternalResourceInput(
