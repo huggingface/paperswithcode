@@ -825,6 +825,9 @@
   margin: 2px 0 6px;
 }
 .bench-row-variant {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-family: var(--mono);
   font-size: 9.5px;
   letter-spacing: 0.02em;
