@@ -257,6 +257,9 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         "GPT-5 mini": ModelIdentity(
             "GPT-5 mini", source_url="https://openai.com/index/introducing-gpt-5/"
         ),
+        "GPT-5.1": ModelIdentity(
+            "GPT-5.1", source_url="https://openai.com/index/gpt-5-1/"
+        ),
         "GPT-5.2": ModelIdentity(
             "GPT-5.2", source_url="https://openai.com/index/introducing-gpt-5-2/"
         ),
@@ -323,6 +326,9 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             "Gemini 4 Carbon",
             source_url="https://deepmind.google/blog/gemini-4-carbon-our-next-frontier-model/",
         ),
+        "Grok 4.1 Fast": ModelIdentity(
+            "Grok 4.1 Fast", source_url="https://x.ai/news/grok-4-1-fast"
+        ),
         "Grok 4.20": ModelIdentity(
             "Grok 4.20", source_url="https://docs.x.ai/developers/models/grok-4.20"
         ),
@@ -379,8 +385,17 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         "Qwen 3.5 Plus": ModelIdentity(
             "Qwen3.5-Plus", source_url="https://qwen.ai/blog?id=qwen3.5"
         ),
+        # Qwen3.6-Max only shipped as the preview release.
+        "Qwen 3.6 Max": ModelIdentity(
+            "Qwen3.6-Max-Preview",
+            source_url="https://qwen.ai/blog?id=qwen3.6-max-preview",
+        ),
         "Qwen 3.6 Plus": ModelIdentity(
             "Qwen3.6-Plus", source_url="https://qwen.ai/blog?id=qwen3.6"
+        ),
+        "Qwen3 Max": ModelIdentity(
+            "Qwen3-Max",
+            source_url="https://qwen.ai/blog?id=241398b9cd6353de490b0f82806c7848c5d2777d",
         ),
         "Qwen3 235B A22B Thinking": ModelIdentity(
             "Qwen3 235B A22B Thinking", arxiv_id="2505.09388", is_open=True
@@ -1142,8 +1157,9 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             "Muse Wonder Full (max)",
             source_url="https://research.meta.ai/blog/muse-wonder",
         ),
+        # The Nemotron 3.5 Super tech report introduces the 120B-A12B VL model.
         "Nemotron 3.5 Super VL": ModelIdentity(
-            "Nemotron 3.5 Super VL", arxiv_id="2610.22019", is_open=True
+            "Nemotron 3.5 Super VL", arxiv_id="2610.38095", is_open=True
         ),
         "Qwen3.8 27B (xhigh)": ModelIdentity(
             "Qwen3.8 27B (xhigh)",
