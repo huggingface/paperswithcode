@@ -298,10 +298,10 @@ Apply the exclusion rules in this order:
 
     Main-board contracts:
     - **LLM boards** (`gsm8k`, `aime-2025`, `gpqa-diamond`, `math-500`, `mmlu`, `mmlu-pro`, `mmmu`, `humaneval`): one model answering each question once (pass@1, greedy, or the mean over k samples), no tools, on the full standard set. Thinking or effort modes of one model are allowed. MMLU's main board is few-shot (5-shot); MMLU-Pro's main board is post-trained (instruct, chat or thinking) models.
-    - **Vision classification** (`imagenet-1k`, `cifar-10`, `cifar-100`): a classifier trained or fine-tuned end to end (including PEFT, quantized, pruned or distilled-teacher versions) on the full labeled training set; clean top-1 accuracy.
+    - **Vision classification** (`imagenet-1k`, `cifar-10`, `cifar-100`): a classifier trained or fine-tuned end to end (including PEFT, quantized, pruned or distilled-teacher versions) on the full labeled training set with standard (non-adversarial) training; clean top-1 accuracy.
     - **`ade20k`**: closed-set semantic segmentation trained on fully labeled ADE20K with a trained decoder. **`coco-val2017`**: closed-set detection trained on COCO train2017, one model, single-scale testing (import the single-scale value when a paper also reports test-time augmentation).
 
-    Variant boards by suffix (slug = `<main slug>-<suffix>`; check the query above for which exist):
+    Variant boards by suffix (slug = `<main slug>-<suffix>`, except that ImageNet variants use the `imagenet-` prefix, e.g. `imagenet-frozen-feature-probe`, `imagenet-zero-shot`, `imagenet-dataset-distillation-ipc-50`; always take the exact slug from the query above, which also shows which variants exist):
     - `-agentic-systems`: multi-agent or multi-model pipelines, routers, ensembles, agent loops.
     - `-test-time-scaling`: majority voting, best-of-N, verifier or reward-model selection, parallel-rollout aggregation (e.g. PaCoRe).
     - `-tool-integrated`: a single model using a code interpreter, search or other tools.
@@ -310,7 +310,7 @@ Apply the exclusion rules in this order:
     - `-adversarial-training` (CIFAR): clean accuracy of adversarially trained or robust models. `-dataset-distillation-ipc-<n>`: a network trained on a distilled set of n images per class; state the evaluation network in `methodology`.
     - `-open-vocabulary` (ADE20K, trained on other data such as COCO) and `-training-free-open-vocabulary` (ADE20K, training-free or annotation-free); `coco-val2017-zero-shot`: zero-shot or open-vocabulary transfer to COCO.
 
-    Skip results that fit neither the main contract nor an existing variant board, such as subsets of the test set, other shot counts, training on a pruned or coreset subset, federated or differentially private training, training on other data (e.g. WebVision), or retrieval scores. Report them as `source setup not comparable to configured leaderboard`. Never post a variant protocol to the main board.
+    Skip results that fit neither the main contract nor an existing variant board, such as subsets of the test set, other shot counts, training on a pruned or coreset subset, adversarial training on a benchmark without an `-adversarial-training` board (e.g. ImageNet), federated or differentially private training, training on other data (e.g. WebVision), or retrieval scores. Report them as `source setup not comparable to configured leaderboard`. Never post a variant protocol to the main board.
 
 Keep an explicit "skipped" list of names + reasons to report at the end. Use reasons like `metric not configured for leaderboard`, `no DB match`, `no task association`, `component metric only; canonical total not reported`, `external eval / comparator (not requested)`, `unfinished checkpoint (source marks model as still training)`, or `source setup not comparable to configured leaderboard` so future cleanup is easy. Do not change task associations or leaderboard metrics in this pass; if the user explicitly wants to add tasks or metrics, defer to the `add-benchmark` skill instead.
 
