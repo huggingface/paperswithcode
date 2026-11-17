@@ -1,6 +1,6 @@
 ---
 name: reply-github-issue
-description: (Also known as pwc-reply-issue.) Handle unread GitHub notifications for "Verify evals on Papers with Code" issues end-to-end. Apply author feedback to the catalog database, verify changes live, reply to authors, mark handled notifications read, and summarize with GitHub reply links. Also handles explicitly selected PwC catalog issues. Exclude Hugging Face artifact-hosting outreach and unrelated notifications unless explicitly requested.
+description: (Also known as pwc-reply-issue.) Handle unread GitHub notifications for "Verify evals on Papers with Code" issues end-to-end. Apply author feedback to the catalog database, verify changes live, reply to authors, mark handled notifications read, and summarize with GitHub reply links. Also covers "Release ... on Hugging Face" issues where NielsRogge posted the verify-evals message as a comment (release issues take priority, so evals go there as a comment instead of a new issue), plus explicitly selected PwC catalog issues. Leave the release discussion itself, other Hugging Face artifact-hosting outreach, and unrelated notifications alone unless explicitly requested.
 ---
 
 # Reply to a GitHub Issue
@@ -15,7 +15,9 @@ workflow. “All unread” uses the same default:
 
 1. Paginate unread GitHub notifications and select evaluation-verification
    issues titled “Verify evals on Papers with Code” (including equivalent
-   “Verify evals on PwC” wording). Include open and closed issues.
+   “Verify evals on PwC” wording), plus mixed “Release … on Hugging Face”
+   threads that carry the verify-evals comment (see “Mixed threads” in
+   section 1). Include open and closed issues.
 2. Address the authors' concerns by making the supported catalog database
    changes, then verify the live results. Do not merely acknowledge requests.
    When every requested change is one the authors can make themselves, invite
@@ -55,7 +57,8 @@ artifacts (model, PanTrack dataset) on Hugging Face” are not. Exclude unrelate
 issues and pull-request notifications as well. Expand beyond PwC catalog work
 only when the user explicitly requests it.
 
-Mixed threads are the exception. When a release issue already exists, the
+Mixed threads are the exception. Release issues take priority over separate
+verify-evals issues: when a release issue already exists, the
 evaluation outreach CRON posts the verify-evals message as a NielsRogge comment
 on that release thread (a comment starting “Hi again,” that links
 `paperswithcode.co/paper/…#results`) instead of opening a separate issue.
