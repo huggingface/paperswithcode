@@ -236,7 +236,6 @@ class Paper(Base):
             date_published.desc().nullslast(),
         ).ddl_if(dialect="postgresql"),
         Index("idx_papers_conference", "conference"),
-        Index("idx_papers_title_search", "title"),  # For text search
         Index("idx_papers_latest_version", "is_latest_version"),
         Index("idx_papers_citation_count", "citation_count"),
         Index("idx_papers_semantic_scholar_id", "semantic_scholar_id"),
