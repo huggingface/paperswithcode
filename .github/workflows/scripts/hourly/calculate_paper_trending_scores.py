@@ -106,11 +106,13 @@ def load_population(session, cutoff):
     log("Loading paper population (GitHub component)...")
     github_rows = session.execute(
         text("""
-            WITH shared_repos AS (
-                SELECT repository_id
-                FROM paper_repositories
-                WHERE is_official = TRUE
-                GROUP BY repository_id
+            WITH shared_repos AS MATERIALIZED (
+                SELECT shared.repository_id
+                FROM paper_repositories shared
+                JOIN papers sp ON sp.id = shared.paper_id
+                WHERE shared.is_official = TRUE
+                  AND sp.is_latest_version = TRUE
+                GROUP BY shared.repository_id
                 HAVING COUNT(*) > :max_repo_papers
             )
             SELECT
