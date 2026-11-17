@@ -243,3 +243,57 @@ def test_repoint_evaluation_sources_keeps_own_scores_first_party():
     assert citing.external is True
     assert unrelated.source_url == "https://paperswithcode.co/paper/1097430"
     assert unrelated.external is True
+
+
+def test_external_release_title_must_announce_the_report_model():
+    from backend.database.paper_merge import external_title_announces_report
+
+    report = "K2-Horizon: A Frontier Fleet of Open Source Language Models"
+    assert external_title_announces_report(
+        "Introducing K2 Horizon: Frontier Performance, Radically Open", report
+    )
+    assert external_title_announces_report(
+        "Muse Glimmer-30B", "Muse Glimmer 30B: An On-Device Agentic Model"
+    )
+    # Later releases of a reported family stay separate papers.
+    for release, report in [
+        (
+            "Distil-Whisper: Distil-Large-v3.5",
+            "Distil-Whisper: Robust Knowledge Distillation via Large-Scale "
+            "Pseudo Labelling",
+        ),
+        ("GLM-5.1: Towards Long-Horizon Tasks", "GLM-5: from Vibe Coding to Agentic"),
+        ("Kimi K2.6", "Kimi K2.5: Visual Agentic Intelligence"),
+        ("LFM2.5-230M: Built to Run Anywhere", "LFM2 Technical Report"),
+        ("Qwen-Image-2.1: Compact and Unified", "Qwen-Image Technical Report"),
+        ("Introducing Llama 3.1", "The Carbon Footprint of Machine Learning"),
+    ]:
+        assert not external_title_announces_report(release, report)
+
+
+def test_report_suffix_is_not_part_of_the_announced_name():
+    from backend.database.paper_merge import external_title_announces_report
+
+    assert external_title_announces_report(
+        "Mellum2: a fast open coding model", "Mellum2 Technical Report"
+    )
+
+
+def test_release_merge_skips_ambiguous_external_matches(monkeypatch):
+    from backend.database import paper_merge as merge_module
+
+    arxiv_paper = SimpleNamespace(id=7, title="K2-Horizon: A Frontier Fleet")
+    pages = {
+        1: SimpleNamespace(id=1, title="Introducing K2 Horizon"),
+        2: SimpleNamespace(id=2, title="K2-Horizon: launch notes"),
+    }
+    db = Mock()
+    db.execute.return_value.scalars.return_value = [1, 2]
+    db.get.side_effect = lambda _model, paper_id: pages[paper_id]
+
+    assert merge_module.find_external_release_for_arxiv_paper(db, arxiv_paper) is None
+
+    db.execute.return_value.scalars.return_value = [1]
+    assert (
+        merge_module.find_external_release_for_arxiv_paper(db, arxiv_paper) is pages[1]
+    )

@@ -15,6 +15,7 @@ from backend.models.database import (
     ModelRelease,
     ModelReleaseArtifact,
     Paper,
+    TrendingModelCandidate,
 )
 
 # Provider labels end in a settings suffix: "Claude Opus 5.5 (Max, Default Fallback)".
@@ -319,3 +320,43 @@ class ModelReleaseIdentityService:
             bound[alias] = release
         self.db.flush()
         return bound
+
+
+def merge_model_release_into(
+    db: Session, source: ModelRelease, target: ModelRelease
+) -> None:
+    """Fold one model identity into another, keeping its links and aliases."""
+    for link in (
+        db.query(ModelReleaseArtifact)
+        .filter(ModelReleaseArtifact.model_release_id == source.id)
+        .all()
+    ):
+        existing = (
+            db.query(ModelReleaseArtifact.id)
+            .filter(
+                ModelReleaseArtifact.model_release_id == target.id,
+                ModelReleaseArtifact.hf_artifact_id == link.hf_artifact_id,
+            )
+            .first()
+        )
+        if existing:
+            db.delete(link)
+        else:
+            link.model_release_id = target.id
+    for alias in (
+        db.query(ModelProviderAlias)
+        .filter(ModelProviderAlias.model_release_id == source.id)
+        .all()
+    ):
+        alias.model_release_id = target.id
+    db.query(TrendingModelCandidate).filter(
+        TrendingModelCandidate.model_release_id == source.id
+    ).update(
+        {TrendingModelCandidate.model_release_id: target.id},
+        synchronize_session=False,
+    )
+    target.aliases = list(
+        dict.fromkeys([*(target.aliases or []), *(source.aliases or [])])
+    )
+    db.delete(source)
+    db.flush()

@@ -7,6 +7,7 @@ When the same work is indexed twice (once as `source='external'` and later as
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sqlalchemy import func, or_, text
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     Evaluation,
+    ModelRelease,
     Paper,
     PaperAuthor,
     PaperConference,
@@ -34,6 +36,10 @@ from backend.services.evaluation_service import (
     _paper_route_keys,
 )
 from backend.services.hf_artifact_service import sync_explicit_hf_artifact_links
+from backend.services.model_release_identity_service import (
+    merge_model_release_into,
+    title_announces_model,
+)
 from backend.utils.urls import get_paper_route_identifier
 
 
@@ -187,6 +193,108 @@ def find_external_paper_for_title(db: Session, title: str) -> Paper | None:
         .order_by(Paper.id.asc())
         .first()
     )
+
+
+_REPORT_SUFFIX = re.compile(r"\s+(?:technical|tech)\s+report$", re.IGNORECASE)
+_VERSION_TOKEN = re.compile(r"[a-z]*\d+(?:\.\d+)*[a-z0-9]*")
+_HF_URL_PREFIX = r"^https?://(www\.)?huggingface\.co/"
+
+
+def _version_tokens(title: str) -> set[str]:
+    return set(_VERSION_TOKEN.findall(re.sub(r"[\s_-]+", " ", title.casefold())))
+
+
+def external_title_announces_report(external_title: str, arxiv_title: str) -> bool:
+    """Whether an external release page announces the model an ArXiv report names.
+
+    "Introducing K2 Horizon: ..." announces "K2-Horizon: A Frontier Fleet ...",
+    but "Distil-Whisper: Distil-Large-v3.5" is a later release than
+    "Distil-Whisper: Robust Knowledge Distillation ..." and "GLM-5.1: ..." is
+    not "GLM-5: ...", so every version token on the release page must also
+    appear in the report title.
+    """
+    name = _REPORT_SUFFIX.sub("", arxiv_title.split(":", 1)[0].strip()).strip()
+    if not name or not title_announces_model(external_title, name):
+        return False
+    return _version_tokens(external_title) <= _version_tokens(arxiv_title)
+
+
+def find_external_release_for_arxiv_paper(
+    db: Session, arxiv_paper: Paper
+) -> Paper | None:
+    """The one external release page that an ArXiv technical report supersedes.
+
+    A model-release radar or curator often indexes a lab's launch blog before
+    its ArXiv report appears. Both name the same model and link the same Hub
+    model repository; anything less is ambiguous and is left alone.
+    """
+    candidate_ids = db.execute(
+        text(
+            f"""
+            WITH report_repos AS (
+                SELECT lower(a.repo_id) AS repo
+                FROM paper_hf_artifacts pha
+                JOIN hf_artifacts a ON a.id = pha.hf_artifact_id
+                WHERE pha.paper_id = :paper_id AND a.kind = 'model'
+                UNION
+                SELECT lower(rtrim(regexp_replace(url, '{_HF_URL_PREFIX}', ''), '/'))
+                FROM papers, unnest(hf_models) AS url
+                WHERE id = :paper_id
+            ),
+            externals AS (
+                SELECT id, hf_models FROM papers
+                WHERE source = 'external' AND is_latest_version AND id <> :paper_id
+            ),
+            release_repos AS (
+                SELECT pha.paper_id, lower(a.repo_id) AS repo
+                FROM paper_hf_artifacts pha
+                JOIN hf_artifacts a ON a.id = pha.hf_artifact_id
+                JOIN externals x ON x.id = pha.paper_id
+                WHERE a.kind = 'model'
+                UNION ALL
+                SELECT x.id, lower(rtrim(regexp_replace(url, '{_HF_URL_PREFIX}', ''), '/'))
+                FROM externals x, unnest(x.hf_models) AS url
+                UNION ALL
+                SELECT e.paper_id,
+                       lower(rtrim(regexp_replace(e.hf_model_url, '{_HF_URL_PREFIX}', ''), '/'))
+                FROM evaluations e
+                JOIN externals x ON x.id = e.paper_id
+                WHERE e.hf_model_url IS NOT NULL
+            )
+            SELECT DISTINCT r.paper_id
+            FROM release_repos r
+            JOIN report_repos USING (repo)
+            -- A dispatcher holds this row in its own transaction. Other active
+            -- jobs fail callback authentication once their row cascades away.
+            WHERE NOT EXISTS (
+                SELECT 1 FROM paper_curation_jobs j
+                WHERE j.paper_id = r.paper_id AND j.status = 'dispatching'
+            )
+            """
+        ),
+        {"paper_id": arxiv_paper.id},
+    ).scalars()
+    matches = [
+        paper
+        for paper in (db.get(Paper, paper_id) for paper_id in candidate_ids)
+        if external_title_announces_report(paper.title or "", arxiv_paper.title or "")
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def merge_external_release_duplicate(
+    db: Session, paper_id: int
+) -> dict[str, Any] | None:
+    """Fold an earlier external release page into its new ArXiv report."""
+    paper = db.get(Paper, paper_id)
+    if paper is None or paper.source != "arxiv" or not paper.title:
+        return None
+    # A savepoint keeps a failed lookup or merge from aborting the caller.
+    with db.begin_nested():
+        external = find_external_release_for_arxiv_paper(db, paper)
+        if external is None:
+            return None
+        return merge_external_paper_into_arxiv(db, external.id, paper.id)
 
 
 def _merge_url_lists(
@@ -589,6 +697,20 @@ def merge_external_paper_into_arxiv(
         ),
         {"arxiv_id": arxiv_paper_id, "external_id": external_id},
     )
+    # Model identities would otherwise cascade away with the external row.
+    kept = {
+        release.canonical_name: release
+        for release in db.query(ModelRelease).filter(
+            ModelRelease.paper_id == arxiv_paper_id
+        )
+    }
+    for release in (
+        db.query(ModelRelease).filter(ModelRelease.paper_id == external_id).all()
+    ):
+        if release.canonical_name in kept:
+            merge_model_release_into(db, release, kept[release.canonical_name])
+        else:
+            release.paper_id = arxiv_paper_id
     db.execute(
         text(
             """

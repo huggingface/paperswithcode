@@ -137,6 +137,11 @@ The server checks source-to-stored conversion and rejects missing evidence
 or a mismatch, including fractions that happen to fit inside 0–100 bounds.
 If metadata conflicts with source or existing leaderboard evidence, skip the
 result and report the conflict instead of choosing a scale arbitrarily.
+A missing `%` sign or unit label is not a conflict. When the metric is a rate
+(accuracy, pass@k, resolve or success rate) and the table prints values above
+1 on a 0–100 range, record `source_scale: "0-100"`; a fraction cannot exceed
+1, so this is not a guess from magnitude. Skip only when every value is at
+most 1 or the text defines another unit.
 
 ### Benchmark result images (add-evals only)
 
