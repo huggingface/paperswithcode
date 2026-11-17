@@ -352,11 +352,10 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         hf_model_url="https://huggingface.co/MiniMaxAI/MiniMax-M2.7",
     ),
     "Laguna M.1": ModelIdentity("Laguna M.1", arxiv_id="2605.27605"),
+    # The Nemotron 3.5 Super and Lightning tech report introduces Lightning.
     "Nemotron 3.5 Lightning": ModelIdentity(
         "NVIDIA Nemotron 3.5 Lightning 30B-A3B",
-        source_url=(
-            "https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
-        ),
+        arxiv_id="2610.38095",
         is_open=True,
         hf_model_url="https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16",
     ),
