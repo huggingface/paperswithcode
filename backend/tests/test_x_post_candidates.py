@@ -167,6 +167,86 @@ def test_competitor_board(name, competitor):
     assert service.competitor_board(Dataset(name=name)) is competitor
 
 
+def _rows(models, values):
+    return [
+        (i, i, model, value) for i, (model, value) in enumerate(zip(models, values))
+    ]
+
+
+@pytest.mark.parametrize(
+    ("name", "models", "values", "lower", "reason"),
+    [
+        # Small new frontier board: posts well (OfficeQA Pro, SLE).
+        (
+            "OfficeQA Pro",
+            ["Sage S2.1 Flash", "Claude Opus 5.5", "x"],
+            [72.9, 70, 60],
+            False,
+            None,
+        ),
+        # Small board without a frontier model: stale or obscure (ETT, TempCompass).
+        (
+            "TempCompass (MCQ)",
+            ["MetaEncoder v1", "STEER-4B", "y"],
+            [79.9, 79, 70],
+            False,
+            "small_without_frontier",
+        ),
+        # Big boards need no frontier model (robotics, TTS).
+        (
+            "Open TTS Leaderboard",
+            [f"m{i}" for i in range(25)],
+            [i / 10 for i in range(25)],
+            True,
+            None,
+        ),
+        (
+            "BBH",
+            ["GPT-4o", *[f"m{i}" for i in range(30)]],
+            [94.7, *range(30)],
+            False,
+            "legacy",
+        ),
+        (
+            "ARC-C",
+            ["GPT-4o", *[f"m{i}" for i in range(30)]],
+            [90, *range(30)],
+            False,
+            "legacy",
+        ),
+        (
+            "ARC-AGI-3",
+            ["GPT-6", *[f"m{i}" for i in range(30)]],
+            [40, *range(30)],
+            False,
+            None,
+        ),
+        (
+            "LIBERO-Goal",
+            [f"m{i}" for i in range(30)],
+            [100, *range(29)],
+            False,
+            "saturated",
+        ),
+        # Lower is better: a WER of 98 is not saturation.
+        (
+            "Odd WER board",
+            [f"m{i}" for i in range(30)],
+            [98, *range(99, 128)],
+            True,
+            None,
+        ),
+        ("AutomationBench-AA", ["GPT-6", "z"], [50, 40], False, "competitor"),
+    ],
+)
+def test_unpostable_board(name, models, values, lower, reason):
+    rows = _rows(models, values)
+    result = service.unpostable_board(
+        Dataset(name=name), board(rows, open_ids=[], lower=lower)
+    )
+    assert result == reason
+
+
 class FakeDb:
     def __init__(self):
         self.added = []

@@ -106,6 +106,39 @@ def competitor_board(dataset: Dataset) -> bool:
     return bool(COMPETITOR_BOARD.search(dataset.name or ""))
 
 
+# Boards the agent kept rejecting (2026-11-17: 40 rejections in a day crowded the
+# SOTA list). Saturated legacy benchmarks (Niels, 2026-11-17) never make a story.
+LEGACY_BOARD = re.compile(
+    r"^(BBH|Big-?Bench Hard|MMLU|HellaSwag|Wino-?grande|ARC(-[CE]| \((Challenge|Easy)\))?|PIQA|BoolQ"
+    r"|GSM8K|HumanEval|MBPP|DROP)$",
+    re.IGNORECASE,
+)
+# A leader at or above this (on a 0-100 higher-is-better metric) leaves no headroom for a story.
+SATURATED_AT = 97.0
+# Below this many entries, a board needs a frontier model on it: small boards
+# without one (ETT, TempCompass, niche robotics splits) were all rejected as
+# stale or obscure, while small new frontier boards (OfficeQA Pro, SLE) posted well.
+SMALL_BOARD = 20
+FRONTIER_MODEL = re.compile(r"\b(GPT|Claude|Gemini|Grok)\b", re.IGNORECASE)
+
+
+def unpostable_board(dataset: Dataset, board: Board) -> str | None:
+    """Why a board can't carry a post, or None when it can."""
+    name = (dataset.name or "").strip()
+    if competitor_board(dataset):
+        return "competitor"
+    if LEGACY_BOARD.match(name):
+        return "legacy"
+    top = board.rows[0].value if board.rows else None
+    if top is not None and not board.lower and SATURATED_AT <= top <= 100:
+        return "saturated"
+    if len(board.rows) < SMALL_BOARD and not any(
+        FRONTIER_MODEL.search(row.model) for row in board.rows
+    ):
+        return "small_without_frontier"
+    return None
+
+
 OPEN_RELEASE_DAYS = 21
 OPEN_RELEASE_PAPERS = 25
 OPEN_RELEASE_BOARDS = 12
@@ -260,8 +293,8 @@ def leaderboard_wins(
     was added in the last `SOTA_WINDOW`, and its leaderboard (all tasks, see
     `leaderboard_rows`) has `SOTA_MIN_ENTRIES` or more entries. Bigger
     leaderboards score higher. Subjects in `skip` (the agent already turned
-    them down) and competitor boards are left out before the `SOTA_LIMIT` cut,
-    so they don't crowd out fresh results.
+    them down) and boards that can't carry a post (`unpostable_board`) are left
+    out before the `SOTA_LIMIT` cut, so they don't crowd out fresh results.
     """
     since = now - SOTA_WINDOW
     published_after = now.date() - timedelta(days=SOTA_PAPER_AGE_DAYS)
@@ -285,10 +318,8 @@ def leaderboard_wins(
         if (dataset.id, metric, paper.id) in seen:
             continue
         seen.add((dataset.id, metric, paper.id))
-        if competitor_board(dataset):
-            continue
         board = load_board(db, dataset.id, metric)
-        if len(board.rows) < SOTA_MIN_ENTRIES:
+        if len(board.rows) < SOTA_MIN_ENTRIES or unpostable_board(dataset, board):
             continue
         win = classify_win(board, paper.id, recent_ids)
         if win is None:
@@ -596,7 +627,7 @@ def open_releases(
             if place is None:
                 continue
             dataset = db.get(Dataset, dataset_id)
-            if competitor_board(dataset):
+            if unpostable_board(dataset, board):
                 continue
             place = {"benchmark": dataset.name, "metric": metric, **place}
             placements.append(place)
