@@ -14,7 +14,6 @@ from backend.models.curation import ResolveModelPaperMutation
 from backend.models.database import (
     Author,
     HfArtifact,
-    ModelProviderAlias,
     ModelRelease,
     ModelReleaseArtifact,
     Paper,
@@ -38,6 +37,7 @@ from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
 )
+from backend.services.model_release_identity_service import merge_model_release_into
 from backend.services.paper_ingestion_service import PaperIngestionService
 
 
@@ -592,37 +592,4 @@ class TrendingModelResolutionService:
         source.is_latest_version = False
 
     def _merge_release_into(self, source: ModelRelease, target: ModelRelease) -> None:
-        for link in (
-            self.db.query(ModelReleaseArtifact)
-            .filter(ModelReleaseArtifact.model_release_id == source.id)
-            .all()
-        ):
-            existing = (
-                self.db.query(ModelReleaseArtifact.id)
-                .filter(
-                    ModelReleaseArtifact.model_release_id == target.id,
-                    ModelReleaseArtifact.hf_artifact_id == link.hf_artifact_id,
-                )
-                .first()
-            )
-            if existing:
-                self.db.delete(link)
-            else:
-                link.model_release_id = target.id
-        for alias in (
-            self.db.query(ModelProviderAlias)
-            .filter(ModelProviderAlias.model_release_id == source.id)
-            .all()
-        ):
-            alias.model_release_id = target.id
-        self.db.query(TrendingModelCandidate).filter(
-            TrendingModelCandidate.model_release_id == source.id
-        ).update(
-            {TrendingModelCandidate.model_release_id: target.id},
-            synchronize_session=False,
-        )
-        target.aliases = list(
-            dict.fromkeys([*(target.aliases or []), *(source.aliases or [])])
-        )
-        self.db.delete(source)
-        self.db.flush()
+        merge_model_release_into(self.db, source, target)

@@ -2174,6 +2174,9 @@ class CodexPaperJobService:
                 workflow.status = "completed"
                 workflow.finished_at = _now()
         elif row.status == "completed" and row.kind == "add-evals":
+            # Retry a merge skipped while the launch page was being dispatched;
+            # the scores add-evals skipped as duplicates then move over.
+            self._merge_external_release(db, row.paper_id)
             workflow.status = "completed"
             workflow.finished_at = _now()
             # External-paper workflows are not part of any scheduled canary.

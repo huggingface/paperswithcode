@@ -449,3 +449,27 @@ def test_failed_release_merge_still_queues_add_evals(db, monkeypatch):
     service._advance_workflow(db, enrich, SETTINGS)
 
     assert db.query(PaperCurationJob).filter_by(kind="add-evals").count() == 1
+
+
+def test_add_evals_completion_retries_skipped_release_merge(db, monkeypatch):
+    paper = _paper(db)
+    service = CodexPaperJobService()
+    enqueue_external_paper_curation(db, paper, settings=SETTINGS, jobs=service)
+    db.commit()
+    enrich = db.query(PaperCurationJob).one()
+    merged = []
+    monkeypatch.setattr(
+        "backend.services.codex_add_evals_service.merge_external_release_duplicate",
+        lambda _db, paper_id: merged.append(paper_id),
+    )
+    enrich.status = "completed"
+    service._advance_workflow(db, enrich, SETTINGS)
+    add_evals = db.query(PaperCurationJob).filter_by(kind="add-evals").one()
+    add_evals.status = "completed"
+
+    service._advance_workflow(db, add_evals, SETTINGS)
+
+    assert merged == [paper.id, paper.id]
+    assert db.get(PaperCurationWorkflow, add_evals.parent_workflow_id).status == (
+        "completed"
+    )

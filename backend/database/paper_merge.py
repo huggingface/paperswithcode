@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     Evaluation,
+    ModelRelease,
     Paper,
     PaperAuthor,
     PaperConference,
@@ -35,7 +36,10 @@ from backend.services.evaluation_service import (
     _paper_route_keys,
 )
 from backend.services.hf_artifact_service import sync_explicit_hf_artifact_links
-from backend.services.model_release_identity_service import title_announces_model
+from backend.services.model_release_identity_service import (
+    merge_model_release_into,
+    title_announces_model,
+)
 from backend.utils.urls import get_paper_route_identifier
 
 
@@ -260,9 +264,11 @@ def find_external_release_for_arxiv_paper(
             SELECT DISTINCT r.paper_id
             FROM release_repos r
             JOIN report_repos USING (repo)
+            -- A dispatcher holds this row in its own transaction. Other active
+            -- jobs fail callback authentication once their row cascades away.
             WHERE NOT EXISTS (
                 SELECT 1 FROM paper_curation_jobs j
-                WHERE j.paper_id = r.paper_id AND j.status IN ('queued', 'running')
+                WHERE j.paper_id = r.paper_id AND j.status = 'dispatching'
             )
             """
         ),
@@ -692,18 +698,19 @@ def merge_external_paper_into_arxiv(
         {"arxiv_id": arxiv_paper_id, "external_id": external_id},
     )
     # Model identities would otherwise cascade away with the external row.
-    db.execute(
-        text(
-            """
-            UPDATE model_releases SET paper_id = :arxiv_id
-            WHERE paper_id = :external_id
-              AND canonical_name NOT IN (
-                  SELECT canonical_name FROM model_releases WHERE paper_id = :arxiv_id
-              )
-            """
-        ),
-        {"arxiv_id": arxiv_paper_id, "external_id": external_id},
-    )
+    kept = {
+        release.canonical_name: release
+        for release in db.query(ModelRelease).filter(
+            ModelRelease.paper_id == arxiv_paper_id
+        )
+    }
+    for release in (
+        db.query(ModelRelease).filter(ModelRelease.paper_id == external_id).all()
+    ):
+        if release.canonical_name in kept:
+            merge_model_release_into(db, release, kept[release.canonical_name])
+        else:
+            release.paper_id = arxiv_paper_id
     db.execute(
         text(
             """
