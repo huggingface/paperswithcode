@@ -965,6 +965,11 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         "GLM-5.3 (max)": ModelIdentity(
             "GLM-5.3 (max)", source_url="https://z.ai/blog/glm-5.3", is_open=True
         ),
+        # GPT-5.5 Pro launched in the GPT-5.5 announcement.
+        "GPT-5.5 Pro (xhigh)": ModelIdentity(
+            "GPT-5.5 Pro (xhigh)",
+            source_url="https://openai.com/index/introducing-gpt-5-5/",
+        ),
         "GPT-5.6 Sol (max)": ModelIdentity(
             "GPT-5.6 Sol (max)", source_url="https://openai.com/index/gpt-5-6/"
         ),
