@@ -98,7 +98,14 @@ only to learn what was announced, never as a source.
    - `source_url`: the lab's canonical announcement, in this order: release
      blog or news post, tech report page, official model card, official
      repository. It must also be in `evidence_urls`.
-   - `title`: the page's own headline.
+   - Only when the publisher has more than a model card. A release whose only
+     first-party page is a Hugging Face or ModelScope model card (no blog
+     post, tech report, project page, or code repository from the publisher)
+     brings little value: reject it. When such a page exists, put it in
+     `evidence_urls` even if the model card is the `source_url`.
+   - `title`: the page's own headline, or the release name when the source is
+     a model card. Never a Hub repository id: `Inflect-Mini-v3`, not
+     `owensong/Inflect-Mini-v3`.
    - `abstract`: the page's own summary or opening paragraphs, verbatim.
    - `date_published`: the first-party release date (the post date, or the
      model card's first commit), not a news date.
@@ -113,7 +120,9 @@ true only when weights are downloadable today (a promise is not open). Add
 `predecessor_paper_id` when a candidate paper is the release's direct
 predecessor and the inspected sources say so.
 
-The backend refuses a non-English external paper title or abstract, and one whose `source_url` host (or Hub/GitHub
+The backend refuses a non-English external paper title or abstract, a title
+that is a Hub repository id, a release whose evidence has no first-party page
+besides Hub model cards, and one whose `source_url` host (or Hub/GitHub
 organization) does not carry the publisher's or model's name, that reuses the
 news lead's host, or that duplicates an indexed paper's source, title, or model
 release. A refusal that names an existing paper means: resolve to it. Do not
