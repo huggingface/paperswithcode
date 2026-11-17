@@ -40,6 +40,7 @@ def test_population_ignores_hf_aggregator_links():
             stored_g=None,
             stored_h=None,
             github_raw=None,
+            stars=None,
         ),
         SimpleNamespace(
             paper_id=2,
@@ -48,17 +49,24 @@ def test_population_ignores_hf_aggregator_links():
             stored_g=0.0,
             stored_h=0.0,
             github_raw=None,
+            stars=40,
         ),
     ]
     hf_rows = [
         SimpleNamespace(
-            paper_id=1, kind="model", repo_id="org/m", trending_score=5, linked_papers=1
+            paper_id=1,
+            kind="model",
+            repo_id="org/m",
+            trending_score=5,
+            likes=30,
+            linked_papers=1,
         ),
         SimpleNamespace(
             paper_id=1,
             kind="space",
             repo_id="tardellirs/paper-pulse",
             trending_score=9,
+            likes=900,
             linked_papers=1,
         ),
         SimpleNamespace(
@@ -66,6 +74,7 @@ def test_population_ignores_hf_aggregator_links():
             kind="space",
             repo_id="org/feed",
             trending_score=9,
+            likes=500,
             linked_papers=40,
         ),
     ]
@@ -77,8 +86,14 @@ def test_population_ignores_hf_aggregator_links():
     ]
 
     population = cron.load_population(session, cutoff=None)
+    cron.derive_popularity(population)
 
     assert population[1]["artifacts"] == [("model", 5.0)]
+    # Aggregator likes do not count toward popularity.
+    assert population[1]["hf_likes"] == 30.0
+    assert population[2]["hf_likes"] == 0.0
+    assert population[1]["popularity"] == 1.0
+    assert population[2]["popularity"] == 1.0
     assert population[2]["artifacts"] == []
     assert population[1]["x_raw"] == 0.0
     assert population[2]["x_raw"] == 12.5
@@ -100,6 +115,7 @@ def test_targeted_compute_only_changes_selected_papers(monkeypatch):
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
         2: {
             "github_raw": 2.0,
@@ -107,6 +123,7 @@ def test_targeted_compute_only_changes_selected_papers(monkeypatch):
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
         3: {
             "github_raw": 0.0,
@@ -114,6 +131,7 @@ def test_targeted_compute_only_changes_selected_papers(monkeypatch):
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
     }
     calls = []
@@ -144,6 +162,7 @@ def test_full_and_targeted_compute_agree_for_same_paper(monkeypatch):
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
         2: {
             "github_raw": 2.0,
@@ -151,6 +170,7 @@ def test_full_and_targeted_compute_agree_for_same_paper(monkeypatch):
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
     }
     github_corpus, hf_corpora = cron.derive_corpora(population)
@@ -175,6 +195,7 @@ def test_targeted_rescore_keeps_hourly_x_lift(monkeypatch):
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
         2: {
             "github_raw": 2.0,
@@ -182,6 +203,7 @@ def test_targeted_rescore_keeps_hourly_x_lift(monkeypatch):
             "artifacts": [],
             "x_raw": 242.0,
             "hourly_lift": lifted,
+            "popularity": 1.0,
         },
     }
     github_corpus, hf_corpora = cron.derive_corpora(population)
@@ -206,6 +228,7 @@ def test_targeted_rescore_keeps_pinned_paper_without_live_signal():
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
         2: {
             "github_raw": 0.0,
@@ -213,6 +236,7 @@ def test_targeted_rescore_keeps_pinned_paper_without_live_signal():
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 80.0,
+            "popularity": 1.0,
         },
     }
     github_corpus, hf_corpora = cron.derive_corpora(population)
@@ -285,7 +309,9 @@ def test_full_run_clears_scores_of_papers_that_left_the_window(monkeypatch):
             "existing": False,
             "artifacts": [],
             "x_raw": 0.0,
-            "hourly_lift": 0.0,
+            "stars": 0.0,
+            "hf_likes": 0.0,
+            "stored": (None, None, None),
         }
     }
     monkeypatch.setattr(cron, "load_population", lambda _session, _cutoff: population)
@@ -314,7 +340,9 @@ def test_targeted_run_leaves_aged_out_scores_to_the_full_run(monkeypatch):
             "existing": False,
             "artifacts": [],
             "x_raw": 0.0,
-            "hourly_lift": 0.0,
+            "stars": 0.0,
+            "hf_likes": 0.0,
+            "stored": (None, None, None),
         }
     }
     monkeypatch.setattr(cron, "load_population", lambda _session, _cutoff: population)
@@ -340,6 +368,7 @@ def test_x_only_paper_stays_unscored_while_x_weight_is_zero():
             "artifacts": [],
             "x_raw": 0.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
         2: {
             "github_raw": 0.0,
@@ -347,6 +376,7 @@ def test_x_only_paper_stays_unscored_while_x_weight_is_zero():
             "artifacts": [],
             "x_raw": 50.0,
             "hourly_lift": 0.0,
+            "popularity": 1.0,
         },
     }
     github_corpus, hf_corpora = cron.derive_corpora(population)
@@ -378,3 +408,68 @@ def test_x_settings_accept_a_full_lift_and_reject_out_of_range(monkeypatch):
     monkeypatch.setenv("PWC_TRENDING_X_WEIGHT", "0.3333")
     monkeypatch.setenv("PWC_TRENDING_X_MIN_LIKES_PER_HOUR", "2")
     assert cron.x_settings() == (0.3333, 2.0)
+
+
+def test_popularity_marks_down_momentum_without_adoption():
+    """A fresh repo with 3 stars ties a widely adopted release on momentum;
+    popularity keeps the adopted release on top (V-JEPA-LM vs MiniCPM-OCR)."""
+    cron = _load_module()
+
+    def entry(stars, likes):
+        return {
+            "github_raw": 1.0,
+            "existing": False,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "stars": stars,
+            "hf_likes": likes,
+            "stored": (None, None, None),
+        }
+
+    population = {1: entry(956, 457), 2: entry(3, 10), 3: entry(50, 40)}
+    # A paper without live momentum does not enter the popularity corpora.
+    population[4] = {**entry(100_000, 0), "github_raw": 0.0}
+    cron.derive_popularity(population)
+    github_corpus, hf_corpora = cron.derive_corpora(population)
+    updates, _ = cron.build_score_changes(population, github_corpus, hf_corpora)
+    scores = {update["id"]: update["score"] for update in updates}
+
+    assert population[1]["popularity"] == 1.0
+    assert 4 not in scores
+    assert scores[1] == pytest.approx(50.0)
+    assert scores[2] < scores[3] < scores[1]
+    # Momentum components are stored unchanged.
+    assert {update["g"] for update in updates} == {1.0}
+
+
+def test_targeted_rescore_keeps_x_lift_above_a_marked_down_base():
+    cron = _load_module()
+    population = {
+        1: {
+            "github_raw": 1.0,
+            "existing": True,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "stars": 0.0,
+            "hf_likes": 0.0,
+            # Hourly run wrote an X lift of 45 over a marked-down base of 25.
+            "stored": (45.0, 1.0, 0.0),
+        },
+        2: {
+            "github_raw": 0.0,
+            "existing": False,
+            "artifacts": [],
+            "x_raw": 0.0,
+            "stars": 10.0,
+            "hf_likes": 0.0,
+            "stored": (None, None, None),
+        },
+    }
+    cron.derive_popularity(population)
+    assert population[1]["popularity"] == 0.0
+    assert population[1]["hourly_lift"] == 45.0
+    github_corpus, hf_corpora = cron.derive_corpora(population)
+    targeted, _ = cron.build_score_changes(
+        population, github_corpus, hf_corpora, paper_ids=[1]
+    )
+    assert targeted[0]["score"] == 45.0

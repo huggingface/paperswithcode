@@ -24,6 +24,8 @@ from backend.utils.trending import (
     is_hf_aggregator,
     parse_trending_paper_id_pin_specs,
     parse_trending_pin_specs,
+    popularity_component,
+    popularity_factor,
     quantile_rank,
     sorted_positive,
 )
@@ -205,3 +207,27 @@ def test_slow_x_posts_count_for_nothing_and_stay_out_of_the_corpus():
     )
     assert (g, h, x) == (0.0, 0.0, 1.0)
     assert score == pytest.approx(SCORE_SCALE)
+
+
+def test_popularity_factor_spares_adopted_papers():
+    assert popularity_factor(1.0) == 1.0
+    assert popularity_factor(0.9) == pytest.approx(0.995)
+    assert popularity_factor(0.4) == pytest.approx(0.82)
+    assert popularity_factor(0.0) == 0.5
+
+
+def test_popularity_component_takes_the_better_of_stars_and_likes():
+    stars = sorted_positive([3, 50, 956, 20000])
+    likes = sorted_positive([10, 40, 457, 5000])
+    assert popularity_component(956, stars, 0, likes) == 0.75
+    assert popularity_component(3, stars, 5000, likes) == 1.0
+    assert popularity_component(0, stars, 0, likes) == 0.0
+
+
+def test_popularity_marks_down_momentum_but_not_the_x_lift():
+    assert composite_score(1.0, 1.0) == SCORE_SCALE
+    assert composite_score(1.0, 1.0, popularity=0.0) == SCORE_SCALE / 2
+    assert composite_score(0.0, 0.0, 1.0, x_weight=1.0, popularity=0.0) == SCORE_SCALE
+    score, g, h, _ = compute_paper_score(20.0, [1.0, 20.0], [], {}, popularity=0.4)
+    assert (g, h) == (1.0, 0.0)
+    assert score == pytest.approx(SCORE_SCALE * 0.5 * 0.82)
