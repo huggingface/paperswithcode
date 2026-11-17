@@ -303,3 +303,31 @@ describe("BenchmarkDetailView metric columns", () => {
     expect(screen.queryByRole("button", { name: /Show more metrics/ })).not.toBeInTheDocument();
   });
 });
+
+describe("BenchmarkDetailView open-source filter", () => {
+  it("hides closed-source rows when the URL asks for open-source only", async () => {
+    setup();
+    vi.mocked(evaluationsApi.byDataset).mockResolvedValue([
+      evaluation({ id: "open", model_name: "Open model", is_open: true }),
+      evaluation({ id: "closed", paper_id: "paper-2", model_name: "Closed model", is_open: false }),
+    ]);
+    renderView("/datasets/test-benchmark?filter=open-source");
+
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("Open model")).toBeInTheDocument();
+    expect(within(table).queryByText("Closed model")).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Show closed-source models" })).not.toBeChecked();
+  });
+
+  it("writes the closed-source toggle to the URL", async () => {
+    setup();
+    renderView("/datasets/test-benchmark?metric=Accuracy");
+    const toggle = () => screen.findByRole("switch", { name: "Show closed-source models" });
+
+    fireEvent.click(await toggle());
+    expect(screen.getByTestId("location")).toHaveTextContent("?metric=Accuracy&filter=open-source");
+    expect(await toggle()).not.toBeChecked();
+    fireEvent.click(await toggle());
+    expect(screen.getByTestId("location")).toHaveTextContent(/^\?metric=Accuracy$/);
+  });
+});

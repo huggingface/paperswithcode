@@ -21,6 +21,8 @@ import { slugify } from "@/lib/slug";
 import NotFound from "@/pages/NotFound";
 import { loadFailurePage } from "@/components/LoadFailurePage";
 
+const OPEN_SOURCE_FILTER_PARAM = "filter";
+const OPEN_SOURCE_FILTER_VALUE = "open-source";
 
 function extractSourcePaperRouteId(paperUrl?: string | null): string | null {
   if (!paperUrl) return null;
@@ -60,6 +62,12 @@ const BenchmarkDetailView: React.FC = () => {
   const highlightEvalId = searchParams.get("eval") || undefined;
   const parameterBound = parseParameterFilter(searchParams.get("max_parameters_exclusive"));
   const { preferences, setHideClosedSourceEvals } = usePreferences();
+  // `?filter=open-source` makes an open-source-only leaderboard shareable:
+  // the link hides closed-source rows for every visitor, regardless of their
+  // saved preference. Without it, the account preference decides.
+  const hideClosed =
+    searchParams.get(OPEN_SOURCE_FILTER_PARAM) === OPEN_SOURCE_FILTER_VALUE ||
+    preferences.hide_closed_source_evals;
   const highlightRowRef = useRef<HTMLTableRowElement | null>(null);
   const didScrollToHighlight = useRef(false);
   const leaderboardCardRef = useRef<HTMLDivElement | null>(null);
@@ -73,7 +81,7 @@ const BenchmarkDetailView: React.FC = () => {
   const datasetQ = useQuery(catalogQueries.datasetPage(datasetSlug, {
     include_paper: true,
     task: taskSlugFromQuery,
-    is_open: preferences.hide_closed_source_evals ? true : undefined,
+    is_open: hideClosed ? true : undefined,
   }));
 
   // Fetch every evaluation on this dataset once. Metric switching is purely
@@ -97,7 +105,7 @@ const BenchmarkDetailView: React.FC = () => {
     ...catalogQueries.taskBenchmarkTrends(currentTaskId ?? undefined, {
       limit: 100,
       min_recent_papers: 0,
-      is_open: preferences.hide_closed_source_evals ? true : undefined,
+      is_open: hideClosed ? true : undefined,
     }),
     enabled: !!datasetQ.data?.id,
   });
@@ -125,7 +133,7 @@ const BenchmarkDetailView: React.FC = () => {
     taskSlug: taskSlugFromQuery,
     highlightEvalId,
     metric: searchParams.get("metric") || undefined,
-    hideClosed: preferences.hide_closed_source_evals,
+    hideClosed,
     parameterBound,
     showMoreMetrics,
     fittingMetricCount,
@@ -180,6 +188,15 @@ const BenchmarkDetailView: React.FC = () => {
       else next.set("max_parameters_exclusive", String(bound));
       return next;
     });
+  };
+  const setOpenSourceOnly = (openSourceOnly: boolean) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (openSourceOnly) next.set(OPEN_SOURCE_FILTER_PARAM, OPEN_SOURCE_FILTER_VALUE);
+      else next.delete(OPEN_SOURCE_FILTER_PARAM);
+      return next;
+    });
+    setHideClosedSourceEvals(openSourceOnly);
   };
   const setMetric = (metric: string) => {
     setSearchParams((current) => {
@@ -298,7 +315,7 @@ const BenchmarkDetailView: React.FC = () => {
           <p className="bm-description">{dataset.description}</p>
         )}
 
-        {preferences.hide_closed_source_evals && hiddenClosedEvals.length > 0 && (
+        {hideClosed && hiddenClosedEvals.length > 0 && (
           <div className="bm-hidden-closed-notice">
             <span>
               {hiddenClosedEvals.length} closed-source {hiddenClosedEvals.length === 1 ? "row is" : "rows are"} hidden
@@ -312,9 +329,7 @@ const BenchmarkDetailView: React.FC = () => {
             <button
               type="button"
               className="bm-hidden-closed-action"
-              onClick={() => {
-                setHideClosedSourceEvals(false);
-              }}
+              onClick={() => setOpenSourceOnly(false)}
             >
               Show closed-source
             </button>
@@ -373,7 +388,7 @@ const BenchmarkDetailView: React.FC = () => {
           </div>
         )}
 
-        <BenchmarkProgression model={model} datasetName={dataset.name} hideClosed={preferences.hide_closed_source_evals}
+        <BenchmarkProgression model={model} datasetName={dataset.name} hideClosed={hideClosed}
           setHideClosed={setHideClosedSourceEvals} setMetric={setMetric} />
 
         {highlightedEval && (() => {
@@ -450,10 +465,8 @@ const BenchmarkDetailView: React.FC = () => {
               <label className="bm-closed-toggle" title="Show or hide evaluations of closed-source models">
                 <Switch
                   className="bm-closed-toggle-switch"
-                  checked={!preferences.hide_closed_source_evals}
-                  onCheckedChange={(checked) => {
-                    setHideClosedSourceEvals(!checked);
-                  }}
+                  checked={!hideClosed}
+                  onCheckedChange={(checked) => setOpenSourceOnly(!checked)}
                   aria-label="Show closed-source models"
                 />
                 <span className="bm-closed-toggle-label">Closed-source</span>
