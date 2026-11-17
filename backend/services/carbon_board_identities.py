@@ -1124,8 +1124,9 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             source_url="https://thinkingmachines.ai/news/introducing-inkling/",
             is_open=True,
         ),
+        # The K2-Horizon tech report introduces the 375B-A23B model.
         "K2 Horizon 375B A23B": ModelIdentity(
-            "K2 Horizon 375B A23B", source_url="https://ifm.ai/blog/k2/", is_open=True
+            "K2 Horizon 375B A23B", arxiv_id="2611.21003", is_open=True
         ),
         "Kimi K3.1 Pro": ModelIdentity(
             "Kimi K3.1 Pro",
