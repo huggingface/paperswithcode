@@ -806,7 +806,7 @@ def paper_candidate(
         paper_url(paper),
         facts,
         screenshot_url=paper_url(paper),
-        score=32.0 - rank if rank else 0.0,
+        score=TRENDING_FEED_DEPTH + 2.0 - rank if rank else 0.0,
     )
 
 
