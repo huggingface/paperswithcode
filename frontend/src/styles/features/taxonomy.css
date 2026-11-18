@@ -358,11 +358,6 @@
 .area-section {
   margin-bottom: 48px;
   scroll-margin-top: 80px;
-  /* Index pages render hundreds of tiles across areas; skip layout and paint
-     for areas far off screen. "auto" remembers each area's real size once
-     rendered, so the scrollbar stays stable. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 640px;
 }
 .area-section-head {
   display: flex;

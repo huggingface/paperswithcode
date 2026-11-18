@@ -160,7 +160,7 @@ def _render(page: DiscoveryPage | None, request: Request) -> Response:
             headers={"Cache-Control": "no-store"},
         )
     try:
-        content = render_discovery_shell(shell, page)
+        content = render_discovery_shell(shell, page, request.url.path)
     except ValueError:
         return HTMLResponse(
             "<!doctype html><title>Papers with Code</title>"

@@ -155,7 +155,7 @@ def render_discovery_document(page: DiscoveryPage) -> str:
     )
 
 
-def render_discovery_shell(shell: str, page: DiscoveryPage) -> str:
+def render_discovery_shell(shell: str, page: DiscoveryPage, request_path: str) -> str:
     title = escape(page.title, quote=True)
     description = escape(page.description, quote=True)
     head = (
@@ -168,7 +168,13 @@ def render_discovery_shell(shell: str, page: DiscoveryPage) -> str:
         f'<meta property="og:url" content="{escape(page.canonical_url, quote=True)}">'
         f'<meta name="twitter:title" content="{title}">'
         f'<meta name="twitter:description" content="{description}">'
-        + route_preload_links(page.canonical_path)
+        # The requested route decides which view renders: nested pages such as
+        # /conferences/:slug/:task share their parent's canonical URL. Legacy
+        # aliases (/sota/…, /{slug}) fall back to the canonical route.
+        + (
+            route_preload_links(request_path)
+            or route_preload_links(page.canonical_path)
+        )
     )
     return inject_root_document(
         replace_document_head(_SOCIAL_META_RE.sub("", shell), head),
