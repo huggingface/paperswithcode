@@ -53,11 +53,10 @@
     <meta name="theme-color" content="#FAF8F4" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#11100E" media="(prefers-color-scheme: dark)" />
 
-    <!-- Fonts load from the HTML, not a CSS @import, so the browser fetches them
-         in parallel with the app stylesheet instead of after it. -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" crossorigin href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400&amp;family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" />
+    <!-- Self-hosted fonts (src/styles/fonts.css). Preload the Latin faces most
+         pages paint first: body text (Inter) and headings (Newsreader). -->
+    <link rel="preload" href="/src/assets/fonts/inter-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/src/assets/fonts/newsreader-normal-latin.woff2" as="font" type="font/woff2" crossorigin />
 
     <!-- Privacy-friendly analytics by Plausible -->
     <script>
