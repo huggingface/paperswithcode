@@ -437,7 +437,7 @@ export default function SubmissionsDashboard() {
       <div className="submissions-filter-panel">
         <div className="submission-filter-block">
           <div className="sidebar-label">Status</div>
-          <div className="period-switch">
+          <div className="period-switch submissions-status-switch">
             {STATUS_FILTERS.map((item) => (
               <button
                 key={item}
