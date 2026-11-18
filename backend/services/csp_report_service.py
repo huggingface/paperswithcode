@@ -9,6 +9,7 @@ so the policy can be tuned from real traffic before it is enforced.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 from datetime import UTC, datetime
@@ -99,21 +100,20 @@ def parse_csp_reports(payload: object) -> list[dict[str, object]]:
 
 
 def append_csp_reports(records: list[dict[str, object]], path: Path) -> None:
-    """Append records as JSON lines until the log reaches its size cap."""
+    """Append records as JSON lines, rotating to ``.1`` at the size cap."""
     if not records:
         return
-    try:
-        size = path.stat().st_size
-    except FileNotFoundError:
-        size = 0
-    if size >= MAX_LOG_BYTES:
-        # Keep one previous file, so a flood shortens history instead of
-        # hiding every later report.
-        os.replace(path, path.with_name(path.name + ".1"))
     received_at = datetime.now(UTC).isoformat(timespec="seconds")
     lines = "".join(
         json.dumps({"at": received_at, **record}, separators=(",", ":")) + "\n"
         for record in records
     )
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(lines)
+    # Backend workers are separate processes; serialize check, rotate, append.
+    with path.with_name(path.name + ".lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if path.exists() and path.stat().st_size >= MAX_LOG_BYTES:
+            # Keep one previous file, so a flood shortens history instead of
+            # hiding every later report.
+            os.replace(path, path.with_name(path.name + ".1"))
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(lines)

@@ -153,3 +153,23 @@ def test_nginx_csp_hashes_match_index_html_inline_scripts():
         assert len(set(policies)) == 1
         script_src = policies[0].split(";")[0].split()
         assert hashes == {token for token in script_src if token.startswith("'sha256-")}
+
+
+def test_concurrent_appends_at_cap_keep_every_record(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    log = tmp_path / "csp.jsonl"
+    monkeypatch.setattr(csp_report_service, "MAX_LOG_BYTES", 200)
+    with ThreadPoolExecutor(8) as pool:
+        list(
+            pool.map(
+                lambda i: append_csp_reports([{"directive": f"d{i}"}], log),
+                range(200),
+            )
+        )
+    kept = (
+        log.read_text().splitlines()
+        + (tmp_path / "csp.jsonl.1").read_text().splitlines()
+    )
+    assert len(kept) == len({json.loads(line)["directive"] for line in kept})
+    assert "d199" in log.read_text() or "d199" in (tmp_path / "csp.jsonl.1").read_text()
