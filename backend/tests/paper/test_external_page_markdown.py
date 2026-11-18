@@ -311,6 +311,20 @@ def test_failed_rescrape_after_a_source_change_leaves_no_old_copy(monkeypatch):
     assert not service.retry_due(status)
 
 
+def test_rescrape_keeps_a_copy_another_worker_just_published(monkeypatch):
+    stale = {"status": "succeeded", "page_url": "https://huggingface.co/acme/model"}
+    published = {"status": "succeeded", "page_url": URL, "markdown_sha256": "new"}
+    bucket = FakeBucket({"external/123294.md": b"new page copy"}).install(monkeypatch)
+    # The first read predates the other worker's publish; the second follows it.
+    reads = iter([stale, published])
+    monkeypatch.setattr(service, "read_status", lambda *_a, **_kw: next(reads))
+    monkeypatch.setattr(service, "scrape_page", pytest.fail)
+
+    assert _prepare() == "new"
+    assert bucket.files["external/123294.md"] == b"new page copy"
+    assert bucket.batches == []
+
+
 def test_prepare_does_not_publish_during_a_markdown_migration(monkeypatch):
     bucket = FakeBucket({"_content/migration.lock": b"locked"}).install(monkeypatch)
     monkeypatch.setattr(service, "scrape_page", pytest.fail)

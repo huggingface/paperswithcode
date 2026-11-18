@@ -444,9 +444,19 @@ def _prepare(
     ):
         raise ExternalPageMarkdownError("markdown_migration_locked", retryable=True)
     if stale:
-        # Remove the previous source's copy first, so a failed scrape of the
-        # new page leaves nothing that readers or curation could mistake for it.
-        _delete_page_copy(paper_id, bucket_id=bucket_id, token=token)
+        # _page_lock is per process: the reader API and the hourly backfill
+        # may both re-scrape, so look again before deleting anything.
+        current = read_status(paper_id, bucket_id=bucket_id, token=token)
+        if current.get("status") == "succeeded" and not markdown_stale(
+            current, page_url
+        ):
+            # Another worker already published the new page.
+            return str(current["markdown_sha256"])
+        if markdown_stale(current, page_url):
+            # Remove the previous source's copy first, so a failed scrape of
+            # the new page leaves nothing readers or curation could mistake
+            # for it.
+            _delete_page_copy(paper_id, bucket_id=bucket_id, token=token)
     try:
         page = scrape_page(page_url, api_key=api_key, timeout_seconds=timeout_seconds)
         markdown = page_paper_markdown(title, page_url, page)
