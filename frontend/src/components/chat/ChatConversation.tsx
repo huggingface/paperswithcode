@@ -66,6 +66,18 @@ export function ChatConversation({
     if (busy) setEditingMessageId(null);
   }, [busy]);
 
+  // Screen readers hear when an answer finishes instead of every streamed token.
+  const [completionAnnouncement, setCompletionAnnouncement] = useState("");
+  const announcedBusyRef = useRef(busy);
+  const lastMessage = messages.at(-1);
+  useEffect(() => {
+    if (busy) setCompletionAnnouncement("");
+    else if (announcedBusyRef.current && lastMessage?.role === "assistant") {
+      setCompletionAnnouncement(lastMessage.error ? "The answer failed." : "Answer complete.");
+    }
+    announcedBusyRef.current = busy;
+  }, [busy, lastMessage]);
+
   useLayoutEffect(() => {
     const scrollElement = scrollRef.current;
     if (!scrollElement) return;
@@ -218,6 +230,7 @@ export function ChatConversation({
         }
       }}
     >Jump to latest</button>}
+    <div className="sr-only" role="status" aria-live="polite">{completionAnnouncement}</div>
     </div>
   );
 }

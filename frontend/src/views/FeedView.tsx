@@ -47,6 +47,7 @@ import {
 } from "@/lib/paperDateRange";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { HOME_PAGE_TITLE } from "@/lib/pageTitles";
+import "@/components/chat/styles/index.css";
 
 
 const PLACEHOLDER_TYPE_MS = 45;

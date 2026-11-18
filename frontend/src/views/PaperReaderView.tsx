@@ -18,6 +18,7 @@ import { normalizePaperRouteId } from "@/lib/utils";
 import { ChatExperience } from "@/views/ChatView";
 import { PdfCitationContext, type PdfCitationTarget } from "@/components/chat/PdfCitationContext";
 import { citationBoxes, type PdfHighlight } from "@/components/pdf/pdfCitations";
+import "@/components/chat/styles/index.css";
 
 const DEFAULT_RATIO = 66;
 const CHAT_TRANSITION_MS = 240;

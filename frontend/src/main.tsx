@@ -9,7 +9,7 @@ import { installChunkReloadRecovery } from "./lib/chunkReload";
 import { initPostHog } from "./lib/posthog";
 import "./styles.css";
 import "./styles/features/index.css";
-import "./components/chat/styles/index.css";
+import "./components/chat/styles/previews.css";
 import App from "./App";
 
 installChunkReloadRecovery();

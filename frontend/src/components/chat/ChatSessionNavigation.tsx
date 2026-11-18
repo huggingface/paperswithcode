@@ -175,7 +175,7 @@ export function ChatSessionNavigation({
     >
       <div className="chat-sidebar-top">
         <button type="button" className="chat-new-chat" onClick={() => { if (canNavigateAwayFromArtifact()) onNew(); }}><PlusIcon /> New chat</button>
-        <button type="button" className="icon-btn" onClick={onClose} title="Collapse sidebar"><PanelIcon /></button>
+        <button type="button" className="icon-btn" onClick={onClose} title="Collapse sidebar" aria-label="Collapse sidebar"><PanelIcon /></button>
       </div>
       {selecting && <div className="chat-sessions-bulk" role="toolbar" aria-label="Selected chats">
         <span className="chat-sessions-bulk-count">{selectedSessionIds.length} selected</span>

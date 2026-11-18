@@ -14,6 +14,7 @@ import { collectChatPapers, type ChatMessage } from "@/lib/chat";
 import { queueChatLaunch } from "@/lib/chatLaunch";
 import { toggleChatBlock } from "@/lib/chatLifecycle";
 import { publicShareToUiMessages, type ChatShareDetail } from "@/lib/chatSessions";
+import "@/components/chat/styles/index.css";
 
 const isNotFound = (error: unknown) => error instanceof ApiError && error.status === 404;
 
