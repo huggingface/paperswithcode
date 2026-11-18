@@ -7,6 +7,8 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import ConferenceDeadlineDialog from "@/components/ai-deadlines/ConferenceDeadlineDialog";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { INDEX_PAGE_TITLES } from "@/lib/pageTitles";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import {
   conferenceDomains,
@@ -198,6 +200,7 @@ const DeadlineCard: React.FC<{
 };
 
 const AiDeadlinesView: React.FC = () => {
+  useDocumentTitle(INDEX_PAGE_TITLES.aiDeadlines);
   const [showTopTierOnly, setShowTopTierOnly] = useState(true);
   const [showPast, setShowPast] = useState(false);
   const [selectedDomains, setSelectedDomains] = useState<Set<string>>(new Set());

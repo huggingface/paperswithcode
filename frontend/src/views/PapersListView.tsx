@@ -21,6 +21,8 @@ import { isChatEnabled } from "@/lib/apiUrl";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 import type { Paper } from "@/lib/api/papers.types";
 import type { PaginatedResponse } from "@/lib/api/shared.types";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { papersPageTitle } from "@/lib/pageTitles";
 
 const SEARCH_SORTS = [
   ["relevance", "relevance"],
@@ -125,6 +127,20 @@ const PapersListView: React.FC = () => {
 
   const totalCount = regularInfinite.data?.pages?.[0]?.count ?? 0;
   const scope = regularInfinite.data?.pages?.[0]?.scope;
+  // Same name as the scoped heading: the display name once the feed loads.
+  const scopeDisplayName =
+    (scope?.kind === "framework" ? scope.framework_name : scope?.repository) ||
+    framework ||
+    repository;
+  useDocumentTitle(
+    papersPageTitle(
+      mode === "scoped"
+        ? `Papers implemented by ${scopeDisplayName}`
+        : mode === "search"
+          ? `Search results for “${urlSearch.trim()}”`
+          : "All Papers",
+    ),
+  );
   const searchMetadata = searchInfinite.data?.pages?.at(-1);
   const frameworkNotFound = framework && isNotFound(infinite.error);
 

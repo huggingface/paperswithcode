@@ -20,6 +20,8 @@ import { safeExternalHref } from "@/lib/safeExternalHref";
 import NotFound from "@/pages/NotFound";
 import { loadFailurePage } from "@/components/LoadFailurePage";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { entityPageTitle } from "@/lib/pageTitles";
 
 /** Methods whose figure is a wide diagram that needs more of the hero than a portrait card. */
 const WIDE_FIGURE_METHODS: ReadonlySet<string | undefined> = new Set([
@@ -34,6 +36,7 @@ const MethodDetailView: React.FC = () => {
   const feed = usePaperFeedParams({ defaultToLastMonth: true });
 
   const methodQ = useQuery(catalogQueries.method(methodSlug));
+  useDocumentTitle(methodQ.data && entityPageTitle(methodQ.data.name));
 
   const areasQ = useQuery({ ...catalogQueries.areas(), enabled: !!methodQ.data?.area_id });
 

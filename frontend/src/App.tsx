@@ -228,6 +228,20 @@ const SiteLayout: React.FC<{ reader?: boolean }> = ({ reader = false }) => {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // First focusable element on every page; hidden until keyboard focus.
+  const skipLink = (
+    <a
+      href="#content"
+      onClick={(e) => {
+        // Move focus without adding a #content history entry.
+        e.preventDefault();
+        document.getElementById("content")?.focus();
+      }}
+      className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[1000] focus:rounded-md focus:border focus:border-[var(--hairline-strong)] focus:bg-[var(--bg)] focus:px-4 focus:py-2 focus:text-[var(--ink)] focus:shadow-lg"
+    >
+      Skip to content
+    </a>
+  );
   const header = <Header onOpenSearch={() => setSearchOpen(true)} />;
   const page = (
     <AppErrorBoundary resetKey={pathname}>
@@ -245,16 +259,18 @@ const SiteLayout: React.FC<{ reader?: boolean }> = ({ reader = false }) => {
   if (reader) {
     return (
       <div className="reader-route-shell">
+        {skipLink}
         {header}
-        <div className="reader-route-content">{page}</div>
+        <main id="content" tabIndex={-1} className="reader-route-content focus:outline-none">{page}</main>
         {search}
       </div>
     );
   }
   return (
     <>
+      {skipLink}
       {header}
-      <main>{page}</main>
+      <main id="content" tabIndex={-1} className="focus:outline-none">{page}</main>
       <SiteFooter />
       {search}
     </>

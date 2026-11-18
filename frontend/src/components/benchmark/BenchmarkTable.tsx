@@ -46,12 +46,14 @@ function renderBenchmarkPaperTitle(
 }
 
 export default function BenchmarkTable({
+  datasetName,
   model,
   showHarness,
   setMetric,
   highlightRowRef,
   onFittingMetricCountChange,
 }: {
+  datasetName: string;
   model: LeaderboardPresentation;
   showHarness: boolean;
   setMetric: (metric: string) => void;
@@ -104,7 +106,7 @@ export default function BenchmarkTable({
       ref={setTableScrollElement}
       className="bm-table-scroll"
       role="region"
-      aria-label="Leaderboard metrics"
+      aria-label={`${datasetName} leaderboard`}
       tabIndex={0}
     >
       <table
@@ -117,6 +119,7 @@ export default function BenchmarkTable({
           } as React.CSSProperties
         }
       >
+        <caption className="sr-only">{datasetName} leaderboard</caption>
         <colgroup>
           <col className="bm-width-rank" />
           <col className="bm-width-model" />

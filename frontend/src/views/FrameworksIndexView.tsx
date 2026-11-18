@@ -7,6 +7,8 @@ import { catalogQueries } from "@/lib/api/queries";
 import type { Framework, FrameworkPlatform } from "@/lib/api/catalog.types";
 import { chipColors, hueFromSlug } from "@/lib/colors";
 import { PLATFORM_LABELS } from "@/lib/frameworks";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { INDEX_PAGE_TITLES } from "@/lib/pageTitles";
 
 const categoryTitleStyle: React.CSSProperties = {
   fontFamily: "var(--mono)",
@@ -137,6 +139,7 @@ export const FrameworkCard: React.FC<{ framework: Framework }> = ({ framework })
 };
 
 const FrameworksIndexView: React.FC = () => {
+  useDocumentTitle(INDEX_PAGE_TITLES.frameworks);
   const catalogQuery = useQuery(catalogQueries.frameworkCatalog());
   const domains = catalogQuery.data?.domains ?? [];
   const totalFrameworks = domains.reduce(

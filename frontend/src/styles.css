@@ -73,12 +73,15 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* 87.5% = 14px at the default 16px, but follows the user's browser/OS text
+   size. Only the root sets it: body inherits, and rem units resolve against it. */
+html { font-size: 87.5%; }
+
 html,
 body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;

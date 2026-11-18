@@ -8,6 +8,7 @@
 import React, { useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 
 import LatexTitle from "@/components/LatexTitle";
 import { catalogQueries, ONE_MINUTE, paperQueries } from "@/lib/api/queries";
@@ -41,7 +42,6 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
 
   useEffect(() => {
     if (!open) return;
-    inputRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
@@ -101,185 +101,201 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
     if (q) go(`/chat?q=${encodeURIComponent(q)}`);
   };
 
+  // Radix supplies the modal semantics: focus containment, outside-click
+  // dismissal, background inertness and focus return to the trigger on close.
   return (
-    <div className="search-overlay" onClick={onClose}>
-      <div className="search-modal" onClick={(e) => e.stopPropagation()}>
-        <input
-          ref={inputRef}
-          className="search-modal-input"
-          placeholder="Search papers, tasks, methods, benchmarks, authors, or organizations…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (chatEnabled && e.key === "Enter") {
+    <DialogPrimitive.Root open onOpenChange={(next) => !next && onClose()}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="search-overlay">
+          <DialogPrimitive.Content
+            className="search-modal"
+            aria-modal="true"
+            aria-describedby={undefined}
+            onOpenAutoFocus={(e) => {
               e.preventDefault();
-              askAssistant();
-            }
-          }}
-        />
-        <div className="search-results">
-          {chatEnabled && query.trim() && (
-            <button type="button" className="search-ask-row" onClick={askAssistant}>
-              <span className="search-ask-chip">assistant</span>
-              <span className="search-ask-text">Ask: “{query.trim()}”</span>
-              <kbd>↵</kbd>
-            </button>
-          )}
-          {!debouncedQuery && (
-            <div className="search-empty">
-              Try “diffusion”, “object detection”, or an arXiv id.
-              {chatEnabled && (
-                <span className="search-empty-sub">Press Enter to ask the assistant</span>
+              inputRef.current?.focus();
+            }}
+          >
+            <DialogPrimitive.Title className="sr-only">Search</DialogPrimitive.Title>
+            <input
+              ref={inputRef}
+              aria-label="Search papers, tasks, methods, benchmarks, authors, or organizations"
+              className="search-modal-input"
+              placeholder="Search papers, tasks, methods, benchmarks, authors, or organizations…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (chatEnabled && e.key === "Enter") {
+                  e.preventDefault();
+                  askAssistant();
+                }
+              }}
+            />
+            <div className="search-results">
+              {chatEnabled && query.trim() && (
+                <button type="button" className="search-ask-row" onClick={askAssistant}>
+                  <span className="search-ask-chip">assistant</span>
+                  <span className="search-ask-text">Ask: “{query.trim()}”</span>
+                  <kbd>↵</kbd>
+                </button>
+              )}
+              {!debouncedQuery && (
+                <div className="search-empty">
+                  Try “diffusion”, “object detection”, or an arXiv id.
+                  {chatEnabled && (
+                    <span className="search-empty-sub">Press Enter to ask the assistant</span>
+                  )}
+                </div>
+              )}
+              {debouncedQuery && !canSearch && (
+                <div className="search-empty">
+                  Keep typing: results appear from {TYPEAHEAD_MIN_CHARS} characters.
+                </div>
+              )}
+              {canSearch && !isLoading && !hasResults && (
+                <div className="search-empty">No matches for "{query}"</div>
+              )}
+              {matchedTasks.length > 0 && (
+                <>
+                  <div className="search-section-label">Tasks · {matchedTasks.length}</div>
+                  {matchedTasks.map((t) => {
+                    const c = chipColors(hueFromSlug(t.slug || ""));
+                    return (
+                      <Link
+                        key={t.id}
+                        className="search-result-tag"
+                        to={`/tasks/${t.slug}`}
+                        onClick={onClose}
+                      >
+                        <span
+                          className="dot"
+                          style={{ width: 6, height: 6, borderRadius: "50%", background: c.dot }}
+                        ></span>
+                        <span className="name">{displayTaskName(t.name, t.slug)}</span>
+                        {t.paper_count != null && <span className="count">{t.paper_count} papers</span>}
+                      </Link>
+                    );
+                  })}
+                </>
+              )}
+              {matchedMethods.length > 0 && (
+                <>
+                  <div className="search-section-label">Methods · {matchedMethods.length}</div>
+                  {matchedMethods.map((m) => (
+                    <Link
+                      key={m.id}
+                      className="search-result-tag"
+                      to={`/methods/${m.slug || m.id}`}
+                      onClick={onClose}
+                    >
+                      <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>{m.name}</span>
+                      {m.paper_count != null && <span className="count">{m.paper_count} papers</span>}
+                    </Link>
+                  ))}
+                </>
+              )}
+              {matchedBenchmarks.length > 0 && (
+                <>
+                  <div className="search-section-label">Benchmarks · {matchedBenchmarks.length}</div>
+                  {matchedBenchmarks.map((d) => (
+                    <Link
+                      key={d.id}
+                      className="search-result-tag"
+                      to={`/benchmark/${d.slug || d.id}`}
+                      onClick={onClose}
+                    >
+                      <span className="name">{d.name}</span>
+                      {d.paper_count != null && d.paper_count > 0 && (
+                        <span className="count">{d.paper_count} entries</span>
+                      )}
+                    </Link>
+                  ))}
+                </>
+              )}
+              {matchedAuthors.length > 0 && (
+                <>
+                  <div className="search-section-label">Authors · {matchedAuthors.length}</div>
+                  {matchedAuthors.map((a) => (
+                    <Link
+                      key={a.id}
+                      className="search-result-tag"
+                      to={`/authors/${a.id}`}
+                      onClick={onClose}
+                    >
+                      <span className="name">{a.full_name}</span>
+                      {a.hf_username && <span className="handle">@{a.hf_username}</span>}
+                      {a.paper_count > 0 && <span className="count">{a.paper_count} papers</span>}
+                    </Link>
+                  ))}
+                </>
+              )}
+              {matchedOrganizations.length > 0 && (
+                <>
+                  <div className="search-section-label">
+                    Organizations · {matchedOrganizations.length}
+                  </div>
+                  {matchedOrganizations.map((o) => (
+                    <Link
+                      key={o.id}
+                      className="search-result-tag"
+                      to={`/orgs/${o.slug}`}
+                      onClick={onClose}
+                    >
+                      {o.logo_url && <img className="logo" src={o.logo_url} alt="" loading="lazy" />}
+                      <span className="name">{o.name}</span>
+                      {o.paper_count != null && o.paper_count > 0 && (
+                        <span className="count">{o.paper_count} papers</span>
+                      )}
+                    </Link>
+                  ))}
+                </>
+              )}
+              {matchedPapers.length > 0 && (
+                <>
+                  <div className="search-section-label">Papers · {matchedPapers.length}</div>
+                  {matchedPapers.map((p) => (
+                    <Link
+                      key={p.id}
+                      className="search-result"
+                      to={`/paper/${p.arxiv_id || p.id}`}
+                      onClick={onClose}
+                    >
+                      <div className="search-result-title">
+                        <LatexTitle title={p.title} />
+                      </div>
+                      <div className="search-result-meta">
+                        <span>{p.arxiv_id ? `arXiv:${p.arxiv_id}` : "External resource"}</span>
+                        {p.authors?.[0] && (
+                          <>
+                            <span>·</span>
+                            <span>{p.authors[0]}{p.authors.length > 1 ? " et al." : ""}</span>
+                          </>
+                        )}
+                        {p.citation_count != null && (
+                          <>
+                            <span>·</span>
+                            <span>↑ {p.citation_count.toLocaleString()}</span>
+                          </>
+                        )}
+                      </div>
+                    </Link>
+                  ))}
+                </>
+              )}
+              {trimmedQuery.length >= TYPEAHEAD_MIN_CHARS && (
+                <button
+                  type="button"
+                  className="search-view-all-row"
+                  onClick={() => go(`/papers?search=${encodeURIComponent(trimmedQuery)}`)}
+                >
+                  View all paper results for “{trimmedQuery}”
+                </button>
               )}
             </div>
-          )}
-          {debouncedQuery && !canSearch && (
-            <div className="search-empty">
-              Keep typing: results appear from {TYPEAHEAD_MIN_CHARS} characters.
-            </div>
-          )}
-          {canSearch && !isLoading && !hasResults && (
-            <div className="search-empty">No matches for "{query}"</div>
-          )}
-          {matchedTasks.length > 0 && (
-            <>
-              <div className="search-section-label">Tasks · {matchedTasks.length}</div>
-              {matchedTasks.map((t) => {
-                const c = chipColors(hueFromSlug(t.slug || ""));
-                return (
-                  <Link
-                    key={t.id}
-                    className="search-result-tag"
-                    to={`/tasks/${t.slug}`}
-                    onClick={onClose}
-                  >
-                    <span
-                      className="dot"
-                      style={{ width: 6, height: 6, borderRadius: "50%", background: c.dot }}
-                    ></span>
-                    <span className="name">{displayTaskName(t.name, t.slug)}</span>
-                    {t.paper_count != null && <span className="count">{t.paper_count} papers</span>}
-                  </Link>
-                );
-              })}
-            </>
-          )}
-          {matchedMethods.length > 0 && (
-            <>
-              <div className="search-section-label">Methods · {matchedMethods.length}</div>
-              {matchedMethods.map((m) => (
-                <Link
-                  key={m.id}
-                  className="search-result-tag"
-                  to={`/methods/${m.slug || m.id}`}
-                  onClick={onClose}
-                >
-                  <span style={{ fontFamily: "var(--mono)", fontWeight: 600 }}>{m.name}</span>
-                  {m.paper_count != null && <span className="count">{m.paper_count} papers</span>}
-                </Link>
-              ))}
-            </>
-          )}
-          {matchedBenchmarks.length > 0 && (
-            <>
-              <div className="search-section-label">Benchmarks · {matchedBenchmarks.length}</div>
-              {matchedBenchmarks.map((d) => (
-                <Link
-                  key={d.id}
-                  className="search-result-tag"
-                  to={`/benchmark/${d.slug || d.id}`}
-                  onClick={onClose}
-                >
-                  <span className="name">{d.name}</span>
-                  {d.paper_count != null && d.paper_count > 0 && (
-                    <span className="count">{d.paper_count} entries</span>
-                  )}
-                </Link>
-              ))}
-            </>
-          )}
-          {matchedAuthors.length > 0 && (
-            <>
-              <div className="search-section-label">Authors · {matchedAuthors.length}</div>
-              {matchedAuthors.map((a) => (
-                <Link
-                  key={a.id}
-                  className="search-result-tag"
-                  to={`/authors/${a.id}`}
-                  onClick={onClose}
-                >
-                  <span className="name">{a.full_name}</span>
-                  {a.hf_username && <span className="handle">@{a.hf_username}</span>}
-                  {a.paper_count > 0 && <span className="count">{a.paper_count} papers</span>}
-                </Link>
-              ))}
-            </>
-          )}
-          {matchedOrganizations.length > 0 && (
-            <>
-              <div className="search-section-label">
-                Organizations · {matchedOrganizations.length}
-              </div>
-              {matchedOrganizations.map((o) => (
-                <Link
-                  key={o.id}
-                  className="search-result-tag"
-                  to={`/orgs/${o.slug}`}
-                  onClick={onClose}
-                >
-                  {o.logo_url && <img className="logo" src={o.logo_url} alt="" loading="lazy" />}
-                  <span className="name">{o.name}</span>
-                  {o.paper_count != null && o.paper_count > 0 && (
-                    <span className="count">{o.paper_count} papers</span>
-                  )}
-                </Link>
-              ))}
-            </>
-          )}
-          {matchedPapers.length > 0 && (
-            <>
-              <div className="search-section-label">Papers · {matchedPapers.length}</div>
-              {matchedPapers.map((p) => (
-                <Link
-                  key={p.id}
-                  className="search-result"
-                  to={`/paper/${p.arxiv_id || p.id}`}
-                  onClick={onClose}
-                >
-                  <div className="search-result-title">
-                    <LatexTitle title={p.title} />
-                  </div>
-                  <div className="search-result-meta">
-                    <span>{p.arxiv_id ? `arXiv:${p.arxiv_id}` : "External resource"}</span>
-                    {p.authors?.[0] && (
-                      <>
-                        <span>·</span>
-                        <span>{p.authors[0]}{p.authors.length > 1 ? " et al." : ""}</span>
-                      </>
-                    )}
-                    {p.citation_count != null && (
-                      <>
-                        <span>·</span>
-                        <span>↑ {p.citation_count.toLocaleString()}</span>
-                      </>
-                    )}
-                  </div>
-                </Link>
-              ))}
-            </>
-          )}
-          {trimmedQuery.length >= TYPEAHEAD_MIN_CHARS && (
-            <button
-              type="button"
-              className="search-view-all-row"
-              onClick={() => go(`/papers?search=${encodeURIComponent(trimmedQuery)}`)}
-            >
-              View all paper results for “{trimmedQuery}”
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Overlay>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 };
 

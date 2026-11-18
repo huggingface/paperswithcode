@@ -20,6 +20,8 @@ import { displayTaskName, transformPaperForCard } from "@/lib/transform";
 import { isLongOrganizationName, organizationShortName } from "@/lib/organizationNames";
 import NotFound from "@/pages/NotFound";
 import { loadFailurePage } from "@/components/LoadFailurePage";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { entityPageTitle } from "@/lib/pageTitles";
 
 
 export const OrganizationPaperFeed: React.FC<{
@@ -63,6 +65,7 @@ export const OrganizationPaperFeed: React.FC<{
     [papersQ.data],
   );
   const organization = organizationQ.data ?? taxonomyQ.data?.organization;
+  useDocumentTitle(organization && entityPageTitle(organization.name));
   const shortName = organization ? organizationShortName(organization) : null;
   const totalCount = papersQ.data?.pages[0]?.count ?? 0;
 

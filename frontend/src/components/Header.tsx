@@ -147,7 +147,7 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
               Papers <em>With Code</em>
             </span>
           </NavLink>
-          <nav className="nav" ref={navRef}>
+          <nav className="nav" ref={navRef} aria-label="Primary">
             {navLinks.map(({ to, label, end, badge, href }) => {
               const content = (
                 <>

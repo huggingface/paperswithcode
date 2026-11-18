@@ -207,6 +207,7 @@ export function EditHfArtifactsDialog({
                       onClick={() => handleRemoveUrl(key, url)}
                       className="h-8 px-2 text-destructive hover:text-destructive"
                       title={`Remove ${label.toLowerCase()} URL`}
+                      aria-label={`Remove ${label.toLowerCase()} URL ${url}`}
                     >
                       <Trash2 className="w-4 h-4" />
                     </Button>

@@ -171,13 +171,13 @@ function XThreadPreview({ thread }: { thread: XThread }) {
 export function XThreadsCard({ onEdit, threads }: { onEdit: () => void; threads: XThread[] }) {
   return (
     <div className="sidebar-card">
-      <div className="sidebar-card-title">
+      <h2 className="sidebar-card-title">
         <span>X threads</span>
         <span className="badge">
           {threads.length} post{threads.length === 1 ? "" : "s"}
           <button type="button" onClick={onEdit} className="edit-link">edit</button>
         </span>
-      </div>
+      </h2>
       {threads.length > 0 ? (
         <div className="x-thread-list">
           {threads.map((thread) => <XThreadPreview key={thread.tweet_id} thread={thread} />)}

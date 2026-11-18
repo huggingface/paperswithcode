@@ -45,6 +45,8 @@ import {
   readHomepagePaperDateRange,
   withHomepagePaperDateRange,
 } from "@/lib/paperDateRange";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { HOME_PAGE_TITLE } from "@/lib/pageTitles";
 
 
 const PLACEHOLDER_TYPE_MS = 45;
@@ -766,8 +768,9 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
 };
 
 // Routes render the public feeds through this; FollowingView renders the following mode.
-const FeedView: React.FC = () => (
-  <HomeFeed mode="trending" />
-);
+const FeedView: React.FC = () => {
+  useDocumentTitle(HOME_PAGE_TITLE);
+  return <HomeFeed mode="trending" />;
+};
 
 export default FeedView;

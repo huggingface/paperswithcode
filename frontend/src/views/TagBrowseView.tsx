@@ -30,6 +30,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import NotFound from "@/pages/NotFound";
 import { loadFailurePage } from "@/components/LoadFailurePage";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { taskPageTitle } from "@/lib/pageTitles";
 
 const SUBTASK_BENCH_PREVIEW = 3;
 
@@ -221,6 +223,10 @@ const TagBrowseView: React.FC = () => {
   // benchmark preview per child. This replaces the previous fan-out of six+
   // independent task/dataset queries on initial load (see Speed plan §1).
   const pageQ = useQuery(catalogQueries.taskPage(taskSlug, { is_open: bestModelIsOpen }));
+  useDocumentTitle(
+    pageQ.data &&
+      taskPageTitle(pageQ.data.task.name, pageQ.data.benchmarks.some((b) => b.best_model_name)),
+  );
 
   useEffect(() => {
     const canonicalSlug = pageQ.data?.task.slug;
