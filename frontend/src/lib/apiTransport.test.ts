@@ -90,6 +90,18 @@ describe("API transport", () => {
     window.localStorage.removeItem("cronAdminToken");
   });
 
+  it("omits credentials in auth-less mirror builds", async () => {
+    vi.stubEnv("VITE_DISABLE_AUTH", "1");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+
+    await new ApiTransport("https://example.test").request("/papers");
+
+    expect(fetchMock.mock.calls[0][1]?.credentials).toBe("omit");
+    vi.unstubAllEnvs();
+  });
+
   it("returns a typed error without applying browser policy", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ detail: { code: "stale_catalog_version" } }), {
