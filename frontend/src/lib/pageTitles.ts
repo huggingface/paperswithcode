@@ -16,6 +16,7 @@ export const INDEX_PAGE_TITLES = {
   organizations: withSuffix("AI Research Organizations"),
   frameworks: withSuffix("Machine Learning Frameworks"),
   trends: withSuffix("Machine Learning Research Trends"),
+  aiDeadlines: withSuffix("AI Conference Deadlines 2026"),
 } as const;
 
 /** Task, method, conference, organization and author pages. */

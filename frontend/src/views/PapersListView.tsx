@@ -51,15 +51,6 @@ const PapersListView: React.FC = () => {
   const urlSearch = searchParams.get("search") || "";
   const mode = papersListMode(searchParams);
   const isSearchMode = mode === "search";
-  useDocumentTitle(
-    papersPageTitle(
-      mode === "scoped"
-        ? `Papers implemented by ${framework || repository}`
-        : mode === "search"
-          ? `Search results for “${urlSearch.trim()}”`
-          : "All Papers",
-    ),
-  );
   // Browsing defaults to the last month like other paper feeds; search results stay all time.
   const feed = usePaperFeedParams({ defaultToLastMonth: !isSearchMode });
   const { setSearchParams } = feed;
@@ -136,6 +127,20 @@ const PapersListView: React.FC = () => {
 
   const totalCount = regularInfinite.data?.pages?.[0]?.count ?? 0;
   const scope = regularInfinite.data?.pages?.[0]?.scope;
+  // Same name as the scoped heading: the display name once the feed loads.
+  const scopeDisplayName =
+    (scope?.kind === "framework" ? scope.framework_name : scope?.repository) ||
+    framework ||
+    repository;
+  useDocumentTitle(
+    papersPageTitle(
+      mode === "scoped"
+        ? `Papers implemented by ${scopeDisplayName}`
+        : mode === "search"
+          ? `Search results for “${urlSearch.trim()}”`
+          : "All Papers",
+    ),
+  );
   const searchMetadata = searchInfinite.data?.pages?.at(-1);
   const frameworkNotFound = framework && isNotFound(infinite.error);
 
