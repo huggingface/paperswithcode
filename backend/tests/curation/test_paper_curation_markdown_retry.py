@@ -368,7 +368,10 @@ def test_callback_validation_rejection_is_not_classified_as_transient():
     assert _is_callback_validation_rejection(transient) is False
 
 
-def test_external_workflow_releases_to_admin_add_evals_after_enrichment():
+@pytest.mark.parametrize(
+    ("enriched", "kind"), [(True, "add-evals"), (False, "enrich-paper")]
+)
+def test_external_workflow_releases_deferred_stage_to_admin_lane(enriched, kind):
     workflow = SimpleNamespace(
         id=uuid.uuid4(),
         paper_id=131370,
@@ -409,8 +412,9 @@ def test_external_workflow_releases_to_admin_add_evals_after_enrichment():
         def query(self, model):
             if model is PaperCurationWorkflow:
                 return Query([workflow])
-            # The workflow's completed enrich-paper job.
-            return Query([SimpleNamespace(id=uuid.uuid4())])
+            # The workflow's completed enrich-paper job, unless enrichment
+            # itself deferred while the page Markdown was pending.
+            return Query([SimpleNamespace(id=uuid.uuid4())] if enriched else [])
 
         def get(self, model, key):
             return paper
@@ -429,7 +433,7 @@ def test_external_workflow_releases_to_admin_add_evals_after_enrichment():
         enqueued[0]["kind"],
         enqueued[0]["trigger"],
         enqueued[0]["requested_by"],
-    ) == ("add-evals", "admin", "external-paper-markdown-ready")
+    ) == (kind, "admin", "external-paper-markdown-ready")
 
 
 @pytest.mark.parametrize("pending", [True, False])
