@@ -70,7 +70,7 @@ export function PaperResourceSidebar({
   return (
     <aside className="detail-sidebar">
       <div className="sidebar-card">
-        <div className="sidebar-card-title">
+        <h2 className="sidebar-card-title">
           <span>GitHub</span>
           <span className="badge">
             {sortedRepos.length} repo{sortedRepos.length === 1 ? "" : "s"}
@@ -78,7 +78,7 @@ export function PaperResourceSidebar({
               edit
             </button>
           </span>
-        </div>
+        </h2>
         {visibleRepos.filter(({ safeHref }) => safeHref).map((repository) => (
           <a
             key={repository.id}
@@ -132,7 +132,7 @@ export function PaperResourceSidebar({
       <RelatedPapersCard isLoading={relatedIsLoading} papers={relatedPapers} />
 
       <div className="sidebar-card">
-        <div className="sidebar-card-title">
+        <h2 className="sidebar-card-title">
           <span>Citation</span>
           <button
             type="button"
@@ -144,7 +144,7 @@ export function PaperResourceSidebar({
             <Icon name="copy" size={11} />
             {citationCopied ? "Copied" : "Copy"}
           </button>
-        </div>
+        </h2>
         <pre style={{ fontFamily: "var(--mono)", fontSize: 10.5, lineHeight: 1.5, color: "var(--ink-soft)", whiteSpace: "pre-wrap", wordBreak: "break-word", margin: 0 }}>
           {citationDisplay}
         </pre>
@@ -162,14 +162,14 @@ function HuggingFaceArtifactsCard({
 }) {
   return (
     <div className="sidebar-card">
-      <div className="sidebar-card-title">
+      <h2 className="sidebar-card-title">
         {viewer.paperHref ? (
           <a href={viewer.paperHref} target="_blank" rel="noopener noreferrer" style={{ color: "inherit", textDecoration: "none" }}>
             🤗 Hugging Face
           </a>
         ) : <span>🤗 Hugging Face</span>}
         <button type="button" onClick={onEdit} className="edit-link">edit</button>
-      </div>
+      </h2>
       {viewer.isLoading ? (
         <Skeleton className="h-16 w-full" />
       ) : (

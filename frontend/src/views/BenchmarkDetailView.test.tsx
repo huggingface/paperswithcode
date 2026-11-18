@@ -293,7 +293,8 @@ describe("BenchmarkDetailView metric columns", () => {
     fireEvent.click(within(table).getByRole("button", { name: metrics[6] }));
     fireEvent.click(screen.getByRole("button", { name: "Show selected metric only" }));
     expect(headers()).toEqual(["Rank", "Model", "Parameters", `${metrics[6]} ↑`, "Paper", "Year"]);
-    expect(screen.getByRole("region", { name: "Leaderboard metrics" })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("region", { name: "Test benchmark leaderboard" })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("table", { name: "Test benchmark leaderboard" })).toBe(table);
   });
 
   it("does not show an expansion control for a single metric", async () => {

@@ -13,6 +13,8 @@ import { displayTaskName } from "@/lib/transform";
 import { Skeleton } from "@/components/ui/skeleton";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import { loadFailurePage } from "@/components/LoadFailurePage";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { entityPageTitle } from "@/lib/pageTitles";
 
 
 const ConferenceDetailView: React.FC = () => {
@@ -23,6 +25,7 @@ const ConferenceDetailView: React.FC = () => {
   const visibleAreas = useMemo(() => sortAreas(taxonomyQ.data?.results ?? []), [taxonomyQ.data]);
 
   const conference = taxonomyQ.data?.conference;
+  useDocumentTitle(conference && entityPageTitle(conference.name));
   const totalPapers = taxonomyQ.data?.total_paper_count ?? 0;
   const listings = CONFERENCE_LISTINGS.filter(
     (listing) => (taxonomyQ.data?.[listing.countKey] ?? 0) > 0,

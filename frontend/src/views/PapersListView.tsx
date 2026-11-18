@@ -21,6 +21,8 @@ import { isChatEnabled } from "@/lib/apiUrl";
 import { catalogQueries, paperFeedKeys } from "@/lib/api/queries";
 import type { Paper } from "@/lib/api/papers.types";
 import type { PaginatedResponse } from "@/lib/api/shared.types";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { papersPageTitle } from "@/lib/pageTitles";
 
 const SEARCH_SORTS = [
   ["relevance", "relevance"],
@@ -49,6 +51,15 @@ const PapersListView: React.FC = () => {
   const urlSearch = searchParams.get("search") || "";
   const mode = papersListMode(searchParams);
   const isSearchMode = mode === "search";
+  useDocumentTitle(
+    papersPageTitle(
+      mode === "scoped"
+        ? `Papers implemented by ${framework || repository}`
+        : mode === "search"
+          ? `Search results for “${urlSearch.trim()}”`
+          : "All Papers",
+    ),
+  );
   // Browsing defaults to the last month like other paper feeds; search results stay all time.
   const feed = usePaperFeedParams({ defaultToLastMonth: !isSearchMode });
   const { setSearchParams } = feed;

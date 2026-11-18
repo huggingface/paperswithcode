@@ -208,6 +208,7 @@ export function EditUrlListDialog({
                     onClick={() => setItems(items.filter((i) => i.url !== item.url))}
                     className="h-8 px-2 text-destructive hover:text-destructive"
                     title={`Remove ${list.singular}`}
+                    aria-label={`Remove ${list.singular} ${item.url}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </Button>

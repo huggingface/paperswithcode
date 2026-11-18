@@ -13,12 +13,15 @@ import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 import { TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
 import { useHashScrollOnReady } from "@/hooks/useHashScrollOnReady";
 import { catalogQueries } from "@/lib/api/queries";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { INDEX_PAGE_TITLES } from "@/lib/pageTitles";
 
 /**
  * Methods index — methods grouped by `area_id`, sorted by trend score desc
  * within each area. Backend areas are the single source of grouping truth.
  */
 const MethodsIndexView: React.FC = () => {
+  useDocumentTitle(INDEX_PAGE_TITLES.methods);
   const areasQ = useQuery(catalogQueries.areas());
 
   // Use the compact directory projection so card rendering does not download

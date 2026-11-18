@@ -12,7 +12,7 @@ export default function AuthorizePaperEditView() {
   const query = useQuery({ ...paperEditQueries.authorization(authorizationId), retry: false });
   const approval = useMutation({ mutationFn: () => paperEditsApi.approve(authorizationId) });
   const grant = query.data;
-  return <main className="mx-auto max-w-xl space-y-5 px-6 py-12">
+  return <section className="mx-auto max-w-xl space-y-5 px-6 py-12">
     <h1 className="text-2xl font-semibold">Authorize your agent to edit a paper</h1>
     {(query.isLoading || isLoading) && <p>Loading authorization…</p>}
     {query.error && <p role="alert">{query.error.message}</p>}
@@ -30,5 +30,5 @@ export default function AuthorizePaperEditView() {
       </> : <HfSignInButton returnTo={`/authorize-paper-edit/${authorizationId}`} label="Sign in with Hugging Face" />}
       {approval.error && <p role="alert">{approval.error.message}</p>}
     </>}
-  </main>;
+  </section>;
 }

@@ -158,6 +158,7 @@ export function PaperResultsSection({
               </span>
             </div>
             <table className="results-table">
+              <caption className="sr-only">{group.taskName} results</caption>
               <colgroup>
                 <col style={{ width: "28%" }} />
                 <col style={{ width: "28%" }} />

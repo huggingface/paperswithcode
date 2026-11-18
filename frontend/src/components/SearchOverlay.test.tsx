@@ -74,6 +74,15 @@ describe("SearchOverlay paper handoff", () => {
     }
   });
 
+  it("is a named modal dialog with a labelled search input", () => {
+    renderOverlay();
+    const dialog = screen.getByRole("dialog", { name: "Search" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    const input = screen.getByRole("textbox", { name: /Search papers, tasks, methods/ });
+    expect(dialog).toContainElement(input);
+    expect(input).toHaveFocus();
+  });
+
   it("keeps Enter assigned to the assistant", async () => {
     renderOverlay();
     const input = screen.getByPlaceholderText(/Search papers/);

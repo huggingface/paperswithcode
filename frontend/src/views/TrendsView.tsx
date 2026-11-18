@@ -5,6 +5,8 @@ import TrendChart from "@/components/TrendChart";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { statsQueries } from "@/lib/api/queries";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { INDEX_PAGE_TITLES } from "@/lib/pageTitles";
 
 const sectionStyle: React.CSSProperties = {
   maxWidth: 960,
@@ -55,6 +57,7 @@ const chartSkeletonStyle: React.CSSProperties = {
 };
 
 const TrendsView: React.FC = () => {
+  useDocumentTitle(INDEX_PAGE_TITLES.trends);
   const trendsQuery = useQuery(statsQueries.trends());
 
   return (

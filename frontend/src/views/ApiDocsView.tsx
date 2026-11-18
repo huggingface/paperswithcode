@@ -239,7 +239,7 @@ export default function ApiDocsView() {
           ))}
         <a href="#response-models">Response models</a>
       </nav>
-      <main className="api-content">
+      <div className="api-content">
         <section id="getting-started">
           <span className="api-beta">Experimental beta</span>
           <h1>Papers With Code API</h1>
@@ -397,7 +397,7 @@ export default function ApiDocsView() {
             </section>
           </>
         )}
-      </main>
+      </div>
     </div>
   );
 }

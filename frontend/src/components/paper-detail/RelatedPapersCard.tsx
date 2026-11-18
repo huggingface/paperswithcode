@@ -13,7 +13,7 @@ export function RelatedPapersCard({
   if (isLoading) {
     return (
       <div className="sidebar-card" aria-busy="true">
-        <div className="sidebar-card-title">Related papers</div>
+        <h2 className="sidebar-card-title">Related papers</h2>
         <div className="related-meta">Finding related work…</div>
       </div>
     );
@@ -22,7 +22,7 @@ export function RelatedPapersCard({
 
   return (
     <div className="sidebar-card">
-      <div className="sidebar-card-title">Related papers</div>
+      <h2 className="sidebar-card-title">Related papers</h2>
       {papers.map((paper) => (
         <Link
           key={paper.id}

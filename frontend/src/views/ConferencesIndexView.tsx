@@ -8,6 +8,8 @@ import { formatDateRange } from "@/lib/deadlines";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AreaDirectorySkeleton, AreaSection } from "@/components/AreaSection";
 import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { INDEX_PAGE_TITLES } from "@/lib/pageTitles";
 
 
 const resolveConferenceYear = (conf: Conference): number => {
@@ -28,6 +30,7 @@ const compareByStartDate = (a: Conference, b: Conference) => {
 };
 
 const ConferencesIndexView: React.FC = () => {
+  useDocumentTitle(INDEX_PAGE_TITLES.conferences);
   const conferencesQ = useQuery(catalogQueries.conferences());
 
   const groupedByYear = useMemo(() => {

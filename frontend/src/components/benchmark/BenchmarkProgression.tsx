@@ -45,7 +45,7 @@ export default function BenchmarkProgression({
         </div>
       </div>
       <div className="bm-card-head">
-        <div className="bm-card-title">SOTA progression</div>
+        <h2 className="bm-card-title">SOTA progression</h2>
         <div className="bm-card-actions">
           {allowedMetrics.length > 1 && (
             <label className="bm-view-select">

@@ -14,6 +14,8 @@ import { TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
 import { useHashScrollOnReady } from "@/hooks/useHashScrollOnReady";
 import { sortAreas } from "@/lib/areas";
 import { catalogQueries } from "@/lib/api/queries";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { INDEX_PAGE_TITLES } from "@/lib/pageTitles";
 
 /**
  * Browse page: render the backend areas verbatim, each with their tasks.
@@ -23,6 +25,7 @@ import { catalogQueries } from "@/lib/api/queries";
  * round-trip, so this view can render the returned taxonomy directly.
  */
 const TagsIndexView: React.FC = () => {
+  useDocumentTitle(INDEX_PAGE_TITLES.tasks);
   const taxonomyQ = useQuery(catalogQueries.areasWithTasks());
   const trendingQ = useQuery(catalogQueries.trendingTasks({ limit: 12, min_recent_papers: 10 }));
   const areasQ = useQuery(catalogQueries.areas());

@@ -7,6 +7,8 @@ import type { Organization } from "@/lib/api/catalog.types";
 
 import "./Organizations.css";
 import { catalogQueries } from "@/lib/api/queries";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { INDEX_PAGE_TITLES } from "@/lib/pageTitles";
 
 type SortMode = "trending" | "papers" | "name";
 
@@ -36,6 +38,7 @@ const Logo: React.FC<{ organization: Organization }> = ({ organization }) => {
 };
 
 const OrganizationsIndexView: React.FC = () => {
+  useDocumentTitle(INDEX_PAGE_TITLES.organizations);
   const [params, setParams] = useSearchParams();
   const sort = parseSort(params.get("sort"));
   const query = params.get("q") ?? "";

@@ -20,6 +20,8 @@ import { safeExternalHref } from "@/lib/safeExternalHref";
 import { slugify } from "@/lib/slug";
 import NotFound from "@/pages/NotFound";
 import { loadFailurePage } from "@/components/LoadFailurePage";
+import { useDocumentTitle } from "@/hooks/useDocumentTitle";
+import { benchmarkPageTitle } from "@/lib/pageTitles";
 
 const OPEN_SOURCE_FILTER_PARAM = "filter";
 const OPEN_SOURCE_FILTER_VALUE = "open-source";
@@ -83,6 +85,7 @@ const BenchmarkDetailView: React.FC = () => {
     task: taskSlugFromQuery,
     is_open: hideClosed ? true : undefined,
   }));
+  useDocumentTitle(datasetQ.data && benchmarkPageTitle(datasetQ.data.name));
 
   // Fetch every evaluation on this dataset once. Metric switching is purely
   // a UI concern (column choice, sort key, SOTA computation), so we must not
@@ -447,7 +450,7 @@ const BenchmarkDetailView: React.FC = () => {
             </div>
           </div>
           <div className="bm-card-head">
-            <div className="bm-card-title">Leaderboard</div>
+            <h2 className="bm-card-title">Leaderboard</h2>
             <div className="bm-card-actions">
               {model.allowedMetrics.length > 1 && (
                 <label className="bm-view-select">
@@ -531,7 +534,7 @@ const BenchmarkDetailView: React.FC = () => {
                 {showMoreMetrics && <span>Scroll metrics horizontally; model and paper details stay visible.</span>}
               </div>
             )}
-            <BenchmarkTable model={model} showHarness={showHarness} setMetric={setMetric} highlightRowRef={highlightRowRef} onFittingMetricCountChange={setFittingMetricCount} />
+            <BenchmarkTable datasetName={dataset.name} model={model} showHarness={showHarness} setMetric={setMetric} highlightRowRef={highlightRowRef} onFittingMetricCountChange={setFittingMetricCount} />
             </>
           )}
         </div>

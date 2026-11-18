@@ -90,6 +90,8 @@ export function EvaluationRowsTable({
             const dataset = catalog.dataset(row.dataset_id);
             const leaderboard = catalog.metrics(row.task_id, row.dataset_id);
             const options = metricOptions(catalog, row);
+            const removeLabel =
+              row.id && !isAdmin ? "Only administrators can delete published results" : "Remove row";
 
             return (
               <tr key={index} className="border-b border-border">
@@ -229,7 +231,8 @@ export function EvaluationRowsTable({
                     size="sm"
                     onClick={() => onDelete(index)}
                     className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                    title={row.id && !isAdmin ? "Only administrators can delete published results" : "Remove row"}
+                    title={removeLabel}
+                    aria-label={removeLabel}
                     disabled={Boolean(row.id) && !isAdmin}
                   >
                     <Trash2 className="w-4 h-4" />
