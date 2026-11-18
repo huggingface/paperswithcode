@@ -9,6 +9,9 @@ from fastapi import Request
 from backend.config import Settings
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+# Browsers post CSP violation reports without an Origin header, sometimes with
+# cookies. The endpoint only appends to a log and never reads the session.
+CSRF_EXEMPT_PATHS = frozenset({"/api/v1/csp-reports"})
 
 
 def request_has_session_cookie(request: Request, settings: Settings) -> bool:
@@ -43,7 +46,7 @@ def csrf_allowed_origins(settings: Settings) -> frozenset[str]:
 def cookie_request_passes_csrf(request: Request, settings: Settings) -> bool:
     """Return whether a cookie-authenticated unsafe request is same-origin."""
 
-    if request.method not in UNSAFE_METHODS:
+    if request.method not in UNSAFE_METHODS or request.url.path in CSRF_EXEMPT_PATHS:
         return True
     if not request_has_session_cookie(request, settings):
         return True
