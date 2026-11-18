@@ -719,7 +719,6 @@ def create_app() -> FastAPI:
     app.add_middleware(
         public_api.PublicReadCorsMiddleware,
         allowed_origins=settings.cors_allowed_origins,
-        allow_origin_regex=settings.extra_allowed_origin_regex or None,
     )
 
     return app

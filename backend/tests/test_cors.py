@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from backend.config import Settings
+from backend.routers.public_api import PublicReadCorsMiddleware
 from backend.utils.cors import install_cors
 
 SPACE_REGEX = r"^https://[a-z0-9-]+(\.static)?\.hf\.space$"
@@ -58,3 +59,32 @@ def test_unlisted_origin_gets_no_cors():
     client = _client(extra_allowed_origin_regex=SPACE_REGEX)
     response = client.get("/api/v1/ping", headers={"Origin": "https://evil.example"})
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_public_catalog_layer_keeps_regex_origins_anonymous():
+    settings = Settings(
+        environment="production", extra_allowed_origin_regex=SPACE_REGEX
+    )
+    app = FastAPI()
+
+    @app.get("/api/v1/papers/{paper_id}")
+    def detail(paper_id: str):
+        return {"id": paper_id}
+
+    install_cors(app, settings)
+    app.add_middleware(
+        PublicReadCorsMiddleware, allowed_origins=settings.cors_allowed_origins
+    )
+    client = TestClient(app)
+
+    space = client.get(
+        "/api/v1/papers/1", headers={"Origin": "https://anyone-anything.hf.space"}
+    )
+    assert space.headers["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in space.headers
+
+    site = client.get(
+        "/api/v1/papers/1", headers={"Origin": "https://paperswithcode.co"}
+    )
+    assert site.headers["access-control-allow-origin"] == "https://paperswithcode.co"
+    assert site.headers["access-control-allow-credentials"] == "true"

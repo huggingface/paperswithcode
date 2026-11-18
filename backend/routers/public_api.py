@@ -4,7 +4,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.datastructures import MutableHeaders
 from starlette.routing import Match
-from starlette.middleware.cors import CORSMiddleware
 
 from backend.services.public_api_schema import (
     PUBLIC_ENDPOINTS,
@@ -27,11 +26,12 @@ def get_public_schema(request: Request):
 class PublicReadCorsMiddleware:
     """Match the actual GET route, so dynamic IDs cannot expose private routes."""
 
-    def __init__(self, app, allowed_origins=(), allow_origin_regex=None):
+    def __init__(self, app, allowed_origins=()):
         self.app = app
-        self.existing_origins = CORSMiddleware(
-            app, allow_origins=allowed_origins, allow_origin_regex=allow_origin_regex
-        )
+        # Only exactly listed origins are credentialed. Origins admitted by
+        # PWC_EXTRA_ALLOWED_ORIGIN_REGEX (any Hugging Face Space) read the
+        # public catalog anonymously, like every other origin.
+        self.credentialed_origins = frozenset(allowed_origins)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["method"] not in {"GET", "OPTIONS"}:
@@ -39,9 +39,7 @@ class PublicReadCorsMiddleware:
             return
         request = Request(scope)
         origin = request.headers.get("origin")
-        credentialed_origin = bool(
-            origin and self.existing_origins.is_allowed_origin(origin)
-        )
+        credentialed_origin = origin in self.credentialed_origins
         get_scope = {**scope, "method": "GET"}
         selected = self._is_public_route(get_scope)
         if selected is None and scope["app"].router.redirect_slashes:
