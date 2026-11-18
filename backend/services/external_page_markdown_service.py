@@ -207,6 +207,21 @@ def page_paper_markdown(title: str, source_url: str, page: ScrapedPage) -> str:
     return markdown
 
 
+def _delete_page_copy(paper_id: str, *, bucket_id: str, token: str | None) -> None:
+    """Delete a page's served alias and manifest; revisions are immutable."""
+    filesystem = BucketFileSystem(token=token)
+    keys = [
+        key
+        for key in (
+            paper_markdown_bucket_key(paper_id, source="external"),
+            paper_markdown_manifest_key(paper_id, source="external"),
+        )
+        if filesystem.exists(f"hf://buckets/{bucket_id}/{key}")
+    ]
+    if keys:
+        HfApi(token=token).batch_bucket_files(bucket_id, delete=keys, token=token)
+
+
 def publish_paper_markdown(
     paper_id: str, markdown: str, *, bucket_id: str, token: str | None
 ) -> str:
@@ -252,13 +267,31 @@ def read_status(paper_id: str, *, bucket_id: str, token: str | None) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def markdown_stale(status: dict, page_url: str) -> bool:
+    """Whether the stored Markdown was scraped from another page.
+
+    Editing an external paper's source URL leaves the old page's copy in place;
+    it must be scraped again rather than served for the new source.
+    """
+    recorded = status.get("page_url")
+    return bool(recorded) and recorded != page_url
+
+
 def web_markdown_ready(paper, *, bucket_id: str, token: str | None) -> bool:
-    """Whether the page's Markdown exists for curation to read."""
+    """Whether the current page's Markdown exists for curation to read."""
+    page_url = external_page_url(
+        source=paper.source,
+        source_url=paper.source_url,
+        conference_url_pdf=paper.conference_url_pdf,
+    )
     path = f"hf://buckets/{bucket_id}/{paper_markdown_bucket_key(str(paper.id), source='external')}"
     try:
-        return BucketFileSystem(token=token).exists(path)
-    except (HfHubHTTPError, OSError):
+        if not BucketFileSystem(token=token).exists(path):
+            return False
+        status = read_status(str(paper.id), bucket_id=bucket_id, token=token)
+    except (HfHubHTTPError, OSError, ValueError):
         return False
+    return page_url is None or not markdown_stale(status, page_url)
 
 
 def web_markdown_pending(paper, *, bucket_id: str, token: str | None) -> bool:
@@ -278,6 +311,9 @@ def web_markdown_pending(paper, *, bucket_id: str, token: str | None) -> bool:
         status = read_status(str(paper.id), bucket_id=bucket_id, token=token)
     except (HfHubHTTPError, OSError, ValueError):
         # A storage outage says nothing about the page; keep waiting.
+        return True
+    if markdown_stale(status, page_url):
+        # The record belongs to the paper's previous source.
         return True
     return status.get("status") != "failed" or bool(status.get("retryable"))
 
@@ -385,6 +421,11 @@ def _prepare(
     timeout_seconds: float,
 ) -> str:
     prior = read_status(paper_id, bucket_id=bucket_id, token=token)
+    stale = markdown_stale(prior, page_url)
+    if stale:
+        # A new source starts fresh; only the framing check (keyed by its own
+        # URL) carries over.
+        prior = {"framing": prior["framing"]} if "framing" in prior else {}
     if not retry_due(prior):
         # A page in backoff is not yet known to be unreadable.
         raise ExternalPageMarkdownError(
@@ -402,6 +443,20 @@ def _prepare(
         f"hf://buckets/{bucket_id}/{MARKDOWN_MIGRATION_LOCK_KEY}"
     ):
         raise ExternalPageMarkdownError("markdown_migration_locked", retryable=True)
+    if stale:
+        # _page_lock is per process: the reader API and the hourly backfill
+        # may both re-scrape, so look again before deleting anything.
+        current = read_status(paper_id, bucket_id=bucket_id, token=token)
+        if current.get("status") == "succeeded" and not markdown_stale(
+            current, page_url
+        ):
+            # Another worker already published the new page.
+            return str(current["markdown_sha256"])
+        if markdown_stale(current, page_url):
+            # Remove the previous source's copy first, so a failed scrape of
+            # the new page leaves nothing readers or curation could mistake
+            # for it.
+            _delete_page_copy(paper_id, bucket_id=bucket_id, token=token)
     try:
         page = scrape_page(page_url, api_key=api_key, timeout_seconds=timeout_seconds)
         markdown = page_paper_markdown(title, page_url, page)

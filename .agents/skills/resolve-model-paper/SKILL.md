@@ -97,7 +97,12 @@ only to learn what was announced, never as a source.
 5. **Otherwise create an external paper.** Submit `external_paper` with:
    - `source_url`: the lab's canonical announcement, in this order: release
      blog or news post, tech report page, official model card, official
-     repository. It must also be in `evidence_urls`.
+     repository. It must also be in `evidence_urls`. The paper reader shows
+     this page, so a release post beats the model card even when the post
+     refuses your direct fetch (403 or a bot-challenge page): read it through
+     another fetch path or take its title, abstract, and date from a
+     first-party page that repeats them. Use the model card only when the lab
+     published no post or report page.
    - Only when the publisher has more than a model card. A release whose only
      first-party page is a Hugging Face or ModelScope model card (no blog
      post, tech report, project page, or code repository from the publisher)

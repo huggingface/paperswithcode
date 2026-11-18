@@ -31,6 +31,7 @@ from backend.services.external_page_markdown_service import (
     ExternalPageMarkdownError,
     external_page_url,
     framing_due,
+    markdown_stale,
     prepare_external_page_markdown,
     record_page_framing,
     retry_due,
@@ -414,18 +415,29 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 for paper_id in pages
             ],
         )
-        missing = [
-            paper_id
-            for paper_id in pages
-            if paper_markdown_bucket_key(paper_id, source="external") not in existing
-        ]
         statuses = self._status_records(
             [external_page_status_key(paper_id) for paper_id in pages]
         )
+        # A copy scraped before the paper's source URL changed is missing too.
+        stale = {
+            paper_id
+            for paper_id in pages
+            if markdown_stale(
+                statuses.get(external_page_status_key(paper_id), {}),
+                pages[paper_id][1],
+            )
+        }
+        missing = [
+            paper_id
+            for paper_id in pages
+            if paper_id in stale
+            or paper_markdown_bucket_key(paper_id, source="external") not in existing
+        ]
         due = [
             paper_id
             for paper_id in missing
-            if retry_due(statuses.get(external_page_status_key(paper_id), {}))
+            if paper_id in stale
+            or retry_due(statuses.get(external_page_status_key(paper_id), {}))
         ]
         selected = due[:EXTERNAL_PAGE_SCRAPE_LIMIT]
         framing = [
