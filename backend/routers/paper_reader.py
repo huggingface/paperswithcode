@@ -14,6 +14,7 @@ from backend.services.external_page_markdown_service import (
     PAGE_MARKDOWN_MAX_BYTES,
     ExternalPageMarkdownError,
     external_page_url,
+    markdown_stale,
     page_frameable,
     prepare_external_page_markdown,
     read_status,
@@ -70,14 +71,24 @@ def get_paper_web_markdown(
     if not paper or not page_url:
         raise _error(404, "This paper has no web page to read")
     try:
-        markdown = _read(paper_id, settings)
-    except PaperMarkdownStorageError as error:
+        status = read_status(
+            paper_id,
+            bucket_id=settings.paper_markdown_hf_bucket_id,
+            token=settings.hf_token or None,
+        )
+        # A copy scraped from the paper's previous source URL is not served.
+        markdown = (
+            None if markdown_stale(status, page_url) else _read(paper_id, settings)
+        )
+    except (PaperMarkdownStorageError, HfHubHTTPError, OSError) as error:
         raise _error(503, "Paper content storage is temporarily unavailable") from error
     except ValueError:
+        markdown = None
+    if markdown is None:
         # Scraping spends the server's Firecrawl credits, so only a signed-in
         # reader triggers it; the Markdown backfill prepares pages for everyone.
         if not has_session(request):
-            raise _error(503, "Paper content is still being prepared") from None
+            raise _error(503, "Paper content is still being prepared")
         try:
             prepare_external_page_markdown(
                 paper_id=paper_id,

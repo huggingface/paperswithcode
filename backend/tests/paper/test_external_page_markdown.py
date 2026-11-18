@@ -247,6 +247,39 @@ def test_prepare_publishes_revision_alias_and_manifest(monkeypatch):
     assert status["markdown_sha256"] == version
 
 
+def test_prepare_rescrapes_after_the_source_url_changes(monkeypatch):
+    framing = {"page_url": URL, "frameable": False, "reason": "x_frame_options"}
+    bucket = FakeBucket(
+        {
+            "external/123294.md": b"model card copy",
+            service.status_key("123294"): json.dumps(
+                {
+                    "status": "failed",
+                    "retryable": False,
+                    "attempt_count": 3,
+                    "page_url": "https://huggingface.co/acme/model",
+                    "framing": framing,
+                }
+            ).encode(),
+        }
+    ).install(monkeypatch)
+    scraped = []
+    monkeypatch.setattr(
+        service,
+        "scrape_page",
+        lambda url, **kwargs: scraped.append(url) or ScrapedPage(TITLE, ARTICLE),
+    )
+
+    _prepare()
+
+    assert scraped == [URL]
+    status = json.loads(bucket.files[service.status_key("123294")])
+    assert status["status"] == "succeeded"
+    assert status["page_url"] == URL
+    assert status["attempt_count"] == 0
+    assert status["framing"] == framing
+
+
 def test_prepare_does_not_publish_during_a_markdown_migration(monkeypatch):
     bucket = FakeBucket({"_content/migration.lock": b"locked"}).install(monkeypatch)
     monkeypatch.setattr(service, "scrape_page", pytest.fail)
@@ -470,6 +503,67 @@ def signed_in(monkeypatch):
     monkeypatch.setattr(paper_reader, "has_session", lambda _request: True)
 
 
+@pytest.fixture(autouse=True)
+def no_reader_status(monkeypatch):
+    """Readers see no scrape status unless a test stores one."""
+
+    monkeypatch.setattr(paper_reader, "read_status", lambda *_a, **_kw: {})
+
+
+def test_web_markdown_rescrapes_a_copy_of_the_previous_source(
+    monkeypatch, reader_client
+):
+    client, _ = reader_client
+    store = {"markdown": "model card copy"}
+    monkeypatch.setattr(
+        paper_reader,
+        "read_status",
+        lambda *_a, **_kw: {
+            "status": "succeeded",
+            "page_url": "https://huggingface.co/acme/model",
+        },
+    )
+    monkeypatch.setattr(
+        paper_reader,
+        "read_paper_markdown_bounded",
+        lambda *args, **kwargs: (store["markdown"], False),
+    )
+
+    def prepare(**kwargs):
+        assert kwargs["page_url"] == URL
+        store["markdown"] = "release post"
+        return "digest"
+
+    monkeypatch.setattr(paper_reader, "prepare_external_page_markdown", prepare)
+
+    response = client.get("/api/v1/papers/123294/web-markdown")
+
+    assert response.status_code == 200
+    assert response.text == "release post"
+
+
+def test_web_markdown_never_serves_a_previous_source_anonymously(
+    monkeypatch, reader_client
+):
+    client, _ = reader_client
+    monkeypatch.setattr(paper_reader, "has_session", lambda _request: False)
+    monkeypatch.setattr(
+        paper_reader,
+        "read_status",
+        lambda *_a, **_kw: {"status": "succeeded", "page_url": "https://old.example"},
+    )
+    monkeypatch.setattr(
+        paper_reader,
+        "read_paper_markdown_bounded",
+        lambda *args, **kwargs: ("old copy", False),
+    )
+    monkeypatch.setattr(paper_reader, "prepare_external_page_markdown", pytest.fail)
+
+    response = client.get("/api/v1/papers/123294/web-markdown")
+
+    assert response.status_code == 503
+
+
 def test_web_markdown_returns_stored_markdown_without_scraping(
     monkeypatch, reader_client
 ):
@@ -579,6 +673,7 @@ def test_hourly_backfill_prepares_a_bounded_batch_of_due_pages(monkeypatch):
             (2, "https://example.com/failed"),
             (3, "https://example.com/new"),
             (4, "https://doi.org/10.1/landing"),
+            (5, "https://example.com/moved"),
         ]
     ]
 
@@ -602,13 +697,21 @@ def test_hourly_backfill_prepares_a_bounded_batch_of_due_pages(monkeypatch):
     job.settings = SimpleNamespace(
         paper_markdown_hf_bucket_id="bucket", hf_token="", firecrawl_api_key="fc-test"
     )
-    job._existing_paths = lambda bucket, paths: {"external/1.md": object()}
+    job._existing_paths = lambda bucket, paths: {
+        "external/1.md": object(),
+        "external/5.md": object(),
+    }
     job._status_records = lambda paths: {
         service.status_key("2"): {
             "status": "failed",
             "retryable": False,
             "attempt_count": 1,
-        }
+        },
+        # Scraped before the paper's source URL changed.
+        service.status_key("5"): {
+            "status": "succeeded",
+            "page_url": "https://huggingface.co/acme/model",
+        },
     }
 
     framed = []
@@ -620,17 +723,17 @@ def test_hourly_backfill_prepares_a_bounded_batch_of_due_pages(monkeypatch):
 
     counts = job._prepare_external_pages()
 
-    assert prepared == ["3"]
-    assert framed == ["1", "2", "3"]
+    assert sorted(prepared) == ["3", "5"]
+    assert framed == ["1", "2", "3", "5"]
     assert counts == {
-        "external_pages_eligible": 3,
-        "external_pages_missing": 2,
-        "external_pages_due": 1,
-        "external_pages_published": 1,
+        "external_pages_eligible": 4,
+        "external_pages_missing": 3,
+        "external_pages_due": 2,
+        "external_pages_published": 2,
         "external_pages_failed": 0,
-        "external_pages_framing_due": 3,
-        "external_pages_framing_checked": 3,
-        "external_pages_frameable": 3,
+        "external_pages_framing_due": 4,
+        "external_pages_framing_checked": 4,
+        "external_pages_frameable": 4,
     }
 
 
@@ -667,6 +770,23 @@ def test_anonymous_miss_does_not_spend_firecrawl_credits(monkeypatch, reader_cli
             False,
         ),
         ("https://openai.com/index/introducing-gpt-6-1-terra#models", False, {}, False),
+        # A copy or failure recorded for the paper's previous source URL.
+        (
+            "https://openai.com/index/introducing-gpt-6-1-terra",
+            True,
+            {"status": "succeeded", "page_url": "https://huggingface.co/acme/model"},
+            True,
+        ),
+        (
+            "https://openai.com/index/introducing-gpt-6-1-terra",
+            False,
+            {
+                "status": "failed",
+                "retryable": False,
+                "page_url": "https://huggingface.co/acme/model",
+            },
+            True,
+        ),
     ],
 )
 def test_web_markdown_pending_never_waits_on_unreadable_pages(

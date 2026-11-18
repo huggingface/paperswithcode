@@ -252,13 +252,31 @@ def read_status(paper_id: str, *, bucket_id: str, token: str | None) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
+def markdown_stale(status: dict, page_url: str) -> bool:
+    """Whether the stored Markdown was scraped from another page.
+
+    Editing an external paper's source URL leaves the old page's copy in place;
+    it must be scraped again rather than served for the new source.
+    """
+    recorded = status.get("page_url")
+    return bool(recorded) and recorded != page_url
+
+
 def web_markdown_ready(paper, *, bucket_id: str, token: str | None) -> bool:
-    """Whether the page's Markdown exists for curation to read."""
+    """Whether the current page's Markdown exists for curation to read."""
+    page_url = external_page_url(
+        source=paper.source,
+        source_url=paper.source_url,
+        conference_url_pdf=paper.conference_url_pdf,
+    )
     path = f"hf://buckets/{bucket_id}/{paper_markdown_bucket_key(str(paper.id), source='external')}"
     try:
-        return BucketFileSystem(token=token).exists(path)
-    except (HfHubHTTPError, OSError):
+        if not BucketFileSystem(token=token).exists(path):
+            return False
+        status = read_status(str(paper.id), bucket_id=bucket_id, token=token)
+    except (HfHubHTTPError, OSError, ValueError):
         return False
+    return page_url is None or not markdown_stale(status, page_url)
 
 
 def web_markdown_pending(paper, *, bucket_id: str, token: str | None) -> bool:
@@ -278,6 +296,9 @@ def web_markdown_pending(paper, *, bucket_id: str, token: str | None) -> bool:
         status = read_status(str(paper.id), bucket_id=bucket_id, token=token)
     except (HfHubHTTPError, OSError, ValueError):
         # A storage outage says nothing about the page; keep waiting.
+        return True
+    if markdown_stale(status, page_url):
+        # The record belongs to the paper's previous source.
         return True
     return status.get("status") != "failed" or bool(status.get("retryable"))
 
@@ -385,6 +406,10 @@ def _prepare(
     timeout_seconds: float,
 ) -> str:
     prior = read_status(paper_id, bucket_id=bucket_id, token=token)
+    if markdown_stale(prior, page_url):
+        # A new source starts fresh; only the framing check (keyed by its own
+        # URL) carries over.
+        prior = {"framing": prior["framing"]} if "framing" in prior else {}
     if not retry_due(prior):
         # A page in backoff is not yet known to be unreadable.
         raise ExternalPageMarkdownError(

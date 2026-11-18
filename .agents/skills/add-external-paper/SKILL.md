@@ -47,9 +47,12 @@ Canonical `source_url` should be the most durable primary surface for the releas
 
 - **The paper PDF whenever one exists**, even when a project page or landing page also exists. Make the PDF the `source_url` and put the project/landing page in `project_pages`. Example: paper 123404 uses `https://sunovivid.github.io/correction-training/paper.pdf` as `source_url` and the project page as a project link.
 - A `source_url` must return the PDF bytes itself, not a viewer page. alphaXiv `https://www.alphaxiv.org/pdf/<id>` URLs are an HTML viewer: store the file it links, `https://pdfs.assets.alphaxiv.org/<id>v<N>.pdf` (paper 132154).
-- Technical report or blog post over a GitHub README when no PDF exists.
-- HF model card when the model card is the release surface.
+- Otherwise the lab's release blog or news post, or a technical-report web page. It beats the HF model card and the GitHub README even when both exist, because the paper reader shows the `source_url`: a model card reads as setup instructions, not as the release. Put the model cards in `hf_artifact_urls` and the repository in `github_repository_urls`.
+- A post that refuses your own fetch (HTTP 403, 567, or a bot-challenge page) still wins. The backend reads web pages through Firecrawl, and the reader can frame the original. Read the post in a browser for the title, abstract, and date, or take them from the model card when it repeats the post. Never fall back to the model card just because `curl` was blocked.
+- HF model card only when the lab published no blog post, news post, or report page for the release.
 - GitHub repo when the README is the only technical report.
+
+Switching an existing row to a better source with `pwc paper update <id> source-url <url>` is safe: the reader and the hourly Markdown backfill re-scrape a copy made from the previous source URL.
 
 ## Collect Source Metadata
 
