@@ -1,4 +1,6 @@
 
+import { isAuthDisabled } from "./apiUrl";
+
 const LOG_API_REQUESTS = import.meta.env.DEV;
 
 export class ApiError extends Error {
@@ -95,7 +97,9 @@ export class ApiTransport {
       const response = await fetch(url, {
         ...requestOptions,
         cache: requestOptions.cache ?? defaultCache,
-        credentials: requestOptions.credentials ?? "include",
+        // Auth-less builds (the Hugging Face Space mirror) read the API
+        // cross-origin, where the backend grants CORS without credentials.
+        credentials: requestOptions.credentials ?? (isAuthDisabled() ? "omit" : "include"),
         headers: requestHeaders,
       });
 
