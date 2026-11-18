@@ -17,6 +17,11 @@
   flex-direction: column;
   gap: 8px;
 }
+.submissions-status-switch {
+  flex-wrap: wrap;
+  align-self: flex-start;
+  max-width: 100%;
+}
 .submissions-type-options {
   flex-wrap: wrap;
 }
@@ -331,4 +336,24 @@
 
 @keyframes submission-spin {
   to { transform: rotate(360deg); }
+}
+
+@media (max-width: 640px) {
+  .submissions-filter-panel {
+    padding: 14px;
+  }
+  .submission-card-top {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .submission-title {
+    font-size: 21px;
+  }
+  .submission-diff-columns,
+  .submission-json-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .submission-action-buttons {
+    justify-content: flex-start;
+  }
 }
