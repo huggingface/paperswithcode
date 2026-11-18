@@ -47,6 +47,13 @@ class Settings(BaseSettings, ChatSettings):
     frontend_dist_dir: str = Field(default="")
     runtime_data_dir: str = Field(default="./runtime")
     cron_log_dir: str = Field(default="./.github/workflows/scripts/logs")
+    csp_report_log: str = Field(
+        default="",
+        description=(
+            "JSONL file for Content-Security-Policy violation reports; deployed "
+            "environments default to /var/log/paperswithcode/<environment>/."
+        ),
+    )
     cron_lock_dir: str = Field(default="./.github/workflows/scripts/locks")
 
     # Database configuration

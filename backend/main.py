@@ -530,6 +530,7 @@ def create_app() -> FastAPI:
         conferences,
         contributions,
         cron,
+        csp_reports,
         datasets,
         dictation,
         evaluations,
@@ -561,6 +562,7 @@ def create_app() -> FastAPI:
     app.include_router(agent_discovery.router, tags=["agent_discovery"])
     app.include_router(autonomous_operations.router, prefix="/api/v1", tags=["admin"])
     app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+    app.include_router(csp_reports.router, prefix="/api/v1", tags=["security"])
     app.include_router(staging_access.router, prefix="/api/v1", tags=["staging-access"])
     app.include_router(bookmarks.router, prefix="/api/v1", tags=["bookmarks"])
     app.include_router(contributions.router, prefix="/api/v1", tags=["contributions"])
