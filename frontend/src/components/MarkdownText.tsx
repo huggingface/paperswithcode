@@ -1,24 +1,31 @@
-import ReactMarkdown from 'react-markdown';
+import { lazy, Suspense } from 'react';
+import ReactMarkdown, { type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
-import rehypeKatex from 'rehype-katex';
 import { Link } from 'react-router-dom';
-import 'katex/dist/katex.min.css';
 
 import { PaperPreviewLink } from '@/components/paper-preview/PaperPreviewLink';
 import { extractPaperRouteId, resolveInternalPath } from '@/lib/internalLinks';
+import { mightContainMath } from '@/lib/markdownMath';
 
-interface MarkdownTextProps {
+// KaTeX (~77 KB gzip + its CSS) loads only for text that has math delimiters.
+const MathMarkdownText = lazy(() => import('./MathMarkdownText'));
+
+export interface MarkdownTextProps {
   text: string;
   className?: string;
 }
 
-const MarkdownText = ({ text, className = '' }: MarkdownTextProps) => {
+export const MarkdownBody = ({
+  text,
+  className = '',
+  rehypePlugins,
+}: MarkdownTextProps & Pick<Options, 'rehypePlugins'>) => {
   return (
     <div className={className}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={rehypePlugins}
         components={{
           a: ({ href, children, node: _node, ...props }) => {
             const internalPath = resolveInternalPath(href);
@@ -48,6 +55,15 @@ const MarkdownText = ({ text, className = '' }: MarkdownTextProps) => {
         {text}
       </ReactMarkdown>
     </div>
+  );
+};
+
+const MarkdownText = (props: MarkdownTextProps) => {
+  if (!mightContainMath(props.text)) return <MarkdownBody {...props} />;
+  return (
+    <Suspense fallback={<MarkdownBody {...props} />}>
+      <MathMarkdownText {...props} />
+    </Suspense>
   );
 };
 

@@ -34,6 +34,7 @@ from backend.models.papers import Paper
 from backend.services.paper_seo_service import (
     PaperSeoDocument,
     render_bibliographic_meta,
+    render_thumbnail_preload,
 )
 from backend.services.thumbnail_service import ThumbnailService
 from backend.utils.latex_text import latex_to_plain_text
@@ -471,5 +472,8 @@ def _render_meta_block(
         lines.append(
             "    " + render_bibliographic_meta(document).replace("\n", "\n    ")
         )
+        preload = render_thumbnail_preload(document)
+        if preload:
+            lines.append("    " + preload)
 
     return "\n" + "\n".join(lines) + "\n  "

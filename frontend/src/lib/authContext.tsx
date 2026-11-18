@@ -11,7 +11,7 @@
  */
 
 import React from "react";
-import posthog from "posthog-js";
+import posthog from "./posthog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { authApi, type AuthUser } from "./api/auth";
