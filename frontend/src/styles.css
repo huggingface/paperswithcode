@@ -32,9 +32,9 @@
 
   --app-leading-column-width: 280px;
 
-  --serif: 'Newsreader', Georgia, serif;
-  --sans: 'Inter', -apple-system, sans-serif;
-  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --serif: 'Newsreader', 'Newsreader Fallback', Georgia, serif;
+  --sans: 'Inter', 'Inter Fallback', -apple-system, sans-serif;
+  --mono: 'JetBrains Mono', 'JetBrains Mono Fallback', ui-monospace, monospace;
 
   color-scheme: light;
 }

@@ -13,6 +13,7 @@ from backend.services.discovery_text_service import (
 from backend.services.spa_shell_service import (
     inject_root_document,
     replace_document_head,
+    route_preload_links,
 )
 
 # Site-wide social tags in the SPA shell that each discovery page replaces.
@@ -167,6 +168,7 @@ def render_discovery_shell(shell: str, page: DiscoveryPage) -> str:
         f'<meta property="og:url" content="{escape(page.canonical_url, quote=True)}">'
         f'<meta name="twitter:title" content="{title}">'
         f'<meta name="twitter:description" content="{description}">'
+        + route_preload_links(page.canonical_path)
     )
     return inject_root_document(
         replace_document_head(_SOCIAL_META_RE.sub("", shell), head),

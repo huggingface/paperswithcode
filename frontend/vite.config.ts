@@ -81,6 +81,8 @@ export default defineConfig(({ mode }) => {
   return {
     define: { "import.meta.env.VITE_CHAT_MCP_APPS_HOST_ENABLED": JSON.stringify(mcpAppsHostEnabled ? "true" : "false") },
     build: {
+      // .vite/manifest.json lets the backend preload each route's lazy chunk.
+      manifest: true,
       rollupOptions: {
         output: {
           assetFileNames: (assetInfo) => assetInfo.name === "pdf.worker.min.mjs"

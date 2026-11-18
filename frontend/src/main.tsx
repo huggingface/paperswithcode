@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "next-themes";
 
 import AppErrorBoundary from "./components/AppErrorBoundary";
+import "./styles/fonts.css";
 import "./index.css";
 import { installChunkReloadRecovery } from "./lib/chunkReload";
 import { initPostHog } from "./lib/posthog";

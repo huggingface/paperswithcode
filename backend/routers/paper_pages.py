@@ -47,8 +47,10 @@ from backend.services.social_meta_service import (
     inject_paper_meta,
 )
 from backend.services.spa_shell_service import (
+    inject_head,
     load_index_html,
     replace_document_head,
+    route_preload_links,
 )
 from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.urls import (
@@ -177,6 +179,9 @@ def _render_paper_html(
         rendered = inject_paper_meta(index_html, meta, document)
         rendered = inject_initial_document(
             rendered, render_initial_paper_document(document)
+        )
+        rendered = inject_head(
+            rendered, route_preload_links("/paper/" + route_identifier)
         )
     except ValueError as exc:
         logger.error("Paper shell contract failed: %s", exc)
