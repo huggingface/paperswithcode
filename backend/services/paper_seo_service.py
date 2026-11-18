@@ -514,6 +514,20 @@ def render_bibliographic_meta(document: PaperSeoDocument) -> str:
     return "\n".join(lines)
 
 
+def render_thumbnail_preload(document: PaperSeoDocument) -> str:
+    """Preload the hero thumbnail, the paper page's usual LCP image.
+
+    The href must equal the client's ``<img src>`` (the API ``thumbnail_url``,
+    unchanged) or the browser downloads the image twice.
+    """
+    if not document.thumbnail:
+        return ""
+    return (
+        f'<link rel="preload" as="image" href="{_escape(document.thumbnail)}" '
+        'fetchpriority="high" />'
+    )
+
+
 _ROOT_RE = re.compile(r'<div\s+id=["\']root["\']\s*>\s*</div>', re.IGNORECASE)
 
 

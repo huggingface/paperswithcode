@@ -220,7 +220,7 @@ export const PaperPreview: React.FC<{ paperId: string; title: string; thumbnailU
             alt={`Thumbnail for ${title}`}
             loading={priority ? "eager" : "lazy"}
             decoding="async"
-            fetchPriority={priority ? "high" : "auto"}
+            fetchPriority={priority ? "high" : undefined}
             style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }}
             onError={() => {
               if (imgAttempt < 1) {

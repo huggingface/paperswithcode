@@ -20,6 +20,7 @@ from backend.services.paper_seo_service import (
     inject_initial_document,
     render_bibliographic_meta,
     render_initial_paper_document,
+    render_thumbnail_preload,
 )
 
 
@@ -209,3 +210,15 @@ def test_initial_document_injection_preserves_latex_backslashes():
     assert inject_initial_document(shell, document_html) == (
         f'<html><body><div id="root">{document_html}</div></body></html>'
     )
+
+
+def test_thumbnail_preload_matches_the_client_image_url():
+    document = build_paper_seo_document(
+        _paper(thumbnail_url="/api/thumbnails/custom/p.jpg?fit=fit9&v=2"), "42"
+    )
+    assert render_thumbnail_preload(document) == (
+        '<link rel="preload" as="image" '
+        'href="/api/thumbnails/custom/p.jpg?fit=fit9&amp;v=2" fetchpriority="high" />'
+    )
+    no_thumb = build_paper_seo_document(_paper(thumbnail_url=None), "42")
+    assert render_thumbnail_preload(no_thumb) == ""
