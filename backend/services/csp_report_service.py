@@ -2,13 +2,15 @@
 
 Browsers send either Reporting API batches (``application/reports+json``,
 ``report-to``) or legacy ``application/csp-report`` bodies (``report-uri``).
-Both are reduced to a compact record and appended to a size-capped JSONL log,
+Both are reduced to a compact record and appended to a size-capped JSONL log
+(rotated to ``.1`` at the cap),
 so the policy can be tuned from real traffic before it is enforced.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -105,7 +107,9 @@ def append_csp_reports(records: list[dict[str, object]], path: Path) -> None:
     except FileNotFoundError:
         size = 0
     if size >= MAX_LOG_BYTES:
-        return
+        # Keep one previous file, so a flood shortens history instead of
+        # hiding every later report.
+        os.replace(path, path.with_name(path.name + ".1"))
     received_at = datetime.now(UTC).isoformat(timespec="seconds")
     lines = "".join(
         json.dumps({"at": received_at, **record}, separators=(",", ":")) + "\n"

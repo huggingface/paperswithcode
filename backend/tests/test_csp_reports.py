@@ -74,15 +74,16 @@ def test_parses_legacy_report_uri_bodies():
     assert parse_csp_reports("text") == []
 
 
-def test_append_respects_size_cap(tmp_path, monkeypatch):
+def test_append_rotates_at_size_cap(tmp_path, monkeypatch):
     log = tmp_path / "csp.jsonl"
-    record = {"page": "https://paperswithcode.co/", "directive": "script-src"}
-    append_csp_reports([record], log)
+    append_csp_reports([{"directive": "script-src"}], log)
     assert json.loads(log.read_text())["directive"] == "script-src"
 
     monkeypatch.setattr(csp_report_service, "MAX_LOG_BYTES", log.stat().st_size)
-    append_csp_reports([record], log)
-    assert len(log.read_text().splitlines()) == 1
+    append_csp_reports([{"directive": "object-src"}], log)
+    assert json.loads(log.read_text())["directive"] == "object-src"
+    rotated = tmp_path / "csp.jsonl.1"
+    assert json.loads(rotated.read_text())["directive"] == "script-src"
 
 
 def test_log_path_defaults_to_environment_log_dir():
