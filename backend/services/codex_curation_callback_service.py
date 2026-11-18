@@ -60,6 +60,7 @@ from backend.services.autonomous_operations_repository import RunContext
 from backend.services.autonomous_policy import AutonomousPolicy
 from backend.services.catalog_errors import CatalogValidationError
 from backend.services.codex_add_evals_service import (
+    ADMIN_MARKDOWN_KINDS,
     BENCHMARK_GAP_KINDS,
     NEW_BENCHMARK_POLICY_PREFIX,
     CodexPaperJobService,
@@ -500,9 +501,10 @@ class CodexCurationCallbackService:
             if hasattr(value, "method_id")
         ]
         # An external release page is read from its prepared Markdown copy;
-        # first-party sites often refuse the runner's own fetch.
+        # first-party sites often refuse the runner's own fetch. Enrichment
+        # waits for it too, or it tags the paper without reading the page.
         markdown_expected = bool(
-            getattr(row, "kind", None) == "add-evals"
+            getattr(row, "kind", None) in ADMIN_MARKDOWN_KINDS
             and paper.source == "external"
             and not paper.arxiv_id
             and self.markdown_pending(

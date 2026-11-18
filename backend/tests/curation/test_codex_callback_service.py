@@ -1500,11 +1500,13 @@ def test_retry_feedback_is_scoped_and_exposes_only_rejection_details():
     [
         ("add-evals", "external", True, True),
         ("add-evals", "external", False, False),
-        ("enrich-paper", "external", True, False),
+        ("enrich-paper", "external", True, True),
+        ("enrich-paper", "external", False, False),
+        ("enrich-paper", "arxiv", True, False),
         ("add-evals", "arxiv", True, False),
     ],
 )
-def test_context_expects_page_markdown_only_for_external_add_evals(
+def test_context_expects_page_markdown_for_external_enrich_and_add_evals(
     kind, source, pending, expected
 ):
     paper = SimpleNamespace(
@@ -1553,4 +1555,4 @@ def test_context_expects_page_markdown_only_for_external_add_evals(
     )
 
     assert result["paper"]["markdown_expected"] is expected
-    assert checked == ([131370] if kind == "add-evals" and source == "external" else [])
+    assert checked == ([131370] if source == "external" else [])
