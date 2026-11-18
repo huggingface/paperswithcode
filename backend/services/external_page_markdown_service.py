@@ -207,6 +207,21 @@ def page_paper_markdown(title: str, source_url: str, page: ScrapedPage) -> str:
     return markdown
 
 
+def _delete_page_copy(paper_id: str, *, bucket_id: str, token: str | None) -> None:
+    """Delete a page's served alias and manifest; revisions are immutable."""
+    filesystem = BucketFileSystem(token=token)
+    keys = [
+        key
+        for key in (
+            paper_markdown_bucket_key(paper_id, source="external"),
+            paper_markdown_manifest_key(paper_id, source="external"),
+        )
+        if filesystem.exists(f"hf://buckets/{bucket_id}/{key}")
+    ]
+    if keys:
+        HfApi(token=token).batch_bucket_files(bucket_id, delete=keys, token=token)
+
+
 def publish_paper_markdown(
     paper_id: str, markdown: str, *, bucket_id: str, token: str | None
 ) -> str:
@@ -406,7 +421,8 @@ def _prepare(
     timeout_seconds: float,
 ) -> str:
     prior = read_status(paper_id, bucket_id=bucket_id, token=token)
-    if markdown_stale(prior, page_url):
+    stale = markdown_stale(prior, page_url)
+    if stale:
         # A new source starts fresh; only the framing check (keyed by its own
         # URL) carries over.
         prior = {"framing": prior["framing"]} if "framing" in prior else {}
@@ -427,6 +443,10 @@ def _prepare(
         f"hf://buckets/{bucket_id}/{MARKDOWN_MIGRATION_LOCK_KEY}"
     ):
         raise ExternalPageMarkdownError("markdown_migration_locked", retryable=True)
+    if stale:
+        # Remove the previous source's copy first, so a failed scrape of the
+        # new page leaves nothing that readers or curation could mistake for it.
+        _delete_page_copy(paper_id, bucket_id=bucket_id, token=token)
     try:
         page = scrape_page(page_url, api_key=api_key, timeout_seconds=timeout_seconds)
         markdown = page_paper_markdown(title, page_url, page)

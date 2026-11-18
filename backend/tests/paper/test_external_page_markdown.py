@@ -169,8 +169,10 @@ class FakeBucket:
             def __init__(self, token=None):
                 pass
 
-            def batch_bucket_files(self, bucket_id, *, add, token=None):
-                bucket.batches.append([key for _, key in add])
+            def batch_bucket_files(self, bucket_id, *, add=(), delete=(), token=None):
+                bucket.batches.append([key for _, key in add] + list(delete))
+                for key in delete:
+                    del bucket.files[key]
                 for data, key in add:
                     bucket.files[key] = data
 
@@ -278,6 +280,35 @@ def test_prepare_rescrapes_after_the_source_url_changes(monkeypatch):
     assert status["page_url"] == URL
     assert status["attempt_count"] == 0
     assert status["framing"] == framing
+
+
+def test_failed_rescrape_after_a_source_change_leaves_no_old_copy(monkeypatch):
+    bucket = FakeBucket(
+        {
+            "external/123294.md": b"model card copy",
+            "_content/manifests/external/123294.json": b"{}",
+            service.status_key("123294"): json.dumps(
+                {"status": "succeeded", "page_url": "https://huggingface.co/acme/model"}
+            ).encode(),
+        }
+    ).install(monkeypatch)
+
+    def blocked(*args, **kwargs):
+        raise ExternalPageMarkdownError("page_blocked")
+
+    monkeypatch.setattr(service, "scrape_page", blocked)
+
+    with pytest.raises(ExternalPageMarkdownError):
+        _prepare()
+
+    assert "external/123294.md" not in bucket.files
+    assert "_content/manifests/external/123294.json" not in bucket.files
+    status = json.loads(bucket.files[service.status_key("123294")])
+    assert status["page_url"] == URL
+    assert status["status"] == "failed"
+    # The new page now owns the record: nothing is stale, and it backs off.
+    assert not service.markdown_stale(status, URL)
+    assert not service.retry_due(status)
 
 
 def test_prepare_does_not_publish_during_a_markdown_migration(monkeypatch):
