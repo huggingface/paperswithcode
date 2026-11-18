@@ -155,21 +155,23 @@ def test_nginx_csp_hashes_match_index_html_inline_scripts():
         assert hashes == {token for token in script_src if token.startswith("'sha256-")}
 
 
-def test_concurrent_appends_at_cap_keep_every_record(tmp_path, monkeypatch):
+def test_concurrent_appends_at_cap_rotate_cleanly(tmp_path, monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
 
     log = tmp_path / "csp.jsonl"
+    rotated = tmp_path / "csp.jsonl.1"
     monkeypatch.setattr(csp_report_service, "MAX_LOG_BYTES", 200)
     with ThreadPoolExecutor(8) as pool:
+        # list() re-raises any worker error, e.g. a vanished file mid-rotation.
         list(
             pool.map(
                 lambda i: append_csp_reports([{"directive": f"d{i}"}], log),
                 range(200),
             )
         )
-    kept = (
-        log.read_text().splitlines()
-        + (tmp_path / "csp.jsonl.1").read_text().splitlines()
-    )
-    assert len(kept) == len({json.loads(line)["directive"] for line in kept})
-    assert "d199" in log.read_text() or "d199" in (tmp_path / "csp.jsonl.1").read_text()
+    record_bytes = max(len(line) + 1 for line in log.read_text().splitlines())
+    for path in (log, rotated):
+        lines = path.read_text().splitlines()
+        # Whole, uninterleaved records, and no file grows past one append over cap.
+        assert len({json.loads(line)["directive"] for line in lines}) == len(lines)
+        assert path.stat().st_size < 200 + record_bytes
