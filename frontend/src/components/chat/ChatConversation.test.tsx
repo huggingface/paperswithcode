@@ -316,3 +316,18 @@ it("continues only the latest persisted turn without rewinding research", () => 
   view.rerender(<ChatConversation {...props} busy messages={[{ ...user, revision: 1 }, assistant]} />);
   expect(view.queryByText("Retry")).toBeNull();
 });
+
+it("announces finished answers once, not while they stream", () => {
+  const chat = setup(true, false);
+  const status = chat.getByRole("status");
+  expect(status.textContent).toBe("");
+  const question: ChatMessage = { id: "question", role: "user", text: "Question" };
+  chat.update([question, { id: "answer", role: "assistant", streaming: true }], true);
+  expect(status.textContent).toBe("");
+  chat.update([question, { id: "answer", role: "assistant" }], false);
+  expect(status.textContent).toBe("Answer complete.");
+  chat.update([question, { id: "next", role: "assistant", error: "boom" }], true);
+  expect(status.textContent).toBe("");
+  chat.update([question, { id: "next", role: "assistant", error: "boom" }], false);
+  expect(status.textContent).toBe("The answer failed.");
+});

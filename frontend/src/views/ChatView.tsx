@@ -56,6 +56,7 @@ import {
 } from "@/lib/chatSessions";
 
 import { chatAvailabilityQuery, chatSessionListQuery, chatSessionQuery } from "@/lib/chatSessionQueries";
+import "@/components/chat/styles/index.css";
 
 
 /** In the reader, the PDF owns the selection: the composer draft carries only text and mentions. */
@@ -483,7 +484,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       <GeneralArtifactWorkspace enabled={mode === "general"}>
       <section className="chat-main" data-testid="active-chat-pane">
         <div className="chat-topbar">
-          {mode === "general" && !sidebarOpen && <button type="button" className="icon-btn" onClick={() => setSidebarOpen(true)} title="Open sidebar"><PanelIcon /></button>}
+          {mode === "general" && !sidebarOpen && <button type="button" className="icon-btn" onClick={() => setSidebarOpen(true)} title="Open sidebar" aria-label="Open sidebar"><PanelIcon /></button>}
           <span className="chat-topbar-title">{isRouteSessionLoading
             ? current?.title || ""
             : current?.title || detail?.title || (isEmpty ? "" : "New chat")}</span>

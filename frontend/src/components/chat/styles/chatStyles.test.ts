@@ -58,3 +58,17 @@ describe("chat style ownership", () => {
     expect(featureStyles).toContain(".chat-mcp-app-fullscreen iframe { height: calc(100vh - 72px) !important; aspect-ratio: auto; }");
   });
 });
+
+describe("chat style loading", () => {
+  const source = (path: string) => readFileSync(resolve(process.cwd(), path), "utf8");
+
+  it("loads the chat sheet only with chat surfaces; link previews stay global", () => {
+    const main = source("src/main.tsx");
+    expect(main).not.toContain("chat/styles/index.css");
+    expect(main).toContain('import "./components/chat/styles/previews.css";');
+    expect(source("src/components/chat/styles/index.css")).not.toContain("previews.css");
+    for (const view of ["ChatView", "SharedChatView", "FeedView", "PaperReaderView"]) {
+      expect(source(`src/views/${view}.tsx`)).toContain('import "@/components/chat/styles/index.css";');
+    }
+  });
+});

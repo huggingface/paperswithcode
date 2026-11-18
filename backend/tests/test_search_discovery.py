@@ -526,6 +526,7 @@ def test_known_client_only_routes_keep_the_spa_shell(client, path):
     response = client.get(path)
     assert response.status_code == 200
     assert '<div id="root"></div>' in response.text
+    assert response.headers["cache-control"] == "no-cache"
 
 
 @pytest.mark.parametrize(
