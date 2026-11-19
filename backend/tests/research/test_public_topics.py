@@ -150,7 +150,7 @@ def test_topic_view_shows_creator_followers_and_visible_avatars(db, now):
         public.set_show_as_follower(db, name, show)
     view = public.topic_view(db, topic_id, None)
     assert view.creator.username == "alice"
-    assert view.creator.avatar_url.endswith("/api/users/alice/avatar?redirect=true")
+    assert view.creator.avatar_url == "/api/v1/research/avatars/alice"
     assert view.followers == 4
     assert [p.username for p in view.follower_avatars] == ["alice", "bob", "dave"]
     assert view.indexable
@@ -232,8 +232,8 @@ def test_bubbles_rank_eligible_public_topics_by_followers(db, now, monkeypatch):
     assert featured.top_paper.title == "Best"
     assert [p.username for p in featured.follower_avatars] == ["alice"]
     assert featured.follower_avatars[0].avatar_url == "/api/v1/research/avatars/alice"
-    assert public.follows_public_topic(db, "alice")
-    assert not public.follows_public_topic(db, "bob")  # hides their avatar
+    assert public.has_account(db, "alice")
+    assert not public.has_account(db, "nobody")
     topics.set_public(db, "bob", quiet, False)
     public.set_hidden(db, popular, True, now)
     assert public.bubbles(db, now) == []
