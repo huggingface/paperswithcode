@@ -1658,6 +1658,25 @@ def deploy(args: argparse.Namespace) -> int:
         )
     with deployment_lock():
         _recover_interrupted_activation(args.environment)
+        expected = getattr(args, "expected_live", None)
+        if expected and _live_sha("production") != expected["production"]:
+            # A staging sync built its merge before waiting for this lock; a
+            # production deploy that ran meanwhile superseded it and runs its
+            # own sync.
+            print(f"skipping superseded {args.environment} deploy of {args.source}")
+            log_event(
+                "deploy",
+                args.environment,
+                "superseded",
+                source=args.source,
+                expected_live=expected,
+            )
+            return 0
+        if expected and _live_sha("staging") != expected["staging"]:
+            raise DeployError(
+                "staging changed while the sync waited for the deploy lock; "
+                "rerun pwc-sync-staging"
+            )
         require_production_chat_monitor(args.environment)
         sha = resolve_sha(args.source, args.environment)
         release = prepare_release(sha, args.environment)
@@ -1911,6 +1930,7 @@ def sync_staging(args: argparse.Namespace) -> int:
             refresh_environment=False,
             allow_expiring_chat_config=False,
             component="site",
+            expected_live={"production": production, "staging": staging},
         )
     )
 
