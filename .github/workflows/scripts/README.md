@@ -26,6 +26,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-calculate-paper-trending-scores.timer` | `*-*-* *:45:00` | `calculate_paper_trending_scores` | `.github/workflows/scripts/hourly/calculate_paper_trending_scores.py` |
 | `pwc-cron-import-hf-daily-papers.timer` | `*-*-* *:00:00` | `import_hf_daily_papers` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
 | `pwc-cron-refresh-paper-embeddings.timer` | `*-*-* *:15:00` | `refresh_paper_embeddings` | `.github/workflows/scripts/hourly/refresh_paper_embeddings.py` |
+| `pwc-cron-monitor-cron-failures.timer` | `*-*-* *:07/15:00` | `monitor_cron_failures` | `.github/workflows/scripts/maintenance/monitor_cron_failures.py` |
 | `pwc-cron-paper-markdown-backfill.timer` | `*-*-* *:17:00` | `paper_markdown_backfill --execute --confirm`<br>`paper_markdown_backfill --full --execute --confirm` | `.github/workflows/scripts/hourly/backfill_paper_markdown.py` |
 | `pwc-cron-paper-markdown-fresh.timer` | `*-*-* *:00/5:00` | `paper_markdown_backfill --lane fresh --execute --confirm` | `.github/workflows/scripts/hourly/backfill_paper_markdown.py` (papers indexed in the last 24 h; two 10-paper slots and its own lock; the hourly live lane skips that window) |
 | `pwc-cron-enqueue-hf-daily-paper-curation.timer` | `*-*-* *:27:00` | `enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
@@ -152,6 +153,7 @@ use `VACUUM FULL`.
 │   └── link_papers_by_task_keywords.py
 ├── maintenance/
 │   ├── cleanup_invalid_repositories.py
+│   ├── monitor_cron_failures.py
 │   ├── run_cleanup_invalid_repositories.sh
 │   └── thumbnail_coverage.py
 ├── utils/
@@ -633,6 +635,17 @@ bounded history.
 content-changed latest papers to the protected TEI endpoint. It validates and
 upserts normalized vectors into the active generation in bounded batches. The
 production environment supplies the endpoint URL and `PWC_HF_TOKEN`.
+
+`maintenance/monitor_cron_failures.py` runs every 15 minutes and posts to the
+Slack incoming webhook in `PWC_CRON_ALERT_SLACK_WEBHOOK_URL` (set in
+`/etc/paperswithcode/production-cron.env`) when a job that sets
+`failure_alert_after` in `backend/services/cron_registry.py` reaches that many
+consecutive failed launcher exits. It reminds every 24 hours while the job keeps
+failing and posts once when it recovers. Open alerts are kept in
+`cron-logs/cron-failure-alerts.json` and shown on the admin CRON dashboard.
+`refresh_paper_embeddings` opts in after 3 failures. The threshold counts exits
+from the last 24 hours, so only jobs that run at least that often can opt in.
+Without the webhook the monitor fails, which the dashboard shows as broken.
 
 ## Manual Utilities
 

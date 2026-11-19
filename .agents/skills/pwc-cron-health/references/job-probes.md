@@ -345,6 +345,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** Upserts content-hashed vectors into the active embedding generation and records pipeline runs.
 - **Independent proof:** Require exactly one active generation; anti-join all latest papers using an independently recomputed title+abstract hash. Check dimension, finite values, approximate unit norm, duplicates, orphans, and backlog trend.
 - **Functional proof:** Query production semantic search with known titles and concepts; full row coverage can coexist with broken vector semantics.
+- **Endpoint proof:** Every run calls the HF Inference Endpoint in `PWC_HF_QUERY_EMBEDDING_ENDPOINT_URL`; a 400 "Your endpoint is in error" means the endpoint itself failed and needs a restart in the Inference Endpoints UI. `/api/v1/papers/search/feed?q=<natural-language query>` must report `applied_mode: hybrid`; `keyword` means search fell back. Opted into Slack alerts after 3 consecutive failures.
 
 ## `preload_thumbnails`
 
@@ -388,6 +389,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** When explicitly enabled, reviews claimed submissions and records a content-free terminal health record; in production it is intentionally disabled unless both autonomous-review flags are true.
 - **Independent proof:** First verify both feature flags and timer state. Disabled plus inactive is `not_applicable`; disabled plus active is a configuration failure. If enabled, inspect claimed/terminal counts, oldest claim, dry-run/remote-launch flags, attempts, and health-record freshness without reading submission content.
 - **Safety:** Never enable the timer, claim a submission, or invoke the reviewer merely to prove health. Validate a claimed run only through the supported scheduler and operator records.
+
+## `monitor_cron_failures`
+
+- **Effect:** Every 15 minutes reads launcher exit history and posts to `PWC_CRON_ALERT_SLACK_WEBHOOK_URL` when an opted-in job (`failure_alert_after`) reaches that many consecutive failures; reminds every 24 hours while the streak lasts and posts a recovery when a run succeeds. Open alerts live in `cron-logs/cron-failure-alerts.json` and appear as `failure_alert` on each job.
+- **Independent proof:** Compare `consecutive_failures` from `launcher.jsonl` for each opted-in job with the open alerts in the state file; a job at or above its threshold without an open alert means delivery failed or the monitor is not running. Check `CRON_FAILURE_ALERTS_SUMMARY` lines in the monitor log.
+- **Trap:** The job fails on purpose while the webhook is unset, so a broken monitor may mean missing configuration, not a code bug. Never post a test message to Slack just to prove delivery.
 
 ## `monitor_chat_operational_alerts`
 

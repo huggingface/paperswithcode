@@ -55,6 +55,13 @@ export interface CronJobStatus {
   output_health: CronHealthAxis;
   lock_state?: Record<string, string | number | boolean | null>;
   lock_stale?: boolean;
+  failure_alert?: {
+    after_consecutive_failures: number;
+    consecutive_failures: number;
+    alerting: boolean;
+    since: string | null;
+    notified_at: string | null;
+  } | null;
   diagnostics?: string | null;
   diagnostic_groups?: Record<string, string[]>;
   health_findings?: Array<{

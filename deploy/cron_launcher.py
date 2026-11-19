@@ -852,6 +852,16 @@ COMMANDS: dict[str, Job] = {
         timeout="6h",
         idempotency="resume generation and activate only complete embeddings",
     ),
+    "monitor_cron_failures": job(
+        "-m",
+        "scripts.maintenance.monitor_cron_failures",
+        timeout="5m",
+        mutates_shared_data=False,
+        idempotency=(
+            "read launcher exit history and post Slack alerts for opted-in jobs "
+            "that keep failing; alert state dedupes repeat posts"
+        ),
+    ),
     "paper_markdown_backfill": job(
         "-m",
         "scripts.hourly.backfill_paper_markdown",

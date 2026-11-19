@@ -21,6 +21,11 @@ from psycopg2.extras import RealDictCursor
 
 from backend.config import get_settings
 from backend.services.autonomous_cron_probe import build_job_findings
+from backend.services.cron_failure_alerts import (
+    STATE_FILE as FAILURE_ALERT_STATE_FILE,
+    dashboard_status as failure_alert_status,
+    load_state as load_failure_alert_state,
+)
 from backend.services.cron_registry import CronJobDefinition, list_cron_jobs
 from backend.services.cron_artifact_health import enrichment_snapshot_metrics
 
@@ -2964,6 +2969,9 @@ def build_cron_dashboard(
         workflow_by_id, workflow_ms = workflow_future.result()
         thumbnail_metrics, thumbnail_ms = thumbnail_future.result()
         launcher_history = launcher_future.result()
+        failure_alert_state = load_failure_alert_state(
+            Path(get_settings().cron_log_dir) / FAILURE_ALERT_STATE_FILE
+        )
     supplemental_db_metrics = {"thumbnail_cache": thumbnail_metrics}
 
     def get_recent_log_status(job: CronJobDefinition) -> Dict[str, Any]:
@@ -3015,6 +3023,9 @@ def build_cron_dashboard(
             now=collection_now,
             process_running=running_by_id[job.id],
             launcher_history=launcher_history.get(job.id),
+        )
+        evaluated["failure_alert"] = failure_alert_status(
+            job, launcher_history.get(job.id), failure_alert_state
         )
         health_findings = build_job_findings(job, evaluated, collection_now)
         evaluated["health_findings"] = [
