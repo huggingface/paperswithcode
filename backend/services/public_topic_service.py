@@ -273,13 +273,42 @@ def with_featured_stats(
     for topic in featured:
         row = stats[topic.id]
         topic.week_papers = row["week_papers"]
-        topic.follower_avatars = [person(name) for name in row["avatars"]]
+        # Served from our origin: some browsers get 503 for huggingface.co images.
+        topic.follower_avatars = [
+            TopicPerson(username=name, avatar_url=f"/api/v1/research/avatars/{name}")
+            for name in row["avatars"]
+        ]
         if row["top_paper_id"] is not None:
             paper = papers[row["top_paper_id"]]
             topic.top_paper = FeaturedTopicPaper(
                 id=paper.id, arxiv_id=paper.arxiv_id, title=paper.title
             )
     return topics
+
+
+def follows_public_topic(db: Session, username: str) -> bool:
+    """Whether the account shows its avatar on a public topic it follows."""
+    return (
+        db.scalar(
+            select(func.count())
+            .select_from(UserProfile)
+            .join(
+                ResearchTopicFollow,
+                ResearchTopicFollow.hf_subject == UserProfile.hf_subject,
+            )
+            .join(ResearchTopic, ResearchTopic.id == ResearchTopicFollow.topic_id)
+            .outerjoin(
+                ResearchSubscription,
+                ResearchSubscription.hf_subject == UserProfile.hf_subject,
+            )
+            .where(
+                UserProfile.current_username == username,
+                ResearchTopic.is_public,
+                func.coalesce(ResearchSubscription.show_as_follower, True),
+            )
+        )
+        > 0
+    )
 
 
 def set_hidden(db: Session, topic_id: int, hidden: bool, now: datetime) -> None:
