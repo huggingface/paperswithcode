@@ -103,6 +103,9 @@ DEPLOY_LOCK = APP_ROOT / "deployment.lock"
 # is a leaked accounting record, not a live request.
 BOUNDED_DRAIN_SECONDS = 600
 PORTS = {"production": 8000, "staging": 8001}
+STAGING_SYNC_BRANCH_PREFIX = "staging-sync/main-"
+STAGING_SYNC_AUTHOR = "Papers With Code staging sync"
+STAGING_SYNC_EMAIL = "staging-sync@paperswithcode.invalid"
 PUBLIC_URLS = {
     "production": "https://paperswithcode.co",
     "staging": "https://staging.paperswithcode.co",
@@ -1771,7 +1774,158 @@ def deploy(args: argparse.Namespace) -> int:
             runtime_id=runtime.name,
         )
     print(f"deployed {args.source} ({sha}) to {args.environment}: {result}")
+    if (
+        args.environment == "production"
+        and result.startswith("success")
+        and getattr(args, "staging_sync", True)
+    ):
+        _sync_staging_after_production()
     return 0
+
+
+def _repository_git(
+    *arguments: str, check: bool = True, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", "--git-dir", str(REPOSITORY), *arguments],
+        text=True,
+        capture_output=True,
+        check=check,
+        env=env,
+    )
+
+
+def _is_ancestor(ancestor: str, descendant: str) -> bool:
+    return (
+        _repository_git(
+            "merge-base", "--is-ancestor", ancestor, descendant, check=False
+        ).returncode
+        == 0
+    )
+
+
+def _live_sha(environment: str) -> str:
+    active = _active_slot(environment)
+    release = _slot_release(environment, active) if active else None
+    if not release:
+        raise DeployError(f"{environment} has no active release")
+    return validate_manifest(release)["git_sha"]
+
+
+def staging_sync_source(production: str, staging: str, *, push: bool) -> str | None:
+    """Return the commit staging needs to carry production, or None if it does.
+
+    Staging runs production plus a line of staging-only work. The staging-only
+    line is whatever the live staging commit has beyond production, so merging
+    the live staging commit into production keeps it while adding everything
+    production gained.
+    """
+    if _is_ancestor(production, staging):
+        return None
+    if _is_ancestor(staging, production):
+        return production
+    merge = _repository_git(
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "--no-messages",
+        production,
+        staging,
+        check=False,
+    )
+    if merge.returncode == 1:
+        conflicts = ", ".join(merge.stdout.split()[1:])
+        raise DeployError(
+            f"staging {staging[:12]} conflicts with production {production[:12]} "
+            f"in {conflicts}; merge them by hand and deploy staging"
+        )
+    merge.check_returncode()
+    tree = merge.stdout.split()[0]
+    if not push:
+        return tree
+    # A fixed identity and date make the merge commit a function of its
+    # parents, so a retry after a failed staging deploy pushes the same commit.
+    date = _repository_git("show", "-s", "--format=%cI", production).stdout.strip()
+    identity = {
+        "GIT_AUTHOR_NAME": STAGING_SYNC_AUTHOR,
+        "GIT_AUTHOR_EMAIL": STAGING_SYNC_EMAIL,
+        "GIT_AUTHOR_DATE": date,
+        "GIT_COMMITTER_NAME": STAGING_SYNC_AUTHOR,
+        "GIT_COMMITTER_EMAIL": STAGING_SYNC_EMAIL,
+        "GIT_COMMITTER_DATE": date,
+    }
+    commit = _repository_git(
+        "commit-tree",
+        tree,
+        "-p",
+        production,
+        "-p",
+        staging,
+        "-m",
+        f"Sync staging: production {production[:12]} + staging line {staging[:12]}",
+        env={**os.environ, **identity},
+    ).stdout.strip()
+    # The host repository is a mirror clone; a refspec push needs mirror off.
+    _repository_git(
+        "-c",
+        "remote.origin.mirror=false",
+        "push",
+        "origin",
+        f"{commit}:refs/heads/{STAGING_SYNC_BRANCH_PREFIX}{production[:12]}"
+        f"-{staging[:12]}",
+    )
+    return commit
+
+
+def sync_staging(args: argparse.Namespace) -> int:
+    require_root()
+    production = _live_sha("production")
+    staging = _live_sha("staging")
+    source = staging_sync_source(production, staging, push=not args.dry_run)
+    if source is None:
+        print(f"staging {staging[:12]} already carries production {production[:12]}")
+        return 0
+    if args.dry_run:
+        print(
+            f"staging {staging[:12]} lacks production {production[:12]}; "
+            "it merges cleanly"
+        )
+        return 0
+    print(f"syncing staging {staging[:12]} to {source} (production {production[:12]})")
+    log_event(
+        "sync-staging",
+        "staging",
+        "started",
+        production_sha=production,
+        staging_sha=staging,
+        git_sha=source,
+    )
+    return deploy(
+        argparse.Namespace(
+            environment="staging",
+            source=source,
+            confirm=None,
+            defer_public_smoke=False,
+            qualify_only=False,
+            legacy_bridge=False,
+            refresh_environment=False,
+            allow_expiring_chat_config=False,
+            component="site",
+        )
+    )
+
+
+def _sync_staging_after_production() -> None:
+    """Carry a successful production release to staging; staging failures are reported, not fatal."""
+    try:
+        sync_staging(argparse.Namespace(dry_run=False))
+    except (DeployError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", None) or exc
+        log_event("sync-staging", "staging", "failed", error=str(detail))
+        print(
+            f"production is live, but staging was not synced: {detail}",
+            file=sys.stderr,
+        )
 
 
 def rollback(args: argparse.Namespace) -> int:
@@ -2029,6 +2183,12 @@ def parser_for(program: str) -> argparse.ArgumentParser:
         parser.add_argument("--refresh-environment", action="store_true")
         parser.add_argument("--allow-expiring-chat-config", action="store_true")
         parser.add_argument("--component", choices=("site", "mcp"), default="site")
+        parser.add_argument(
+            "--no-staging-sync",
+            dest="staging_sync",
+            action="store_false",
+            help="do not carry a successful production release to staging",
+        )
         parser.set_defaults(handler=deploy)
     elif program.endswith("pwc-rollback"):
         parser.add_argument("environment", choices=ENVIRONMENTS)
@@ -2040,6 +2200,13 @@ def parser_for(program: str) -> argparse.ArgumentParser:
         parser.add_argument("--confirm")
         parser.add_argument("--component", choices=("site", "mcp"), default="site")
         parser.set_defaults(handler=cleanup_command)
+    elif program.endswith("pwc-sync-staging"):
+        parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="report whether staging lacks production without pushing or deploying",
+        )
+        parser.set_defaults(handler=sync_staging)
     elif program.endswith("pwc-reap"):
         parser.add_argument("environment", choices=ENVIRONMENTS)
         parser.set_defaults(handler=reap)
