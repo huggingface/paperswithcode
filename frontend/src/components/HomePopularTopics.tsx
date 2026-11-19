@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Check, Plus, Users } from 'lucide-react';
 import { researchQueries } from '@/lib/api/queries';
+import { assetUrl } from '@/lib/apiUrl';
 import type { TopicPerson } from '@/lib/api/research';
 import { FEATURED_TOPIC_COUNT, topicPath, topicTitle, useFollowFeaturedTopic } from '@/lib/researchTopic';
 
@@ -71,7 +72,7 @@ function FollowerAvatar({ person }: { person: TopicPerson }) {
   }
   return <img
     className="topic-avatar"
-    src={person.avatar_url}
+    src={assetUrl(person.avatar_url) ?? undefined}
     alt=""
     width={20}
     height={20}

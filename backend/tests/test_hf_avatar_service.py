@@ -92,4 +92,5 @@ def test_serves_avatar_images_and_rejects_non_images(monkeypatch):
     assert hf_avatar_service.avatar_image("alice") == ("image/svg+xml", b"<svg/>")
     assert hf_avatar_service.avatar_image("alice") == ("image/svg+xml", b"<svg/>")
     assert hf_avatar_service.avatar_image("page") is None
+    assert hf_avatar_service.avatar_image("page") is None  # misses are remembered
     assert fetched == ["/alice", "/page"]
