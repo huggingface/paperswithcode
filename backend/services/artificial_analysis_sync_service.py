@@ -233,12 +233,7 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         is_open=True,
     ),
     "motif-3": PaperIdentity(arxiv_id="2608.09119", is_open=True),
-    "muse-glimmer": external(
-        "https://huggingface.co/meta-models/Muse-Glimmer-30B",
-        "Muse Glimmer-30B",
-        "2026-08-09",
-        is_open=True,
-    ),
+    "muse-glimmer": PaperIdentity(arxiv_id="2610.24628", is_open=True),
     "muse-spark-1-2": external(
         "https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/",
         "Introducing Muse Spark 1.1",
