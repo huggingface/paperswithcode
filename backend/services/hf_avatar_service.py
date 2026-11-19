@@ -17,6 +17,7 @@ import httpx
 AVATAR_API = "https://huggingface.co/api/users/{}/avatar"
 HF_ORIGIN = "https://huggingface.co"
 CACHE_SECONDS = 24 * 60 * 60
+MISS_SECONDS = 60 * 60
 TIMEOUT_SECONDS = 2.0
 MAX_IMAGE_BYTES = 512 * 1024
 MAX_CACHED_IMAGES = 500
@@ -24,8 +25,8 @@ IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+
 
 # username -> (expires at, image URL); only successful lookups are kept.
 _cache: dict[str, tuple[float, str]] = {}
-# username -> (expires at, content type, bytes)
-_images: dict[str, tuple[float, str, bytes]] = {}
+# username -> (expires at, (content type, bytes)); None remembers a miss.
+_images: dict[str, tuple[float, tuple[str, bytes] | None]] = {}
 
 
 def avatar_urls(usernames: list[str]) -> dict[str, str]:
@@ -65,7 +66,15 @@ def avatar_image(username: str) -> tuple[str, bytes] | None:
     now = time.monotonic()
     cached = _images.get(username)
     if cached and cached[0] > now:
-        return cached[1], cached[2]
+        return cached[1]
+    image = fetch_avatar_image(username)
+    if len(_images) >= MAX_CACHED_IMAGES:
+        _images.clear()
+    _images[username] = (now + (CACHE_SECONDS if image else MISS_SECONDS), image)
+    return image
+
+
+def fetch_avatar_image(username: str) -> tuple[str, bytes] | None:
     url = avatar_urls([username]).get(username)
     if url is None:
         return None
@@ -77,7 +86,4 @@ def avatar_image(username: str) -> tuple[str, bytes] | None:
     content_type = response.headers.get("content-type", "").split(";")[0].strip()
     if content_type not in IMAGE_TYPES or len(response.content) > MAX_IMAGE_BYTES:
         return None
-    if len(_images) >= MAX_CACHED_IMAGES:
-        _images.clear()
-    _images[username] = (now + CACHE_SECONDS, content_type, response.content)
     return content_type, response.content

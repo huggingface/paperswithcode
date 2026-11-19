@@ -9,7 +9,7 @@ import { usePaperFeedQuery } from '@/hooks/usePapers';
 import { researchApi, TOPIC_PAPERS_PAGE_SIZE, type PublicTopic, type TopicPaperOrder, type TopicPerson } from '@/lib/api/research';
 import { readHomepagePaperDateRange, withHomepagePaperDateRange } from '@/lib/paperDateRange';
 import { researchKeys, researchQueries } from '@/lib/api/queries';
-import { hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
+import { assetUrl, hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
 import { ApiError, isNotFound } from '@/lib/apiTransport';
 import {
@@ -147,7 +147,7 @@ function Avatar({ person, size }: { person: TopicPerson; size: number }) {
     return <span className="topic-avatar home-topic-avatar-initial" title={`@${person.username}`}
       style={{ width: size, height: size, fontSize: size * 0.45 }}>{person.username.charAt(0).toUpperCase()}</span>;
   }
-  return <img className="topic-avatar" src={person.avatar_url} alt="" title={`@${person.username}`}
+  return <img className="topic-avatar" src={assetUrl(person.avatar_url) ?? undefined} alt="" title={`@${person.username}`}
     width={size} height={size} loading="lazy" onError={() => setFailed(true)} />;
 }
 

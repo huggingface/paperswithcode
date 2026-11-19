@@ -247,6 +247,8 @@ def follower_avatar(username: str, db: Session = Depends(get_database_session)):
     """An account's HF avatar, served from our origin for topic pages and cards."""
     if not public_topic_service.has_account(db, username):
         raise HTTPException(status_code=404, detail="Avatar not found")
+    # Free the pooled connection before a topic page's many lookups wait on HF.
+    db.close()
     image = hf_avatar_service.avatar_image(username)
     if image is None:
         raise HTTPException(status_code=404, detail="Avatar not found")
