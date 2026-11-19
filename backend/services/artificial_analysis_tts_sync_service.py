@@ -53,17 +53,19 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "step-audio-editx-mar-2026": PaperIdentity(arxiv_id="2511.03601", is_open=True),
     "styletts-2": PaperIdentity(arxiv_id="2306.07691", is_open=True),
     "vibe-voice-1-5b": PaperIdentity(arxiv_id="2508.19205"),
-    "vibe-voice-7b": PaperIdentity(arxiv_id="2508.19205", is_open=True),
     "voxtral-tts": PaperIdentity(arxiv_id="2603.25551", is_open=True),
     "wavenet": PaperIdentity(arxiv_id="1609.03499"),
     "xtts-v2": PaperIdentity(arxiv_id="2406.04904", is_open=True),
 }
 
 
-# Reviewed 2026-09-09: this upstream model page now returns 404 and is absent
-# from the complete catalog. The original step-audio-2.5-tts model remains live;
-# it is a separate version, so its result must not inherit the retired row.
-RETIRED_MODEL_SLUGS = frozenset({"st260629"})
+# Reviewed retirements: each upstream model page returns 404 and is absent from
+# the complete catalog, so its managed row is deleted.
+# - st260629 (2026-09-09): the original step-audio-2.5-tts model remains live;
+#   it is a separate version, so its result must not inherit the retired row.
+# - vibe-voice-7b (2026-11-19): VibeVoice 7B left the catalog; VibeVoice 1.5B
+#   (vibe-voice-1-5b) remains and keeps its own row.
+RETIRED_MODEL_SLUGS = frozenset({"st260629", "vibe-voice-7b"})
 
 
 @dataclass(frozen=True)
