@@ -81,12 +81,13 @@ sudo pwc-deploy production <exact-main-sha> --confirm DEPLOY_PRODUCTION
 After a successful production activation, `pwc-deploy production` runs
 `pwc-sync-staging`: when the live staging commit lacks the production commit,
 it merges the staging commit into production, pushes the merge as
-`staging-sync/main-<production sha12>`, and deploys it to staging. If staging
-holds nothing beyond production, staging gets the production commit itself. A
-merge conflict or failed staging deploy leaves staging as it was and is
-reported without failing the production deploy; resolve the conflict by hand
-on a branch from production, then deploy staging. Pass `--no-staging-sync` to
-skip it, and run `sudo pwc-sync-staging [--dry-run]` to sync later.
+`staging-sync/main-<production sha12>-<staging sha12>`, and deploys it to
+staging. If staging holds nothing beyond production, staging gets the
+production commit itself. A merge conflict or failed staging deploy leaves
+staging as it was and is reported without failing the production deploy;
+resolve the conflict by hand on a branch from production, then deploy staging.
+Pass `--no-staging-sync` to skip it, and run `sudo pwc-sync-staging
+[--dry-run]` to sync later; a retry rebuilds the same merge commit.
 
 Do not infer production authorization from approval to deploy staging, test a
 branch, merge code, or prepare a release. Preserve the environment feature

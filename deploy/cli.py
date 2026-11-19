@@ -1776,7 +1776,7 @@ def deploy(args: argparse.Namespace) -> int:
     print(f"deployed {args.source} ({sha}) to {args.environment}: {result}")
     if (
         args.environment == "production"
-        and result == "success"
+        and result.startswith("success")
         and getattr(args, "staging_sync", True)
     ):
         _sync_staging_after_production()
@@ -1843,11 +1843,16 @@ def staging_sync_source(production: str, staging: str, *, push: bool) -> str | N
     tree = merge.stdout.split()[0]
     if not push:
         return tree
+    # A fixed identity and date make the merge commit a function of its
+    # parents, so a retry after a failed staging deploy pushes the same commit.
+    date = _repository_git("show", "-s", "--format=%cI", production).stdout.strip()
     identity = {
         "GIT_AUTHOR_NAME": STAGING_SYNC_AUTHOR,
         "GIT_AUTHOR_EMAIL": STAGING_SYNC_EMAIL,
+        "GIT_AUTHOR_DATE": date,
         "GIT_COMMITTER_NAME": STAGING_SYNC_AUTHOR,
         "GIT_COMMITTER_EMAIL": STAGING_SYNC_EMAIL,
+        "GIT_COMMITTER_DATE": date,
     }
     commit = _repository_git(
         "commit-tree",
@@ -1860,10 +1865,14 @@ def staging_sync_source(production: str, staging: str, *, push: bool) -> str | N
         f"Sync staging: production {production[:12]} + staging line {staging[:12]}",
         env={**os.environ, **identity},
     ).stdout.strip()
+    # The host repository is a mirror clone; a refspec push needs mirror off.
     _repository_git(
+        "-c",
+        "remote.origin.mirror=false",
         "push",
         "origin",
-        f"{commit}:refs/heads/{STAGING_SYNC_BRANCH_PREFIX}{production[:12]}",
+        f"{commit}:refs/heads/{STAGING_SYNC_BRANCH_PREFIX}{production[:12]}"
+        f"-{staging[:12]}",
     )
     return commit
 
