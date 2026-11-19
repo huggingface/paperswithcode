@@ -375,3 +375,19 @@ def test_superseded_staging_sync_deploy_is_skipped(
 
     assert deploy_cli.deploy(args) == 0
     assert events == [("deploy", "staging", "superseded")]
+
+
+def test_staging_sync_deploy_refuses_when_only_staging_moved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A recovery rollback or new staging work is not a newer sync; report it."""
+    monkeypatch.setattr(deploy_cli, "DEPLOY_LOCK", tmp_path / "deployment.lock")
+    monkeypatch.setattr(deploy_cli, "APP_ROOT", tmp_path)
+    monkeypatch.setattr(deploy_cli, "_recover_interrupted_activation", lambda env: None)
+    live = {"production": "production", "staging": "rolled-back-staging"}
+    monkeypatch.setattr(deploy_cli, "_live_sha", live.__getitem__)
+    args = parser_for("pwc-deploy").parse_args(["staging", "merge-sha"])
+    args.expected_live = {"production": "production", "staging": "old-staging"}
+
+    with pytest.raises(deploy_cli.DeployError, match="rerun pwc-sync-staging"):
+        deploy_cli.deploy(args)
