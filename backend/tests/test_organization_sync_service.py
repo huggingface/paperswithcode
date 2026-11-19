@@ -203,4 +203,5 @@ def test_featured_sync_combines_hf_alias_papers():
         "facebook-research",
         "metaresearch",
         "MetaSuperintelligenceLab",
+        "meta-models",
     ]
