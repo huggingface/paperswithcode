@@ -61,6 +61,7 @@ _PAPER_COMMAND_ARGUMENTS = {
     "begin-edit": (),
     "draft": ("--directory", "--artifact-id", "--expected-parent-version-id"),
     "repair": ("--directory", "--artifact-id", "--expected-parent-version-id"),
+    "edit-context": ("--directory",),
     "repair-context": ("--directory",),
 }
 _PAPER_UNSAFE_SHELL_CHARACTERS = frozenset("\\\r\n;&|<>()`$*?[]{}!~")
@@ -439,8 +440,24 @@ class WorkerToolHooks:
         tool_id = tool_use_id or str(hook_input.get("tool_use_id") or "")
         name = str(hook_input.get("tool_name") or "")
         arguments = hook_input.get("tool_input") or {}
-        self.budget.register_call(tool_id)
-        decision = self.budget.authorize(tool_id, name, arguments)
+        command = arguments.get("command") if name == "Bash" else None
+        # Research before `pwc-paper create` must not starve the command that
+        # activates the paper budget, so paper commands always use that budget.
+        paper_budget = (
+            isinstance(command, str) and _pwc_paper_command(command) is not None
+        )
+        self.budget.register_call(
+            tool_id,
+            self.settings.chat_latex_paper_max_tool_rounds if paper_budget else None,
+        )
+        decision = self.budget.authorize(
+            tool_id,
+            name,
+            arguments,
+            maximum_calls=(
+                self.settings.chat_latex_paper_max_tool_calls if paper_budget else None
+            ),
+        )
         if not decision.allowed:
             self.results[tool_id] = self.budget.result(
                 tool_id, decision.reason or "Tool denied.", status="denied"
