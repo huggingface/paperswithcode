@@ -62,14 +62,7 @@ describe("Header navigation", () => {
     expect(desktopLinks[1]).toHaveAccessibleName("Chat");
     expect(desktopLinks[2]).toHaveAccessibleName("Browse state-of-the-art");
     expect(within(desktopLinks[1]).getByText("New")).toBeVisible();
-    expect(screen.getByRole("status")).toHaveTextContent(
-      "New: following feed, follow your favorite tasks, benchmarks, authors or organizations",
-    );
-    expect(
-      within(screen.getByRole("status")).getByRole("link", { name: "following feed" }),
-    ).toHaveAttribute("href", "/following");
-    expect(within(screen.getByRole("status")).queryByRole("link", { name: "chat" }))
-      .not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Open menu" }));
     const mobilePanel = document.querySelector(".mobile-nav-panel");
@@ -95,12 +88,6 @@ describe("Header navigation", () => {
     expect(desktopChat).toHaveAccessibleName("Chat");
     expect(desktopChat).toHaveAttribute("href", "https://paperswithcode.co/chat");
     expect(desktopChat).toHaveAttribute("target", "_blank");
-    expect(
-      within(screen.getByRole("status")).getByRole("link", { name: "following feed" }),
-    ).toHaveAttribute("href", "https://paperswithcode.co/following");
-    expect(
-      within(screen.getByRole("status")).getByRole("link", { name: "following feed" }),
-    ).toHaveAttribute("target", "_blank");
 
     await user.click(screen.getByRole("button", { name: "Open menu" }));
     const mobilePanel = document.querySelector(".mobile-nav-panel") as HTMLElement;
@@ -166,36 +153,6 @@ describe("Header navigation", () => {
       width: "64px",
     }));
     expect(container.querySelectorAll(".nav-indicator")).toHaveLength(1);
-  });
-
-  it("hides the announcement on PDF reader routes", () => {
-    render(
-      <MemoryRouter initialEntries={["/pdf/2606.03748"]}>
-        <Header onOpenSearch={vi.fn()} />
-      </MemoryRouter>,
-    );
-
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-
-  it("remembers when the announcement is dismissed", async () => {
-    const user = userEvent.setup();
-    const firstRender = render(
-      <MemoryRouter>
-        <Header onOpenSearch={vi.fn()} />
-      </MemoryRouter>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Dismiss announcement" }));
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-
-    firstRender.unmount();
-    render(
-      <MemoryRouter>
-        <Header onOpenSearch={vi.fn()} />
-      </MemoryRouter>,
-    );
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
   it("links the GitHub repository from the header and mobile menu", async () => {
