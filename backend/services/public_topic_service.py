@@ -103,7 +103,8 @@ def person(username: str | None) -> TopicPerson | None:
         return None
     return TopicPerson(
         username=username,
-        avatar_url=f"https://huggingface.co/api/users/{username}/avatar?redirect=true",
+        # Served from our origin: some browsers get 503 for huggingface.co images.
+        avatar_url=f"/api/v1/research/avatars/{username}",
     )
 
 
@@ -273,11 +274,7 @@ def with_featured_stats(
     for topic in featured:
         row = stats[topic.id]
         topic.week_papers = row["week_papers"]
-        # Served from our origin: some browsers get 503 for huggingface.co images.
-        topic.follower_avatars = [
-            TopicPerson(username=name, avatar_url=f"/api/v1/research/avatars/{name}")
-            for name in row["avatars"]
-        ]
+        topic.follower_avatars = [person(name) for name in row["avatars"]]
         if row["top_paper_id"] is not None:
             paper = papers[row["top_paper_id"]]
             topic.top_paper = FeaturedTopicPaper(
@@ -286,28 +283,15 @@ def with_featured_stats(
     return topics
 
 
-def follows_public_topic(db: Session, username: str) -> bool:
-    """Whether the account shows its avatar on a public topic it follows."""
+def has_account(db: Session, username: str) -> bool:
+    """Whether a Papers with Code account uses this Hugging Face username."""
     return (
         db.scalar(
-            select(func.count())
-            .select_from(UserProfile)
-            .join(
-                ResearchTopicFollow,
-                ResearchTopicFollow.hf_subject == UserProfile.hf_subject,
-            )
-            .join(ResearchTopic, ResearchTopic.id == ResearchTopicFollow.topic_id)
-            .outerjoin(
-                ResearchSubscription,
-                ResearchSubscription.hf_subject == UserProfile.hf_subject,
-            )
-            .where(
-                UserProfile.current_username == username,
-                ResearchTopic.is_public,
-                func.coalesce(ResearchSubscription.show_as_follower, True),
-            )
+            select(UserProfile.hf_subject)
+            .where(UserProfile.current_username == username)
+            .limit(1)
         )
-        > 0
+        is not None
     )
 
 
