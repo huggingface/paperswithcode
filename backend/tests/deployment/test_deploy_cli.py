@@ -350,3 +350,28 @@ def test_failed_staging_sync_does_not_fail_production(
 
     assert "staging was not synced: staging conflicts" in capsys.readouterr().err
     assert events == [("sync-staging", "staging", "failed")]
+
+
+def test_superseded_staging_sync_deploy_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A sync whose production or staging moved while it waited for the lock."""
+    monkeypatch.setattr(deploy_cli, "DEPLOY_LOCK", tmp_path / "deployment.lock")
+    monkeypatch.setattr(deploy_cli, "APP_ROOT", tmp_path)
+    monkeypatch.setattr(deploy_cli, "_recover_interrupted_activation", lambda env: None)
+    live = {"production": "new-production", "staging": "old-staging"}
+    monkeypatch.setattr(deploy_cli, "_live_sha", live.__getitem__)
+    events = []
+    monkeypatch.setattr(
+        deploy_cli, "log_event", lambda *args, **kwargs: events.append(args)
+    )
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("a superseded sync must not resolve or deploy")
+
+    monkeypatch.setattr(deploy_cli, "resolve_sha", unexpected)
+    args = parser_for("pwc-deploy").parse_args(["staging", "merge-sha"])
+    args.expected_live = {"production": "old-production", "staging": "old-staging"}
+
+    assert deploy_cli.deploy(args) == 0
+    assert events == [("deploy", "staging", "superseded")]
