@@ -135,6 +135,11 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   production is `paperswithcode-backend@production` on `:8000`, staging is
   `paperswithcode-backend@staging` on `:8001`, and nginx serves each environment's
   `current/frontend-dist`.
+- Staging runs production plus staging-only work. A successful production
+  deploy automatically merges the live staging commit into production and
+  deploys the result to staging (`pwc-sync-staging`); on a merge conflict it
+  leaves staging alone and reports it, so resolve the conflict and deploy
+  staging by hand. Build staging-only branches on the live staging commit.
 - Use `pwc-status`, `pwc-deploy`, and `pwc-rollback` for lifecycle operations.
   Use `pwc-nginx` separately for nginx changes.
 - Scheduled production work must use the installed `pwc-cron` allowlist. Never
