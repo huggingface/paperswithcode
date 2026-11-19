@@ -276,10 +276,20 @@ def test_parse_requires_current_stepaudio_catalog_model():
         _next_html(_current_reviewed_catalog())
     )
 
-    assert len(entries) == 14
+    assert len(entries) == 13
     assert "st260629" not in {entry.slug for entry in entries}
     assert "step-audio-2.5-tts" in {entry.slug for entry in entries}
     assert tts.MODEL_PAPER_IDENTITIES["step-audio-2.5-tts"].arxiv_id == "2605.23463"
+
+
+def test_parse_accepts_catalog_without_retired_vibevoice_7b():
+    catalog = _current_reviewed_catalog()
+    assert "vibe-voice-7b" not in {model["slug"] for model in catalog}
+
+    entries = tts.parse_artificial_analysis_tts_leaderboard(_next_html(catalog))
+
+    assert "vibe-voice-7b" in tts.RETIRED_MODEL_SLUGS
+    assert "vibe-voice-1-5b" in {entry.slug for entry in entries}
 
 
 def test_retired_stepaudio_slug_cannot_replace_current_required_model():
