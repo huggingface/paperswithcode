@@ -116,9 +116,7 @@ def configure_release(manifest: dict, release: Path, environment: str) -> None:
             {
                 "PWC_CHAT_ARTIFACTS_ENABLED": str(artifact_foundation).lower(),
                 "PWC_CHAT_POSTERLY_ENABLED": str(posterly_release).lower(),
-                "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": str(
-                    artifact_foundation
-                ).lower(),
+                "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
             }
         )
         if artifact_foundation:
