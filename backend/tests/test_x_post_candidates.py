@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from backend.models.database import Dataset
+from backend.models.database import Dataset, Paper
 from backend.services import x_post_candidates as service
 from backend.services.x_post_candidates import (
     Board,
@@ -184,13 +184,21 @@ def _rows(models, values):
             False,
             None,
         ),
-        # Small board without a frontier model: stale or obscure (ETT, TempCompass).
+        # Tiny board without a frontier model: stale or obscure.
         (
             "TempCompass (MCQ)",
             ["MetaEncoder v1", "STEER-4B", "y"],
             [79.9, 79, 70],
             False,
             "small_without_frontier",
+        ),
+        # Vision boards never list a frontier LLM; 14 rows is enough (pi^4 on Sintel).
+        (
+            "Sintel",
+            [f"m{i}" for i in range(14)],
+            [0.03 + i / 100 for i in range(14)],
+            True,
+            None,
         ),
         # Big boards need no frontier model (robotics, TTS).
         (
@@ -416,3 +424,17 @@ def test_subject_paper_id_reads_every_key_shape():
     assert subject_paper_id("open:625:Accuracy:131917") == 131917
     assert subject_paper_id("task:12:625:Accuracy:131917") == 131917
     assert subject_paper_id("2026-W46") is None
+
+
+def test_best_per_paper_keeps_each_papers_top_win():
+    def item(paper_id, score):
+        return (
+            service.Candidate(
+                "new_sota", f"{score}:{paper_id}", "", "", {}, b"", score=score
+            ),
+            Paper(id=paper_id),
+        )
+
+    found = [item(1, 9), item(2, 30), item(1, 12), item(3, 5), item(2, 8)]
+    kept = service.best_per_paper(found)
+    assert [(paper.id, c.score) for c, paper in kept] == [(2, 30), (1, 12), (3, 5)]

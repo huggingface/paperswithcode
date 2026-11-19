@@ -115,10 +115,12 @@ LEGACY_BOARD = re.compile(
 )
 # A leader at or above this (on a 0-100 higher-is-better metric) leaves no headroom for a story.
 SATURATED_AT = 97.0
-# Below this many entries, a board needs a frontier model on it: small boards
-# without one (ETT, TempCompass, niche robotics splits) were all rejected as
-# stale or obscure, while small new frontier boards (OfficeQA Pro, SLE) posted well.
-SMALL_BOARD = 20
+# Below this many entries, a board needs a frontier model on it: tiny boards
+# without one are stale splits, while small new frontier boards (OfficeQA Pro,
+# SLE) posted well. Kept low because vision, speech and robotics boards never
+# list a frontier LLM (a 20-row bar hid the pi^4 Sintel SOTA, 2026-11-19); the
+# agent's rejections are remembered, so a weak small board costs one look.
+SMALL_BOARD = 8
 FRONTIER_MODEL = re.compile(r"\b(GPT|Claude|Gemini|Grok)\b", re.IGNORECASE)
 
 
@@ -283,6 +285,18 @@ def open_sota_text(facts: dict[str, Any], credit: str) -> str:
     )
 
 
+def best_per_paper(
+    found: list[tuple[Candidate, Paper]],
+) -> list[tuple[Candidate, Paper]]:
+    """Highest-scoring win first, one per paper: a paper that tops many splits
+    (FlexCast on eight ETT horizons) would otherwise fill the SOTA list. Once
+    the agent rejects that board, the paper's next-best win takes its place."""
+    kept: dict[int, tuple[Candidate, Paper]] = {}
+    for item in sorted(found, key=lambda item: -item[0].score):
+        kept.setdefault(item[1].id, item)
+    return list(kept.values())
+
+
 def leaderboard_wins(
     db: Session,
     *,
@@ -399,7 +413,7 @@ def leaderboard_wins(
             (Candidate(kind, subject, "", link, facts, image, score=score), paper)
         )
 
-    found.sort(key=lambda item: -item[0].score)
+    found = best_per_paper(found)
     for candidate, paper in found[:SOTA_LIMIT]:
         handles, organization = sota_credit(db, paper, fetch_org_handle)
         candidate.facts["verified_x_handles"] = [f"@{h}" for h in handles]
