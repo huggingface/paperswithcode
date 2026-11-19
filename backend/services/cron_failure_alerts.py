@@ -53,6 +53,8 @@ def save_state(
         "w", dir=path.parent, prefix=f".{path.name}.", delete=False
     ) as handle:
         json.dump(payload, handle, sort_keys=True)
+    # The monitor runs as pwc-cron; the dashboard reads this as the web app user.
+    os.chmod(handle.name, 0o644)
     os.replace(handle.name, path)
 
 
@@ -100,8 +102,11 @@ def plan_alerts(
                 "consecutive_failures": streak,
                 "last_failure_at": runs.get("last_failure_at"),
             }
+        elif open_alert and streak:
+            # Failures that aged out of the 24h window are not a recovery.
+            next_state[job.id] = dict(open_alert)
         elif open_alert:
-            # A streak below the threshold means a run succeeded since the alert.
+            # The latest launcher exit succeeded.
             alerts.append(
                 FailureAlert(
                     job.id,

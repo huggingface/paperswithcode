@@ -60,6 +60,20 @@ def test_recovery_closes_the_alert():
     assert state == {}
 
 
+def test_failures_aging_out_of_the_window_are_not_a_recovery():
+    _, state = plan_alerts([JOB], {JOB.id: _runs(3)}, {}, NOW)
+    alerts, kept = plan_alerts(
+        [JOB], {JOB.id: _runs(2, runs=2)}, state, NOW + timedelta(hours=2)
+    )
+    assert alerts == [] and kept == state
+
+
+def test_state_file_is_readable_by_the_web_app(tmp_path):
+    path = tmp_path / "alerts.json"
+    save_state(path, {}, NOW)
+    assert path.stat().st_mode & 0o777 == 0o644
+
+
 def test_missing_history_keeps_open_alert_without_posting():
     _, state = plan_alerts([JOB], {JOB.id: _runs(3)}, {}, NOW)
     alerts, kept = plan_alerts([JOB], {}, state, NOW + timedelta(hours=30))
