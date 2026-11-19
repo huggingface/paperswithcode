@@ -76,18 +76,25 @@ LIMIT :limit
 
 # Weekly stats and faces for the few topics the homepage features as cards.
 FEATURED_SQL = """
-SELECT t.id,
- (SELECT count(*) FROM research_topic_verdicts v JOIN papers p ON p.id=v.paper_id
-  WHERE v.topic_id=t.id AND v.score>=:threshold AND p.date_published>=:week) week_papers,
- (SELECT p.id FROM research_topic_verdicts v JOIN papers p ON p.id=v.paper_id
-  WHERE v.topic_id=t.id AND v.score>=:threshold AND p.date_published>=:week
-  ORDER BY v.score DESC, p.date_published DESC, p.id DESC LIMIT 1) top_paper_id,
+SELECT t.id, count(w.id) week_papers,
+ (array_agg(w.id ORDER BY w.score DESC, w.date_published DESC, w.id DESC))[1] top_paper_id,
  ARRAY(SELECT u.current_username FROM research_topic_follows f
   JOIN user_profiles u ON u.hf_subject=f.hf_subject
   LEFT JOIN research_subscriptions s ON s.hf_subject=f.hf_subject
   WHERE f.topic_id=t.id AND coalesce(s.show_as_follower, true)
   ORDER BY f.created_at, f.hf_subject LIMIT :avatars) avatars
-FROM research_topics t WHERE t.id = ANY(:ids)
+FROM research_topics t
+LEFT JOIN LATERAL (
+ -- Each hit counts once, as its arXiv id's latest version, like the topic page.
+ SELECT p.id, p.date_published, max(v.score) score
+ FROM research_topic_verdicts v JOIN papers source ON source.id=v.paper_id
+ JOIN papers p ON (source.arxiv_id IS NOT NULL AND p.arxiv_id=source.arxiv_id AND p.is_latest_version)
+  OR (source.arxiv_id IS NULL AND p.id=source.id)
+ WHERE v.topic_id=t.id AND v.score>=:threshold AND p.date_published>=:week
+ GROUP BY p.id, p.date_published
+) w ON true
+WHERE t.id = ANY(:ids)
+GROUP BY t.id
 """
 
 
