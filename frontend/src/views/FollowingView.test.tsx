@@ -601,6 +601,10 @@ it('shows the most followed topics above the trending feed with this week\'s pap
   expect(within(cards[0]).getByRole('link', { name: 'Faster drafts' })).toHaveAttribute('href', '/paper/2611.00001');
   expect(await within(cards[1]).findByRole('link', { name: /Following/ })).toHaveAttribute('href', '/following?topic=14');
   expect(within(row).queryByText(/Ocr releases/)).not.toBeInTheDocument();
+  // An avatar that fails to load shows the follower's initial instead.
+  fireEvent.error(cards[0].querySelector('img.topic-avatar')!);
+  expect(cards[0]).toHaveTextContent('A');
+  expect(cards[0].querySelector('img.topic-avatar')).toBeNull();
 });
 it('invites guests to follow a popular topic after the sixth trending paper', async () => {
   auth.user = null;

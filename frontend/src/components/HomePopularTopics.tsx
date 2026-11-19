@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Check, Plus, Users } from 'lucide-react';
 import { researchQueries } from '@/lib/api/queries';
+import type { TopicPerson } from '@/lib/api/research';
 import { FEATURED_TOPIC_COUNT, topicPath, topicTitle, useFollowFeaturedTopic } from '@/lib/researchTopic';
 
 /** The most followed public topics as cards above the trending feed, so visitors discover following.
@@ -31,15 +33,7 @@ export default function HomePopularTopics({ followedIds, onBuild }: {
           <Link to={topicPath(topic)} className="home-topic-title">{topicTitle(topic)}</Link>
           <div className="home-topic-followers">
             {avatars.length > 0 && <span className="home-topic-avatars" aria-hidden="true">
-              {avatars.map(person => <img
-                key={person.username}
-                className="topic-avatar"
-                src={person.avatar_url}
-                alt=""
-                width={20}
-                height={20}
-                loading="lazy"
-              />)}
+              {avatars.map(person => <FollowerAvatar key={person.username} person={person} />)}
             </span>}
             {topic.followers} {topic.followers === 1 ? 'follower' : 'followers'}
           </div>
@@ -67,4 +61,21 @@ export default function HomePopularTopics({ followedIds, onBuild }: {
     </ul>
     {failed && <p className="home-topics-error" role="alert">Could not follow that topic. Please try again.</p>}
   </section>;
+}
+
+/** A follower's face, or their initial when the image does not load. */
+function FollowerAvatar({ person }: { person: TopicPerson }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <span className="topic-avatar home-topic-avatar-initial">{person.username.charAt(0).toUpperCase()}</span>;
+  }
+  return <img
+    className="topic-avatar"
+    src={person.avatar_url}
+    alt=""
+    width={20}
+    height={20}
+    loading="lazy"
+    onError={() => setFailed(true)}
+  />;
 }
