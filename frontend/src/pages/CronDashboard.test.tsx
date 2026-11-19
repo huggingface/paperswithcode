@@ -153,6 +153,34 @@ describe("CronJobCard health axes", () => {
     expect(screen.getByText("Scheduler evidence")).toBeInTheDocument();
   });
 
+  it("shows the Slack failure alert threshold and an open alert", () => {
+    const failureAlert = {
+      after_consecutive_failures: 3,
+      consecutive_failures: 1,
+      alerting: false,
+      since: null,
+      notified_at: null,
+    };
+    const { rerender } = renderWithClient(
+      <CronJobCard job={{ ...job, failure_alert: failureAlert }} expanded={false} onToggle={() => undefined} />,
+    );
+    expect(screen.getByText("Slack alert after 3 consecutive failures (now 1)")).toBeInTheDocument();
+    expect(screen.queryByText("Slack alert open")).not.toBeInTheDocument();
+
+    rerender(
+      <CronJobCard
+        job={{
+          ...job,
+          failure_alert: { ...failureAlert, consecutive_failures: 4, alerting: true, since: "2026-11-16T23:15:00Z" },
+        }}
+        expanded={false}
+        onToggle={() => undefined}
+      />,
+    );
+    expect(screen.getByText("Slack alert open")).toBeInTheDocument();
+    expect(screen.getByText(/^Slack alert open since /)).toBeInTheDocument();
+  });
+
   it("explains paper Markdown spend, reservations, and rolling window", async () => {
     const budget = {
       mode: "live" as const,

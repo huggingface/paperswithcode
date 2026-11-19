@@ -127,6 +127,9 @@ class CronJobDefinition:
     # True when runs differ in their work (lanes sharing one launcher lock), so
     # a lock-skipped run is missed work rather than a harmless overlap.
     lock_skip_misses_work: bool = False
+    # Post a Slack alert once this many consecutive production runs failed
+    # (counted from launcher exits in the last 24h, so it must fit that window).
+    failure_alert_after: Optional[int] = None
 
     @property
     def systemd_unit_pairs(self) -> Tuple[Tuple[str, str], ...]:
@@ -2861,6 +2864,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         lock_file="/var/lib/paperswithcode/production/cron-locks/refresh_paper_embeddings.lock",
         expected_runtime_minutes=20,
         stale_after_minutes=120,
+        failure_alert_after=3,
         critical=True,
         healthy_no_work_allowed=True,
         db_freshness_query="""
@@ -3223,6 +3227,29 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             "autonomous_submission_enabled",
             "autonomous_submission_jobs_enabled",
         ),
+    ),
+    CronJobDefinition(
+        id="monitor_cron_failures",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(15, offset_minutes=7),),
+        schedule_grace_minutes=10,
+        systemd_timer="pwc-cron-monitor-cron-failures.timer",
+        systemd_service="pwc-cron-monitor-cron-failures.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="CRON Failure Alert Monitor",
+        category="systemd",
+        schedule="7/15 * * * * (every 15 minutes)",
+        script_path="maintenance/monitor_cron_failures.py",
+        log_name="monitor_cron_failures",
+        process_patterns=("scripts.maintenance.monitor_cron_failures",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/monitor_cron_failures.lock"
+        ),
+        expected_runtime_minutes=1,
+        stale_after_minutes=45,
+        critical=False,
+        healthy_no_work_allowed=True,
     ),
     CronJobDefinition(
         id="monitor_chat_operational_alerts",

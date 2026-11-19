@@ -442,6 +442,7 @@ export function CronJobCard({
                 <h3 className="font-semibold">{job.display_name}</h3>
                 {job.critical && <Badge variant="outline" className="text-[10px] uppercase tracking-wide">Critical</Badge>}
                 {job.lock_stale && <StatusBadge tone="broken">Held lock</StatusBadge>}
+                {job.failure_alert?.alerting && <StatusBadge tone="broken">Slack alert open</StatusBadge>}
                 <AxisBadge label="Execution" axis={job.execution_health} />
                 <AxisBadge label="Output" axis={job.output_health} />
                 {expanded ? <ChevronUp className="h-4 w-4 cron-muted" /> : <ChevronDown className="h-4 w-4 cron-muted" />}
@@ -455,6 +456,14 @@ export function CronJobCard({
                 {job.schedule && <span className="cron-fact md:col-span-2"><Calendar /><span className="font-mono text-xs">{job.schedule}</span></span>}
                 {job.log_status && <span className="cron-fact"><FileText />Log status: {job.log_status}</span>}
                 {job.workflow_status && <span className="cron-fact"><Activity />Actions: {formatWorkflowStatus(job.workflow_status)}</span>}
+                {job.failure_alert && (
+                  <span className="cron-fact md:col-span-2">
+                    <AlertTriangle />
+                    {job.failure_alert.alerting
+                      ? `Slack alert open since ${formatCronDate(job.failure_alert.since)}`
+                      : `Slack alert after ${job.failure_alert.after_consecutive_failures} consecutive failures (now ${job.failure_alert.consecutive_failures})`}
+                  </span>
+                )}
               </div>
               {job.work_summary && <div className="cron-message">{job.work_summary}</div>}
               {job.error && <div className="cron-message cron-message--error"><strong>Error: </strong>{job.error}</div>}

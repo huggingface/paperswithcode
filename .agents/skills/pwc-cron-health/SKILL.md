@@ -136,6 +136,7 @@ Inspect every job object, not only the summary, `critical_issues`, health score,
 - Treat `degraded`, `unknown`, `broken`, and `stuck` as findings even when the score is at least 80% or the endpoint says healthy.
 - Separate `execution_health` from `output_health`; either can fail independently.
 - `execution_health.recent_runs` summarizes the last 24 hours of launcher `exit` and `lock_skipped` records in `cron-logs/launcher.jsonl` (`runs`, `failures`, `consecutive_failures`, `lock_skips`). Two or more consecutive failures mark a job broken even while a run is active, and a failure rate of 10% (at least three failures) degrades it even when the latest exit succeeded. Without the key (no launcher history yet), check `journalctl -u SERVICE --since '24 hours ago' | grep -c 'Failed with result'` yourself: systemd keeps only the latest exit.
+- `failure_alert` is set on jobs that opt into Slack alerts (`failure_alert_after` in the registry; today `refresh_paper_embeddings` after 3 consecutive failures). `alerting: true` means `monitor_cron_failures` has posted an alert that is still open. A job that is broken on `recent_runs` without an open alert is either below its threshold or not opted in: report it, and propose opting it in when a silent failure would hurt users.
 - Inspect `db_metrics`, `work_metrics`, workflow/systemd evidence, lock state, process state, and diagnostics.
 - The admin `/status` response is cached stale-while-revalidate for about a minute. Prefer the fresh CLI build; use `force_refresh=true` only as corroboration.
 - Treat the paused/manual URL extraction entry as `not_applicable` for schedule cadence. Audit its last manual run only when one is claimed.
@@ -222,6 +223,7 @@ Propose the smallest corrective or diagnostic action, ordered by impact. Do not 
 - A red job whose only evidence is an old systemd failure with fresh data (for example `link_papers_by_task_keywords` after one failed weekly run) needs `reset-failed`, not a code fix. Propose it; do not run it.
 - `sync_artificial_analysis` and the model-release radar share one Artificial Analysis key limited to 100 requests/day (resets about 04:48 UTC). Nightly 429s mean the budget is exhausted, not that the sync is broken.
 - Timer changes ship via `sudo python3 deploy/install_deploy_tools.py <sha>` run from the git checkout, not the release directory (`python` is not on root's PATH).
+- Hourly jobs that call an external endpoint fail quietly while the site falls back: from 2026-11-16 to 11-19 the query-embedding Inference Endpoint was in error, `refresh_paper_embeddings` failed every hour and search served keyword-only results with no visible error. Probe the endpoint itself (and, for search, `applied_mode` in `/api/v1/papers/search/feed?q=…`) instead of trusting a `success_no_work` output.
 - Never use `git stash` while auditing; the stash stack is shared across worktrees and sessions.
 - Accepting the dashboard's status for green jobs is not an audit. If any job is not independently verified, name it under "Unverified scope".
 
