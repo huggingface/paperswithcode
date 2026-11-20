@@ -13,7 +13,7 @@ WITH new_methods (
     ('qwen2', 'Qwen2', 'Qwen2',
      'Qwen2 is the 2024 successor to [Qwen](/methods/qwen), a suite of dense and [Mixture-of-Experts](/methods/mixture-of-experts) language models from 0.5B to 72B parameters with base and instruction-tuned checkpoints. The flagship Qwen2-72B scores 84.2 on MMLU as a base model, surpassing most earlier open-weight models, and the series was followed by [Qwen2.5](/methods/qwen2-5).',
      'Qwen2, Qwen-2, Qwen2-7B, Qwen2-72B', 2024,
-     '2407.10671', NULL, 'always', ARRAY[]::text[]),
+     '2407.10671', NULL, 'always', ARRAY['Qwen-2']),
     ('qwen2-5-coder', 'Qwen2.5-Coder', 'Qwen2.5-Coder',
      'Qwen2.5-Coder is a code-specialized series built on [Qwen2.5](/methods/qwen2-5) and continually pretrained on more than 5.5 trillion tokens, released in sizes from 0.5B to 32B parameters. Careful data cleaning, synthetic data and balanced mixing give state-of-the-art open-model results on more than ten code generation, completion, reasoning and repair benchmarks while keeping general and math skills.',
      'Qwen2.5-Coder, Qwen2.5 Coder, Qwen-2.5-Coder', 2024,
@@ -61,7 +61,7 @@ WITH new_methods (
     ('claude-fable-5-2', 'Claude Fable 5.2', 'Claude Fable 5.2',
      'Claude Fable 5.2 is Anthropic''s November 2026 successor to [Claude Fable 5.1](/methods/claude-fable-5-1), with improvements in coding, reasoning and vision. As with earlier Fable releases, it is the same underlying model as Claude Mythos 5.2 but carries strong cybersecurity and biology safeguards, which lets Anthropic make it available to all users.',
      'Claude Fable 5.2, Claude-Fable-5.2, Fable 5.2', 2026,
-     NULL, 132092, 'always', ARRAY[]::text[])
+     NULL, 132092, 'always', ARRAY['Fable 5.2'])
 )
 INSERT INTO methods (
     slug, name, full_name, description, keywords,
