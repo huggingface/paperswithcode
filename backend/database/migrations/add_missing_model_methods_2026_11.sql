@@ -11,7 +11,9 @@ WITH new_methods (
 ) AS (VALUES
     ('chatgpt', 'ChatGPT', 'ChatGPT',
      'ChatGPT is OpenAI''s conversational assistant, released as a research preview in November 2022. It is a sibling of [InstructGPT](/paper/2203.02155), trained with [RLHF](/methods/rlhf) on dialogue data in which human trainers played both user and assistant, and was fine-tuned from a model in the [GPT-3.5](/methods/gpt-3-5) series. The dialogue format lets it answer follow-up questions, admit mistakes, challenge incorrect premises and reject inappropriate requests; it is one of the most common baselines and objects of study in LLM papers.',
-     'ChatGPT, Chat-GPT, ChatGPT-3.5, ChatGPT-4', 2022,
+     -- Version compounds ("ChatGPT-4o") are keywords of the specific model
+     -- below, so the longest match tags that model rather than ChatGPT.
+     'ChatGPT, Chat-GPT', 2022,
      133666, 'always', ARRAY[]::text[]),
     ('gpt-4-turbo', 'GPT-4 Turbo', 'GPT-4 Turbo',
      'GPT-4 Turbo is the faster, cheaper successor to [GPT-4](/methods/gpt-4) that OpenAI announced at DevDay in November 2023, with a 128K-token context window, more recent world knowledge and lower prices. A vision-enabled version (GPT-4 Turbo with Vision) and later dated snapshots followed before [GPT-4o](/methods/gpt-4o) replaced it as the flagship.',
@@ -93,11 +95,11 @@ INSERT INTO methods (
 VALUES (
     'gpt-3-5', 'GPT-3.5', 'GPT-3.5',
     'GPT-3.5 is OpenAI''s series of models between [GPT-3](/methods/gpt-3) and [GPT-4](/methods/gpt-4), trained on text and code and aligned with instruction tuning and [RLHF](/methods/rlhf). The series, which finished training in early 2022, includes code-davinci-002, text-davinci-002 and text-davinci-003; [ChatGPT](/methods/chatgpt) was fine-tuned from it, and gpt-3.5-turbo, launched in the API in March 2023, became the most widely used GPT-3.5 model and a standard baseline in papers.',
-    'GPT-3.5, GPT3.5, GPT-3.5 Turbo, GPT-3.5-turbo, gpt-3.5-turbo, text-davinci-003, text-davinci-002, code-davinci-002',
+    'GPT-3.5, GPT3.5, GPT-3.5 Turbo, GPT-3.5-turbo, gpt-3.5-turbo, ChatGPT-3.5, text-davinci-003, text-davinci-002, code-davinci-002',
     (SELECT id FROM areas WHERE name = 'General' LIMIT 1),
     2022, NULL,
     'https://openai.com/index/introducing-chatgpt-and-whisper-apis/',
-    'Introducing APIs for GPT-3.5 Turbo and Whisper',
+    'Introducing ChatGPT and Whisper APIs',
     NULL, NULL, NULL, 'always',
     ARRAY['GPT-3.5 Turbo', 'text-davinci-003', 'text-davinci-002', 'code-davinci-002']
 )
@@ -114,6 +116,13 @@ ON CONFLICT (slug) DO UPDATE SET
     abstract_linking = EXCLUDED.abstract_linking,
     aliases = EXCLUDED.aliases,
     updated_at = CURRENT_TIMESTAMP;
+
+-- "ChatGPT-4o", "ChatGPT-4" and "ChatGPT-5" name the underlying model; as
+-- longer keywords they win the keyword linker's longest match over "ChatGPT".
+UPDATE methods SET keywords = keywords || ', ' || v.keyword, updated_at = CURRENT_TIMESTAMP
+FROM (VALUES ('gpt-4o', 'ChatGPT-4o'), ('gpt-4', 'ChatGPT-4'), ('gpt-5', 'ChatGPT-5')) AS v(slug, keyword)
+WHERE methods.slug = v.slug
+  AND NOT (v.keyword = ANY (string_to_array(replace(methods.keywords, ', ', ','), ',')));
 
 INSERT INTO paper_methods (paper_id, method_id)
 SELECT source_paper_id, id FROM methods
