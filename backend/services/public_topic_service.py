@@ -35,8 +35,7 @@ from backend.services.research_topic_service import THRESHOLD
 BUBBLE_LIMIT = 20
 BUBBLE_MIN_RECENT_PAPERS = 5
 RECENT_DAYS = 30
-# The homepage features the most followed topics as cards with this week's papers.
-FEATURED_COUNT = 3
+# Popular topics show as cards with this week's papers, on the homepage and in the feed editor.
 FEATURED_DAYS = 7
 FEATURED_AVATARS = 3
 INDEX_MIN_FOLLOWERS = 3
@@ -74,7 +73,7 @@ ORDER BY followers DESC, recent DESC, id
 LIMIT :limit
 """
 
-# Weekly stats and faces for the few topics the homepage features as cards.
+# Weekly stats and faces for the popular topic cards.
 FEATURED_SQL = """
 SELECT t.id, count(w.id) week_papers,
  (array_agg(w.id ORDER BY w.score DESC, w.date_published DESC, w.id DESC))[1] top_paper_id,
@@ -240,9 +239,8 @@ def bubbles(db: Session, now: datetime) -> list[TopicBubble]:
 def with_featured_stats(
     db: Session, topics: list[TopicBubble], now: datetime
 ) -> list[TopicBubble]:
-    """Add this week's papers and a few followers' faces to the top topics."""
-    featured = topics[:FEATURED_COUNT]
-    if not featured:
+    """Add this week's papers, the top paper and a few followers' faces to each topic."""
+    if not topics:
         return topics
     week = (now - timedelta(days=FEATURED_DAYS)).date()
     stats = {
@@ -253,7 +251,7 @@ def with_featured_stats(
                 "threshold": THRESHOLD,
                 "week": week,
                 "avatars": FEATURED_AVATARS,
-                "ids": [topic.id for topic in featured],
+                "ids": [topic.id for topic in topics],
             },
         ).mappings()
     }
@@ -271,7 +269,7 @@ def with_featured_stats(
             )
         )
     }
-    for topic in featured:
+    for topic in topics:
         row = stats[topic.id]
         topic.week_papers = row["week_papers"]
         topic.follower_avatars = [person(name) for name in row["avatars"]]
