@@ -15,7 +15,6 @@ from pathlib import Path
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# Setup logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
@@ -28,14 +27,12 @@ def main():
     logger.info("Running Dataset Variants and Splits Migration")
     logger.info("=" * 80)
 
-    # Read the SQL migration file
     migration_file = Path(__file__).parent / "add_dataset_variants_and_splits.sql"
     logger.info(f"Reading migration from: {migration_file}")
 
     with open(migration_file, "r") as f:
         migration_sql = f.read()
 
-    # Database connection parameters
     db_params = {
         "host": os.getenv("PWC_DB_HOST", "localhost"),
         "port": os.getenv("PWC_DB_PORT", "5432"),
@@ -45,20 +42,16 @@ def main():
     }
 
     try:
-        # Connect to database
         logger.info("Connecting to database...")
         conn = psycopg2.connect(**db_params)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Execute the migration
         logger.info("Executing migration SQL...")
         cursor.execute(migration_sql)
 
-        # Commit changes
         conn.commit()
         logger.info("Migration committed successfully!")
 
-        # Verify the changes
         logger.info("\nVerifying migration...")
         cursor.execute("""
             SELECT column_name, data_type
@@ -73,7 +66,6 @@ def main():
         for col in columns:
             logger.info(f"  - {col[0]}: {col[1]}")
 
-        # Check views
         cursor.execute("""
             SELECT table_name
             FROM information_schema.views

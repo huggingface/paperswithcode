@@ -127,7 +127,6 @@ def test_replace_day_imports_matches_and_reports_unresolved(db):
     stored = {entry.paper_id: entry.rank for entry in db.query(PaperXTrending).all()}
     assert stored == {1: 1, 5: 2, 6: 3}
 
-    # Re-running a day replaces its rows instead of accumulating them.
     replace(db, date(2026, 10, 30), [row(1, arxiv_id="2610.00002")])
     assert [entry.paper_id for entry in db.query(PaperXTrending).all()] == [2]
 

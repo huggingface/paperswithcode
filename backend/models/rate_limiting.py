@@ -12,7 +12,6 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from abc import ABC
 
-# Set up logging
 logger = logging.getLogger(__name__)
 
 
@@ -40,16 +39,14 @@ class RateLimitingMixin(ABC):
         """
         super().__init__(**kwargs)
 
-        # Rate limiting configuration
         self.requests_per_minute = requests_per_minute
         self.requests_per_day = requests_per_day
         self.request_times = []
         self.daily_requests = 0
         self.last_reset = datetime.now().date()
 
-        # Retry configuration
         self.max_retries = 3
-        self.base_delay = 1.0  # Base delay for exponential backoff
+        self.base_delay = 1.0
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """Check if the error is a rate limit error."""
@@ -58,7 +55,7 @@ class RateLimitingMixin(ABC):
             "rate limit" in error_str
             or "429" in error_str
             or "too many requests" in error_str
-            or "resource_exhausted" in error_str  # Gemini-specific
+            or "resource_exhausted" in error_str
         )
 
     def _is_quota_exceeded_error(self, error: Exception) -> bool:
@@ -112,13 +109,11 @@ class RateLimitingMixin(ABC):
         """Check and enforce rate limits."""
         now = datetime.now()
 
-        # Reset daily counter
         if now.date() > self.last_reset:
             self.daily_requests = 0
             self.last_reset = now.date()
             logger.info(f"🔄 Daily counter reset. New day: {now.date()}")
 
-        # Check daily limit
         if self.daily_requests >= self.requests_per_day:
             wait_until = datetime.combine(
                 now.date() + timedelta(days=1), datetime.min.time()
@@ -131,7 +126,6 @@ class RateLimitingMixin(ABC):
                 f"Daily quota exceeded: {self.daily_requests}/{self.requests_per_day} requests used"
             )
 
-        # Check per-minute limit
         minute_ago = now - timedelta(minutes=1)
         self.request_times = [t for t in self.request_times if t > minute_ago]
 
@@ -149,13 +143,11 @@ class RateLimitingMixin(ABC):
         """Handle rate limit errors with exponential backoff."""
         error_str = str(error)
 
-        # Try to parse retry delay from error message
         retry_delay = self._parse_retry_delay(error_str)
 
         if retry_delay:
             delay = retry_delay
         else:
-            # Exponential backoff: 1s, 2s, 4s, 8s...
             delay = self.base_delay * (2**attempt)
 
         logger.warning(
@@ -170,13 +162,11 @@ class RateLimitingMixin(ABC):
         """Handle service unavailable errors with exponential backoff."""
         error_str = str(error)
 
-        # Try to parse retry delay from error message
         retry_delay = self._parse_retry_delay(error_str)
 
         if retry_delay:
             delay = retry_delay
         else:
-            # Shorter exponential backoff for service issues: 1s, 2s, 4s...
             delay = self.base_delay * (2**attempt)
 
         logger.warning(
@@ -202,10 +192,8 @@ class RateLimitingMixin(ABC):
         """
         for attempt in range(self.max_retries):
             try:
-                # Check rate limits before making request
                 await self._check_rate_limits()
 
-                # Execute the actual API call
                 result = await api_call_func(*args, **kwargs)
 
                 logger.debug(
@@ -214,7 +202,6 @@ class RateLimitingMixin(ABC):
                 return result
 
             except Exception as e:
-                # Handle different types of errors
                 if self._is_rate_limit_error(e):
                     if attempt < self.max_retries - 1:
                         await self._handle_rate_limit_error(e, attempt)
@@ -231,7 +218,6 @@ class RateLimitingMixin(ABC):
                     logger.error(f"❌ Quota exceeded: {e}")
                     raise Exception(f"Daily quota exceeded: {e}")
                 else:
-                    # For other errors, retry with exponential backoff
                     if attempt == self.max_retries - 1:
                         raise e
                     else:

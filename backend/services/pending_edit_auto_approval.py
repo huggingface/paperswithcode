@@ -65,7 +65,6 @@ Payload = dict[str, Any]
 @dataclass(frozen=True)
 class AutoApprovalDecision:
     apply: bool
-    # Why the edit was held; None when it simply is not eligible or is applied.
     held_reason: str | None = None
 
     @property
@@ -195,8 +194,6 @@ class AutoApprovalPolicy:
             or ACADEMIC_HOST.search(host)
         ):
             return True
-        # LIKE only narrows the candidates; the hostname of each is compared
-        # exactly, so a host mentioned in a path or query string earns no trust.
         escaped = host.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         urls = (
             self.db.query(ProjectPage.url)
@@ -245,7 +242,6 @@ class AutoApprovalPolicy:
         if not removed:
             return None
         rows = self._auto_rows(hf_subject, now - timedelta(hours=24))
-        # Taking back one's own earlier additions is a correction, not a removal.
         own = set()
         for row in rows:
             if row.paper_id == paper_id and row.edit_type == edit_type:

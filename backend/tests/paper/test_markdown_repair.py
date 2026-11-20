@@ -207,7 +207,6 @@ def test_live_repair_fallback_prioritizes_missing_work_and_respects_mode(
             "retryable": missing_status == "deferred",
             "next_retry_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
         }
-    # Exhausted repairs must not be silently resubmitted by the fallback.
     statuses[f"_jobs/status/{papers[1]['arxiv_id']}.json"] = {
         "status": "failed",
         "schema_version": 2,
@@ -306,8 +305,6 @@ def test_full_lane_repairs_small_invalid_objects_outside_the_live_window(
     job._existing_paths = Mock(
         return_value={key: SimpleNamespace(size=size) for key, size in sizes.items()}
     )
-    # A paper still missing inside the live window belongs to the live lane and
-    # must not hold back full-lane repairs.
     job._copy_upstream = Mock(return_value=(fresh, 0))
     job._status_records = Mock(return_value={})
     job._semantic_records = Mock(
@@ -327,7 +324,6 @@ def test_full_lane_repairs_small_invalid_objects_outside_the_live_window(
     candidates = [
         item for item in job._launch.call_args.args[0] if not item.get("layout_only")
     ]
-    # Bounded, and the live lane alone repairs the recent window.
     assert len(candidates) == MODULE.LIVE_REPAIR_LIMIT
     assert {item["arxiv_id"] for item in candidates} <= {
         item["arxiv_id"] for item in small

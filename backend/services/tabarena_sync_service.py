@@ -76,14 +76,10 @@ MODEL_CELL_RE = re.compile(
 )
 CI_RE = re.compile(r"^\+[0-9]+(?:\.[0-9]+)?/-[0-9]+(?:\.[0-9]+)?$")
 
-# Exact upstream links that identify a local arXiv paper through another canonical
-# publication surface. Other non-arXiv links resolve only through curated source,
-# repository, project-page, or Hugging Face artifact associations in the database.
 URL_ARXIV_OVERRIDES = {
     "https://www.nature.com/articles/s41586-024-08328-6": "2207.01848",
     "https://github.com/LAMDA-Tabular/TabSwift": "2606.07345",
     "https://openreview.net/pdf?id=Y00pwFyrHR": "2608.01400",
-    # The release blog and subsequent technical report share this repository.
     "https://github.com/google-research/tabfm": "2609.37959",
 }
 
@@ -451,9 +447,6 @@ class TabArenaSyncService:
             )
             managed_by_name = {row.model_name: row for row in managed_rows}
             upstream_names = {entry.model_name for entry in entries}
-            # Links without an indexed paper go to the shared matcher; the rest
-            # become release-radar signals. A missing arXiv paper is a
-            # catalog gap reported separately, not an unknown model.
             unknown = {
                 entry.model_name: _leaderboard_model(entry)
                 for entry in entries
@@ -512,8 +505,6 @@ class TabArenaSyncService:
                 row.paper_id = paper_id
                 row.methodology = methodology
                 row.metrics = {METRIC_NAME: entry.elo}
-                # Upstream imputation estimates missing benchmark scores; it is
-                # not evidence that the model used additional training data.
                 row.uses_additional_data = False
                 row.is_open = "closed-source-api" not in entry.tags
                 row.best_metric = METRIC_NAME

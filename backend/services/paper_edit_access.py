@@ -45,8 +45,6 @@ class PaperEditAccess:
         self.db = db
 
     def lock_account(self, subject: str) -> None:
-        # Transaction-scoped and shared across all processes. Always acquire this
-        # before a paper lock, including when suspending or approving a grant.
         if self.db.bind.dialect.name == "postgresql":
             key = int.from_bytes(
                 sha256(f"paper-edit:{subject}".encode()).digest()[:8],

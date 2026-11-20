@@ -10,11 +10,11 @@ from pydantic import BaseModel
 class Message(BaseModel):
     """Message model for generator inputs."""
 
-    role: str  # "user" or "assistant"
-    content: Union[str, List[str]]  # Text content, can be string or list of strings
-    image_paths: Optional[List[str]] = None  # Optional list of image file paths
-    image_urls: Optional[List[str]] = None  # Optional list of image URLs
-    pdf_path: Optional[str] = None  # Optional PDF file path
+    role: str
+    content: Union[str, List[str]]
+    image_paths: Optional[List[str]] = None
+    image_urls: Optional[List[str]] = None
+    pdf_path: Optional[str] = None
 
 
 class Generator(ABC):

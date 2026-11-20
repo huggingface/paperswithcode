@@ -218,7 +218,6 @@ def test_due_selection_refreshes_recent_papers_before_older_ones(tmp_path):
     with session_factory() as db:
         db.add_all(
             [
-                # Old paper, zero citations, refreshed longest ago.
                 _paper(
                     1,
                     citation_count=0,
@@ -255,7 +254,6 @@ def test_due_selection_refreshes_recent_papers_before_older_ones(tmp_path):
 
         rows = PaperCitationRefreshService(db).pending_chunk(0, 5, 7)
 
-    # Never refreshed, then the last year oldest-refresh first, then the rest.
     assert [row["id"] for row in rows] == [4, 3, 2, 1, 5]
 
 
@@ -303,7 +301,6 @@ def test_early_refresh_picks_oldest_not_yet_due_arxiv_papers(tmp_path):
 
         assert service.count_refreshable() == 4
         rows = service.refresh_ahead_chunk(5, 7)
-        # Due and never-refreshed papers belong to the regular pending set.
         assert [row["id"] for row in rows] == [3, 2]
 
 

@@ -80,16 +80,12 @@ def _unique(entries: list[LeaderboardEntry], what: str) -> None:
         raise ValueError(f"{what} lists {duplicates!r} twice")
 
 
-# --- Vals Index -------------------------------------------------------------
-
 VALS_HEADER = ("Rank", "Model", "Accuracy")
 
 
 def parse_vals_index(html: str) -> list[LeaderboardEntry]:
     if not isinstance(html, str) or not html.strip():
         raise TypeError("Vals Index response must be non-empty HTML")
-    # The page also has a per-sector breakdown table; the ranked table is
-    # the one whose header starts with Rank / Model / Accuracy.
     tables = []
     for table in BeautifulSoup(html, "html.parser").find_all("table"):
         rows = table.find_all("tr")
@@ -121,8 +117,6 @@ def parse_vals_index(html: str) -> list[LeaderboardEntry]:
     check_entry_count(entries, "Vals Index", 15, 400)
     return entries
 
-
-# --- SWE-sweep --------------------------------------------------------------
 
 SWE_SWEEP_HARNESS = "mini-SWE-agent"
 _SWE_SWEEP_RESULTS = re.compile(r"(?<![\w.$])(\w+)\s*=\s*\[\s*\{\s*\"model\"")
@@ -160,10 +154,7 @@ def parse_swe_sweep(html: str) -> list[LeaderboardEntry]:
     return entries
 
 
-# --- Andon Labs: Vending-Bench 2 and Blueprint-Bench 2 ------------------------
-
 _SCRIPT_URL = re.compile(r'(?:href|src)="([^"]*/_app/immutable/[^"]+\.js)"')
-# Minified object literal before 2026-11-02, a JSON.parse string since.
 _VB2_RUNS = re.compile(r'(?<![\w$"])(?:vb2|"vb2"):\{')
 _NODE_IDS = re.compile(r"node_ids:\s*\[([\d,\s]+)\]")
 
@@ -209,12 +200,7 @@ def fetch_vending_bench_2(client: httpx.Client | None = None) -> list[Leaderboar
             httpx.URL(VENDING_BENCH_2_URL).join(url)
             for url in _SCRIPT_URL.findall(page)
         ]
-        # Start from the page's route modules and follow their imports to
-        # the shared chunk that holds the run data.
         queue = [url for url in scripts if "/nodes/" in url.path]
-        # Since 2026-11-02 the page preloads only its layout nodes; the
-        # route's own node is named by hydration's node_ids and resolved
-        # through the app entry's node table.
         node_ids = _NODE_IDS.search(page)
         app = next((url for url in scripts if "/entry/app." in url.path), None)
         if node_ids and app is not None:
@@ -267,8 +253,6 @@ def parse_blueprint_bench_2(html: str) -> list[LeaderboardEntry]:
         if len(cells) != 3 or not cells[1] or len(cells[1]) > 200:
             raise ValueError(f"Blueprint-Bench 2 row is malformed: {cells!r}")
         _, name, score = cells
-        # "Human*" is a 12-apartment baseline; "0.000**" marks scores at or
-        # below the random baseline, which the board does not rank.
         if name.endswith("*") or score.endswith("**"):
             continue
         try:
@@ -284,8 +268,6 @@ def parse_blueprint_bench_2(html: str) -> list[LeaderboardEntry]:
     check_entry_count(entries, "Blueprint-Bench 2", 10, 300)
     return entries
 
-
-# --- Surge AI: Riemann-Bench ------------------------------------------------
 
 RIEMANN_TITLE = "Riemann-bench Leaderboard"
 _CONFIGURATION = re.compile(r"^(?P<model>.+?) \((?P<configuration>[^()]+)\)$")
@@ -318,13 +300,9 @@ def parse_riemann_bench(html: str) -> list[LeaderboardEntry]:
             (match["model"], match["configuration"]) if match else (_text(name), "")
         )
         brand_text = _text(brand)
-        # "Gemini" + "4 Argon" is Gemini 4 Argon; "Hy" + "Hy4 Preview" and
-        # "Inkling" + "Inkling" already name the model.
         label = model if model.startswith(brand_text) else f"{brand_text} {model}"
         if not label or len(label) > 200:
             raise ValueError(f"Riemann-Bench row {position} is malformed")
-        # The data-score attribute is empty on this board; the visible text
-        # carries the percentage.
         value = _percent(
             _text(score.parent).replace(" ", ""), f"Riemann-Bench {label!r}"
         )
@@ -342,10 +320,6 @@ def parse_riemann_bench(html: str) -> list[LeaderboardEntry]:
     return entries
 
 
-# --- Collinear AI: CWE-bench v2 ----------------------------------------------
-
-# v2 replaced v1 on 2026-11-02; v1 is a frozen archive at /v1 and its board
-# (cwe-bench-v1) is no longer synced.
 CWE_LIST_NAME = "CWE-bench v2 leaderboard"
 _CWE_DESCRIPTION = re.compile(
     r"^pass@1 (?P<pass1>\d+(?:\.\d+)?)%, "
@@ -391,9 +365,6 @@ def parse_cwe_bench(html: str) -> list[LeaderboardEntry]:
     return entries
 
 
-# --- ExploitGym ---------------------------------------------------------------
-
-# Only full-set runs under the board's 6-hour budget are comparable.
 EXPLOITGYM_PROTOCOLS = ("6h timeout", "rescaled 6h timeout")
 _PARENTHETICAL = re.compile(r"\s*[\\]?\(.*$")
 
@@ -437,10 +408,6 @@ def parse_exploitgym(text: str) -> list[LeaderboardEntry]:
     return entries
 
 
-# --- CyberGym -----------------------------------------------------------------
-
-# Feature labels the site's default "Model-focused" view leaves out: runs
-# against the cleaned vulnerable image, or with a test-time knowledge base.
 CYBERGYM_EXCLUDED_FEATURES = ("dynamic", "test-time mem.")
 
 
@@ -453,7 +420,6 @@ def parse_cybergym(text: str, now: datetime | None = None) -> list[LeaderboardEn
     now = now or datetime.now(UTC)
     entries = []
     for row in rows:
-        # The page ranks single-trial rows that are not held back.
         if row.get("trials") != 1 or row.get("hidden"):
             continue
         if (row.get("focus") or "model") != "model":
@@ -487,12 +453,9 @@ def parse_cybergym(text: str, now: datetime | None = None) -> list[LeaderboardEn
     return entries
 
 
-# --- PatchEval-Verified ---------------------------------------------------------
-
 PATCHEVAL_HEADING = "## 📈 Results on PatchEval-Verified"
 PATCHEVAL_HEADER = ("Agent", "Model", "Pass@1")
 PATCHEVAL_CASES = 230
-# README agent labels -> the CLI names used as harness on other boards.
 PATCHEVAL_HARNESSES = {"codex": "Codex", "opencode": "OpenCode", "trae": "Trae CLI"}
 _PATCHEVAL_SCORE = re.compile(r"(\d+)/(\d+) \(([\d.]+)%\)")
 
@@ -531,10 +494,6 @@ def parse_patcheval_verified(markdown: str) -> list[LeaderboardEntry]:
     return entries
 
 
-# --- Artificial Analysis evaluation pages (CritPt, CritPt v2) ---------------
-
-# The pages are server-rendered Next.js; the model records arrive as JSON text
-# in ``self.__next_f.push([1, "..."])`` script chunks.
 _RSC_CHUNK = re.compile(r'self\.__next_f\.push\(\[1,("(?:[^"\\]|\\.)*")\]\)')
 
 
@@ -611,19 +570,11 @@ def parse_terminal_bench_science(html: str) -> list[LeaderboardEntry]:
     )
 
 
-# Models whose own release reports a CritPt score already on the board; the
-# self-reported row stays and the Artificial Analysis rerun is left out.
 CRITPT_SELF_REPORTED = {
     "K2 Horizon 375B A23B": "self-reported row from the K2 Horizon release is kept",
     "Nemotron 3.5 Super VL": "self-reported row from the model card is kept",
     "Beam 1.0": "self-reported row from Reflection's Beam release is kept",
 }
-
-
-# --- Board registry -----------------------------------------------------------
-# Every board on the shared engine, including the ones defined in their own
-# modules (Vals AI Finance Agent v2, Surge AI Chartography, SWE-Marathon,
-# JevBench, RSI-Exam).
 
 
 @dataclass(frozen=True)
@@ -666,8 +617,6 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             identities=IDENTITIES["swe-sweep"],
             min_selected=5,
             excluded={
-                # 11/116 is not a whole number of bugs out of 4,068, and the
-                # site's FAQ says Astra 6 has not been evaluated: a partial run.
                 "Astra 6": "partial run (about 93 of 100 repositories)",
             },
             protocol="Share of all 4,068 bugs resolved (hidden fix tests plus the existing suite), mini-SWE-agent, 1,000 steps / 12 h per repository.",
@@ -716,12 +665,10 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             identities=IDENTITIES["riemann-bench"],
             min_selected=15,
             excluded={
-                # Its catalog paper was deleted; Chartography excludes it too.
                 "DeepSeek V4 Flash Vision (experimental)": "experimental variant without a release",
             },
             protocol="25 private research-level problems with programmatic answer checks (v1.1 answer keys); agents have coding tools and web search.",
         ),
-        # Surge's Webflow host rejects non-browser user agents.
         _fetching(
             RIEMANN_BENCH_URL, parse_riemann_bench, surge_chartography.USER_AGENT
         ),
@@ -767,7 +714,6 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             excluded={
                 "XekRung-1.5-27B-Preview (finetuned from Qwen3.8-27B)": "unreleased preview checkpoint, still being trained",
                 "Basin (basin1-0912-pre-dpo)": "pre-DPO training checkpoint",
-                # The April preview; its 0813 successor is reviewed.
                 "DeepSeek-V4-Pro Preview": "superseded preview checkpoint",
                 "OpenHands-LM-32B": "v0.1 research preview",
             },
@@ -828,7 +774,6 @@ BOARD_SYNCS: dict[str, BoardSync] = {
             metric="Accuracy",
             identities=IDENTITIES["terminal-bench-science-0-1"],
             min_selected=10,
-            # Vendors' own runs (Claude Code, unnamed harnesses) stay as they are.
             adopt_unmanaged=False,
             protocol="All 70 Terminal-Bench-Science 0.1.0 tasks (life, physical, mathematical, engineering and earth science), run with the mini-swe-agent harness; pass@1 averaged over three repeats per task; independent evaluation by Artificial Analysis.",
         ),

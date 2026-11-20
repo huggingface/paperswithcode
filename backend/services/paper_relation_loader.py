@@ -56,11 +56,9 @@ from backend.services.abstract_link_service import abstract_sha, catalog_preview
 from backend.utils.organization_logos import organization_logo_path
 from backend.utils.urls import get_method_source_url, get_paper_route_identifier
 
-# Paper cards show the first three author names (frontend PaperCard).
 CARD_AUTHOR_LINKS = 3
 
 
-# Per-kind cap on stored Hub links returned with detail resources.
 LINKED_HF_ARTIFACT_LIMIT = 100
 
 
@@ -213,7 +211,7 @@ class PaperRelationLoader:
         for mention in current:
             preview = previews.get((mention.entity_type, mention.entity_id))
             if preview is None:
-                continue  # entity deleted since it was judged
+                continue
             relations.abstract_mentions.setdefault(mention.paper_id, []).append(
                 AbstractMention(
                     start=mention.start_offset,
@@ -506,7 +504,6 @@ class PaperRelationLoader:
         )
         for paper_id, author_id, author_name, hf_username, hf_avatar_url in author_rows:
             _append_relation(relations.authors, paper_id, author_name)
-            # Cards link only the names they display, keeping long author lists out of feeds.
             links = relations.author_links.get(paper_id, ())
             if author_link_limit is None or len(links) < author_link_limit:
                 _append_relation(

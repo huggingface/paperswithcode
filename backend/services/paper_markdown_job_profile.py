@@ -73,10 +73,6 @@ class PaperMarkdownJobProfile:
         return payload
 
 
-# Six retained successful production shards included four 100-paper runs; the
-# slowest finished in 17,220 seconds (4.78h). The 7h hard bound leaves 2.22h
-# above that observed maximum, while the 6.5h worker deadline preserves a
-# 30-minute checkpoint/cleanup margin and a $12.60 worst-case reservation.
 PAPER_MARKDOWN_LIVE_JOB_PROFILE = PaperMarkdownJobProfile(
     profile_id="live-v1",
     mode="live",
@@ -93,10 +89,6 @@ PAPER_MARKDOWN_BACKFILL_JOB_PROFILE = PaperMarkdownJobProfile(
     soft_deadline_seconds=int(6.5 * 3600),
     concurrency=4,
 )
-# The fresh lane is a live-mode slot pair for papers indexed in the last day,
-# so reader chat gets page-tagged layout within minutes instead of waiting
-# behind a 100-paper live shard (~3h). A five-paper live shard ran 10 minutes
-# on 2026-10-25, model start-up included; 2h leaves ample margin at $3.60.
 PAPER_MARKDOWN_FRESH_JOB_PROFILE = PaperMarkdownJobProfile(
     profile_id="live-fresh-v1",
     mode="live",

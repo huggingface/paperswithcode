@@ -17,12 +17,8 @@ from backend.utils.latex_text import latex_to_plain_text
 PRODUCTION_ORIGIN = "https://paperswithcode.co"
 SEARCH_DESCRIPTION_CHARS = 175
 SOCIAL_DESCRIPTION_CHARS = 280
-# Results pages rank for "<model> benchmarks" queries; keep the name and list
-# within what search engines show before " | Papers with Code".
 BENCHMARK_TITLE_NAME_CHARS = 40
 BENCHMARK_TITLE_CHARS = 75
-# Curated classification overrides are deliberately explicit and factual.
-# Move these into a normalized paper field when document types become editable.
 DOCUMENT_TYPE_OVERRIDES = {
     "2607.24653": "Technical Report",
 }
@@ -147,7 +143,6 @@ def _benchmark_title(title: str, benchmark_names: Iterable[str]) -> Optional[str
     heading = f"{prefix} benchmarks: "
     chosen: list[str] = []
     for label in labels:
-        # One entry per benchmark family: LIBERO covers LIBERO-Long etc.
         if any(label.startswith(f"{parent}-") for parent in chosen):
             continue
         if len(heading + ", ".join([*chosen, label])) > BENCHMARK_TITLE_CHARS:

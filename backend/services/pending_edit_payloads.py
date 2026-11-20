@@ -297,8 +297,6 @@ def _validate_new_benchmark(payload: Payload) -> Payload:
             raise PendingEditError("Benchmark 'description' is required")
         return output
 
-    # Preserve review compatibility for submissions created before benchmark
-    # and task names became free-text administrative fields.
     output = _suggestion_base(payload)
     if "description" not in output:
         raise PendingEditError("Benchmark 'description' is required")
@@ -460,8 +458,6 @@ def _validate_evaluation_operation(operation: Any) -> Payload:
         data = operation.get("data")
         if not isinstance(data, dict):
             raise PendingEditError("Evaluation operation needs a 'data' object")
-        # Pending proposals retain their stricter structural admission policy;
-        # canonical models own field types, URL normalization and patch presence.
         for field in ("task_id", "dataset_id"):
             if field in data and data[field] is not None:
                 if type(data[field]) is not int or data[field] <= 0:
@@ -485,7 +481,6 @@ def _validate_evaluation_operation(operation: Any) -> Payload:
             if not isinstance(best_metric, str) or not best_metric.strip():
                 raise PendingEditError("best_metric must be nonblank")
         model = EvaluationCreateData if kind == "create" else EvaluationUpdateRequest
-        # Unknown internal flags cannot override the presence of supplied fields.
         output["data"] = model.model_validate(data).model_dump(
             mode="json", exclude_unset=True
         )

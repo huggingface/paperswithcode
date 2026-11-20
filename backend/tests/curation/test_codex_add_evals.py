@@ -89,8 +89,6 @@ def test_release_manifest_pins_remote_worker_revision(tmp_path):
 
 def test_remote_job_uses_immutable_curator_image():
     settings = get_settings()
-    # Each deployment pins its own curator image; production's pin lives in
-    # the host-environment tooling, not in the application defaults.
     assert settings.codex_jobs_image == ""
     assert "@sha256:" in production_codex_image_values()["PWC_CODEX_JOBS_IMAGE"]
     assert settings.codex_jobs_image_revision == ""
@@ -124,7 +122,6 @@ def test_curator_bootstrap_allowlist_matches_service_bundle(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_removed_leaderboards(monkeypatch):
-    # These fake sessions do not model the tombstone aggregate query.
     monkeypatch.setattr(
         "backend.services.codex_curation_callback_service."
         "CodexCurationCallbackService._removed_leaderboards",
@@ -196,7 +193,6 @@ def test_runner_completion_survives_a_lost_response(monkeypatch, runner_module):
         calls.append((path, method, timeout))
         if len(calls) == 1:
             raise runner_module.http.client.RemoteDisconnected("closed")
-        # The first attempt reached the server, so the job is already terminal.
         raise urllib.error.HTTPError("url", 401, "Invalid", {}, io.BytesIO())
 
     monkeypatch.setattr(runner_module, "_send", send)
@@ -481,8 +477,6 @@ def test_remote_curation_reads_external_release_pages_as_the_paper():
         .split()
     )
 
-    # Blog-only external papers have no Markdown/PDF; the release page is the
-    # paper, so enrichment must still tag tasks and add official Hub repos.
     assert "the `paper_source` document is the paper" in skill
     assert "The missing Markdown or PDF is not missing evidence." in skill
     assert "is the release's own model card" in skill
@@ -510,8 +504,6 @@ def test_remote_add_evals_fills_parameter_count_and_hub_url():
         .split()
     )
 
-    # Scheduled add-evals rows were stored without sizes because only
-    # benchmark-gap rows were told about these fields.
     assert "Set `num_parameters` and `hf_model_url` on every new evaluation" in skill
     assert "raw integer `safetensors.total`" in skill
     assert "never copy them from a sibling size, a base model, or a headline" in skill

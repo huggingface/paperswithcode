@@ -51,8 +51,6 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# The leaderboard object of sciences-last-exam.org on 2026-11-16 (board
-# updated 2026-11-10), without the source-file checksums.
 FIXTURE_TEXT = (Path(__file__).parent / "fixtures" / "sle_data.js").read_text()
 BUNDLE = "assets/data.946b0c6822a31f7c.js"
 TASK_ID = 992
@@ -166,11 +164,9 @@ def test_parse_splits_every_assessment_into_its_own_board():
         "3.33",
         "Claude Code",
     )
-    # The composite rounds half up to the two decimals the site shows.
     composite = _values(boards["science-s-last-exam-sle"])
     assert composite["GPT-6.1 Sol"] == ("44.66", "Codex")
     assert composite["Claude Opus 5"] == ("37.50", "Claude Code")
-    # Hypothesis Discovery runs in the benchmark's own research harness.
     assert {entry.harness for entry in boards["sle-hypothesis-discovery"]} == {
         "DiscoveryRSI"
     }
@@ -188,7 +184,6 @@ def test_parse_splits_every_assessment_into_its_own_board():
 
 def test_provisional_scores_and_their_composites_are_skipped():
     boards = _boards()
-    # Gemini 4 Argon's Hypothesis Discovery run is still in progress.
     assert "Gemini 4 Argon" not in _values(boards["sle-hypothesis-discovery"])
     assert "Gemini 4 Argon" not in _values(boards["science-s-last-exam-sle"])
     assert len(boards["sle-scientific-software-operation"]) == 9
@@ -248,7 +243,6 @@ def test_parser_enforces_model_bounds(monkeypatch):
 
 def test_first_run_adopts_hand_imported_rows_and_is_idempotent():
     session = _session()
-    # The 2026-11-16 hand import: same paper, model name and harness.
     session.add(
         Evaluation(
             paper_id=_paper_id(MODEL_IDENTITIES["GPT-6.1 Sol"].paper_key),

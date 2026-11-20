@@ -93,7 +93,6 @@ def _save_topic(
 ) -> TopicView:
     now = datetime.now(timezone.utc)
     text = _topic_text(body)
-    # A topic named like a catalog task, method or benchmark duplicates following it.
     matches = research_topic_service.suggestions(db, text)
     if matches:
         raise HTTPException(
@@ -132,7 +131,6 @@ def add_topic(
     return _save_topic(db, request, user["hf_subject"], body, None)
 
 
-# Declared before /me/topics/{topic_id} so "order" is not read as an id.
 @router.put("/me/topics/order", response_model=list[TopicView])
 def reorder_topics(
     body: TopicOrderUpdate,
@@ -235,7 +233,6 @@ def topic_matches(
     return research_topic_service.suggestions(db, text)
 
 
-# Declared before /research/topics/{topic_id} so "featured" is not read as an id.
 @router.get("/research/topics/featured", response_model=list[TopicBubble])
 def featured_topics(response: Response, db: Session = Depends(get_database_session)):
     response.headers["Cache-Control"] = "public, max-age=600"
@@ -284,8 +281,6 @@ def public_topic_papers(
         raise HTTPException(404, "Topic not found") from exc
 
 
-# Single-topic endpoints from before accounts could follow several: they read
-# and replace the account's first topic, and DELETE removes every topic.
 @router.get("/me/topic", response_model=TopicView | None)
 def topic(
     user: dict = Depends(require_user), db: Session = Depends(get_database_session)
@@ -464,7 +459,6 @@ def update_email(
 
 @router.get("/research/unsubscribe/{token}", response_class=HTMLResponse)
 def unsubscribe_page(token: str):
-    # GET is a confirmation page: email-link scanners must not opt users out.
     return '<h1>Unsubscribe from weekly research emails</h1><form method="post"><button>Unsubscribe</button></form>'
 
 

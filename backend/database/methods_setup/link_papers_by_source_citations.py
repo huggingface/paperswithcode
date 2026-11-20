@@ -40,13 +40,11 @@ from backend.models.database import Method, Paper
 SEMANTIC_SCHOLAR_BASE_URL = "https://api.semanticscholar.org/graph/v1"
 CITATIONS_FIELDS = "citingPaper.paperId,citingPaper.externalIds,citingPaper.title"
 REFERENCES_FIELDS = "citedPaper.paperId,citedPaper.externalIds,citedPaper.title"
-DEFAULT_PAGE_SIZE = 1000  # Semantic Scholar maximum.
-DEFAULT_REQUEST_DELAY = 1.5  # Conservative; matches the existing hourly cron.
+DEFAULT_PAGE_SIZE = 1000
+DEFAULT_REQUEST_DELAY = 1.5
 DEFAULT_BATCH_SIZE = 500
 DEFAULT_SAMPLE_UNMATCHED = 5
 DEFAULT_MAX_RETRIES = 5
-# Semantic Scholar enforces ``offset + limit < 10000`` on the citations endpoint,
-# so we can never page past index 9_999 for any single source paper.
 SEMANTIC_SCHOLAR_CITATIONS_HARD_CAP = 9999
 
 ARXIV_VERSION_RE = re.compile(r"v\d+$")
@@ -224,7 +222,6 @@ class SemanticScholarClient:
                 if remaining <= 0:
                     return
                 limit = min(page_size, remaining)
-            # Stay strictly below Semantic Scholar's offset+limit ceiling.
             limit = min(limit, SEMANTIC_SCHOLAR_CITATIONS_HARD_CAP - offset)
             if limit <= 0:
                 return

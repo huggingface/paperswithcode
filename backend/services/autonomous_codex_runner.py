@@ -1274,8 +1274,6 @@ class AutonomousCodexRunner:
         revision = self.environ.get("PWC_AUTONOMOUS_CODEX_PRICING_REVISION", "").strip()
         if _CODE.fullmatch(revision) is None:
             raise RuntimeError("Autonomous Codex pricing is not configured")
-        # Alias names intentionally differ from model slugs; pricing is selected by
-        # the same closed server alias that selects the model.
         prefix = (
             "PWC_AUTONOMOUS_CODEX_LUNA"
             if model_alias == "diagnosis"

@@ -12,7 +12,6 @@ from typing import Dict, List
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# Add backend to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from backend.config import get_settings
@@ -33,8 +32,6 @@ REVIEW_ONLY_ALIASES = {
 def get_database_connection():
     """Get a psycopg2 database connection."""
     settings = get_settings()
-    # Parse the database URL to extract connection parameters
-    # URL format: postgresql://user:password@host:port/database
     url = settings.database_url.replace("postgresql://", "")
     user_pass, host_port_db = url.split("@")
     user, password = user_pass.split(":")
@@ -275,7 +272,6 @@ def validate_best_metrics(cursor, dry_run=True) -> int:
     Returns:
         Number of evaluations updated
     """
-    # Find evaluations without best_metric
     cursor.execute("""
         SELECT id, model_name, metrics
         FROM evaluations
@@ -298,14 +294,11 @@ def validate_best_metrics(cursor, dry_run=True) -> int:
         model_name = eval_row["model_name"]
         metrics = eval_row["metrics"]
 
-        # Determine best metric based on available metrics
-        # Priority: box AP > AP > any other metric
         if "box AP" in metrics:
             best_metric = "box AP"
         elif "AP" in metrics:
             best_metric = "AP"
         else:
-            # Use the first metric key
             best_metric = next(iter(metrics.keys())) if metrics else None
 
         if best_metric:
@@ -353,7 +346,6 @@ def main():
         conn = get_database_connection()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Run validations
         print("\n1. Auditing metric labels against leaderboard definitions...")
         metric_label_issues = audit_metric_labels(cursor)
 
@@ -363,12 +355,10 @@ def main():
         print("\n3. Checking for missing best_metric values...")
         updated_best_metrics = validate_best_metrics(cursor, dry_run=dry_run)
 
-        # Commit changes if not dry run
         if not dry_run:
             conn.commit()
             print("\n✓ All changes committed to database")
 
-        # Summary
         print("\n" + "=" * 60)
         print("Summary:")
         print(f"  Metric labels needing review: {metric_label_issues}")

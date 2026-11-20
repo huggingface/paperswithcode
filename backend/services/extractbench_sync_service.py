@@ -34,7 +34,6 @@ from backend.services.leaderboard_sync_catalog import (
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.paper_ingestion_service import PaperIngestionService
 
-# The README leaderboard and grounding tables are both rendered from this CSV.
 EXTRACTBENCH_CSV_URL = (
     "https://raw.githubusercontent.com/run-llama/ExtractBench/main/leaderboard.csv"
 )
@@ -59,10 +58,7 @@ REQUIRED_COLUMNS = frozenset(
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("ExtractBench")
 MIN_EXPECTED_ENTRIES = 30
 MAX_EXPECTED_ENTRIES = 400
-# Refuse to replace the managed leaderboard when the reviewed subset collapses.
 MIN_REVIEWED_ENTRIES = 20
-# Categories whose rows are single models; the rest are extraction products,
-# coding-agent harnesses and LlamaExtract tiers that need a reviewed identity.
 MODEL_CATEGORIES = frozenset({"Commercial VLM", "OSS"})
 
 
@@ -155,13 +151,8 @@ _QWEN_3_5 = external(
 )
 _INTERNVL_3_5 = arxiv("2508.18265")
 _GEMMA_4 = arxiv("2607.02770")
-# The ExtractBench paper is LlamaIndex's own report on its LlamaExtract tiers.
 _LLAMAEXTRACT = arxiv("2607.29677", is_open=False)
 
-# Exact upstream `Provider` labels are the trust boundary between a leaderboard
-# row and its reviewed introducing paper or official release page. Rows whose
-# label is not reviewed here stay unpublished and are reported by the job.
-# Coding-agent rows (Claude Code, Codex) resolve to the underlying model.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "LlamaExtract Agentic Plus": _LLAMAEXTRACT,
     "LlamaExtract Agentic": _LLAMAEXTRACT,
@@ -255,7 +246,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "InternVL3.5 14B": _INTERNVL_3_5,
     "MiniCPM-V 4.5": arxiv("2509.18154"),
     "Kimi-VL A3B": arxiv("2504.07491"),
-    # The GLM-4.6V model card cites the GLM-4.5V / GLM-4.1V-Thinking report.
     "GLM-4.6V Flash": arxiv("2507.01006"),
     "NuExtract3": external(
         "https://about.nuextract.ai/blog/nuextract-3-release",
@@ -287,8 +277,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     ),
 }
 
-# Extraction products without an introducing paper or official model release
-# page. They are reviewed exclusions, not unreviewed rows.
 EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
     {
         "Pulse (Effort)",
@@ -303,7 +291,6 @@ EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
         "Extend Max Context + Review Agent",
         "Extend Performance + Review Agent",
         "Parseur",
-        # Third-party extraction harnesses around a model, not model releases.
         "KYNEX (GPT-5.4)",
         "KYNEX (GPT-5.5)",
         "KYNEX (GPT-6.1 Sol)",
@@ -356,8 +343,6 @@ class ExtractBenchSyncStats:
 
 
 def _leaderboard_model(entry: ExtractBenchEntry) -> LeaderboardModel:
-    # The CSV has no lab column: take the lab of a known model family
-    # ("Qwen3.8 27B"), else the vendor the label leads with ("OpenAI GPT-6").
     return vendor_label_model(entry.provider)
 
 
@@ -547,8 +532,6 @@ class ExtractBenchSyncService:
                     f"ExtractBench has only {len(reviewed)} reviewed rows; refusing "
                     "to replace the managed leaderboard"
                 )
-            # New single-model rows are matched to an indexed paper; the rest
-            # become release-radar signals and match on a later run.
             matcher = LeaderboardModelMatcher(
                 self.db,
                 provider="extractbench",
@@ -556,7 +539,6 @@ class ExtractBenchSyncService:
                 leaderboard_url=EXTRACTBENCH_SOURCE_URL,
             )
             matched = matcher.match([_leaderboard_model(e) for e in new_models])
-            # (entry, paper id, is_open, HF model URL)
             publishable: list[tuple[ExtractBenchEntry, int, bool, str | None]] = []
             for entry in reviewed:
                 identity = MODEL_PAPER_IDENTITIES[entry.provider]
@@ -577,7 +559,6 @@ class ExtractBenchSyncService:
                     (
                         entry,
                         match.paper_id,
-                        # Upstream lists open-weight models as OSS.
                         entry.category == "OSS" or match.is_open,
                         match.hf_model_url,
                     )

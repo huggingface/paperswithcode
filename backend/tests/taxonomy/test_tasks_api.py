@@ -37,8 +37,6 @@ from backend.services.discovery_page_service import DiscoveryPageService
 from backend.database.tasks_setup.add_cvpr_coverage_tasks import ensure_task
 
 
-# Trending scores older than 24h are treated as missing, so test repos/papers
-# stamp a fresh timestamp to be eligible for the trending sort.
 _FRESH = datetime.now(timezone.utc)
 _STALE = datetime.now(timezone.utc) - timedelta(hours=48)
 
@@ -48,8 +46,6 @@ def _pin_trending_mode(monkeypatch, mode: str) -> None:
     monkeypatch.setattr(get_settings(), "trending_ranking_mode", mode)
 
 
-# The ORM uses Postgres-only types for unrelated columns; teach SQLite to
-# render them as TEXT so the schema can be created in-memory for tests.
 @compiles(ARRAY, "sqlite")
 def _compile_array_sqlite(_element, _compiler, **_kw):
     return "TEXT"
@@ -323,16 +319,13 @@ def tasks_with_uneven_paper_counts():
     db.commit()
 
     associations = [
-        # Language Modeling: 4 papers
         (1, 1),
         (2, 1),
         (3, 1),
         (4, 1),
-        # Robotics: 3 papers
         (1, 2),
         (5, 2),
         (6, 2),
-        # Object Detection: 1 paper
         (7, 3),
     ]
     db.add_all(
@@ -751,9 +744,6 @@ def test_task_papers_trending_orders_by_official_repo_trending_score(
 
     titles = [paper["title"] for paper in data["results"]]
 
-    # Papers 1 and 2 have official trending scores (10.0 and 2.5) and must
-    # come first, in that order. The remaining three papers have no
-    # qualifying official trending score and follow.
     assert titles[:2] == ["Paper 1", "Paper 2"]
     assert set(titles[2:]) == {"Paper 3", "Paper 4", "Paper 5"}
     assert data["count"] == 5
@@ -922,8 +912,6 @@ def test_task_papers_trending_composite_ranks_by_paper_score(
     data = response.json()
     titles = [paper["title"] for paper in data["results"]]
 
-    # Paper 1 (score 80) and Paper 2 (score 40) lead in that order; the stale
-    # and unscored papers follow without being dropped.
     assert titles[:2] == ["Paper 1", "Paper 2"]
     assert set(titles[2:]) == {"Paper 3", "Paper 4"}
     assert data["count"] == 4
@@ -942,9 +930,6 @@ def test_task_papers_trending_composite_puts_fresh_null_scores_last(
 
     _pin_trending_mode(monkeypatch, "composite")
 
-    # SQLite sorts NULLs last for DESC while production PostgreSQL sorts them
-    # first. Make this endpoint test reproduce the production dialect's NULL
-    # ordering so the regression remains visible in the in-memory test suite.
     def emulate_postgres_desc_null_ordering(
         _conn, _cursor, statement, parameters, _context, _executemany
     ):

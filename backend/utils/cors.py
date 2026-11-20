@@ -57,7 +57,6 @@ def install_cors(app: FastAPI, settings: Settings) -> None:
         cors_kwargs["allow_origin_regex"] = settings.extra_allowed_origin_regex
     app.add_middleware(CORSMiddleware, **cors_kwargs)
     if settings.extra_allowed_origin_regex:
-        # Added after CORSMiddleware, so it wraps it and sees its headers.
         app.add_middleware(
             PatternOriginsWithoutCredentials, exact_origins=exact_origins
         )

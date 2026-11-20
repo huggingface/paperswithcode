@@ -22,23 +22,15 @@ VALS_FINANCE_AGENT_URL = "https://www.vals.ai/benchmarks/fabv2"
 TASK_SLUG = "agents"
 DATASET_SLUG = "finance-agent-v2"
 METRIC_NAME = "Accuracy"
-# Only these leading columns are read; Vals relabels the cost/duration columns
-# after them (2026-10-26: "Tokens / Test", "Duration / Test").
 TABLE_HEADER = ("Rank", "Model", "Accuracy")
 USER_AGENT = "paperswithcode-vals-finance-agent-sync/1.0"
 MIN_EXPECTED_ROWS = 40
 MAX_EXPECTED_ROWS = 400
-# Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 50
 
 
 _MUSE_SPARK_1_3 = "https://research.meta.ai/blog/introducing-muse-spark-1-3"
 
-# Exact Vals model labels are the trust boundary between a leaderboard row and
-# its introducing paper. Model names follow the catalog (reviewed on
-# 2026-10-14, 2026-10-16 and 2026-10-18), not Vals' spelling. Other labels are
-# matched automatically when the catalog names them unambiguously, and
-# otherwise handed to the release radar.
 _MISTRAL_LARGE_4 = ModelIdentity(
     "Mistral Large 4 Preview",
     source_url=(
@@ -149,7 +141,6 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "GPT-5.6 Luna": ModelIdentity(
         "GPT-5.6 Luna", source_url="https://openai.com/index/gpt-5-6/"
     ),
-    # Upstream switches between both labels.
     "Mistral Large 4": _MISTRAL_LARGE_4,
     "Mistral Large 4 Preview": _MISTRAL_LARGE_4,
     "GPT-5.6 Terra": ModelIdentity(
@@ -352,7 +343,6 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         hf_model_url="https://huggingface.co/MiniMaxAI/MiniMax-M2.7",
     ),
     "Laguna M.1": ModelIdentity("Laguna M.1", arxiv_id="2605.27605"),
-    # The Nemotron 3.5 Super and Lightning tech report introduces Lightning.
     "Nemotron 3.5 Lightning": ModelIdentity(
         "NVIDIA Nemotron 3.5 Lightning 30B-A3B",
         arxiv_id="2610.38095",
@@ -371,8 +361,6 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         is_open=True,
         hf_model_url="https://huggingface.co/CohereLabs/command-a-plus-05-2026-bf16",
     ),
-    # Models without a catalog paper before 2026-10-16, indexed from their
-    # official release pages (papers 123607-123614).
     "Ling 3.0 Flash Fin": ModelIdentity(
         "Ling-3.0-flash-Fin",
         source_url="https://huggingface.co/inclusionAI/Ling-3.0-flash-Fin",
@@ -420,8 +408,6 @@ def parse_vals_finance_agent(html: str) -> list[LeaderboardEntry]:
     """Parse the leaderboard table, failing on any layout change."""
     if not isinstance(html, str) or not html.strip():
         raise TypeError("Vals AI response must be non-empty HTML")
-    # The page also renders sample answers whose Markdown can contain tables,
-    # so pick the leaderboard by its header instead of by position.
     leaderboards = []
     for table in BeautifulSoup(html, "html.parser").find_all("table"):
         rows = table.find_all("tr")

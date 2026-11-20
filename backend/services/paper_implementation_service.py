@@ -35,9 +35,6 @@ def family_repository_exists_clause(
     )
 
 
-# Hub artifacts come from the HF CRON's junction table (arXiv papers) or from
-# explicit URL arrays on the paper (external papers). Feed-card badges count
-# both, so every ``has_hf_artifacts`` filter must accept either.
 HF_ARTIFACTS_EXIST_SQL = """(
     EXISTS (SELECT 1 FROM paper_hf_artifacts pha WHERE pha.paper_id = p.id)
     OR cardinality(p.hf_models) > 0

@@ -27,8 +27,6 @@ from backend.models.database import (
 )
 
 
-# Trending scores older than 24h are treated as missing, so test rows stamp a
-# fresh timestamp to be eligible for the trending sort.
 _FRESH = datetime.now(timezone.utc)
 _STALE = datetime.now(timezone.utc) - timedelta(hours=48)
 

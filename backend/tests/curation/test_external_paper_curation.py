@@ -40,7 +40,6 @@ SETTINGS = SimpleNamespace(
 def db():
     engine = create_engine("sqlite://")
     metadata = MetaData()
-    # Only storage is simplified; service queries and ORM mappings are real.
     for model in (
         Paper,
         PaperCurationBootstrapBundle,
@@ -56,8 +55,7 @@ def db():
             elif kind.__class__.__name__ in {"ARRAY", "TSVECTOR", "Vector"}:
                 kind = String()
             elif column.primary_key and kind.__class__.__name__ == "BigInteger":
-                kind = Integer()  # SQLite autoincrements only INTEGER keys
-            # Keep created_at/updated_at defaults; job serialization reads them.
+                kind = Integer()
             default = column.server_default if column.name.endswith("_at") else None
             columns.append(
                 Column(
@@ -112,7 +110,6 @@ def test_new_external_paper_queues_one_admin_lane_workflow(db):
     assert job.parent_workflow_id == workflow.id
     assert job.requested_by == "external-paper-created"
     assert job.paper_route == str(paper.id)
-    # Interactive admin jobs keep priority 0 and dispatch first.
     assert job.priority == 50
 
 
@@ -202,7 +199,7 @@ def test_late_enrich_completion_closes_workflow_with_finished_evals(db):
     db.commit()
     enrich = db.query(PaperCurationJob).one()
     workflow = db.get(PaperCurationWorkflow, enrich.parent_workflow_id)
-    workflow.status = "running"  # as set by an admin retry
+    workflow.status = "running"
     db.add(
         PaperCurationJob(
             id=uuid.uuid4(),

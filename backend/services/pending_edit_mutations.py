@@ -452,7 +452,6 @@ class PendingEditMutationService:
             profile = self._hf_organization_profile(curation, hf_slug)
             if profile is not None:
                 hf_slug = profile.hf_slug
-                # The profile's website and avatar replace submitted ones below.
                 if profile.website_url:
                     website_url = None
             duplicate = Organization.slug == slug
@@ -486,7 +485,6 @@ class PendingEditMutationService:
         self.db.add(entity)
         self.db.flush()
         if paper_id is not None:
-            # Suggestions made from a paper page also tag that paper.
             current_ids = [
                 row[0]
                 for row in self.db.query(PaperOrganization.organization_id).filter(
@@ -587,8 +585,6 @@ class PendingEditMutationService:
         self, paper_id: int | None, payload: Payload
     ) -> tuple[str, str]:
         paper_id = self._require_paper(paper_id)
-        # Revalidate stored proposals before the first write, including proposals
-        # persisted before canonical command validation was introduced.
         normalized = validate_payload("evaluations", payload)
         commands = [
             evaluation_command(

@@ -43,9 +43,6 @@ GENERAL_ORDERING = FeedOrdering(nulls_last=True, case_insensitive_direction=True
 SCOPED_ORDERING = FeedOrdering(id_tiebreaker=True, fallback_to_date=True)
 
 
-# Exact feed totals cost a scan of every matching paper, while the page itself
-# is a short index walk. Feed responses are already HTTP-cacheable for 60 s, so
-# reuse a total for that long; infinite scroll then counts once, not per page.
 COUNT_CACHE_TTL_SECONDS = 60
 COUNT_CACHE_MAX_ENTRIES = 1024
 _count_cache: OrderedDict[tuple[str, str], tuple[float, int]] = OrderedDict()
@@ -77,8 +74,6 @@ def search_filter(query: Query[DBPaper], search: str, bind) -> Query[DBPaper]:
     pattern = f"%{search}%"
     title, abstract = DBPaper.title, DBPaper.abstract
     if search.isascii() and bind.dialect.name == "postgresql":
-        # ILIKE under the database's en_US.UTF-8 collation is ~2.5x slower
-        # than under "C", which folds ASCII patterns the same way.
         title, abstract = title.collate("C"), abstract.collate("C")
     return query.filter(or_(title.ilike(pattern), abstract.ilike(pattern)))
 

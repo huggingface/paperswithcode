@@ -106,7 +106,6 @@ def test_organizations_with_enough_public_papers_are_featured(monkeypatch):
             Paper(
                 id=paper_id,
                 title=f"Paper {paper_id}",
-                # The last paper is not public, so "small" stays one short.
                 abstract="" if paper_id == AUTO_FEATURE_MIN_PAPERS + 1 else "Abstract",
                 arxiv_id=f"2501.{paper_id:05d}",
                 source="arxiv",

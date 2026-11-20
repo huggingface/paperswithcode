@@ -45,14 +45,12 @@ from backend.services.x_thread_review_service import ReviewVerdict
 
 X_SEARCH_URL = "https://api.x.com/2/tweets/search/recent"
 X_ARCHIVE_SEARCH_URL = "https://api.x.com/2/tweets/search/all"
-# Full-archive search allows one request per second per app.
 ARCHIVE_REQUEST_INTERVAL = 1.1
 MAX_QUERY_LENGTH = 512
 MAX_SCANS_PER_PAPER = 3
 RESCAN_AFTER = timedelta(hours=20)
 CANDIDATE_WINDOW_DAYS = 10
 MAX_THREADS_PER_PAPER = 2
-# Backfill searches from a week before publication to two months after it.
 ARCHIVE_WINDOW_BEFORE = timedelta(days=7)
 ARCHIVE_WINDOW_AFTER = timedelta(days=60)
 ACTOR = {
@@ -63,7 +61,6 @@ ACTOR = {
 }
 
 Search = Callable[[str, date | None], dict]
-# Reviews one match (with post text and links) for one paper.
 Review = Callable[[Paper, dict], ReviewVerdict]
 
 
@@ -118,7 +115,6 @@ def archive_window(published: date, now: datetime) -> tuple[str, str]:
     start = (
         datetime.combine(published, datetime.min.time(), UTC) - ARCHIVE_WINDOW_BEFORE
     )
-    # X rejects end times later than ten seconds ago.
     end = min(
         start + ARCHIVE_WINDOW_BEFORE + ARCHIVE_WINDOW_AFTER, now - timedelta(minutes=1)
     )
@@ -176,7 +172,6 @@ def make_x_search(
 def _name_tokens(name: str) -> list[str]:
     folded = unicodedata.normalize("NFKD", name)
     ascii_name = "".join(c for c in folded if not unicodedata.combining(c)).lower()
-    # Display names often carry suffixes such as "Jane Doe @ NeurIPS" or "(she/her)".
     ascii_name = re.split(r"[@|(\[]", ascii_name)[0]
     return re.findall(r"[a-z]+", ascii_name)
 
@@ -191,12 +186,9 @@ def author_matches(
         tokens = _name_tokens(author)
         if len(tokens) >= 2 and set(tokens) <= shown:
             return author
-        # Accept "First Last" when the paper lists middle names or initials.
         full = [token for token in tokens if len(token) > 1]
         if len(full) >= 2 and {full[0], full[-1]} <= shown:
             return author
-        # Nicknamed display names ("Aaron Huang" for Wei Huang) often keep the
-        # real name in the handle (@AaronWeiHuang).
         if len(full) >= 2 and any(
             len(joined) >= 6 and joined in handle
             for joined in (full[0] + full[-1], full[-1] + full[0])
@@ -214,7 +206,6 @@ def organization_matches(user: dict, organizations: list[str]) -> str | None:
     shown.update(re.findall(r"[a-z0-9]+", user.get("name", "").lower()))
     for organization in organizations:
         tokens = re.findall(r"[a-z0-9]+", organization.lower())
-        # Very short names ("AI") would match unrelated business accounts.
         if len("".join(tokens)) < 3:
             continue
         if set(tokens) <= shown or "".join(tokens) in handle:
@@ -246,8 +237,6 @@ def build_query(
     for url in project_urls:
         host = urlsplit(url).netloc.removeprefix("www.")
         path = urlsplit(url).path.strip("/")
-        # Keep the path: one host (a lab's github.io site) often serves many
-        # projects, and the bare host would match posts about all of them.
         target = f"{host}/{path}" if path else host
         terms.append(f'url:"{target}"')
     for url in repo_urls:
@@ -454,7 +443,7 @@ def discover_x_threads(
         except httpx.HTTPStatusError as error:
             result.error = f"X search HTTP {error.response.status_code}"
             if error.response.status_code in {401, 403, 429}:
-                break  # Credentials or quota: every later search would fail too.
+                break
             continue
         except httpx.HTTPError as error:
             result.error = f"X search failed: {error}"
@@ -471,13 +460,11 @@ def discover_x_threads(
                         "reason": verdict.reason,
                     }
             except (httpx.HTTPError, KeyError, ValueError) as error:
-                # Unreviewed matches are never linked. Like a failed search,
-                # the scan is not recorded, so the next run retries the paper.
                 result.error = f"review failed: {error}"
                 result.matches = []
                 status = getattr(getattr(error, "response", None), "status_code", None)
                 if status in {401, 403, 429}:
-                    break  # Credentials or quota: every later review would fail too.
+                    break
                 continue
         approved = [
             match

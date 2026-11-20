@@ -104,10 +104,6 @@ class ExternalResourceService:
     def __init__(self, db: Session):
         self.db = db
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def add_external_resource(
         self,
         payload: ExternalResourceInput,
@@ -207,7 +203,6 @@ class ExternalResourceService:
                 self.db.flush()
                 paper_id = db_paper.id
             else:
-                # Update mutable fields on a re-ingest; never change source/url.
                 existing.title = payload.title.strip()
                 if payload.abstract is not None:
                     existing.abstract = payload.abstract
@@ -244,7 +239,6 @@ class ExternalResourceService:
                 f"Failed to ingest external resource {source_url}: {exc}"
             )
 
-        # After the commit, so the download never holds a transaction open.
         if existing is None and commit:
             settings = get_settings()
             archive_new_external_paper_pdf(
@@ -290,8 +284,6 @@ class ExternalResourceService:
         `ExternalResourceError`. This matches the plan's policy of holding
         external rows out of the catalog when the date is unknown.
         """
-        # Imported lazily so the rest of the module can be used without the
-        # GenAI dependencies installed.
         from backend.genai_steps.extract_external_resource_metadata import (
             extract_external_resource_metadata,
         )
@@ -326,8 +318,6 @@ class ExternalResourceService:
                 "supply date_published manually"
             )
 
-        # Merge extracted URLs with caller-supplied overrides. The link
-        # junction tables are deduped by URL, so duplicates here are safe.
         github_urls = list(metadata.github_repository_urls)
         if github_repository_urls_extra:
             github_urls.extend(github_repository_urls_extra)
@@ -348,10 +338,6 @@ class ExternalResourceService:
             hf_artifact_urls=hf_urls,
         )
         return self.add_external_resource(payload)
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     def _link_authors(self, paper_id: int, author_names: List[str]) -> tuple[int, int]:
         added = 0
@@ -438,8 +424,6 @@ class ExternalResourceService:
                     DBPaperRepository(
                         paper_id=paper_id,
                         repository_id=repo.id,
-                        # Per plan: GitHub repos linked directly from the
-                        # external source page default to is_official=true.
                         is_official=True,
                     )
                 )
@@ -473,8 +457,6 @@ class ExternalResourceService:
         existing_models = list(paper.hf_models or [])
         existing_datasets = list(paper.hf_datasets or [])
         existing_spaces = list(paper.hf_spaces or [])
-        # Hub repo ids are case-insensitive, so `org/Model` and `org/model`
-        # are the same artifact.
         seen: set[str] = {
             url.lower() for url in existing_models + existing_datasets + existing_spaces
         }
@@ -525,7 +507,6 @@ class ExternalResourceService:
             paper.hf_datasets,
             paper.hf_spaces,
         )
-        # New explicit URLs must not inherit a previously completed empty scan.
         paper.hf_artifacts_scanned_at = None
 
         return {

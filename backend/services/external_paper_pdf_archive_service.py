@@ -22,8 +22,6 @@ from backend.services.paper_markdown_service import PAPER_PDF_MAX_BYTES
 
 logger = logging.getLogger(__name__)
 
-# Ingestion runs in request handlers, so a slow host must not hold one for
-# the OCR worker's three minutes; the worker still archives what times out.
 DOWNLOAD_TIMEOUT_SECONDS = 20
 DOWNLOAD_DEADLINE_SECONDS = 60
 
@@ -54,7 +52,6 @@ def archive_external_paper_pdf(
     )
     if len(data) > PAPER_PDF_MAX_BYTES:
         raise ValueError("invalid_pdf")
-    # The worker trusts an archived copy, so archive only a PDF that opens.
     with fitz.open(stream=data, filetype="pdf") as document:
         if document.page_count < 1:
             raise ValueError("invalid_pdf")

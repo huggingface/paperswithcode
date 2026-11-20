@@ -55,7 +55,6 @@ def main() -> None:
                 session.add(dataset)
                 session.flush()
                 logger.info("Created dataset %r (id=%s)", dataset.name, dataset.id)
-            # "(<language>)" becomes the chip label under the English board.
             dataset.name = f"Open ASR Leaderboard ({language})"
             dataset.full_name = (
                 f"Open Automatic Speech Recognition Leaderboard ({language})"

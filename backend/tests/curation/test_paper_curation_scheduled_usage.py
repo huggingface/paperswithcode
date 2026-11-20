@@ -88,7 +88,6 @@ def test_scheduled_usage_filters_for_completed_jobs(monkeypatch):
     CodexPaperJobService._scheduled_usage_snapshot(Database(), None)
 
     assert any("paper_curation_jobs.status" in predicate for predicate in filters)
-    # Summing tokens must not load whole job rows.
     assert selected == ["finished_at", "input_tokens", "output_tokens"]
 
 
@@ -183,7 +182,6 @@ def test_cross_job_callback_token_cancels_only_the_token_owner(monkeypatch):
         )
 
     assert error.value.status_code == 401
-    # The offending job is stopped; the global scheduler is never paused.
     assert canceled == [owner]
     assert owner.error == "Callback token was presented for another job"
     assert added == []
@@ -215,7 +213,6 @@ def test_cross_job_token_is_revoked_even_if_cancel_fails(monkeypatch):
             uuid.uuid4(), "Bearer valid-for-another-job", Database()
         )
 
-    # The revocation was committed before the remote cancel was attempted.
     assert commits == [None]
 
 

@@ -196,7 +196,6 @@ def test_other_boards_are_still_created():
 
 
 def test_surviving_row_cannot_be_removed_on_a_removed_board():
-    # With or without a replacement, a curator already chose the survivor.
     survivor = _stored(46100, LIBERO_PRO)
     survivor.methodology = None
     service = _service([survivor])

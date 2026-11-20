@@ -121,7 +121,6 @@ class TestTripleValidation:
         self, db_session, test_paper, test_task, test_dataset, test_metric
     ):
         """Test that evaluation succeeds when metric is in allowed list."""
-        # Create triple: task + dataset + metric
         triple = DBTaskDatasetMetric(
             task_id=test_task.id,
             dataset_id=test_dataset.id,
@@ -130,7 +129,6 @@ class TestTripleValidation:
         db_session.add(triple)
         db_session.commit()
 
-        # Create evaluation with allowed metric
         service = EvaluationService(db_session)
         request = EvaluationCreateRequest(
             paper_id=test_paper.id,
@@ -157,7 +155,6 @@ class TestTripleValidation:
         self, db_session, test_paper, test_task, test_dataset, test_metric
     ):
         """Test that evaluation fails when metric is not in allowed list."""
-        # Create triple with TestAP
         triple = DBTaskDatasetMetric(
             task_id=test_task.id,
             dataset_id=test_dataset.id,
@@ -166,14 +163,13 @@ class TestTripleValidation:
         db_session.add(triple)
         db_session.commit()
 
-        # Try to create evaluation with different metric
         service = EvaluationService(db_session)
         request = EvaluationCreateRequest(
             paper_id=test_paper.id,
             task_id=test_task.id,
             dataset_id=test_dataset.id,
             model_name="Test Model",
-            metrics={"WER": "5.2"},  # Not in allowed list
+            metrics={"WER": "5.2"},
             best_metric="WER",
         )
 
@@ -251,10 +247,8 @@ class TestProjectPageCRUD:
             source="manual",
         )
 
-        # Create first page
         service.create_project_page(request)
 
-        # Try to create duplicate
         with pytest.raises(ValueError, match="already exists"):
             service.create_project_page(request)
 
@@ -262,7 +256,6 @@ class TestProjectPageCRUD:
         """Test updating a project page."""
         service = ProjectPageService(db_session)
 
-        # Create page
         create_request = ProjectPageCreateRequest(
             url="https://example.com/update-test",
             is_official=False,
@@ -270,7 +263,6 @@ class TestProjectPageCRUD:
         )
         page = service.create_project_page(create_request)
 
-        # Update page
         update_request = ProjectPageUpdateRequest(
             is_official=True,
             source="ai_extraction",
@@ -279,13 +271,12 @@ class TestProjectPageCRUD:
 
         assert updated_page.is_official is True
         assert updated_page.source == "ai_extraction"
-        assert updated_page.url == "https://example.com/update-test"  # Unchanged
+        assert updated_page.url == "https://example.com/update-test"
 
     def test_delete_project_page(self, db_session):
         """Test deleting a project page."""
         service = ProjectPageService(db_session)
 
-        # Create page
         request = ProjectPageCreateRequest(
             url="https://example.com/delete-test",
             is_official=True,
@@ -293,10 +284,8 @@ class TestProjectPageCRUD:
         )
         page = service.create_project_page(request)
 
-        # Delete page
         service.delete_project_page(page.id)
 
-        # Verify deletion
         deleted_page = (
             db_session.query(DBProjectPage)
             .filter(DBProjectPage.id == int(page.id))
@@ -312,7 +301,6 @@ class TestPaperProjectPageAssociations:
         """Test associating a project page with a paper."""
         service = ProjectPageService(db_session)
 
-        # Create project page
         create_request = ProjectPageCreateRequest(
             url="https://example.com/paper-project",
             is_official=True,
@@ -320,7 +308,6 @@ class TestPaperProjectPageAssociations:
         )
         page = service.create_project_page(create_request)
 
-        # Associate with paper
         association = service.associate_project_page_with_paper(
             paper_id=str(test_paper.id),
             project_page_id=page.id,
@@ -336,7 +323,6 @@ class TestRepositoryStarHistory:
 
     def test_get_star_history(self, db_session, test_repository):
         """Test retrieving star history for a repository."""
-        # Create some star history snapshots
         now = datetime.now()
         for i in range(5):
             snapshot = DBRepositoryStarHistory(
@@ -347,7 +333,6 @@ class TestRepositoryStarHistory:
             db_session.add(snapshot)
         db_session.commit()
 
-        # Retrieve history
         service = RepositoryService(db_session)
         history = service.get_repository_star_history(
             repository_id=str(test_repository.id),
@@ -358,13 +343,11 @@ class TestRepositoryStarHistory:
         assert history.repository_id == str(test_repository.id)
         assert history.count == 5
         assert len(history.snapshots) == 5
-        # Verify ordering (oldest first)
         assert history.snapshots[0].num_stars == 140
         assert history.snapshots[-1].num_stars == 100
 
     def test_get_star_history_with_limit(self, db_session, test_repository):
         """Test retrieving star history with limit."""
-        # Create snapshots
         now = datetime.now()
         for i in range(10):
             snapshot = DBRepositoryStarHistory(
@@ -375,7 +358,6 @@ class TestRepositoryStarHistory:
             db_session.add(snapshot)
         db_session.commit()
 
-        # Retrieve with limit
         service = RepositoryService(db_session)
         history = service.get_repository_star_history(
             repository_id=str(test_repository.id),

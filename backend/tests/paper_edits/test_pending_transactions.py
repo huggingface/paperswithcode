@@ -90,7 +90,7 @@ def test_approval_failure_respects_transaction_owner(
         db.rollback()
     else:
         assert rollback.call_count == 1
-        commit.assert_not_called()  # The diagnostic uses its own explicit transaction.
+        commit.assert_not_called()
     db.expire_all()
     assert db.get(Paper, 1).title == original_title
     assert db.get(Paper, 1).source_url != "https://example.com/partial"
@@ -163,8 +163,6 @@ def test_remote_callback_keeps_attestation_claim_and_catalog_atomic(
     original_title = db.get(Paper, 1).title
     db.get(Paper, 1).title = "unrelated callback state"
 
-    # Successful replays apply once. Failed callbacks remain retryable without
-    # reserving the remote run ID or completing the claim.
     for _ in range(2):
         expected = (
             nullcontext()

@@ -35,12 +35,6 @@ _SHARD_RE = re.compile(r"^(?P<year>\d{4})-(?P<bucket>\d+)$")
 
 
 def _xml_response(content: Iterable[str] | str) -> Response:
-    # Render the whole document inside the request. Streaming it kept a pooled
-    # database connection and a server-side cursor open for as long as a
-    # crawler took to download the shard, and the request-scoped session could
-    # close underneath the cursor ("named cursor isn't valid anymore"). A shard
-    # of lightweight rows is a few megabytes of XML, so build it, release the
-    # connection, then send.
     if not isinstance(content, str):
         content = "".join(content)
     return Response(

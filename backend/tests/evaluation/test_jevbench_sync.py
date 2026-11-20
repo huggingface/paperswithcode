@@ -54,8 +54,6 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# The API-board and reference rows of /api/jevbench/latest on 2026-11-12
-# (release v1.8.9, method v1.7), trimmed to the fields the parser reads.
 FIXTURE_TEXT = (Path(__file__).parent / "fixtures" / "jevbench_latest.json").read_text()
 TASK_ID = 1032
 DATASET_ID = 3353
@@ -148,7 +146,6 @@ def test_parse_keeps_the_ranked_api_board_in_official_order():
     )
     assert first.evaluated_on == date(2026, 10, 21)
     by_name = {entry.name: entry for entry in entries}
-    # A vendor suffix matching the source host is dropped from the row name.
     assert by_name["Drex Max"].lab == "Nace AI"
     assert by_name["Drex Max"].value == Decimal("75.38")
     assert by_name[
@@ -156,15 +153,12 @@ def test_parse_keeps_the_ranked_api_board_in_official_order():
         "free on OpenRouter as inception/mercury-decide:free)"
     ].lab == ("Inception")
     assert by_name["Amos 1 large (Scira)"].lab == "Scira"
-    # The Jev reference row sits on the API board at rank 15.
     assert by_name["Jev 1.13.0"].detail.startswith("rank 15 of 48")
     assert entries[-1].name == "Qwen3.8 27B (Chutes TEE)"
-    # Preliminary, unranked, wrapper and listed-only rows are skipped.
     assert "classifier.dev (fast tier)" not in by_name
     assert not any(
         name.startswith("Microsoft-Decision-1 (Azure Foundry) —") for name in by_name
     )
-    # Gemini Decision 1 joined the board after this v1.8.9 fixture was saved.
     assert set(MODEL_IDENTITIES) - {"Gemini Decision 1"} <= set(by_name)
     values = [entry.value for entry in entries]
     assert values == sorted(values, reverse=True)
@@ -252,7 +246,6 @@ def test_first_run_publishes_reviewed_rows_and_signals_the_rest():
     ranked = sorted(rows.values(), key=lambda row: row.best_rank)
     assert [(row.model_name, row.metrics[METRIC_NAME]) for row in ranked] == [
         ("Drex Max", 75.38),
-        # The better of GPT-6 Luna's two reasoning settings.
         ("GPT-6 Luna", 40.39),
         ("GPT-5.6 Luna", 21.36),
         ("Gemini 3.1 Flash-Lite", 16.93),

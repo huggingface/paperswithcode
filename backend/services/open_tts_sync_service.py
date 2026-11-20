@@ -42,9 +42,6 @@ SPACE_APP_URL = "https://hf-audio-open-tts-leaderboard.hf.space"
 SPACE_SOURCE_URL = "https://huggingface.co/spaces/hf-audio/open_tts_leaderboard"
 DEFAULT_LANGUAGE = "🇬🇧 English"
 DEFAULT_DATASETS = ["Seed-TTS", "CV3-Eval", "MiniMax"]
-# Seed-TTS and CV3-Eval cover these languages; the all-languages board averages
-# over them. MiniMax adds languages that only it covers (2026-11-12), which
-# ranked a single model across every language.
 CORE_LANGUAGES = (
     "🇬🇧 English",
     "🇨🇳 Chinese",
@@ -56,8 +53,6 @@ CORE_LANGUAGES = (
     "🇰🇷 Korean",
     "🇷🇺 Russian",
 )
-# Per-language boards (label -> the Space's `?languages=<code>` deeplink code).
-# English is the default board; Cantonese ranks too few models for a board.
 LANGUAGE_BOARDS = {
     "🇨🇳 Chinese": "zh",
     "🇫🇷 French": "fr",
@@ -121,7 +116,6 @@ METHODOLOGY_BY_DATASET = {
 
 _MODEL_LINK_RE = re.compile(
     r'<a\b[^>]*\bhref=["\']https://huggingface\.co/([^"\'?#]+)["\'][^>]*>(.*?)</a>'
-    # Display badges such as "NEW" (added upstream 2026-11-14) follow the link.
     r"(?:\s*<span\b[^>]*>[^<]*</span>)*"
     r"(?:\s*<sup>[^<]*</sup>)?",
     re.IGNORECASE,
@@ -143,8 +137,6 @@ class ReviewedModel:
     display_name: str
 
 
-# Reviewed against the model cards linked by the default leaderboard on
-# 2026-09-11. Only models with a dedicated arXiv paper are published.
 MODEL_CATALOG = {
     "microsoft/VibeVoice-Realtime-0.5B": ReviewedModel(
         PaperIdentity(arxiv_id="2508.19205", is_open=True),
@@ -316,8 +308,6 @@ def parse_open_tts_leaderboard(
     for row in rows:
         if not isinstance(row, list) or len(row) != len(headers):
             raise ValueError("Open TTS response contains a malformed row")
-        # Upstream leaves Rank empty for models without full coverage of the
-        # selected languages/datasets; their averages are not comparable.
         if row[indexes["Rank"]] is None:
             continue
         model_cell = str(row[indexes["Model"]])
@@ -353,8 +343,6 @@ def parse_open_tts_leaderboard(
             rtfx=rtfx,
             is_open=license_name.casefold() not in {"proprietary", "closed"},
         )
-        # Upstream can list one model twice under different voices; keep
-        # its best-ranked row.
         key = model_id.casefold()
         if key not in entries_by_model or rank < entries_by_model[key].rank:
             entries_by_model[key] = entry
@@ -565,8 +553,6 @@ class OpenTtsSyncService:
         if now.tzinfo is None:
             now = now.replace(tzinfo=UTC)
         try:
-            # Models outside the reviewed catalog go to the shared matcher
-            # once for both views; the rest become release-radar signals.
             reviewed_ids = {model_id.casefold() for model_id in MODEL_PAPER_IDENTITIES}
             unknown = list(
                 {

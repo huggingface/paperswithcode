@@ -198,7 +198,6 @@ def disagreement_candidates(
                     ),
                 }
             )
-    # Blind order: a hash of the pair and the candidate, never the origin alone.
     candidates.sort(
         key=lambda c: _hash(
             pi_row.id, c["field"], json.dumps(c["value"], sort_keys=True), c["origin"]

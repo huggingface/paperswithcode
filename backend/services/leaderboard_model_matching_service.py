@@ -49,14 +49,11 @@ class MatchedModel:
     hf_model_url: str | None = None
 
 
-# Reasoning-effort settings: "GPT-6 Sol (max)", "DeepSeek V4.1 Flash (xhigh)".
 _EFFORT_SUFFIX = re.compile(
     r"\s*\((?:max|xhigh|high|medium|low|minimal)\)\s*$", re.IGNORECASE
 )
 
 
-# Model families whose name alone identifies the lab, for boards that list
-# bare model names. A name outside these families reports no signal.
 _FAMILY_LABS = (
     (re.compile(r"(?:claude|opus|sonnet|haiku)\b", re.I), "Anthropic"),
     (re.compile(r"(?:gpt|chatgpt|codex)\b|o\d+(?:\b|-)", re.I), "OpenAI"),
@@ -132,8 +129,6 @@ def vendor_label_model(label: str, lab: str = "") -> LeaderboardModel:
     name = _SETTINGS.sub("", label).strip() or label
     vendor, _, rest = name.partition(" ")
     if rest and vendor.casefold() in _VENDORS:
-        # A known family's canonical lab wins, so "Google Gemini ..." and a
-        # bare "Gemini ..." from another board share one radar signal.
         lab, name = lab or family_lab(rest) or vendor, rest
     return LeaderboardModel(name, lab or family_lab(name) or vendor)
 
@@ -165,21 +160,16 @@ class LeaderboardModelMatcher:
         releases.update(
             self._alias_matches([name for name in names if name not in releases])
         )
-        # Rows keep the leaderboard's spelling, so a model matched by title
-        # today and by its release later keeps one row.
         matched = {
             name: MatchedModel(release.paper_id, name, release.is_open)
             for name, release in releases.items()
         }
         for name in names:
             if name not in matched and (paper_id := announcing_paper_id(self.db, name)):
-                # Open only when the paper links the model's own weights.
                 hf_model_url = self._weights_url(paper_id, name)
                 matched[name] = MatchedModel(
                     paper_id, name, hf_model_url is not None, hf_model_url
                 )
-        # An effort setting names the same model; its rows share the base
-        # name, so the board keeps that model's best setting.
         bases = {
             name: base
             for name in names

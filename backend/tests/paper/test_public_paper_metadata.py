@@ -231,7 +231,7 @@ def test_unknown_everywhere_is_a_cached_404(monkeypatch, catalog):
     assert first.status_code == second.status_code == 404
     assert first.json()["detail"]["code"] == "paper_not_found"
     assert first.headers["cache-control"] == "public, max-age=3600"
-    assert len(upstream.calls) == 2  # HF + arXiv once; the miss is cached
+    assert len(upstream.calls) == 2
 
 
 def test_upstream_outage_is_503_not_404(monkeypatch, catalog):
@@ -294,7 +294,7 @@ def test_uncached_lookups_are_rate_limited_per_client(monkeypatch, catalog):
     cached = client.get("/api/v1/papers/2610.00000/public-metadata")
 
     assert statuses == [404, 404, 429]
-    assert cached.status_code == 404  # cache hits never count against the budget
+    assert cached.status_code == 404
 
 
 def test_invalid_identifier_is_400(monkeypatch, catalog):
@@ -326,10 +326,10 @@ def _request(client, real_ip):
 @pytest.mark.parametrize(
     ("client", "real_ip", "expected"),
     [
-        (None, "203.0.113.7", "203.0.113.7"),  # nginx over the unix socket
+        (None, "203.0.113.7", "203.0.113.7"),
         (None, "not-an-ip", None),
         (None, None, None),
-        (("198.51.100.2", 1234), "203.0.113.7", "198.51.100.2"),  # untrusted peer
+        (("198.51.100.2", 1234), "203.0.113.7", "198.51.100.2"),
         (("127.0.0.1", 1234), "203.0.113.7", "203.0.113.7"),
     ],
 )
@@ -391,7 +391,7 @@ def test_title_search_matches_arxiv_title_ignoring_case_and_punctuation(
     assert "matched_name" not in body
     assert body["note"].startswith("Not indexed by Papers With Code")
     assert "ti%3A%22why+should+i+trust+you+explaining" in upstream.calls[0]
-    assert len(upstream.calls) == 2  # arXiv search + Hugging Face; no Crossref
+    assert len(upstream.calls) == 2
 
 
 def test_title_search_returns_catalog_paper_when_arxiv_match_is_indexed(
@@ -514,12 +514,10 @@ def test_title_search_matches_unique_name_when_subtitle_differs(monkeypatch, cat
     [
         [],
         [("2001.00001", "Different Title Entirely", "2020-01-01")],
-        # A shared name is ambiguous, so neither paper is chosen.
         [
             ("1912.08531", "GlobalTrack: A Simple and Strong Baseline", "2019-12-18"),
             ("2301.00002", "GlobalTrack: Tracking Satellites", "2023-01-02"),
         ],
-        # A full page may hide another paper with the name on a later page.
         [("1912.08531", "GlobalTrack: A Simple and Strong Baseline", "2019-12-18")]
         + [
             (f"2302.{n:05d}", f"Tracking Study {n} with GlobalTrack", "2023-02-01")

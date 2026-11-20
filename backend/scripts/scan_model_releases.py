@@ -91,8 +91,6 @@ def main() -> int:
             settings = get_settings()
             record_release_signals(db, report)
             signals = queue_release_signals(db, settings, jobs=codex_paper_job_service)
-            # Read the fields now: commit expires the rows and the session
-            # is closed before they are logged.
             queued = [
                 {"lab": signal.lab, "model": signal.model_name, "url": signal.lead_url}
                 for signal in signals
@@ -112,7 +110,6 @@ def main() -> int:
         logger.info("model_release_radar_queued %s", json.dumps(signal))
     for error in report.errors:
         logger.warning("model_release_radar_source_error %s", json.dumps(error))
-    # Every source failing means the radar is blind, not that nothing shipped.
     return 1 if report.errors and len(report.errors) == report.sources_checked else 0
 
 

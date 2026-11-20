@@ -76,9 +76,6 @@ def rank_target(db_session):
     try:
         yield task.id, dataset.id, paper.id
     finally:
-        # Tests commit individual mutations.  Reset any failed in-flight
-        # transaction, then remove every dependent row before the isolated
-        # leaderboard itself so assertion failures cannot leak fixtures.
         db_session.rollback()
         db_session.query(Evaluation).filter(
             Evaluation.task_id == task.id,
@@ -111,11 +108,8 @@ def test_rank_calculation_basic(db_session, rank_target):
     """
     service = EvaluationService(db_session)
 
-    # Create test evaluations (using existing paper, task, dataset IDs)
-    # You'll need to adjust these IDs based on your database
     test_task_id, test_dataset_id, test_paper_id = rank_target
 
-    # Create evaluations with different mAP scores
     eval1 = service.create_evaluation(
         paper_id=test_paper_id,
         task_id=test_task_id,
@@ -143,11 +137,6 @@ def test_rank_calculation_basic(db_session, rank_target):
         best_metric="mAP",
     )
 
-    # Verify ranks
-    # Model B (65.9) should be rank 1
-    # Model C (63.2) should be rank 2
-    # Model A (60.5) should be rank 3
-
     eval1_updated = service.get_evaluation(int(eval1.id))
     eval2_updated = service.get_evaluation(int(eval2.id))
     eval3_updated = service.get_evaluation(int(eval3.id))
@@ -164,7 +153,6 @@ def test_rank_calculation_basic(db_session, rank_target):
 
     print("✓ Basic rank calculation test passed")
 
-    # Cleanup
     service.delete_evaluation(int(eval1.id))
     service.delete_evaluation(int(eval2.id))
     service.delete_evaluation(int(eval3.id))
@@ -178,7 +166,6 @@ def test_rank_recalculation_on_update(db_session, rank_target):
 
     test_task_id, test_dataset_id, test_paper_id = rank_target
 
-    # Create evaluations
     eval1 = service.create_evaluation(
         paper_id=test_paper_id,
         task_id=test_task_id,
@@ -197,7 +184,6 @@ def test_rank_recalculation_on_update(db_session, rank_target):
         best_metric="mAP",
     )
 
-    # Verify initial ranks
     eval1_v1 = service.get_evaluation(int(eval1.id))
     eval2_v1 = service.get_evaluation(int(eval2.id))
     assert eval1_v1.best_rank == 2
@@ -205,7 +191,6 @@ def test_rank_recalculation_on_update(db_session, rank_target):
 
     service.update_evaluation(int(eval1.id), metrics={"mAP": "65.0"}, best_metric="mAP")
 
-    # Verify ranks were recalculated
     eval1_v2 = service.get_evaluation(int(eval1.id))
     eval2_v2 = service.get_evaluation(int(eval2.id))
 
@@ -214,7 +199,6 @@ def test_rank_recalculation_on_update(db_session, rank_target):
 
     print("✓ Rank recalculation on update test passed")
 
-    # Cleanup
     service.delete_evaluation(int(eval1.id))
     service.delete_evaluation(int(eval2.id))
 
@@ -378,7 +362,6 @@ def test_rank_recalculation_on_delete(db_session, rank_target):
 
     test_task_id, test_dataset_id, test_paper_id = rank_target
 
-    # Create evaluations
     eval1 = service.create_evaluation(
         paper_id=test_paper_id,
         task_id=test_task_id,
@@ -406,7 +389,6 @@ def test_rank_recalculation_on_delete(db_session, rank_target):
         best_metric="mAP",
     )
 
-    # Verify initial ranks
     eval1_v1 = service.get_evaluation(int(eval1.id))
     eval2_v1 = service.get_evaluation(int(eval2.id))
     eval3_v1 = service.get_evaluation(int(eval3.id))
@@ -415,10 +397,8 @@ def test_rank_recalculation_on_delete(db_session, rank_target):
     assert eval2_v1.best_rank == 1
     assert eval3_v1.best_rank == 2
 
-    # Delete the top-ranked evaluation
     service.delete_evaluation(int(eval2.id))
 
-    # Verify remaining evaluations have updated ranks
     eval1_v2 = service.get_evaluation(int(eval1.id))
     eval3_v2 = service.get_evaluation(int(eval3.id))
 
@@ -427,7 +407,6 @@ def test_rank_recalculation_on_delete(db_session, rank_target):
 
     print("✓ Rank recalculation on delete test passed")
 
-    # Cleanup
     service.delete_evaluation(int(eval1.id))
     service.delete_evaluation(int(eval3.id))
 
@@ -440,7 +419,6 @@ def test_separate_ranking_by_additional_data(db_session, rank_target):
 
     test_task_id, test_dataset_id, test_paper_id = rank_target
 
-    # Create evaluations without additional data
     eval1_no_extra = service.create_evaluation(
         paper_id=test_paper_id,
         task_id=test_task_id,
@@ -461,7 +439,6 @@ def test_separate_ranking_by_additional_data(db_session, rank_target):
         uses_additional_data=False,
     )
 
-    # Create evaluations with additional data
     eval1_extra = service.create_evaluation(
         paper_id=test_paper_id,
         task_id=test_task_id,
@@ -485,23 +462,19 @@ def test_separate_ranking_by_additional_data(db_session, rank_target):
     service.recalculate_ranks(test_task_id, test_dataset_id, uses_additional_data=False)
     service.recalculate_ranks(test_task_id, test_dataset_id, uses_additional_data=True)
 
-    # Verify ranks within each group
     eval1_no_extra_check = service.get_evaluation(int(eval1_no_extra.id))
     eval2_no_extra_check = service.get_evaluation(int(eval2_no_extra.id))
     eval1_extra_check = service.get_evaluation(int(eval1_extra.id))
     eval2_extra_check = service.get_evaluation(int(eval2_extra.id))
 
-    # Within the no-extra-data group
     assert eval1_no_extra_check.best_rank == 2
     assert eval2_no_extra_check.best_rank == 1
 
-    # Within the extra-data group
     assert eval1_extra_check.best_rank == 2
     assert eval2_extra_check.best_rank == 1
 
     print("✓ Separate ranking by additional data test passed")
 
-    # Cleanup
     service.delete_evaluation(int(eval1_no_extra.id))
     service.delete_evaluation(int(eval2_no_extra.id))
     service.delete_evaluation(int(eval1_extra.id))

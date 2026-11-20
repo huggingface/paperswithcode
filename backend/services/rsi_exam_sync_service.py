@@ -29,16 +29,12 @@ RSI_EXAM_URL = "https://rsi-exam.ai/"
 TASK_SLUG = "auto-research"
 DATASET_SLUG = "rsi-exam"
 METRIC_NAME = "Normalized Score"
-# A new release or task set rescales every score; a reviewer decides whether
-# the managed rows move with it.
 RELEASE = "RSI-Exam 0.1"
 FULL_TASKS = 88
 MIN_EXPECTED_ENTRIES = 10
 MAX_EXPECTED_ENTRIES = 100
-# Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 8
 
-# The board's harness labels, by their lower-case form on the page.
 HARNESSES = {
     "antigravity": "Antigravity",
     "claude code": "Claude Code",
@@ -49,7 +45,6 @@ HARNESSES = {
     "qwen coder": "Qwen Code",
 }
 
-# Board names that carry no family prefix, by the start of the name.
 _NAME_LABS = {
     "Fable ": "Anthropic",
     "Muse ": "Meta",
@@ -57,9 +52,6 @@ _NAME_LABS = {
     "Step ": "StepFun",
 }
 
-# Exact RSI-Exam row names are the trust boundary between a model and its
-# introducing paper. Other names are matched automatically when the catalog
-# names them unambiguously, and otherwise handed to the release radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Opus 5.5": ModelIdentity(
         "Claude Opus 5.5", source_url="https://www.anthropic.com/claude-opus-5-5"
@@ -104,7 +96,6 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Qwen 4 Max": ModelIdentity(
         "Qwen4 Max", source_url="https://qwen.ai/blog?id=qwen4-max"
     ),
-    # A dated API snapshot of Qwen3.8-Max, listed beside the release model.
     "Qwen3.8 Max-0902": ModelIdentity(
         "Qwen3.8 Max-0902", source_url="https://qwen.ai/blog?id=qwen3.8"
     ),

@@ -40,7 +40,6 @@ def load_prompt(config_path: str, subfolder_name="templates") -> PromptTemplate:
     Returns:
         PromptTemplate: A prompt template object.
     """
-    # from the root folder, load the prompt config file
     config_file = ROOT_FOLDER / "prompts" / config_path
     with open(config_file, "r") as file:
         config = json.load(file)
@@ -48,7 +47,6 @@ def load_prompt(config_path: str, subfolder_name="templates") -> PromptTemplate:
     template_path = os.path.join(
         ROOT_FOLDER, "prompts", subfolder_name, config["template_path"]
     )
-    # load in txt file
     with open(template_path, "r") as file:
         template = file.read()
 

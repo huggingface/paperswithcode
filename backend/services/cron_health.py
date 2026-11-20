@@ -35,7 +35,6 @@ GITHUB_REPOSITORY = "huggingface/paperswithcode"
 WORKFLOW_STATUS_CACHE_SECONDS = 60
 WORKFLOW_RUN_BATCH_PAGES = 3
 MAX_LAUNCHER_EVIDENCE_BYTES = 1024 * 1024
-# About a day of launcher records at today's every-minute job cadence.
 MAX_LAUNCHER_HISTORY_BYTES = 4 * 1024 * 1024
 LAUNCHER_HISTORY_HOURS = 24
 MAX_SCHEDULE_STATE_BYTES = 4096
@@ -211,7 +210,6 @@ def get_lock_state(
         "exists": True,
         "held": held,
         "probe_status": probe_status,
-        # Backward-compatible field: only a confirmed held lock can be stale.
         "stale": held is True and age_minutes > expected_runtime_minutes,
         "age_minutes": round(age_minutes, 1),
         "path": str(path),
@@ -469,7 +467,6 @@ def fetch_persistent_execution(
             record = json.loads(raw_line)
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
-        # Terminal records ("exit", "lock_skipped") follow their launch record.
         if not isinstance(record, dict) or record.get("event"):
             continue
         if record.get("job") != job.id and record.get("health_job") != job.id:
@@ -537,8 +534,6 @@ def fetch_launcher_history(
         finished = _parse_log_timestamp(record.get("at"))
         if finished is None or finished < cutoff:
             continue
-        # `job` is the dashboard id; `health_job` names the log file, which for
-        # lane jobs (e.g. sync_mmeb_v2 -> "v2") is not a dashboard id.
         job_id = str(record.get("job") or record.get("health_job") or "")
         summary = history.setdefault(
             job_id,
@@ -1233,10 +1228,6 @@ def _execution_health(
         if previous_expected and (
             completed is None or completed < previous_expected - grace
         ):
-            # Restarts and reboots also move ActiveEnterTimestamp, but the
-            # Persistent=true stamp keeps LastTriggerUSec, so only a timer that
-            # has never fired was installed after the slot. Manual runs before
-            # activation leave completion evidence but owe no timer slot.
             activated = _parse_log_timestamp(evidence.get("timer_activated_at"))
             if (
                 activated is not None
@@ -1275,7 +1266,6 @@ def _execution_health(
             "reason": "GitHub Actions evidence is unavailable",
         }
     scheduled = evidence.get("scheduled_run")
-    # Backward compatibility for callers/tests that provide one normalized run.
     if (
         scheduled is None
         and evidence.get("event") in {None, "schedule"}
@@ -1709,9 +1699,6 @@ def _hot_github_trending_contract(
         reasons.append(f"rate-limit reserve stopped {reserve_stops} run(s)")
     if remaining is not None and reserve is not None and int(remaining) < int(reserve):
         if reserve_stops:
-            # The job stops at the reserve before each call, so a reading below
-            # it after a stop means another job sharing the token spent the
-            # budget: the reserve worked, the token is contended.
             status = _worse_output(status, "degraded")
             reasons.append(
                 f"shared GitHub budget below reserve ({remaining} remaining < {reserve})"
@@ -1758,7 +1745,6 @@ def _provider_counter_contract(
         or work.get("artifacts_failed", 0)
         or 0
     )
-    # Retried throttling is routine; only a material share of calls matters.
     if throttled and (not api_calls or throttled / api_calls >= 0.05):
         status = _worse_output(status, "degraded")
         reasons.append(f"upstream provider rate-limited {throttled} request(s)")
@@ -1899,7 +1885,6 @@ def _daily_curation_contract(
         status = _worse_output(status, "broken")
         reasons.append(f"scheduled dispatch is paused: {pause_condition}")
 
-    # The registry SQL counts only the rolling cohort the enqueuer revisits.
     for metric, label in (
         ("failed_workflows", "failed workflow"),
         ("partial_workflows", "partial workflow"),
@@ -1974,8 +1959,6 @@ def _curation_thumbnail_contract(
     queue_is_empty = not any(
         int(db.get(key, 0) or 0) for key in ("queued", "processing", "stale_processing")
     )
-    # The queue is event-driven: an idle queue writes nothing, so write
-    # staleness only matters while work is waiting.
     if context.systemd.get("service_result") == "success" and queue_is_empty:
         status = "healthy"
         reasons = ["latest queue poll completed and no thumbnail work is pending"]
@@ -2078,7 +2061,6 @@ def _suggested_questions_contract(
         return status, reasons
     missing = int(db.get("visible_missing") or 0)
     if not missing:
-        # A fully covered home feed writes nothing, so staleness is no-work.
         reasons = [reason for reason in reasons if reason != context.db_reason]
         if status in {"degraded", "broken", "unknown"} and not reasons:
             status = "healthy"
@@ -2107,8 +2089,6 @@ def _research_digests_contract(
     uncertain = int(db.get("uncertain_digests") or 0)
     overdue = int(db.get("overdue_pending_digests") or 0)
     problems: List[str] = []
-    # Give the 08:00 run two hours before calling a window missing, and only
-    # when last week had recipients (no followers means no digests at all).
     if not current and previous and age > 120:
         problems.append(
             f"no digests for this week's window although last week had {previous}"
@@ -2439,9 +2419,6 @@ def fetch_workflow_statuses(
             previous_schedule_needs_refresh = True
         if not runs:
             if workflow_file in previous and previous_schedule_needs_refresh:
-                # A rerun updates the original GitHub run in place. If that old
-                # failed run has fallen outside the repository-wide recent-run
-                # page, refresh its workflow instead of retaining the failure.
                 bootstrap.append(job)
             elif workflow_file in previous:
                 statuses[job.id] = dict(previous[workflow_file])
@@ -2640,8 +2617,6 @@ def evaluate_job_health(
             )
 
     recent_log_success, _ = _recent_log_success(job, log_status, now=now)
-    # An inode may persist forever; only a currently held kernel lock is evidence.
-    # Give the wrapper a short handoff window before calling a held orphan broken.
     lock_blocks_job = (
         lock_state.get("held") is True
         and not running
@@ -2658,8 +2633,6 @@ def evaluate_job_health(
         reasons.append("lock is held during the wrapper-to-Python handoff window")
 
     if running:
-        # A queued or just-started invocation has not logged yet, so the log's
-        # last_run still belongs to the previous run; the newest start wins.
         start_ages = [
             age
             for age in (

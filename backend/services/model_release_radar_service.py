@@ -50,11 +50,8 @@ MAX_CHILD_SITEMAPS = 5
 AA_PROVIDER = "artificial-analysis"
 WEB_SEARCH_PROVIDER = "web-search"
 EXA_SEARCH_URL = "https://api.exa.ai/search"
-# Web news is searched over a short window: the radar runs every three hours,
-# and a long window fills the result budget with coverage of one big launch.
 WEB_SEARCH_LOOKBACK_DAYS = 3
 WEB_SEARCH_RESULTS = 25
-# Varied phrasings, because news search ranks by similarity to the query.
 WEB_SEARCH_QUERIES = (
     "AI lab announces new large language model",
     "introducing our new frontier AI model",
@@ -67,7 +64,6 @@ _LEAD_VERB = re.compile(
     r"^(?:introducing|announcing|meet|releasing|launching|say hello to)\s+(?:the\s+)?",
     re.IGNORECASE,
 )
-# A model name ends at the first clause boundary of a headline.
 _NAME_BOUNDARY = re.compile(
     r"\s*(?:[:|,;!?(]|\s[-–—]\s|\b(?:and|for|with|in|on|to|now|is|as|at|from|by)\b)",
     re.IGNORECASE,
@@ -87,18 +83,10 @@ class ReleaseSource:
     lab: str
     url: str
     kind: Literal["rss", "sitemap"]
-    # Model family names. A post counts as a release only when the model
-    # name in its headline starts with one of them.
     families: tuple[str, ...]
-    # Pattern of the lab's naming convention ("Timestral" for Mistral's
-    # "-stral" names). A bare name matching it that is not yet a listed
-    # family announces a new model family.
     new_family: str | None = None
-    # Sitemaps: only follow article URLs under this path.
     path_prefix: str = ""
-    # Sitemaps without trustworthy <lastmod>: read the date from the slug.
     slug_date: tuple[str, str] | None = None
-    # Sitemaps: newest article pages fetched per run.
     max_pages: int = 12
 
     @property
@@ -116,8 +104,6 @@ class ReleaseSource:
         )
 
 
-# Only sources reachable from the production host with machine-readable
-# dates. Labs without one are found through the web news search.
 RELEASE_SOURCES: tuple[ReleaseSource, ...] = (
     ReleaseSource(
         lab="OpenAI",
@@ -216,8 +202,6 @@ class ReleaseSignal:
     status: Literal["indexed", "unindexed"] = "unindexed"
     paper_id: int | None = None
     matched_by: str | None = None
-    # A web signal's url is the lab's own page only when the extractor cited
-    # one; otherwise it is a news article.
     official_url: bool = False
 
     def to_dict(self) -> dict:
@@ -246,11 +230,6 @@ class RadarReport:
             "unindexed": len(self.unindexed),
             "errors": self.errors,
         }
-
-
-# ---------------------------------------------------------------------------
-# Parsing
-# ---------------------------------------------------------------------------
 
 
 def _local(tag: str) -> str:
@@ -338,8 +317,6 @@ _PUBLISHED = (
     ),
     re.compile(r"<time[^>]+datetime=[\"']([^\"']+)", re.IGNORECASE),
 )
-# The date readers see ("October 15, 2026"). CMS metadata can keep a draft's
-# date (Mistral's Timestral post: datePublished 2026-07-15, shown October 15).
 _VISIBLE_DATE = re.compile(
     r">\s*((?:January|February|March|April|May|June|July|August|September|"
     r"October|November|December) \d{1,2}, \d{4})\s*<"
@@ -370,9 +347,6 @@ def release_model_name(title: str, source: ReleaseSource) -> str | None:
     name = _LEAD_VERB.sub("", headline)
     announced = name != headline
     name, *rest = _NAME_BOUNDARY.split(name, maxsplit=1)
-    # Without a lead verb the headline must be the model name, optionally
-    # followed by a subtitle ("Gemini 4 Argon: our next era ..."), not a
-    # sentence about it ("GPT-6 and Intelligent UI for everyone").
     if (
         not announced
         and rest
@@ -383,14 +357,9 @@ def release_model_name(title: str, source: ReleaseSource) -> str | None:
     words = name.split()
     if not source.family_pattern.match(name) or not 1 <= len(words) <= 6:
         return None
-    # Model names are Title Case or versioned ("Mistral Large 4", "GPT-6.1
-    # Sol"); a lowercase word means a sentence ("Mistral AI raises ...").
     if any(word[0].islower() and not re.search(r"\d", word) for word in words[1:]):
         return None
     has_version = any(char.isdigit() for char in name)
-    # Headlines that merely start with a family name must carry a version;
-    # a bare family name ("Introducing Claude") is a product page, but a bare
-    # new name in the lab's convention ("Timestral: ...") is a new family.
     if (
         not has_version
         and not source.is_new_family(name)
@@ -424,11 +393,6 @@ def _escape_like(value: str) -> str:
 
 def _name_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
-
-
-# ---------------------------------------------------------------------------
-# Collection
-# ---------------------------------------------------------------------------
 
 
 class FeedClient:
@@ -507,8 +471,6 @@ def _collect_sitemap_articles(
         if parts.path.rstrip("/") == source.path_prefix.rstrip("/"):
             continue
         stamped = _slug_date(page.url, source) if source.slug_date else page.published
-        # Rebuilt sitemaps refresh <lastmod>, so it only proves a page is old;
-        # the article's own publication date decides recency below.
         if stamped is None or stamped < cutoff:
             continue
         candidates.append(FeedEntry(page.url, None, stamped))
@@ -611,7 +573,6 @@ class OpenAIReleaseExtractor:
             text_format=ExtractedReleases,
         )
         if response.output_parsed is None:
-            # Refusals and empty outputs leave nothing to parse.
             raise ValueError("release extraction returned no structured output")
         return response.output_parsed.releases
 
@@ -631,7 +592,6 @@ def web_search_signals(
         return []
     signals: list[ReleaseSignal] = []
     for release in extract(ordered):
-        # The model must cite hits; uncited or invented ids are dropped.
         cited = [ordered[i] for i in release.hit_ids if 0 <= i < len(ordered)]
         official_id = release.official_hit_id
         official = official_id is not None and 0 <= official_id < len(ordered)
@@ -659,11 +619,6 @@ def web_search_signals(
     return signals
 
 
-# ---------------------------------------------------------------------------
-# Catalog matching
-# ---------------------------------------------------------------------------
-
-
 def match_catalog(db: Session, signals: list[ReleaseSignal]) -> None:
     """Mark signals already covered by a paper row (read-only)."""
     if not signals:
@@ -685,8 +640,6 @@ def match_catalog(db: Session, signals: list[ReleaseSignal]) -> None:
         for value in (s.model_name, s.title)
         if s.source != AA_PROVIDER or value == s.model_name
     }
-    # Release pages are indexed under the headline ("Introducing Claude
-    # Sonnet 5.5") or with a subtitle ("Gemini 3.1 Flash-Lite: Built for ...").
     headlines = sorted(
         {
             f"{verb}{name}"

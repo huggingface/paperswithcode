@@ -135,8 +135,6 @@ def prepare_entity_search(
 
     normalized = normalize_entity_search_text(raw)
     tokens = tokenize_entity_search_text(raw)
-    # Numeric API IDs are intentionally not search identities. A numeric slug
-    # can still be reached through its canonical entity route.
     slug_identity = None if raw.isdigit() or not tokens else raw.casefold()
     return EntitySearchTerms(
         raw=raw,
@@ -209,11 +207,6 @@ def postgres_search_expressions(model, terms: EntitySearchTerms, *, full_name=No
             normalized_vector.op("@@")(prefix_query),
         )
         lexical_match = model.search_vector.op("@@")(lexical_query)
-        # A single term's cover density only counts its repetitions (and the
-        # raw-name vector double-counts hyphenated compounds such as
-        # "human-scene"), so treat single-term matches as textual ties that
-        # entity trends break, like `deterministic_match`. Multi-term queries
-        # rank adjacency on the separator-normalized name.
         if len(terms.tokens) == 1:
             relevance = case((prefix_match, 1.0), else_=0.0)
         else:
@@ -303,9 +296,6 @@ def _edit_confidence(query: str, name: str) -> float:
         candidate = "".join(name_tokens[start : start + window_size])
         denominator = max(1, len(query_compact), len(candidate))
         confidence = 1 - _damerau_levenshtein(query_compact, candidate) / denominator
-        # Prefer an equally good typo repair that explains more of the
-        # displayed name, without making a single misspelled long token too
-        # weak to recover inside a multi-token name.
         coverage_factor = 0.7 + 0.3 * (window_size / len(name_tokens))
         best = max(best, confidence * coverage_factor)
     return best

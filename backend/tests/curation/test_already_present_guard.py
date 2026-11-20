@@ -105,7 +105,6 @@ LOWER = SimpleNamespace(name="Top-1 Accuracy", direction="lower_is_better")
 
 
 def test_already_present_rejected_when_only_other_papers_rank_higher():
-    # Other papers' rows are never returned: the query is scoped to this paper.
     service = _service(_Database(metric=HIGHER, evaluations=[]))
 
     with pytest.raises(ValueError, match="is not already_present"):
@@ -127,7 +126,6 @@ def test_already_present_rejected_when_own_row_is_worse():
 
 
 def test_rejection_names_the_stored_rows_so_a_retry_can_correct_the_value():
-    # PolyViT job e4360f72 copied the CIFAR-10 column (99.4) for CIFAR-100.
     service = _service(_Database(metric=HIGHER, evaluations=[_evaluation(7, 93.9)]))
 
     with pytest.raises(

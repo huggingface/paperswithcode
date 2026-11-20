@@ -65,7 +65,6 @@ MAX_BACKFILL_ATTEMPTS = 5
 STALE_CLAIM = timedelta(minutes=30)
 RETRY_AFTER = timedelta(minutes=10)
 PREVIEW_DEPTH = 30
-# Saving waits on one embedding; search's tight budget left new topics empty.
 PREVIEW_EMBEDDING_TIMEOUT_MS = 5000
 LABEL_MIN_LENGTH = 60
 LABEL_MODEL = "gpt-6-luna"
@@ -95,7 +94,6 @@ POLICY = (
     "paper's contribution lies in a different area."
 )
 
-# Everything Jev sees about a paper: the card shown on the site plus its tags.
 CARDS_SQL = """
 SELECT r.id, r.title, r.abstract,
   (SELECT string_agg(a.name, ', ' ORDER BY pa.author_order)
@@ -242,8 +240,6 @@ def judge_papers(
                 paper_id = futures[future]
                 error = future.exception()
                 if error is not None:
-                    # A transport or malformed-answer failure leaves the pairs
-                    # unjudged for the next run; anything else is a bug.
                     if not isinstance(error, (httpx.HTTPError, KeyError, ValueError)):
                         raise error
                     failed += len(work[paper_id])
@@ -309,7 +305,6 @@ def judge_recent(db: Session, judge: TopicJudge, now: datetime) -> tuple[int, in
 def recall_older(db: Session, topic: str, now: datetime) -> list[int]:
     """Top older papers by dense + lexical reciprocal rank fusion, no name matching."""
     end = window_start(now) - timedelta(days=1)
-    # Any topic word may match: a long description rarely has every word in one paper.
     lexical = db.execute(
         text(
             """
@@ -337,8 +332,6 @@ def recall_older(db: Session, topic: str, now: datetime) -> list[int]:
             settings.query_embedding_timeout_ms,
             settings.query_embedding_max_concurrency,
         )
-        # The HNSW scan stops after ef_search (40) rows; keep scanning in exact
-        # distance order until the date-filtered search fills the depth.
         db.execute(text("SET LOCAL hnsw.ef_search = 1000"))
         db.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
         dense = retrieval.encode_and_search(
@@ -393,7 +386,7 @@ def backfill(
     try:
         older = recall_older(db, topic.text, now)
     except QueryEmbeddingUnavailable:
-        older = None  # Judge the window now; recall older papers on the retry.
+        older = None
     window = window_paper_ids(db, now)
     topic.backfill_total = len(window) + len(older or [])
     db.commit()
@@ -454,7 +447,7 @@ def summarize(value: str) -> str | None:
             if part.get("type") == "output_text"
         )
     except (httpx.HTTPError, KeyError, ValueError):
-        return None  # The full text is shown; the next save retries.
+        return None
     label = display_text(label).strip("\"'“”").rstrip(".")[:80]
     return label[:1].upper() + label[1:] or None
 
@@ -478,7 +471,7 @@ def save_preview(db: Session, topic: ResearchTopic, now: datetime) -> None:
     try:
         vector = retrieval.encode_query(topic.text, generation, client)
     except QueryEmbeddingUnavailable:
-        return  # The feed fills in once Jev has judged the topic.
+        return
     db.execute(text("SET LOCAL hnsw.ef_search = 100"))
     db.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))
     start = window_start(now)
@@ -566,7 +559,6 @@ def topic_views(db: Session, subject: str) -> list[TopicView]:
             suggestions=suggestions(db, topic.text),
             is_public=topic.is_public,
             is_creator=topic.created_by_hf_subject == subject,
-            # Only public topics name their creator.
             creator=person(creator)
             if topic.is_public and topic.created_by_hf_subject != subject
             else None,
@@ -599,11 +591,9 @@ def _add_follow(
     position: int | None = None,
 ) -> None:
     """Follow ``topic`` unless already followed; raises ``OverflowError`` at the cap."""
-    # A topic that exhausted its retries gets a fresh start from a new follower.
     if topic.backfill_status == "failed":
         topic.backfill_status = "pending"
         topic.backfill_attempts = 0
-    # Topics from before creators were recorded go to their next follower.
     if topic.created_by_hf_subject is None:
         topic.created_by_hf_subject = subject
     if _follow(db, subject, topic.id) is not None:
@@ -615,7 +605,6 @@ def _add_follow(
         db.rollback()
         raise OverflowError(MAX_TOPICS)
     if position is None:
-        # After a reorder every topic has a position, so a new one goes last.
         last = db.scalar(
             select(func.max(ResearchTopicFollow.position)).where(
                 ResearchTopicFollow.hf_subject == subject
@@ -659,8 +648,6 @@ def follow_topic(
     topic = db.scalar(
         select(ResearchTopic).where(ResearchTopic.normalized == normalized)
     )
-    # An edited topic keeps its place in the account's order. Follow time drives
-    # digest freshness, so pin the current order as positions instead of reusing it.
     if old is not None and old.position is None:
         _pin_order(db, subject)
     position = old.position if old is not None else None
@@ -669,7 +656,6 @@ def follow_topic(
         db.flush()
     _add_follow(db, subject, topic, now, position)
     db.commit()
-    # Saving the topic again retries a label or preview that failed.
     if topic.label is None:
         topic.label = summarize(topic.text)
         db.commit()

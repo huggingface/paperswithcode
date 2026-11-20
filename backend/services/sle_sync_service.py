@@ -33,22 +33,16 @@ from backend.services.live_leaderboard_sync import (
 SLE_LEADERBOARD_URL = "https://sciences-last-exam.org/leaderboard"
 SLE_SITE_URL = "https://sciences-last-exam.org/"
 TASK_SLUG = "scientific-reasoning"
-# Hypothesis Discovery runs in the benchmark's own research harness, not in
-# the model's coding-agent harness.
 HYPOTHESIS_HARNESS = "DiscoveryRSI"
 MIN_EXPECTED_MODELS = 3
 MAX_EXPECTED_MODELS = 60
-# Refuse to touch a managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 3
 
 _DATA_BUNDLE = re.compile(r"""["'](?:\./|/)?(assets/data\.[0-9a-f]+\.js)["']""")
 _LEADERBOARD_KEY = re.compile(r"""\bleaderboard\s*:\s*(?=\{)""")
-# The composite averages exactly these assessments; a new member (Wet-lab
-# Execution, say) restates every composite and needs a reviewer decision.
 COMPOSITE_MEMBERS = ("pp", "eo", "sc", "so", "hd", "e2e")
 
 
-# (capability id, label, PwC benchmark slug, PwC metric, SLE metric, protocol)
 BOARD_SPECS = (
     (
         "all",
@@ -110,9 +104,6 @@ BOARD_SPECS = (
     ),
 )
 
-# Exact SLE model names are the trust boundary between a leaderboard row and
-# its introducing paper. Other names are matched automatically when the
-# catalog names them unambiguously, and otherwise handed to the release radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "GPT-6.1 Sol": ModelIdentity(
         "GPT-6.1 Sol", source_url="https://openai.com/index/introducing-gpt-6-1-sol/"
@@ -250,7 +241,6 @@ def parse_sle(text: str) -> list[tuple[LiveLeaderboard, list[LeaderboardEntry]]]
             and harness.strip()
         ):
             raise ValueError(f"SLE model row is malformed: {model!r}")
-        # A trailing asterisk flags a provisional composite on the site.
         label = name.strip().rstrip("*").strip()
         if key in roster or label in {entry[0] for entry in roster.values()}:
             raise ValueError(f"SLE lists {label} twice")
@@ -261,7 +251,6 @@ def parse_sle(text: str) -> list[tuple[LiveLeaderboard, list[LeaderboardEntry]]]
             f"{MIN_EXPECTED_MODELS}-{MAX_EXPECTED_MODELS}"
         )
 
-    # A model with any provisional assessment has a provisional composite.
     provisional = {
         key
         for capability in COMPOSITE_MEMBERS

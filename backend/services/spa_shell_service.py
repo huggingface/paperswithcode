@@ -57,8 +57,6 @@ def load_index_html() -> Optional[str]:
     return None
 
 
-# Server-rendered routes and the lazily loaded view module each one renders
-# (React.lazy in frontend/src/App.tsx). Unknown paths simply get no preloads.
 _ROUTE_VIEWS: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (re.compile(pattern), source)
     for pattern, source in (

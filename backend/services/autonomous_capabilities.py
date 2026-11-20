@@ -90,8 +90,6 @@ CAPABILITY_MANIFESTS: Mapping[Operator, frozenset[Capability]] = MappingProxyTyp
                 Capability.APPLY_EXISTING_LEADERBOARD_EVAL,
                 Capability.APPLY_PAPER_METADATA_EDIT,
                 Capability.RESOLVE_MODEL_PAPER,
-                # The one exception to the human-only taxonomy boundary: a
-                # benchmark-gap candidate reported by at least three papers.
                 Capability.CREATE_BENCHMARK_FROM_GAP,
             }
         ),
@@ -132,8 +130,6 @@ CAPABILITY_RESOURCE_KINDS: Mapping[Capability, frozenset[ResourceKind]] = (
             ),
             Capability.APPLY_PAPER_METADATA_EDIT: frozenset({ResourceKind.PAPER}),
             Capability.CREATE_EXTERNAL_PAPER: frozenset({ResourceKind.EXTERNAL_PAPER}),
-            # Release-radar resolutions may create an external paper; the
-            # resolution service requires a first-party, non-duplicate source.
             Capability.RESOLVE_MODEL_PAPER: frozenset(
                 {
                     ResourceKind.TRENDING_MODEL_CANDIDATE,

@@ -123,7 +123,6 @@ def test_dry_run_reports_stalled_scheduling_jobs_without_cancelling():
     job = _scheduler(execute=False, confirm=False, full=True)
     job.api = Mock()
     stalled = _scheduling_job("stalled", age=timedelta(hours=2))
-    # The dry run previews the execute plan (slot freed) but never cancels.
     assert job._reap_stalled_scheduling([stalled]) == []
     assert job.stalled_scheduling_jobs == 1
     job.api.cancel_job.assert_not_called()

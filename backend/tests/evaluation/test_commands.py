@@ -97,7 +97,6 @@ def mutation():
 
 
 def create_payload(model_name="Original"):
-    # A leaderboard holds one entry per model, so multi-row tests name each row.
     return dict(
         paper_id=1,
         task_id=1,
@@ -179,9 +178,7 @@ def test_create_and_patch_presence_parity(db, adapter):
     assert (row.harness, row.source_url, row.num_parameters, row.hf_model_url) == (
         None,
     ) * 4
-    assert (
-        row.model_name == "Updated"
-    )  # Legacy non-clearable fields retain null semantics.
+    assert row.model_name == "Updated"
     assert row.metrics == {"Accuracy": 0}
     assert row.external_source_url is None
 
@@ -507,7 +504,6 @@ def test_batch_refreshes_distinct_old_new_scopes_after_all_writes(
     assert [row.best_rank for row in rows[-2:]] == [1, 3]
     if result:
         assert {row["id"]: row["best_rank"] for row in result["evaluations"]} == ranks
-    # Recomputing every leaderboard independently must leave persisted ranks unchanged.
     for dataset in (1, 2):
         for metric in ("Accuracy", "Loss"):
             original(service, 1, dataset, metric_name=metric, commit=False)
@@ -548,7 +544,6 @@ def test_batch_rank_failure_rolls_back_rows_and_derived_ranks(db, monkeypatch, a
                 ],
             )
         except Exception:
-            # Pending mutation intentionally leaves rollback to approval's owner.
             if adapter == "pending":
                 db.rollback()
             raise

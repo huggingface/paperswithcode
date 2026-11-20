@@ -99,13 +99,11 @@ class Dataset(BaseModel):
     )
     hf_url: Optional[str] = Field(None, description="Hugging Face dataset URL")
 
-    # Additional metadata from PapersWithCode
     short_description: Optional[str] = Field(
         None, description="Short description/summary"
     )
     homepage: Optional[str] = Field(None, description="Official homepage URL")
 
-    # Dataset hierarchy and variants
     parent_dataset_id: Optional[str] = Field(
         None, description="Parent dataset ID if this is a variant"
     )
@@ -117,14 +115,12 @@ class Dataset(BaseModel):
         None, description="Name of the split (e.g., test-dev, minival, val2017)"
     )
 
-    # Image URLs
     image_url: Optional[str] = Field(None, description="Main image URL for the dataset")
     thumbnail_url: Optional[str] = Field(None, description="Thumbnail image URL")
     verified_image_url: Optional[str] = Field(
         None, description="Verified image URL from PWC"
     )
 
-    # Paper reference
     introducing_paper_id: Optional[str] = Field(
         None, description="ID of paper that introduced this dataset"
     )
@@ -135,13 +131,11 @@ class Dataset(BaseModel):
         None, description="URL to paper that introduced this dataset"
     )
 
-    # Licensing
     license_name: Optional[str] = Field(
         None, description="License name (e.g., MIT, Apache 2.0)"
     )
     license_url: Optional[str] = Field(None, description="URL to license details")
 
-    # Dates
     introduced_year: Optional[int] = Field(
         None, description="Year the dataset was introduced"
     )
@@ -149,7 +143,6 @@ class Dataset(BaseModel):
         None, description="Date when dataset was introduced"
     )
 
-    # Array fields
     modalities: Optional[List[str]] = Field(
         None, description="Data modalities (e.g., ['Images', 'Videos'])"
     )
@@ -163,14 +156,10 @@ class Dataset(BaseModel):
     @field_validator("languages", "variants", mode="before")
     @classmethod
     def coerce_optional_string_list(cls, value: object) -> Optional[List[str]]:
-        # Legacy imports stored JSON ``null`` and, for a few datasets, an object
-        # in these JSONB columns; neither is a list of names, so the API omits
-        # them instead of failing the whole listing.
         if not isinstance(value, list):
             return None
         return [str(item) for item in value if item is not None]
 
-    # Usage and warnings
     num_papers: Optional[int] = Field(
         None, description="Number of papers using this dataset"
     )
@@ -178,10 +167,8 @@ class Dataset(BaseModel):
         None, description="Warning or note about the dataset"
     )
 
-    # PWC source
     pwc_url: Optional[str] = Field(None, description="Original PapersWithCode URL")
 
-    # Legacy fields (kept for backwards compatibility)
     paper_count: Optional[int] = Field(
         None, description="Number of papers using this dataset (alias for num_papers)"
     )
@@ -216,14 +203,10 @@ class Dataset(BaseModel):
         ),
     )
 
-    # Allowed metrics for this dataset
     allowed_metrics: Optional[List[str]] = Field(
         None, description="List of metric names allowed for evaluations on this dataset"
     )
 
-    # Optionally embedded introducing paper. Populated only when the request
-    # passes `?include_paper=true`. Lets the benchmark page collapse the
-    # previous dataset → paper waterfall into a single round trip (PLAN.md §5).
     introducing_paper: Optional["IntroducingPaper"] = Field(
         None,
         description="Lightweight introducing-paper embed. Present only when the request asked for it.",
@@ -296,7 +279,6 @@ class DatasetCreateRequest(BaseModel):
         ..., description="List of task IDs to link this dataset to"
     )
 
-    # Additional PWC fields
     short_description: Optional[str] = Field(
         None, description="Short description/summary"
     )
@@ -344,7 +326,6 @@ class DatasetUpdateRequest(BaseModel):
         None, description="URL to paper that introduced this dataset"
     )
 
-    # Additional PWC fields
     short_description: Optional[str] = Field(
         None, description="Short description/summary"
     )
@@ -462,7 +443,6 @@ class Evaluation(BaseModel):
         ..., description="Timestamp when record was last updated"
     )
 
-    # Additional fields for frontend display
     paper_title: Optional[str] = Field(None, description="Title of the paper")
     paper_arxiv_id: Optional[str] = Field(None, description="ArXiv ID of the paper")
     paper_published_date: Optional[str] = Field(
@@ -720,7 +700,6 @@ class DatasetMetricSetRequest(BaseModel):
     )
 
 
-# Resolve the dataset model's forward references within this bounded module.
 Dataset.model_rebuild()
 
 __all__ = [

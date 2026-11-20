@@ -184,15 +184,10 @@ def test_math_spans_are_skipped():
 
 
 def test_benchmark_base_names_resolve_through_the_catalog_hierarchy():
-    # Unqualified row wins over its qualified split.
     assert links("Terminal-Bench 2.0") == [("Terminal-Bench 2.0", "dataset", 12)]
-    # The group's single parent wins (SFT points to Zero-Shot).
     assert links("LIBERO-Plus") == [("LIBERO-Plus", "dataset", 22)]
-    # A lone split resolves to the parent that names the same benchmark.
     assert links("WEAR") == [("WEAR", "dataset", 40)]
-    # Variants sharing one outside parent resolve to it.
     assert links("SkillsBench") == [("SkillsBench", "dataset", 50)]
-    # Co-equal variants with no parent: the one with the most evaluations.
     assert links("SNU-FILM") == [("SNU-FILM", "dataset", 31)]
 
 
@@ -311,8 +306,6 @@ def acronym_links(text):
 
 
 def test_abbreviation_redefined_with_overlapping_words_is_not_linked():
-    # "fine" and "tuning" overlap Reinforcement Fine-Tuning, but "rejection
-    # sampling" makes the expansion another method.
     text = "we apply Rejection sampling Fine-Tuning (RFT). RFT uses samples"
     assert acronym_links(text) == []
     assert acronym_links("we train a Thinking Reward Model (TRM); TRM scores") == []
@@ -339,12 +332,10 @@ def test_function_word_does_not_start_an_expansion():
         ("DPO", 6),
         ("DPO", 6),
     ]
-    # "Model" is ignored when comparing words but can still start the expansion.
     assert acronym_links("a Model Predictive Controller (MPC); MPC runs") == [
         ("MPC", 7),
         ("MPC", 7),
     ]
-    # A trailing "Model" alone does not make "Mamba Language Model" an MLM.
     assert acronym_links("our Mamba Language Model (MLM); the MLM wins") == []
 
 
@@ -389,7 +380,6 @@ def test_compact_names_and_short_years():
         ("AIME 2025", "dataset", 80),
         ("MATH-500", "dataset", 81),
     ]
-    # An exact catalog name beats a short-year alias.
     assert links("AIME24") == [("AIME24", "dataset", 83)]
     assert links("on COCO") == [("COCO", "dataset", 82)]
 
@@ -437,7 +427,7 @@ def test_benchmark_initials_abbreviation_matches():
         ("HLE", "dataset", 87),
         ("Humanity's Last Exam", "dataset", 87),
     ]
-    assert links("SFT") == []  # LIBERO-Plus (SFT) is a split, not an abbreviation
+    assert links("SFT") == []
 
 
 def test_curated_aliases_link_and_one_word_aliases_are_judged():
@@ -455,7 +445,7 @@ def test_name_shared_by_a_benchmark_and_a_method_yields_both_for_the_judge():
     assert [(c.surface, c.entity_type, c.entity_id) for c in found] == [
         ("GQA", "dataset", 88),
         ("GQA", "method", 29),
-        ("GQA", "method", 29),  # GQA-8: eight groups, still the method
+        ("GQA", "method", 29),
     ]
     assert all(c.variant_suspect for c in found)
     assert links("grouped-query attention (GQA)") == [

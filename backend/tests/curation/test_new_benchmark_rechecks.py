@@ -72,7 +72,6 @@ def db(monkeypatch):
         ],
     )
     with Session(engine) as session:
-        # The production loader uses Postgres casts; read the test datasets.
         monkeypatch.setattr(
             recheck_module,
             "load_catalog_entities",
@@ -179,10 +178,10 @@ def rechecks(db) -> dict[int, PaperCurationJob]:
 def test_new_board_queues_rechecks_only_for_papers_that_report_it(db):
     add_board(db, 1, 20, BOARD_CREATED)
     reports = "Table 2: AIME 2025 accuracy of our model. We gain 4 points on AIME 2025."
-    add_paper(db, 1)  # reports it in its own tables
-    add_paper(db, 2)  # cites it only in the bibliography
-    add_paper(db, 3)  # names it once, in related work
-    add_paper(db, 4)  # already has an AIME 2025 row
+    add_paper(db, 1)
+    add_paper(db, 2)
+    add_paper(db, 3)
+    add_paper(db, 4)
     db.add(
         Evaluation(
             paper_id=4,
@@ -194,10 +193,10 @@ def test_new_board_queues_rechecks_only_for_papers_that_report_it(db):
             created_at=BOARD_CREATED,
         )
     )
-    add_paper(db, 5, abstract="We reach 61% on AIME 2025.")  # no Markdown yet
-    add_paper(db, 6, eval_at=BOARD_CREATED + timedelta(hours=1))  # curated after
-    add_paper(db, 7, task_id=2, dataset_id=11)  # another task
-    add_paper(db, 8)  # add-evals already in flight
+    add_paper(db, 5, abstract="We reach 61% on AIME 2025.")
+    add_paper(db, 6, eval_at=BOARD_CREATED + timedelta(hours=1))
+    add_paper(db, 7, task_id=2, dataset_id=11)
+    add_paper(db, 8)
     db.add(
         PaperCurationJob(
             id=uuid.uuid4(),
@@ -234,7 +233,6 @@ def test_new_board_queues_rechecks_only_for_papers_that_report_it(db):
     assert job.policy_version == "new-benchmark-20"
     assert job.requested_by == "new-benchmark:20"
 
-    # Idempotent per (paper, dataset): the next daily run queues nothing new.
     again, _reads = run(db, texts)
     assert again["rechecks"] == []
     assert len(rechecks(db)) == 2

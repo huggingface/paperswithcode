@@ -89,7 +89,6 @@ def test_population_ignores_hf_aggregator_links():
     cron.derive_popularity(population)
 
     assert population[1]["artifacts"] == [("model", 5.0)]
-    # Aggregator likes do not count toward popularity.
     assert population[1]["hf_likes"] == 30.0
     assert population[2]["hf_likes"] == 0.0
     assert population[1]["popularity"] == 1.0
@@ -99,7 +98,6 @@ def test_population_ignores_hf_aggregator_links():
     assert population[2]["x_raw"] == 12.5
     assert population[1]["hourly_lift"] == 0.0
     assert population[2]["hourly_lift"] == 100.0
-    # Paper 2 only had an aggregator, so its stored score is cleared.
     github_corpus, hf_corpora = cron.derive_corpora(population)
     updates, clears = cron.build_score_changes(population, github_corpus, hf_corpora)
     assert [update["id"] for update in updates] == [1]
@@ -149,7 +147,6 @@ def test_targeted_compute_only_changes_selected_papers(monkeypatch):
     assert [update["id"] for update in updates] == [2]
     assert clears == [3]
     assert len(calls) == 2
-    # The selected score is still normalized against paper 1's larger signal.
     assert calls[0][1] == [2.0, 10.0]
 
 
@@ -215,7 +212,6 @@ def test_targeted_rescore_keeps_hourly_x_lift(monkeypatch):
 
     assert lifted == 100.0
     assert targeted[0]["score"] == 100.0
-    # The hourly run recomputes the lift from its own settings (here: weight 0).
     assert next(u for u in full if u["id"] == 2)["score"] == 25.0
 
 
@@ -393,7 +389,6 @@ def test_x_only_paper_stays_unscored_while_x_weight_is_zero():
     by_id = {update["id"]: update for update in updates}
     assert by_id[2]["x"] == 1.0
     assert by_id[2]["score"] == pytest.approx(100, abs=1e-3)
-    # The GitHub-only paper keeps its score: X only lifts.
     assert by_id[1]["score"] == pytest.approx(50, abs=1e-3)
     assert clears == []
 
@@ -427,7 +422,6 @@ def test_popularity_marks_down_momentum_without_adoption():
         }
 
     population = {1: entry(956, 457), 2: entry(3, 10), 3: entry(50, 40)}
-    # A paper without live momentum does not enter the popularity corpora.
     population[4] = {**entry(100_000, 0), "github_raw": 0.0}
     cron.derive_popularity(population)
     github_corpus, hf_corpora = cron.derive_corpora(population)
@@ -438,7 +432,6 @@ def test_popularity_marks_down_momentum_without_adoption():
     assert 4 not in scores
     assert scores[1] == pytest.approx(50.0)
     assert scores[2] < scores[3] < scores[1]
-    # Momentum components are stored unchanged.
     assert {update["g"] for update in updates} == {1.0}
 
 
@@ -452,7 +445,6 @@ def test_targeted_rescore_keeps_x_lift_above_a_marked_down_base():
             "x_raw": 0.0,
             "stars": 0.0,
             "hf_likes": 0.0,
-            # Hourly run wrote an X lift of 45 over a marked-down base of 25.
             "stored": (45.0, 1.0, 0.0),
         },
         2: {

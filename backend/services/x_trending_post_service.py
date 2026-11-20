@@ -60,7 +60,6 @@ X_API = "https://api.x.com/2"
 CANDIDATE_WINDOW_DAYS = 14
 CANDIDATES_PER_RUN = 10
 SOTA_MIN_ENTRIES = 5
-# The first place must beat every other paper's best by this share of it.
 SOTA_MIN_MARGIN = 0.01
 ORGANIZATIONS_CHECKED = 3
 MAX_TAGS = 2
@@ -69,8 +68,6 @@ ABSTRACT_CHARS = 3000
 RENDER_ZOOM = 2.0
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 ELLIPSIS = "…"
-# Download failures, unreadable PDFs (PyMuPDF raises FileDataError, a
-# RuntimeError, or low-level FzErrorBase), and PDFs without pages.
 RENDER_ERRORS = (
     httpx.HTTPError,
     ValueError,
@@ -78,7 +75,6 @@ RENDER_ERRORS = (
     IndexError,
     fitz.mupdf.FzErrorBase,
 )
-# A sentence ends at . ! ? followed by whitespace, except after "vs." etc.
 _SENTENCE_END = re.compile(
     r"(?<!\bvs\.)(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bal\.)(?<=[.!?])\s+"
 )
@@ -89,8 +85,6 @@ _HF_X_LINK = re.compile(
     r'href="https://(?:www\.)?(?:twitter|x)\.com/([A-Za-z0-9_]{1,15})/?"'
 )
 _IGNORED_HANDLES = {"huggingface", "home", "intent", "share", "x", "twitter"}
-# Concrete results: standalone numbers (not "Qwen3" or "27B"), percentages and
-# multiples count double, plus comparison words.
 _STANDALONE_NUMBER = re.compile(r"(?<![\w.-])\d+(?:\.\d+)?(?![\w.]*[A-Za-z])")
 _MEASURE = re.compile(
     r"(?<![\w.-])\d+(?:\.\d+)?\s?(?:%|×|x\b|-fold|points?\b|pp\b|times\b)"
@@ -100,7 +94,6 @@ _CLAIM = re.compile(
     r"faster|fewer|cuts?|reduc|doubl|halv|match)",
     re.IGNORECASE,
 )
-# A lead with a number must compare it with something.
 _COMPARISON = re.compile(
     r"\b(?:outperform\w*|beat(?:s|ing|en)?|exceed\w*|surpass\w*|ahead of|than|"
     r"versus|vs|compared|state-of-the-art|sota|first|best|tops?|topped|topping|"
@@ -110,10 +103,6 @@ _COMPARISON = re.compile(
 _SMALL_DELTA = re.compile(
     r"(?:\+\s?|\bby\s+)0\.\d+\s?(?:points?|pp|%|percent)", re.IGNORECASE
 )
-# Well-known labs and companies, by organization slug, with their official X
-# account. Each handle was looked up on the X API (2026-11-05): a business or
-# blue-verified account named after the organization. With None, the handle
-# has to come from `organization_x_handle`.
 NOTABLE_X_HANDLES: dict[str, str | None] = {
     "adobe": "AdobeResearch",
     "alibabagroup": "AlibabaGroup",
@@ -176,7 +165,6 @@ NOTABLE_X_HANDLES: dict[str, str | None] = {
     "zai-org": "Zai_org",
 }
 _PRONOUN_START = re.compile(r"(?:It|Its|They|Their|This|These)\b")
-# Luna aims this far below the limit, since it miscounts characters.
 LUNA_MARGIN = 30
 LUNA_MODEL = "gpt-6-luna"
 RESPONSES_URL = "https://api.openai.com/v1/responses"
@@ -499,7 +487,7 @@ class Sota:
     previous_model: str
     previous_value: float
     entries: int
-    margin: float  # share of the previous best
+    margin: float
 
 
 def sota_result(db: Session, paper: Paper) -> Sota | None:

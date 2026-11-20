@@ -38,16 +38,10 @@ from backend.services.paper_markdown_service import (
 
 FIRECRAWL_SCRAPE_URL = "https://api.firecrawl.dev/v2/scrape"
 PAGE_MARKDOWN_MAX_BYTES = 2 * 1024 * 1024
-# Shorter pages are abstract stubs or conference listings, not readable papers.
 PAGE_MARKDOWN_MIN_CHARS = 2000
-# The paper title must appear near the top of the page; a program listing that
-# mentions the paper somewhere among hundreds of others is not the paper.
 TITLE_WINDOW_CHARS = 4000
 TITLE_MATCH_RATIO = 0.6
 MAX_ATTEMPTS = 3
-# Venue and publisher landing pages show an abstract and link the PDF (often
-# behind a paywall); scraping them yields metadata, not a paper. Mirrored in
-# frontend/src/lib/paperReader.ts.
 LANDING_PAGE_HOSTS = frozenset(
     {
         "aclanthology.org",
@@ -64,9 +58,6 @@ LANDING_PAGE_HOSTS = frozenset(
     }
 )
 
-# Whether the reader can show a page itself in a frame is checked from its
-# response headers. Framing rarely changes; an unreachable page is checked
-# again sooner.
 FRAME_CHECK_TIMEOUT_SECONDS = 10
 FRAME_CHECK_MAX_REDIRECTS = 5
 FRAME_CHECK_MAX_AGE = timedelta(days=7)
@@ -75,7 +66,6 @@ FRAME_CHECK_USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/130.0 Safari/537.36"
 )
-# frame-ancestors sources that admit the reader at https://paperswithcode.co.
 FRAMING_SOURCES = frozenset(
     {"*", "https:", "paperswithcode.co", "https://paperswithcode.co"}
 )
@@ -123,7 +113,6 @@ def external_page_url(
         or not hostname
         or parsed.username
         or parsed.password
-        # A fragment points into a page that lists many papers.
         or parsed.fragment
         or _is_pdf_url(parsed)
         or hostname.removeprefix("www.") in LANDING_PAGE_HOSTS
@@ -310,17 +299,14 @@ def web_markdown_pending(paper, *, bucket_id: str, token: str | None) -> bool:
     try:
         status = read_status(str(paper.id), bucket_id=bucket_id, token=token)
     except (HfHubHTTPError, OSError, ValueError):
-        # A storage outage says nothing about the page; keep waiting.
         return True
     if markdown_stale(status, page_url):
-        # The record belongs to the paper's previous source.
         return True
     return status.get("status") != "failed" or bool(status.get("retryable"))
 
 
 def retry_due(status: dict, *, now: datetime | None = None) -> bool:
     """Whether a page with this status record may be scraped again."""
-    # A record holding only a framing check has no scrape attempt yet.
     if status.get("status") in {None, "succeeded"}:
         return True
     if not status.get("retryable"):
@@ -342,8 +328,6 @@ def _write_status(
 ) -> None:
     now = datetime.now(UTC)
     prior_attempts = int(prior.get("attempt_count") or 0)
-    # Our own storage outage says nothing about the page, so it never uses up
-    # the page's attempts.
     counted = error is not None and error.code != "storage_unavailable"
     attempts = prior_attempts + 1 if counted else (prior_attempts if error else 0)
     retryable = bool(
@@ -423,39 +407,28 @@ def _prepare(
     prior = read_status(paper_id, bucket_id=bucket_id, token=token)
     stale = markdown_stale(prior, page_url)
     if stale:
-        # A new source starts fresh; only the framing check (keyed by its own
-        # URL) carries over.
         prior = {"framing": prior["framing"]} if "framing" in prior else {}
     if not retry_due(prior):
-        # A page in backoff is not yet known to be unreadable.
         raise ExternalPageMarkdownError(
             str(prior.get("error_class") or "page_unreadable"),
             retryable=bool(prior.get("retryable")),
         )
-    # A concurrent request may have published while this one waited.
     alias = paper_markdown_bucket_key(paper_id, source="external")
     if prior.get("status") == "succeeded" and BucketFileSystem(token=token).exists(
         f"hf://buckets/{bucket_id}/{alias}"
     ):
         return str(prior["markdown_sha256"])
-    # Check before the paid scrape; a held lock costs no credit.
     if BucketFileSystem(token=token).exists(
         f"hf://buckets/{bucket_id}/{MARKDOWN_MIGRATION_LOCK_KEY}"
     ):
         raise ExternalPageMarkdownError("markdown_migration_locked", retryable=True)
     if stale:
-        # _page_lock is per process: the reader API and the hourly backfill
-        # may both re-scrape, so look again before deleting anything.
         current = read_status(paper_id, bucket_id=bucket_id, token=token)
         if current.get("status") == "succeeded" and not markdown_stale(
             current, page_url
         ):
-            # Another worker already published the new page.
             return str(current["markdown_sha256"])
         if markdown_stale(current, page_url):
-            # Remove the previous source's copy first, so a failed scrape of
-            # the new page leaves nothing readers or curation could mistake
-            # for it.
             _delete_page_copy(paper_id, bucket_id=bucket_id, token=token)
     try:
         page = scrape_page(page_url, api_key=api_key, timeout_seconds=timeout_seconds)
@@ -477,7 +450,6 @@ def _prepare(
         )
     except HfHubHTTPError as error:
         failure = ExternalPageMarkdownError("storage_unavailable", retryable=True)
-        # Back off so a storage outage does not re-scrape on every read.
         _write_status(
             paper_id,
             {"page_url": page_url},

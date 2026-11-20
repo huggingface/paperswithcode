@@ -477,9 +477,6 @@ def run_embedding_job(args: argparse.Namespace) -> int:
 
 def plan_query_endpoint(args: argparse.Namespace) -> int:
     """Deploy from the embedding catalog, then pin revision and scaling."""
-    # Catalog deployment is important here: for compatible embedding models it
-    # selects TEI, including Matryoshka ``dimensions`` support. A generic
-    # pytorch endpoint uses the inference toolkit and ignores that parameter.
     deploy_command = [
         "hf",
         "endpoints",

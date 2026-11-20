@@ -61,15 +61,12 @@ from backend.services.author_service import (
 
 HF_PAPER_URL = "https://huggingface.co/api/papers/{arxiv_id}"
 USER_AGENT = "PapersWithCode-AuthorClaimBackfill/1.0 (https://paperswithcode.co)"
-# HF allows 500 requests per 5 minutes per IP; stay below it.
 DEFAULT_REQUESTS_PER_SECOND = 1.5
 MAX_ATTEMPTS = 6
 FIRST_BACKOFF_SECONDS = 30.0
 
 PHASES = ("claims", "doubles", "split", "merge", "empty")
-# Coauthors that tie a paper to an account when no stronger evidence exists.
 MIN_SHARED_COAUTHORS = 2
-# A name-only row with more papers likely lumps several namesakes together.
 MAX_COAUTHOR_PAPERS = 100
 
 _MERGE_SETUP = (
@@ -84,7 +81,6 @@ _MERGE_SETUP = (
     FROM authors
     WHERE hf_id IS NOT NULL OR hf_username IS NOT NULL
     """,
-    # Links whose author is certainly the person: claimed, or hand-curated.
     """
     CREATE TEMP TABLE merge_identity AS
     SELECT pa.author_id, pa.paper_id
@@ -105,7 +101,6 @@ _MERGE_SETUP = (
       )
       AND EXISTS (SELECT 1 FROM merge_anchor an WHERE an.author_id = h.id)
     """,
-    # Name-only coauthors distinctive enough to count as shared evidence.
     f"""
     CREATE TEMP TABLE merge_coauthor AS
     SELECT a.id AS author_id
@@ -307,17 +302,12 @@ class AuthorClaimCleanup:
         self.db = db
         self.report = report
         self.stats = CleanupStats()
-        # Name-only author id -> the account its papers merged into.
         self.merged_into: dict[int, int] = {}
-        # Filled by replay_claims: HF byline names by arXiv id (name key ->
-        # name) and HF-linked author names before the replay renamed any.
         self.bylines: dict[str, dict[str, str]] = {}
         self.original_names: dict[int, str] = {}
 
     def replay_claims(self, cache: Path) -> None:
         """Apply cached HF author lists through the daily claim sync."""
-        # The sync renames an account's row to its HF full name; the split
-        # still needs the name the legacy links were matched by.
         self.original_names = dict(
             self.db.query(Author.id, Author.name).filter(
                 or_(Author.hf_id.isnot(None), Author.hf_username.isnot(None))
@@ -374,7 +364,6 @@ class AuthorClaimCleanup:
             claimed = [pair for pair in links if pair[0].claimed]
             name_only = [pair for pair in links if not _is_hf(pair[1])]
             keep = claimed or name_only
-            # Two coauthors can share a name; only one byline slot is a double.
             if len({link.author_order for link, _ in links}) > 1:
                 skip = "different_positions"
             elif len(keep) != 1:
@@ -419,7 +408,6 @@ class AuthorClaimCleanup:
         account proves namesakes exist. A name with one account may just be
         that person's unclaimed papers, so it stays.
         """
-        # An account renamed by a claim still counts under its former name.
         accounts = Counter(
             key
             for author_id, name in self.db.query(Author.id, Author.name).filter(
@@ -649,7 +637,6 @@ class AuthorClaimCleanup:
             )
             aliases = self.db.query(AuthorAlias).filter_by(author_id=author_id).all()
             if target is None and aliases:
-                # Deleting would cascade away aliases that keep old URLs alive.
                 self.stats.counts["empty_kept_alias_target"] += 1
                 continue
             for alias in aliases:

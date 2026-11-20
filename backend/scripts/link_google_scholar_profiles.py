@@ -82,7 +82,6 @@ INSERT_CANDIDATE_SQL = text(
     """
 )
 
-# Several Wikidata people fitting the name make it a common name.
 PENDING_PROFILES_SQL = text(
     """
     SELECT DISTINCT c.author_id, c.scholar_id, n.papers,
@@ -168,7 +167,6 @@ def check_new_authors(
     s2 = SemanticScholarBatch(s2_key, client)
     for chunk in iter_chunks(pending[: args.s2_authors], 300):
         papers_by_author = load_papers([author.id for author, _ in chunk])
-        # Only people with an ORCID or S2 ID can be confirmed through S2.
         s2_papers = {
             paper.paper_id: paper
             for author, people in chunk
@@ -226,7 +224,6 @@ def read_profiles(client: httpx.Client, serp_key: str, reserve: int) -> None:
     )
     read = 0
     for row in pending:
-        # A profile costs up to three searches before any borderline re-read.
         if budget - serp.requests < serp.max_pages:
             break
         papers = load_papers([row.author_id])[row.author_id]
@@ -280,7 +277,6 @@ def store_links(dry_run: bool) -> None:
         ]
         decide(rows)
         logger.info("Candidate statuses: %s", dict(Counter(r["status"] for r in rows)))
-        # One row per author: two Wikidata items can share the same Scholar ID.
         confirmed = {
             r["author_id"]: r
             for r in rows

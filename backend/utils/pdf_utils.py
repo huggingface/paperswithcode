@@ -11,7 +11,6 @@ from PyPDF2 import PdfReader
 from pdf2image import convert_from_path
 import pdfplumber
 
-# Type variable for generic return type
 T = TypeVar("T")
 
 PROJECT_PAGE_URL_PATTERN = r"\bhttps?://[a-zA-Z0-9.-]+\.github\.io[^\s]*"
@@ -22,7 +21,6 @@ async def safe_regex_search_async(pattern: str, text: str, timeout_seconds: int 
     Perform regex search with asyncio timeout to prevent hanging.
     """
     try:
-        # Run the regex search in a separate thread with timeout
         match = await asyncio.wait_for(
             asyncio.to_thread(re.search, pattern, text), timeout=timeout_seconds
         )
@@ -62,17 +60,14 @@ def extract_hyperlinks_from_pdf(pdf_path):
     try:
         with pdfplumber.open(pdf_path) as pdf:
             for page in pdf.pages:
-                # Extract hyperlinks
                 annotations = page.hyperlinks
                 if annotations:
                     for link in annotations:
                         if "uri" in link:
-                            # Get the text near the link if available
                             text = ""
                             if "text" in link:
                                 text = link["text"]
                             elif "bbox" in link:
-                                # Extract text from the bounding box area
                                 bbox = link["bbox"]
                                 crop = page.crop(bbox)
                                 text = crop.extract_text() or ""
@@ -80,7 +75,6 @@ def extract_hyperlinks_from_pdf(pdf_path):
                             links.append({"text": text.strip(), "url": link["uri"]})
     except Exception as e:
         print(f"Error extracting hyperlinks from PDF: {e}")
-        # Return empty list if extraction fails
         return []
 
     return links
@@ -110,10 +104,8 @@ def pdf_to_images_sync(pdf_path: str, pages: List[int] = [1, 2]) -> List[str]:
     """
     temp_files = []
     try:
-        # Convert PDF pages to images
         images = convert_from_path(pdf_path, first_page=pages[0], last_page=pages[-1])
 
-        # Create temporary files for each image
         for i, image in enumerate(images):
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
                 image.save(temp_file.name, "PNG")
@@ -122,7 +114,6 @@ def pdf_to_images_sync(pdf_path: str, pages: List[int] = [1, 2]) -> List[str]:
         return temp_files
     except Exception as e:
         print(f"Error converting PDF to images: {e}")
-        # Clean up any created files on error
         for temp_file in temp_files:
             try:
                 os.unlink(temp_file)
@@ -169,22 +160,17 @@ def _is_valid_pdf(content: bytes) -> tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message)
     """
-    # Check PDF magic bytes (PDF files start with "%PDF-")
     if not content.startswith(b"%PDF-"):
-        # Check if it's HTML (common for reCAPTCHA pages)
         if content.startswith(b"<!DOCTYPE") or content.startswith(b"<html"):
             if b"recaptcha" in content.lower() or b"captcha" in content.lower():
                 return False, "ArXiv returned reCAPTCHA page (rate limited)"
             return False, "ArXiv returned HTML page instead of PDF"
         return False, "Downloaded file is not a valid PDF (missing PDF magic bytes)"
 
-    # Additional validation: check if file ends properly
-    # PDF files should end with "%%EOF" (possibly followed by whitespace)
     content_stripped = content.rstrip()
     if not content_stripped.endswith(b"%%EOF"):
         return False, "Downloaded file appears to be truncated (missing PDF EOF marker)"
 
-    # Check minimum size (valid PDFs are typically at least 1KB)
     if len(content) < 1024:
         return (
             False,
@@ -207,12 +193,10 @@ def _is_valid_pdf_content(content: bytes) -> bool:
     if not content:
         return False
 
-    # Check PDF magic number (PDF files start with %PDF-)
     if not content.startswith(b"%PDF-"):
         return False
 
-    # Additional check: ensure it's not HTML content (common when rate limited)
-    content_lower = content[:1024].lower()  # Check first 1KB
+    content_lower = content[:1024].lower()
     html_indicators = [b"<html", b"<!doctype", b"<head>", b"<body>", b"recaptcha"]
 
     for indicator in html_indicators:
@@ -267,18 +251,16 @@ async def async_retry_with_backoff(
         except retry_exceptions as e:
             last_exception = e
 
-            if attempt == max_retries - 1:  # Last attempt
+            if attempt == max_retries - 1:
                 print(f"All {max_retries} attempts failed for {operation_name}")
                 raise e
 
-            # Calculate delay with exponential backoff
             delay = min(base_delay * (backoff_factor**attempt), max_delay)
             print(
                 f"{operation_name} failed with {type(e).__name__}: {str(e)}, retrying in {delay:.1f} seconds..."
             )
             await asyncio.sleep(delay)
 
-    # This should never be reached, but just in case
     if last_exception:
         raise last_exception
     raise RuntimeError(f"Unexpected error in retry logic for {operation_name}")
@@ -294,23 +276,19 @@ async def temp_pdf_download(arxiv_id: str):
     error_message = None
     with tempfile.TemporaryDirectory() as temp_dir:
         try:
-            # Get the PDF URL
             pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
 
-            # Download the PDF asynchronously with increased timeout for large files
-            # ArXiv PDFs can be quite large (20MB+), so we need generous timeouts
             timeout = aiohttp.ClientTimeout(total=120, connect=10, sock_read=60)
 
             async def download_pdf():
                 """Inner function to download PDF that will be retried."""
                 async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.get(pdf_url) as response:
-                        response.raise_for_status()  # Raise an exception for bad responses
+                        response.raise_for_status()
                         content = await response.read()
                         print(f"Downloaded {len(content)} bytes")
                         return content
 
-            # Use the retry function with specific exceptions that should trigger retries
             content = await async_retry_with_backoff(
                 func=download_pdf,
                 max_retries=3,
@@ -327,11 +305,9 @@ async def temp_pdf_download(arxiv_id: str):
             if not _is_valid_pdf_content(content):
                 raise Exception("Downloaded content is not a valid PDF file")
 
-            # Generate a filename for the PDF
             filename = f"{arxiv_id}.pdf"
             filepath = os.path.join(temp_dir, filename)
 
-            # Save the PDF synchronously (file write doesn't need to be async)
             with open(filepath, "wb") as f:
                 f.write(content)
 
@@ -348,10 +324,8 @@ async def temp_pdf_download(arxiv_id: str):
         try:
             yield filepath, error_message
         except GeneratorExit:
-            # Handle cleanup when the generator is being closed
             pass
         except Exception:
-            # Handle any other exceptions thrown into the generator
             pass
 
 
@@ -381,69 +355,52 @@ async def extract_first_two_pages_pymupdf_sync(input_path: str) -> str:
     cleaned_temp_pdf = None
 
     try:
-        # --- Attempt to clean the input PDF first ---
         try:
             initial_doc = fitz.open(input_path)
-            # Create a temporary file for the cleaned version
             with tempfile.NamedTemporaryFile(
                 delete=False, suffix="_cleaned.pdf"
             ) as temp_clean_file:
                 cleaned_pdf_path = temp_clean_file.name
-            # Save with cleanup options
             initial_doc.save(cleaned_pdf_path, garbage=4, deflate=True)
             initial_doc.close()
             print(f"Attempted to clean PDF, saved to: {cleaned_pdf_path}")
-            # Use the cleaned PDF path as the new input
             input_path_to_use = cleaned_pdf_path
-            cleaned_temp_pdf = cleaned_pdf_path  # Keep track for cleanup
+            cleaned_temp_pdf = cleaned_pdf_path
         except Exception as clean_e:
             print(
                 f"Warning: Failed to clean PDF, proceeding with original. Error: {clean_e}"
             )
-            input_path_to_use = input_path  # Fallback to original if cleaning fails
-        # --------------------------------------------
+            input_path_to_use = input_path
 
-        # Open the source PDF (either original or cleaned)
         input_doc = fitz.open(input_path_to_use)
 
-        # Create a new empty PDF document
         writer_doc = fitz.open()
 
-        # Check if the document has at least one page
         if len(input_doc) == 0:
-            # Close potentially opened docs before raising
             if input_doc:
                 input_doc.close()
             if writer_doc:
                 writer_doc.close()
             raise ValueError("Input PDF has no pages.")
 
-        # Determine the number of pages to extract (max 2)
         num_pages_to_extract = min(len(input_doc), 2)
 
-        # Insert the first two pages (or fewer if the doc is shorter)
         writer_doc.insert_pdf(input_doc, from_page=0, to_page=num_pages_to_extract - 1)
 
-        # Create a temporary file for the final output
         with tempfile.NamedTemporaryFile(
             delete=False, suffix="_extract.pdf"
         ) as temp_extract_file:
-            # Write the output to the temporary file
-            # Using garbage collection here too, just in case
             writer_doc.save(temp_extract_file.name, garbage=4, deflate=True)
             output_temp_file_path = temp_extract_file.name
 
-        # Close the documents
         input_doc.close()
         writer_doc.close()
 
         print(f"Extracted first {num_pages_to_extract} pages using PyMuPDF.")
-        # Return the path of the temporary file containing the extraction
         return output_temp_file_path
 
     except Exception as e:
         print(f"Error using PyMuPDF to extract pages: {e}")
-        # Clean up documents if they were potentially opened
         try:
             if input_doc:
                 input_doc.close()
@@ -451,10 +408,9 @@ async def extract_first_two_pages_pymupdf_sync(input_path: str) -> str:
                 writer_doc.close()
         except Exception as cleanup_e:
             print(f"Error during exception cleanup: {cleanup_e}")
-        raise  # Re-raise the original exception
+        raise
 
     finally:
-        # Clean up the intermediate cleaned PDF if it was created
         if cleaned_temp_pdf and os.path.exists(cleaned_temp_pdf):
             try:
                 os.unlink(cleaned_temp_pdf)

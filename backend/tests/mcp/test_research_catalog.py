@@ -595,8 +595,6 @@ def test_versioned_markdown_chunk_cache_is_separate_and_avoids_content_reread(
 def test_versioned_chunk_falls_back_to_the_compatibility_alias_without_a_manifest(
     monkeypatch,
 ):
-    # Older uploads have only ``<prefix>/<paper>.md``; chunk mode used to 404
-    # for them while the plain route served the same bytes.
     data = "aα🙂z".encode()
     files = {"1706/1706.03762.md": data}
     _install_versioned_filesystem(monkeypatch, files)
@@ -646,7 +644,6 @@ def test_versioned_chunk_falls_back_to_the_compatibility_alias_without_a_manifes
 def test_unversioned_chunk_drops_a_partial_character_at_the_byte_cap(monkeypatch):
     data = "aα🙂z".encode()
     _install_versioned_filesystem(monkeypatch, {"1706/1706.03762.md": data})
-    # A 5-byte cap cuts into the 4-byte emoji; only "aα" (3 bytes) is servable.
     monkeypatch.setattr(
         paper_markdown_service, "PAPER_MARKDOWN_UNVERSIONED_CHUNK_MAX_BYTES", 5
     )

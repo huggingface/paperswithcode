@@ -62,7 +62,6 @@ def test_rank_leaderboard_uses_dominant_task_metric_and_direction():
     evaluations = [
         _evaluation(1, 2, "m1", {"WER": "5.0"}, "WER", 1),
         _evaluation(2, 2, "m2", {"WER": "3.0"}, "WER", 2),
-        # Same model and paper as m2: folded into one row with both metrics.
         _evaluation(3, 2, "m2", {"CER": "1.0"}, "CER", 1, paper_id=2),
         _evaluation(4, 1, "other", {"WER": "1.0"}, "WER", 1),
     ]

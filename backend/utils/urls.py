@@ -49,7 +49,6 @@ def get_arxiv_abs_url(arxiv_id: str, version: Optional[str] = None) -> Optional[
     if version and version != "v1":
         return f"{settings.arxiv_base_url}/abs/{arxiv_id}{version}"
     else:
-        # No version returns latest version (ArXiv default behavior)
         return f"{settings.arxiv_base_url}/abs/{arxiv_id}"
 
 
@@ -73,7 +72,6 @@ def get_arxiv_pdf_url(arxiv_id: str, version: Optional[str] = None) -> Optional[
     if version and version != "v1":
         return f"{settings.arxiv_base_url}/pdf/{arxiv_id}{version}.pdf"
     else:
-        # No version returns latest version (ArXiv default behavior)
         return f"{settings.arxiv_base_url}/pdf/{arxiv_id}.pdf"
 
 
@@ -96,10 +94,8 @@ def get_paper_url(
     domain = domain or settings.app_domain
 
     if arxiv_id:
-        # Clean URL: paperswithcode.ai/papers/1805.10616
         return f"https://{domain}/papers/{arxiv_id}"
     else:
-        # Fallback for non-ArXiv papers: paperswithcode.ai/papers/12345
         return f"https://{domain}/papers/{paper_id}"
 
 
@@ -244,10 +240,8 @@ def validate_arxiv_id(arxiv_id: str) -> bool:
     if not arxiv_id:
         return False
 
-    # Modern format: YYMM.NNNN (e.g., 1805.10616)
     modern_pattern = r"^\d{4}\.\d{4,5}$"
 
-    # Legacy format: subject-class/YYMMnnn (e.g., cs.DS/0610046)
     legacy_pattern = r"^[a-z-]+(\.[A-Z]{2})?\/\d{7}$"
 
     return bool(
@@ -270,13 +264,9 @@ def validate_version(version: str) -> bool:
     if not version:
         return False
 
-    # Version format: v followed by one or more digits
     version_pattern = r"^v\d+$"
 
     return bool(re.match(version_pattern, version))
-
-
-# Utility functions for URL parsing
 
 
 def parse_arxiv_url(url: str) -> Optional[tuple[str, Optional[str]]]:
@@ -294,12 +284,6 @@ def parse_arxiv_url(url: str) -> Optional[tuple[str, Optional[str]]]:
     if not url:
         return None
 
-    # Pattern for ArXiv URLs with optional version
-    # Examples:
-    # https://arxiv.org/abs/1805.10616
-    # https://arxiv.org/abs/1805.10616v2
-    # https://arxiv.org/html/2606.13141v1
-    # https://arxiv.org/pdf/1805.10616v2.pdf
     arxiv_pattern = r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d{4,5})(v\d+)?(?:\.pdf)?"
 
     match = re.search(arxiv_pattern, url)
@@ -346,12 +330,11 @@ def extract_arxiv_id_from_text(text: str) -> Optional[str]:
     if not text:
         return None
 
-    # Look for ArXiv ID patterns in text
     patterns = [
-        r"arXiv:(\d{4}\.\d{4,5})",  # arXiv:1805.10616
-        r"arxiv:(\d{4}\.\d{4,5})",  # arxiv:1805.10616 (lowercase)
-        r"(\d{4}\.\d{4,5})",  # 1805.10616 (standalone)
-        r"arXiv:([a-z-]+(?:\.[A-Z]{2})?\/\d{7})",  # arXiv:cs.DS/0610046 (legacy)
+        r"arXiv:(\d{4}\.\d{4,5})",
+        r"arxiv:(\d{4}\.\d{4,5})",
+        r"(\d{4}\.\d{4,5})",
+        r"arXiv:([a-z-]+(?:\.[A-Z]{2})?\/\d{7})",
     ]
 
     for pattern in patterns:

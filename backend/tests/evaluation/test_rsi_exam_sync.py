@@ -52,8 +52,6 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# The leaderboard section of https://rsi-exam.ai/ on 2026-11-16 (all three
-# panels; only Full is read).
 FIXTURE_TEXT = (
     Path(__file__).parent / "fixtures" / "rsi_exam_leaderboard.html"
 ).read_text()
@@ -146,7 +144,6 @@ def test_parse_reads_the_full_board_in_official_order():
         "score 0.5357, run in claude code · max"
     )
     by_name = {entry.name: entry for entry in entries}
-    # Four decimals as published, not the Public or Private panel's values.
     assert by_name["Opus 5"].value == Decimal("0.4640")
     assert by_name["Qwen3.8 Max"].harness == "Qwen Code"
     assert by_name["Muse Spark 1.3"].harness == "Muse Code"
@@ -217,7 +214,6 @@ def test_first_run_publishes_reviewed_rows_and_signals_the_rest():
         ("Gemini 4 Argon", "Antigravity"),
     ]
     assert [row.best_rank for row in ranked] == list(range(1, 21))
-    # The dated snapshot and the release model share the Qwen3.8-Max paper.
     assert rows["Qwen3.8 Max-0902"].paper_id == rows["Qwen3.8 Max"].paper_id
     assert rows["Kimi K3"].is_open and not rows["Claude Opus 5.5"].is_open
     opus = rows["Claude Opus 5.5"]

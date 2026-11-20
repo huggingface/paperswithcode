@@ -100,13 +100,11 @@ def seed_agents_with_sisters(db):
         area_id=2,
         level=0,
     )
-    # Same area as agents but deliberately NOT a configured sister.
     distractor = DBTask(
         id=14, name="Other General", slug="other-general", area_id=1, level=0
     )
     db.add_all([agents, coding_agents, computer_use, language_modeling, distractor])
 
-    # Insert sister rows out of display_order to prove the API sorts them.
     db.add_all(
         [
             DBTaskSisterTask(task_id=10, sister_task_id=13, display_order=2),
@@ -131,7 +129,6 @@ def test_agents_page_returns_explicit_sisters_in_order(client):
         "language-modeling",
     ]
 
-    # The same-area distractor must NOT appear just because it shares an area.
     assert "other-general" not in sister_slugs
 
 

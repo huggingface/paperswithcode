@@ -47,15 +47,10 @@ def is_case_sensitive_keyword(keyword: str) -> bool:
 
 @lru_cache(maxsize=None)
 def _keyword_pattern(keyword: str) -> re.Pattern[str]:
-    # Compile once per keyword. With thousands of task keywords, relying on
-    # `re`'s ~512-entry cache recompiled every pattern for every paper and
-    # pushed the weekly linker past its 6-hour timeout on 2026-11-15.
     flags = 0 if is_case_sensitive_keyword(keyword) else re.IGNORECASE
     return re.compile(r"\b" + re.escape(keyword) + r"s?\b", flags)
 
 
-# re.IGNORECASE treats these as case variants of ASCII "i", but casefold()
-# does not map them to "i". They are the only such characters in Python 3.12.
 _IGNORECASE_ONLY_FOLDS = str.maketrans({"İ": "i", "ı": "i"})
 
 
@@ -104,7 +99,6 @@ def create_keyword_patterns(
     for item in items:
         item_id = item["id"]
 
-        # Parse keywords
         keywords_list = [k.strip() for k in item["keywords"].split(",") if k.strip()]
 
         for keyword in keywords_list:
@@ -136,7 +130,6 @@ def create_keyword_patterns_with_metadata(
         item_id = item["id"]
         item_name = item.get("name", "")
 
-        # Parse keywords
         keywords_list = [k.strip() for k in item["keywords"].split(",") if k.strip()]
 
         for keyword in keywords_list:
@@ -155,20 +148,12 @@ def create_keyword_patterns_with_metadata(
     return dict(case_sensitive), dict(case_insensitive)
 
 
-# When the superseding task matches, drop the generic/subsuming task tag.
 TASK_SUPERSESSION_RULES: tuple[tuple[str, str], ...] = (
     ("3d-object-detection", "object-detection"),
     ("video-frame-interpolation", "optical-flow"),
     ("video-matting", "image-matting"),
 )
 
-# Image and video task phrases frequently co-occur in related-work sections.
-# When a paper's title clearly identifies only one modality, prefer that task
-# over an automatic tag caused by the abstract mentioning the neighboring
-# modality. Titles that explicitly cover both modalities remain unchanged.
-# When neither modality is named in the title, keep both only for coordinated
-# contribution/evaluation evidence; genuinely broad edge cases can be manually
-# tagged.
 _MODALITY_TASK_PAIRS: tuple[tuple[str, str], ...] = (
     ("image-editing", "video-editing"),
     ("image-generation", "video-generation"),
@@ -307,8 +292,6 @@ def _resolve_image_video_task_conflicts(
     return result
 
 
-# Strong Image Classification signals — explicit task/benchmark mentions that justify
-# keeping an image-classification tag even when an audio-classification tag also matched.
 _STRONG_IMAGE_CLASSIFICATION_PATTERNS: tuple[str, ...] = (
     r"\bimage classifications?\b",
     r"\bcifar-?10\b",
@@ -416,9 +399,6 @@ def has_strong_image_classification_signal(text: str) -> bool:
     )
 
 
-# Reinforcement Learning (task 22) covers RL for LLMs and foundation models;
-# Classic Reinforcement Learning covers control, games, offline RL, and MARL.
-# The two share generic RL keywords, so a paper may hold only one of them.
 _LLM_RL_PATTERN = re.compile(
     r"\b(?:LLMs?|MLLMs?|VLMs?|large language models?|language models?|"
     r"vision[- ]language|RLHF|RLAIF|RLVR|GRPO|DPO|chain[- ]of[- ]thought|"
@@ -446,8 +426,6 @@ def apply_task_supersession_rules(
         if superseding_id in result and excluded_id is not None:
             result.discard(excluded_id)
 
-    # Audio papers often cite ViT/ImageNet/ResNet as cross-modal pretraining baselines.
-    # Drop image-classification unless the abstract also names an IC benchmark/task.
     audio_task_id = slug_to_id.get("audio-classification")
     image_task_id = slug_to_id.get("image-classification")
     if (
@@ -458,9 +436,6 @@ def apply_task_supersession_rules(
     ):
         result.discard(image_task_id)
 
-    # "Diagnosis" is common in medical papers, but is also used for failures,
-    # software, models, and reasoning. Require healthcare context when that is
-    # the only signal that could have produced the broad Healthcare tag.
     healthcare_task_id = slug_to_id.get("healthcare")
     healthcare_keywords = (task_keywords_by_slug or {}).get("healthcare", [])
     has_specific_healthcare_keyword = any(
@@ -515,21 +490,10 @@ def find_matching_items_simple(
     matched_items = set()
     folded_text = fold_for_keyword_prefilter(text)
 
-    # Find case-sensitive matches.
-    # Word-boundary matching (with optional trailing 's' for plurals) keeps
-    # acronyms like "NER" or "VLM" from substring-matching inside unrelated
-    # words such as "FINER" or "OpenCLIP". Compound acronyms that should
-    # still be tagged (LVLMs, MLLMs, ...) are expected to be added as their
-    # own keywords on the task.
     for keyword, item_ids in case_sensitive_patterns.items():
         if _keyword_matches_simple(text, keyword):
             matched_items.update(item_ids)
 
-    # Find case-insensitive matches.
-    # Word-boundary matching prevents substring false positives like matching
-    # "transformed" when looking for "transformer". The trailing `s?` allows
-    # the common English plural so e.g. keyword "large language model" still
-    # tags a paper that writes "Large Language Models" in its abstract.
     for keyword_lower, item_ids in case_insensitive_patterns.items():
         if _keyword_matches_simple(text, keyword_lower, folded_text):
             matched_items.update(item_ids)
@@ -563,15 +527,10 @@ def find_matching_items_longest_match(
         return set()
 
     matched_items = set()
-    matched_positions = set()  # Track which character positions we've already matched
+    matched_positions = set()
 
-    # Store all potential matches with their positions
     all_matches = []
 
-    # Find case-sensitive matches
-    # For case-sensitive keywords (usually acronyms), use substring matching
-    # This catches plurals (VLMs, GANs) and compounds (LVLMs, OpenCLIP)
-    # Case sensitivity prevents false positives (CLIP vs clip)
     for keyword, item_list in case_sensitive_patterns.items():
         for match in re.finditer(re.escape(keyword), text):
             start, end = match.span()
@@ -586,10 +545,6 @@ def find_matching_items_longest_match(
                     }
                 )
 
-    # Find case-insensitive matches.
-    # Allow an optional trailing 's' (plural) inside the closing word boundary,
-    # mirroring the `find_matching_items_simple` rule so plural forms like
-    # "transformers" / "language models" still tag the underlying method/task.
     text_lower = text.lower()
     for keyword_lower, item_list in case_insensitive_patterns.items():
         for match in re.finditer(
@@ -607,14 +562,11 @@ def find_matching_items_longest_match(
                     }
                 )
 
-    # Sort matches by length (longest first), then by position
     all_matches.sort(key=lambda x: (-x["length"], x["start"]))
 
-    # Apply longest-match rule: only keep matches that don't overlap with longer matches
     for match in all_matches:
         match_positions = set(range(match["start"], match["end"]))
 
-        # Check if this match overlaps with any already-accepted match
         if not match_positions.intersection(matched_positions):
             matched_items.add(match["item_id"])
             matched_positions.update(match_positions)

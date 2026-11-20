@@ -16,7 +16,6 @@ from backend.services.paper_markdown_job_profile import (
 
 PAPER_MARKDOWN_GPU_HOURLY_RATE_USD = float(_GPU_HOURLY_RATE_DECIMAL)
 PAPER_MARKDOWN_LEGACY_JOB_RESERVATION_HOURS = 12.0
-# Compatibility alias for callers which imported the old conservative value.
 PAPER_MARKDOWN_JOB_RESERVATION_HOURS = PAPER_MARKDOWN_LEGACY_JOB_RESERVATION_HOURS
 PAPER_MARKDOWN_LIVE_WINDOW_DAYS = 30
 
@@ -170,7 +169,6 @@ def paper_markdown_budget_snapshot(
             accounted = job_reservation
             active_reserved += accounted
         else:
-            # Missing terminal timing must fail conservatively.
             accounted = job_reservation
             spent += accounted
             unknown_terminal_reservation += accounted
@@ -243,8 +241,6 @@ def paper_markdown_budget_snapshot(
         "unknown_terminal_reservation_usd": round(unknown_terminal_reservation, 2),
         "desired_jobs": decision.desired_jobs,
         "affordable_jobs": decision.affordable_jobs,
-        # Legacy keys now describe the actual admitted plan, which is the plan
-        # the scheduler will reserve and launch.
         "planned_jobs": decision.affordable_jobs,
         "planned_reserved_usd": decision.planned_reservation_usd,
         "current_exposure_usd": round(current_exposure, 2),

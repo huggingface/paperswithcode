@@ -14,9 +14,6 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-# The weekly cron lives under .github/workflows/scripts/, which is added to
-# PYTHONPATH at runtime via the wrapper shell. Mirror that for tests so we can
-# import `scripts.weekly.link_methods_by_references` directly.
 WORKFLOWS_SCRIPTS_PATH = Path(__file__).resolve().parents[3] / ".github" / "workflows"
 if str(WORKFLOWS_SCRIPTS_PATH) not in sys.path:
     sys.path.insert(0, str(WORKFLOWS_SCRIPTS_PATH))
@@ -90,7 +87,6 @@ def _seed_corpus(db: Session) -> None:
                 version="v1",
                 is_latest_version=True,
                 date_published=date(2015, 12, 10),
-                # Intentionally no semantic_scholar_id; matches via arxiv_id only.
             ),
             DBPaper(
                 id=10,
@@ -275,7 +271,6 @@ def test_build_method_source_index_groups_methods_per_source():
         100,
         101,
     ]
-    # ResNet has no SS id but does have an arxiv id.
     assert by_arxiv["1706.03762"] == [100, 101] or sorted(by_arxiv["1706.03762"]) == [
         100,
         101,
@@ -290,15 +285,11 @@ def test_select_unscanned_papers_skips_already_scanned_and_orders_newest_first()
 
     rows = select_unscanned_papers(db, limit=10)
     ids_in_order = [r["id"] for r in rows]
-    # 11 has methods_scanned_at set, so it must be excluded.
     assert 11 not in ids_in_order
-    # 12 (newest) > 10 > 1/2 (source papers, also unscanned)
     assert ids_in_order[0] == 12
     assert ids_in_order[1] == 10
-    # All four unscanned papers selected (1, 2 are unscanned source papers).
     assert sorted(ids_in_order) == [1, 2, 10, 12]
 
-    # --rescan should also include paper 11.
     rows_with_rescan = select_unscanned_papers(db, limit=10, rescan=True)
     assert 11 in [r["id"] for r in rows_with_rescan]
 
@@ -314,7 +305,6 @@ def test_select_unscanned_papers_limit_respected():
 def test_count_unscanned_papers():
     db = _build_in_memory_session()
     _seed_corpus(db)
-    # 1, 2, 10, 12 are unscanned; 11 is scanned.
     assert count_unscanned_papers(db) == 4
 
 
@@ -344,15 +334,11 @@ def test_dry_run_does_not_write_links_or_mark_scanned():
 
     stats = link_methods_by_references(db, client, limit=10, write=False, log=_no_log)
 
-    # Citing Paper A would have matched 3 methods: Transformer (100), MHA (101) via SS,
-    # and ResNet (200) via arxiv id.
     assert stats.method_matches_found >= 3
     assert stats.links_inserted == 0
 
-    # No paper_methods rows added beyond the 3 seeded source-paper links.
     assert db.query(PaperMethod).count() == 3
 
-    # Nothing should be marked as scanned.
     unscanned = db.execute(
         text("SELECT id FROM papers WHERE methods_scanned_at IS NULL ORDER BY id")
     ).all()
@@ -384,7 +370,6 @@ def test_write_mode_inserts_links_dedupes_and_marks_scanned():
 
     stats = link_methods_by_references(db, client, limit=10, write=True, log=_no_log)
 
-    # 12 is unresolvable (no SS id, no arxiv id) — must still be marked scanned.
     rows = {
         row[0]: row[1]
         for row in db.execute(
@@ -394,14 +379,13 @@ def test_write_mode_inserts_links_dedupes_and_marks_scanned():
     for paper_id in (1, 2, 10, 12):
         assert rows[paper_id] is not None, f"paper {paper_id} should be marked scanned"
 
-    # Citing Paper A picked up 3 method links (100, 101, 200).
     pm_pairs = {(row.paper_id, row.method_id) for row in db.query(PaperMethod).all()}
     assert (10, 100) in pm_pairs
     assert (10, 101) in pm_pairs
     assert (10, 200) in pm_pairs
 
-    assert stats.papers_skipped_no_ss_id == 1  # paper 12
-    assert stats.papers_processed >= 3  # 1, 2, 10 were resolvable
+    assert stats.papers_skipped_no_ss_id == 1
+    assert stats.papers_processed >= 3
     assert stats.links_inserted == 3
 
 
@@ -427,7 +411,6 @@ def test_write_mode_is_idempotent_when_rerun():
         (row.paper_id, row.method_id) for row in db.query(PaperMethod).all()
     }
 
-    # Re-run: every paper is now scanned, so the second run should select 0 papers.
     client_second = FakeReferencesClient(references_by_paper=refs)
     stats_second = link_methods_by_references(
         db, client_second, limit=10, write=True, log=_no_log
@@ -508,9 +491,7 @@ def test_paper_with_only_arxiv_id_uses_arxiv_form_for_lookup():
 
     link_methods_by_references(db, client, limit=10, write=True, log=_no_log)
 
-    # Paper 2 has arxiv_id but no SS id, so it should be queried as arXiv:1512.03385.
     assert "arXiv:1512.03385" in captured
-    # Paper 10 has SS id and should be queried directly.
     assert "ss-citing-a" in captured
 
 
@@ -518,7 +499,6 @@ def test_targeted_paper_id_overrides_unscanned_filter():
     db = _build_in_memory_session()
     _seed_corpus(db)
 
-    # Paper 11 is scanned, but explicit --paper-id should still pick it up.
     client = FakeReferencesClient(
         references_by_paper={
             "ss-citing-b": [

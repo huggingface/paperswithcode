@@ -27,8 +27,6 @@ PAPER_PDF_MAX_BYTES = 150 * 1024 * 1024
 PAPER_PDF_CHUNK_BYTES = 1024 * 1024
 PAPER_MARKDOWN_MAX_BYTES = 64 * 1024 * 1024
 PAPER_MARKDOWN_MANIFEST_MAX_BYTES = 4096
-# Bound for chunking a paper that has no versioned manifest yet; the bytes are
-# held in the shared 128-entry in-process cache, so keep it modest.
 PAPER_MARKDOWN_UNVERSIONED_CHUNK_MAX_BYTES = 2 * 1024 * 1024
 PAPER_MARKDOWN_CHUNK_CACHE_ENTRIES = 256
 PAPER_MARKDOWN_CHUNK_CACHE_BYTES = 16 * 1024 * 1024
@@ -541,9 +539,6 @@ def read_paper_markdown_chunk(
             source=resolved_source,
         )
     except PaperMarkdownNotFoundError:
-        # Older uploads have only the mutable compatibility alias the plain
-        # route serves.  Chunk it from a bounded in-process copy so agents can
-        # read those papers too; the content hash still versions the cursor.
         return _read_unversioned_markdown_chunk(
             paper_id=normalized,
             source=resolved_source,
@@ -630,16 +625,12 @@ def _read_unversioned_markdown_chunk(
             "Markdown is not available for this paper"
         ) from error
     if truncated:
-        # The cap may fall inside a multi-byte character; drop the partial
-        # sequence so every byte counted by the size and version is servable.
         while raw:
             try:
                 raw.decode("utf-8")
                 break
             except UnicodeDecodeError as error:
                 raw = raw[: error.start]
-    # Anything beyond the bound is not served, so the document ends there and
-    # the version hashes exactly the bytes a reader can reach.
     version = hashlib.sha256(raw).hexdigest()
     if content_version is not None and content_version != version:
         raise PaperMarkdownVersionMismatchError(

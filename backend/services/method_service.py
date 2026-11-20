@@ -49,8 +49,6 @@ from backend.services.entity_search import (
 )
 
 
-# The methods directory asks for the same ranking on every visit, and papers
-# arrive in daily imports, so a short shared cache keeps it current.
 TRENDING_METHODS_TTL_SECONDS = 600
 _trending_methods_cache: dict[tuple, tuple[float, TrendingMethods]] = {}
 
@@ -521,10 +519,8 @@ class MethodService:
             DatabaseError: If database query fails
         """
         try:
-            # Convert string ID to integer
             method_id_int = int(method_id)
 
-            # Query the database
             db_method = (
                 self.db.query(DBMethod)
                 .options(joinedload(DBMethod.source_paper))
@@ -535,7 +531,6 @@ class MethodService:
             if not db_method:
                 raise PaperNotFoundError(f"Method with ID {method_id} not found")
 
-            # Get paper count for this method
             paper_count = (
                 self.db.query(func.count(PaperMethod.paper_id))
                 .filter(PaperMethod.method_id == db_method.id)
@@ -565,7 +560,6 @@ class MethodService:
             DatabaseError: If database query fails
         """
         try:
-            # Try to find by slug first (preferred), then fall back to name
             db_method = (
                 self.db.query(DBMethod)
                 .options(joinedload(DBMethod.source_paper))
@@ -581,7 +575,6 @@ class MethodService:
             if not db_method:
                 raise PaperNotFoundError(f"Method '{method_name}' not found")
 
-            # Get paper count for this method
             paper_count = (
                 self.db.query(func.count(PaperMethod.paper_id))
                 .filter(PaperMethod.method_id == db_method.id)
@@ -615,7 +608,6 @@ class MethodService:
             DatabaseError: If database query fails
         """
         try:
-            # Base query with join to paper_methods
             query = (
                 self.db.query(DBMethod)
                 .options(joinedload(DBMethod.source_paper))
@@ -624,17 +616,13 @@ class MethodService:
                 .order_by(DBMethod.name)
             )
 
-            # Get total count
             total_count = query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             methods = []
             for db_method in results:
-                # Get paper count for this method
                 paper_count = (
                     self.db.query(func.count(PaperMethod.paper_id))
                     .filter(PaperMethod.method_id == db_method.id)
@@ -644,7 +632,6 @@ class MethodService:
 
                 methods.append(self._convert_db_method_to_api(db_method, paper_count))
 
-            # Calculate pagination
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 
@@ -874,7 +861,6 @@ class MethodService:
         try:
             from backend.models.database import Paper as DBPaper
 
-            # Get method to verify it exists - try by ID first, then by slug/name
             method = None
             if method_id.isdigit():
                 method_id_int = int(method_id)
@@ -882,7 +868,6 @@ class MethodService:
                     self.db.query(DBMethod).filter(DBMethod.id == method_id_int).first()
                 )
 
-            # If not found by ID or not numeric, try by slug first, then name
             if not method:
                 method = (
                     self.db.query(DBMethod)
@@ -898,7 +883,6 @@ class MethodService:
             if not method:
                 raise PaperNotFoundError(f"Method '{method_id}' not found")
 
-            # Base query for papers with this method
             query = (
                 self.db.query(DBPaper)
                 .join(PaperMethod, DBPaper.id == PaperMethod.paper_id)
@@ -950,7 +934,6 @@ class MethodService:
             DatabaseError: If database operation fails
         """
         try:
-            # Get method - try by ID first, then by name/slug
             method = None
             if method_id.isdigit():
                 method = (
@@ -974,23 +957,19 @@ class MethodService:
             if not method:
                 raise PaperNotFoundError(f"Method '{method_id}' not found")
 
-            # Parse existing keywords
             existing_keywords = []
             if method.keywords:
                 existing_keywords = [kw.strip() for kw in method.keywords.split(",")]
 
-            # Add new keywords (avoid duplicates)
             for keyword in keywords:
                 keyword = keyword.strip()
                 if keyword and keyword not in existing_keywords:
                     existing_keywords.append(keyword)
 
-            # Update keywords
             method.keywords = ", ".join(existing_keywords)
             self.db.commit()
             self.db.refresh(method)
 
-            # Return updated method
             return self.get_method_by_id(str(method.id))
 
         except PaperNotFoundError:
@@ -1015,7 +994,6 @@ class MethodService:
             DatabaseError: If database operation fails
         """
         try:
-            # Get method - try by ID first, then by name/slug
             method = None
             if method_id.isdigit():
                 method = (
@@ -1039,25 +1017,21 @@ class MethodService:
             if not method:
                 raise PaperNotFoundError(f"Method '{method_id}' not found")
 
-            # Parse existing keywords
             existing_keywords = []
             if method.keywords:
                 existing_keywords = [kw.strip() for kw in method.keywords.split(",")]
 
-            # Remove specified keywords
             keywords_to_remove = [kw.strip().lower() for kw in keywords]
             existing_keywords = [
                 kw for kw in existing_keywords if kw.lower() not in keywords_to_remove
             ]
 
-            # Update keywords
             method.keywords = (
                 ", ".join(existing_keywords) if existing_keywords else None
             )
             self.db.commit()
             self.db.refresh(method)
 
-            # Return updated method
             return self.get_method_by_id(str(method.id))
 
         except PaperNotFoundError:
@@ -1084,7 +1058,6 @@ class MethodService:
             DatabaseError: If database operation fails
         """
         try:
-            # Get method - try by ID first, then by name/slug
             method = None
             if method_id.isdigit():
                 method = (
@@ -1108,13 +1081,11 @@ class MethodService:
             if not method:
                 raise PaperNotFoundError(f"Method '{method_id}' not found")
 
-            # Set new keywords
             cleaned_keywords = [kw.strip() for kw in keywords if kw.strip()]
             method.keywords = ", ".join(cleaned_keywords) if cleaned_keywords else None
             self.db.commit()
             self.db.refresh(method)
 
-            # Return updated method
             return self.get_method_by_id(str(method.id))
 
         except PaperNotFoundError:

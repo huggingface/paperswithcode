@@ -94,13 +94,10 @@ class RepositoryService:
         if page_size is None:
             page_size = self.settings.default_page_size
 
-        # Ensure page_size doesn't exceed maximum
         page_size = min(page_size, self.settings.max_page_size)
 
         try:
-            # Build base query with optional paper count
             if include_paper_count or order_by == "paper_count":
-                # Join with paper_repositories to get paper count
                 query = (
                     self.db.query(
                         DBRepository,
@@ -112,7 +109,6 @@ class RepositoryService:
             else:
                 query = self.db.query(DBRepository)
 
-            # Apply filters
             if owner:
                 if include_paper_count or order_by == "paper_count":
                     query = query.filter(DBRepository.owner.ilike(f"%{owner}%"))
@@ -120,11 +116,9 @@ class RepositoryService:
                     query = query.filter(DBRepository.owner.ilike(f"%{owner}%"))
 
             if official_only:
-                # Filter repositories that are official for at least one paper
                 if include_paper_count or order_by == "paper_count":
                     query = query.having(func.bool_or(DBPaperRepository.is_official))
                 else:
-                    # Need to join with paper_repositories for this filter
                     query = (
                         query.join(DBPaperRepository)
                         .filter(DBPaperRepository.is_official)
@@ -137,10 +131,8 @@ class RepositoryService:
             if source:
                 query = query.filter(DBRepository.source == source)
 
-            # Apply ordering
             if order_by == "paper_count":
                 if not (include_paper_count or order_by == "paper_count"):
-                    # Need to add paper count to query
                     query = (
                         self.db.query(
                             DBRepository,
@@ -161,26 +153,20 @@ class RepositoryService:
                 else:
                     query = query.order_by(asc(order_field))
 
-            # Get total count
             total_count = query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             api_repositories = []
             for result in results:
                 if include_paper_count or order_by == "paper_count":
                     repo, paper_count = result
                     api_repo = self._db_repository_to_api(repo)
-                    # Note: paper_count is lost here since Repository model doesn't have this field
-                    # This is a limitation of the current API model design
                     api_repositories.append(api_repo)
                 else:
                     api_repositories.append(self._db_repository_to_api(result))
 
-            # Calculate pagination info
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 
@@ -377,7 +363,6 @@ class RepositoryService:
             DatabaseError: On database errors
         """
         try:
-            # Check if we should skip due to existing official repository
             if skip_if_official_exists:
                 existing_official = (
                     self.db.query(DBRepository)
@@ -387,14 +372,14 @@ class RepositoryService:
                     )
                     .filter(
                         DBPaperRepository.paper_id == int(paper_id),
-                        DBRepository.source.in_(["hf_api"]),  # Priority sources
+                        DBRepository.source.in_(["hf_api"]),
                         DBPaperRepository.is_official,
                     )
                     .first()
                 )
 
                 if existing_official:
-                    return None  # Skip - official repository already exists
+                    return None
 
             repository = self._upsert_repository(url, owner, name, num_stars, source)
             self._associate_repository(paper_id, str(repository.id), is_official)
@@ -418,8 +403,6 @@ class RepositoryService:
         source: str,
     ) -> DBRepository:
         """Create or update a repository row and flush it without committing."""
-        # Normalize GitHub URLs to lowercase to avoid case-sensitivity duplicates
-        # GitHub URLs are case-insensitive in practice (they redirect)
         normalized_url = normalize_github_url(url)
         if normalized_url:
             url = normalized_url
@@ -435,7 +418,6 @@ class RepositoryService:
                 existing_repo.url = url
             existing_repo.owner = owner or existing_repo.owner
             existing_repo.name = name or existing_repo.name
-            # Keep highest star count; don't update source - keep original
             existing_repo.num_stars = max(num_stars, existing_repo.num_stars)
             self.db.flush()
             return existing_repo
@@ -480,9 +462,6 @@ class RepositoryService:
                 is_official or existing_association.is_official or is_only_repository
             )
         else:
-            # The first and only repository on a paper page is treated as its
-            # official repository by default. Explicit flags still govern
-            # additional repositories.
             is_first_repository = paper_links.first() is None
             self.db.add(
                 DBPaperRepository(
@@ -510,7 +489,7 @@ class RepositoryService:
             owner=db_repository.owner,
             name=db_repository.name,
             num_stars=db_repository.num_stars,
-            is_official=False,  # Default to False since is_official is now in junction table
+            is_official=False,
             source=db_repository.source,
             trending_score=(
                 float(db_repository.trending_score)
@@ -552,7 +531,6 @@ class RepositoryService:
         try:
             threshold_date = datetime.now() - timedelta(days=threshold_days)
 
-            # Create priority for never-updated repositories with 0 stars
             priority_case = case(
                 (
                     (func.min(DBRepository.num_stars_updated_at).is_(None))
@@ -562,7 +540,6 @@ class RepositoryService:
                 else_=2,
             )
 
-            # Query to group by owner/name and get all matching repository IDs
             result = (
                 self.db.query(
                     DBRepository.owner,
@@ -588,9 +565,7 @@ class RepositoryService:
                 .order_by(
                     priority_case.asc(),
                     func.min(DBRepository.num_stars_updated_at).asc().nullsfirst(),
-                    func.count(
-                        DBRepository.id
-                    ).desc(),  # Process repos with more URLs first
+                    func.count(DBRepository.id).desc(),
                 )
                 .first()
             )
@@ -702,7 +677,6 @@ class RepositoryService:
 
             stats = {"total": 0, "updated": 0, "skipped": 0, "failed": 0}
 
-            # Find repositories with missing owner/name
             repositories = (
                 self.db.query(DBRepository)
                 .filter(
@@ -719,24 +693,20 @@ class RepositoryService:
                 f"Found {stats['total']} repositories with missing owner/name fields"
             )
 
-            # Process in batches
             for i in range(0, len(repositories), batch_size):
                 batch = repositories[i : i + batch_size]
                 batch_updated = 0
 
                 for repo in batch:
                     try:
-                        # Parse GitHub URL to extract owner and name
                         owner, name = parse_github_url(repo.url)
 
                         if owner and name:
-                            # Update repository with parsed values
                             repo.owner = owner
                             repo.name = name
                             batch_updated += 1
                             stats["updated"] += 1
                         else:
-                            # Skip non-GitHub URLs or invalid URLs
                             stats["skipped"] += 1
                             logger.debug(
                                 f"Skipped repository ID {repo.id}: Unable to parse owner/name from {repo.url}"
@@ -748,7 +718,6 @@ class RepositoryService:
                             f"Error processing repository ID {repo.id}: {str(e)}"
                         )
 
-                # Commit batch
                 try:
                     self.db.commit()
                     logger.info(
@@ -791,7 +760,6 @@ class RepositoryService:
         try:
             from backend.models.database import RepositoryStarHistory as DBStarHistory
 
-            # Verify repository exists
             repo = (
                 self.db.query(DBRepository)
                 .filter(DBRepository.id == int(repository_id))
@@ -802,28 +770,23 @@ class RepositoryService:
                     f"Repository with ID {repository_id} not found"
                 )
 
-            # Build query
             query = self.db.query(DBStarHistory).filter(
                 DBStarHistory.repository_id == int(repository_id)
             )
 
-            # Apply time filter
             if hours_lookback:
                 cutoff_time = datetime.now() - timedelta(hours=hours_lookback)
                 query = query.filter(DBStarHistory.snapshot_at >= cutoff_time)
             elif since:
                 query = query.filter(DBStarHistory.snapshot_at >= since)
 
-            # Order by time ascending (oldest first)
             query = query.order_by(DBStarHistory.snapshot_at.asc())
 
-            # Apply limit
             if limit:
                 query = query.limit(limit)
 
             snapshots = query.all()
 
-            # Convert to API models
             api_snapshots = [
                 RepositoryStarHistory(
                     id=str(snapshot.id),

@@ -62,9 +62,6 @@ from backend.services.entity_search import (
 )
 
 
-# Trending domains depend only on the date windows and the request filters,
-# while the homepage asks for the same ranking on every visit. Papers arrive in
-# daily imports, so a short shared cache keeps the ranking current.
 TRENDING_TASKS_TTL_SECONDS = 600
 _trending_tasks_cache: dict[tuple, tuple[float, TrendingTasks]] = {}
 
@@ -202,10 +199,6 @@ class TaskService:
             return self.search_tasks(query=search, page=page, page_size=page_size)
 
         try:
-            # Pre-aggregate each relation independently so joining all three
-            # count sources cannot multiply rows. This keeps the list endpoint
-            # to one bounded query while returning exact direct-association
-            # counts for papers, benchmarks, and stored evaluation rows.
             paper_counts = (
                 self.db.query(
                     PaperTask.task_id.label("task_id"),
@@ -251,7 +244,6 @@ class TaskService:
                 .outerjoin(evaluation_counts, evaluation_counts.c.task_id == DBTask.id)
             )
 
-            # Apply filters
             if _task_ids is not None:
                 query = query.filter(DBTask.id.in_(_task_ids))
 
@@ -283,17 +275,13 @@ class TaskService:
             else:
                 query = query.order_by(asc(order_field))
 
-            # Total count of distinct tasks matching filters (works with GROUP BY
-            # because SQLAlchemy wraps it in a subquery).
             total_count = (
                 _count_override if _count_override is not None else query.count()
             )
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             tasks = []
             for db_task, paper_count, benchmark_count, evaluation_count in results:
                 tasks.append(
@@ -305,7 +293,6 @@ class TaskService:
                     )
                 )
 
-            # Calculate pagination
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 
@@ -450,7 +437,6 @@ class TaskService:
             if not db_task:
                 raise PaperNotFoundError(f"Task with ID {task_id} not found")
 
-            # Get paper count for this task
             paper_count = (
                 self.db.query(func.count(PaperTask.paper_id))
                 .filter(PaperTask.task_id == db_task.id)
@@ -536,7 +522,6 @@ class TaskService:
             parents = []
             current = db_task
 
-            # Traverse up the hierarchy
             while current.parent_id is not None:
                 parent = (
                     self.db.query(DBTask).filter(DBTask.id == current.parent_id).first()
@@ -544,7 +529,6 @@ class TaskService:
                 if not parent:
                     break
 
-                # Get paper count for parent
                 paper_count = (
                     self.db.query(func.count(PaperTask.paper_id))
                     .filter(PaperTask.task_id == parent.id)
@@ -656,10 +640,8 @@ class TaskService:
         sister tasks, recommended frameworks, children, direct benchmarks,
         per-child benchmark previews) so the frontend makes one request.
         """
-        # Import here to avoid a circular import at module load time.
         from backend.services.dataset_service import DatasetService
 
-        # Resolve the task by numeric id or slug.
         if str(task_id).isdigit():
             task = self.get_task_by_id(str(task_id))
         else:
@@ -736,12 +718,10 @@ class TaskService:
             DatabaseError: If database query fails
         """
         try:
-            # Verify area exists
             area = self.db.query(DBArea).filter(DBArea.id == int(area_id)).first()
             if not area:
                 raise PaperNotFoundError(f"Area with ID {area_id} not found")
 
-            # Get tasks for this area
             return self.get_tasks(
                 page=page,
                 page_size=page_size,
@@ -1019,7 +999,6 @@ class TaskService:
         try:
             from backend.models.database import Paper as DBPaper
 
-            # Get task to verify it exists (try by ID or slug)
             task = None
             if task_id.isdigit():
                 task = self.db.query(DBTask).filter(DBTask.id == int(task_id)).first()
@@ -1029,7 +1008,6 @@ class TaskService:
             if not task:
                 raise PaperNotFoundError(f"Task with ID or slug '{task_id}' not found")
 
-            # Base query for papers with this task
             query = (
                 self.db.query(DBPaper)
                 .join(PaperTask, DBPaper.id == PaperTask.paper_id)
@@ -1078,7 +1056,6 @@ class TaskService:
             DatabaseError: If database operation fails
         """
         try:
-            # Get task - try by ID or slug
             task = None
             if task_id.isdigit():
                 task = self.db.query(DBTask).filter(DBTask.id == int(task_id)).first()
@@ -1088,23 +1065,19 @@ class TaskService:
             if not task:
                 raise PaperNotFoundError(f"Task with ID or slug '{task_id}' not found")
 
-            # Parse existing keywords
             existing_keywords = []
             if task.keywords:
                 existing_keywords = [kw.strip() for kw in task.keywords.split(",")]
 
-            # Add new keywords (avoid duplicates)
             for keyword in keywords:
                 keyword = keyword.strip()
                 if keyword and keyword not in existing_keywords:
                     existing_keywords.append(keyword)
 
-            # Update keywords
             task.keywords = ", ".join(existing_keywords)
             self.db.commit()
             self.db.refresh(task)
 
-            # Return updated task
             return self.get_task_by_id(str(task.id))
 
         except PaperNotFoundError:
@@ -1129,7 +1102,6 @@ class TaskService:
             DatabaseError: If database operation fails
         """
         try:
-            # Get task - try by ID or slug
             task = None
             if task_id.isdigit():
                 task = self.db.query(DBTask).filter(DBTask.id == int(task_id)).first()
@@ -1139,23 +1111,19 @@ class TaskService:
             if not task:
                 raise PaperNotFoundError(f"Task with ID or slug '{task_id}' not found")
 
-            # Parse existing keywords
             existing_keywords = []
             if task.keywords:
                 existing_keywords = [kw.strip() for kw in task.keywords.split(",")]
 
-            # Remove specified keywords
             keywords_to_remove = [kw.strip().lower() for kw in keywords]
             existing_keywords = [
                 kw for kw in existing_keywords if kw.lower() not in keywords_to_remove
             ]
 
-            # Update keywords
             task.keywords = ", ".join(existing_keywords) if existing_keywords else None
             self.db.commit()
             self.db.refresh(task)
 
-            # Return updated task
             return self.get_task_by_id(str(task.id))
 
         except PaperNotFoundError:
@@ -1180,7 +1148,6 @@ class TaskService:
             DatabaseError: If database operation fails
         """
         try:
-            # Get task - try by ID or slug
             task = None
             if task_id.isdigit():
                 task = self.db.query(DBTask).filter(DBTask.id == int(task_id)).first()
@@ -1190,13 +1157,11 @@ class TaskService:
             if not task:
                 raise PaperNotFoundError(f"Task with ID or slug '{task_id}' not found")
 
-            # Set new keywords
             cleaned_keywords = [kw.strip() for kw in keywords if kw.strip()]
             task.keywords = ", ".join(cleaned_keywords) if cleaned_keywords else None
             self.db.commit()
             self.db.refresh(task)
 
-            # Return updated task
             return self.get_task_by_id(str(task.id))
 
         except PaperNotFoundError:
@@ -1220,7 +1185,6 @@ class TaskService:
             ValueError: If area_id or parent_id don't exist, or slug already exists
         """
         try:
-            # Validate area_id exists if provided
             if request.area_id is not None:
                 area = (
                     self.db.query(DBArea).filter(DBArea.id == request.area_id).first()
@@ -1230,7 +1194,6 @@ class TaskService:
                         f"Area with ID {request.area_id} not found"
                     )
 
-            # Validate parent_id exists if provided and calculate level
             level = 0
             if request.parent_id is not None:
                 parent = (
@@ -1242,15 +1205,12 @@ class TaskService:
                     )
                 level = parent.level + 1
 
-            # Generate slug from name
             slug = slugify(request.name)
 
-            # Check if slug already exists
             existing_task = self.db.query(DBTask).filter(DBTask.slug == slug).first()
             if existing_task:
                 raise CatalogConflictError(f"Task with slug '{slug}' already exists")
 
-            # Create the task
             db_task = DBTask(
                 name=request.name,
                 slug=slug,
@@ -1270,7 +1230,6 @@ class TaskService:
                 self.db.flush()
             self.db.refresh(db_task)
 
-            # Return the created task using the existing get_task_by_id method
             return self.get_task_by_id(str(db_task.id))
 
         except ValueError as e:

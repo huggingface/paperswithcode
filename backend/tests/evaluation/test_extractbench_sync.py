@@ -323,7 +323,6 @@ def test_unknown_models_match_announcements_or_become_radar_signals(monkeypatch)
     assert (row.model_name, row.metrics[PRIMARY_METRIC_NAME]) == ("Nova Parse 2", 91)
     assert row.is_open is False
     assert session.query(PaperTask).filter(PaperTask.paper_id == 2000).count() == 1
-    # Products never become release signals; the unmatched model does.
     signal = session.query(ModelReleaseSignal).one()
     assert (signal.lab, signal.model_name) == ("OpenAI", "GPT-9 Mini")
     assert signal.sightings == 2

@@ -46,10 +46,7 @@ ENTITIES = {
     "organization": (Organization, "orgs"),
 }
 
-# Well-known researchers; author popularity has no data signal, since citation
-# ranks favour coauthors of a few huge papers.
 POPULAR_AUTHOR_IDS = (266, 4049, 13379, 25, 264)
-# Enough organizations to still fill five chips after hiding followed ones.
 POPULAR_ORGANIZATION_LIMIT = 10
 
 
@@ -79,7 +76,6 @@ def suggestions(db: Session) -> FollowSuggestions:
         for a in db.scalars(select(Author).where(Author.id.in_(POPULAR_AUTHOR_IDS)))
     }
     ordered_authors = [authors[i] for i in POPULAR_AUTHOR_IDS if i in authors]
-    # The directory's curated order puts the best-known labs first.
     organizations = db.scalars(
         select(Organization)
         .where(Organization.display_order.is_not(None))
@@ -179,7 +175,6 @@ def interests(db: Session, subject: str) -> dict[tuple[str, int], Interest]:
 def set_follow(
     db: Session, subject: str, kind: str, entity_id: int, enabled: bool
 ) -> None:
-    # Serialize mutations for the account, including the bounded follow count.
     db.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 914))"),
         {"subject": subject},
@@ -303,9 +298,6 @@ def diverse(
     return selected
 
 
-# Match associations on every version, display the latest version, and apply the
-# earliest publication date. Recursive UNION (not UNION ALL) tolerates bad cycles.
-# A topic matches its Jev verdicts, plus its embedding preview until the backfill is done.
 MATCH_SQL = """
 WITH RECURSIVE interests AS (
  SELECT kind,entity_id,created_at FROM research_follows WHERE hf_subject=:subject
@@ -359,8 +351,6 @@ NEW_COUNT_LIMIT = 100
 
 def new_paper_cutoff(now: datetime, since: datetime) -> date:
     """Earliest publication date a paper added after ``since`` can count as new."""
-    # A paper added after the last visit was published at most a few days before it,
-    # and the feed itself only reaches back 30 days.
     return max(since - timedelta(days=7), now - timedelta(days=30)).date()
 
 
@@ -406,7 +396,6 @@ def matching_entries(
     if not interest_map:
         return []
     entries, strengths = {}, {}
-    # Events are limited to recent discovery; initial catalog backfill is feed-only.
     events = {}
     if window_start is not None:
         for row in db.execute(
@@ -485,7 +474,6 @@ def matching_entries(
                             "metrics": event["metrics"],
                         }
                     )
-    # Feed benchmark scores are current, so corrections render without creating alerts.
     if window_start is None and entries:
         benchmark_ids = [i for (k, i) in interest_map if k == "benchmark"]
         if benchmark_ids:
@@ -552,7 +540,6 @@ def feed_entries(
         .subquery("matches")
     )
     matched_ids = select(matches.c.id)
-    # Selected topics and follows combine as either-or, like merging their feeds.
     selected = [
         and_(matches.c.kind == kind, matches.c.entity_id == entity_id)
         for kind, entity_id in follows

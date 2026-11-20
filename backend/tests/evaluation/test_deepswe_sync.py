@@ -199,7 +199,6 @@ def test_parser_rejects_truncated_duplicate_or_wrong_harness_data():
 
 
 def test_every_named_upstream_model_has_a_release_identity():
-    # The 28 upstream ids live on 2026-10-20 all have display names and papers.
     assert set(MODEL_DISPLAY_NAMES) == set(MODEL_PAPER_IDENTITIES)
     assert len(MODEL_PAPER_IDENTITIES) == 28
 
@@ -254,7 +253,6 @@ def test_sync_upserts_known_rows_and_preserves_unmatched_models():
     assert second.updated == 2
     assert session.query(Evaluation).count() == 2
     assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 73.65}
-    # Without a lab there is nothing to hand to the release radar.
     assert session.query(ModelReleaseSignal).count() == 0
 
 

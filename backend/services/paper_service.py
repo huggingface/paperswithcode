@@ -152,8 +152,6 @@ class PaperService:
             try:
                 thumbnail_path = thumbnail_service.get_local_thumbnail_path(filename)
             except ThumbnailGenerationError:
-                # Legacy catalog identifiers can be malformed. An optional
-                # thumbnail must not prevent hydrating the paper or its batch.
                 return None
             if thumbnail_path:
                 return build_thumbnail_url(filename)
@@ -203,7 +201,6 @@ class PaperService:
             ).search_title
         return hydrated
 
-    # Map the singular DB artifact kind to the Hugging Face listing path segment.
     _HF_KIND_TO_PATH = {"model": "models", "dataset": "datasets", "space": "spaces"}
 
     @staticmethod
@@ -233,7 +230,6 @@ class PaperService:
         if not any(counts.values()):
             return None
 
-        # Deterministic tie-break order: model, then dataset, then space.
         best_kind = max(
             ("model", "dataset", "space"),
             key=lambda kind: counts[kind],
@@ -243,8 +239,6 @@ class PaperService:
         path = PaperService._HF_KIND_TO_PATH[best_kind]
         if db_paper.arxiv_id:
             if best_kind == "space":
-                # HF has no working arXiv filter on the Spaces catalog; the paper
-                # page lists linked Spaces instead.
                 canonical = re.sub(r"v\d+$", "", db_paper.arxiv_id.strip())
                 best_url = f"https://huggingface.co/papers/{canonical}"
             else:
@@ -301,9 +295,6 @@ class PaperService:
         authors = relations.authors.get(db_paper.id, [])
         author_links = relations.author_links.get(db_paper.id, [])
 
-        # Source-aware URL construction. ArXiv rows derive abs/pdf URLs from
-        # `arxiv_id` + `version`. External rows use `source_url` for the
-        # primary link and have no derived PDF.
         url_abs = get_paper_abs_url(
             db_paper.source,
             db_paper.arxiv_id,
@@ -336,7 +327,6 @@ class PaperService:
         project_pages = relations.project_pages.get(db_paper.id) or None
         x_threads = relations.x_threads.get(db_paper.id) or None
 
-        # Create the API model
         paper_data = {
             "id": str(db_paper.id),
             "arxiv_id": db_paper.arxiv_id,
@@ -397,7 +387,6 @@ class PaperService:
         relations: PaperRelations,
     ) -> PaperSummary:
         """Convert one database paper using an already-loaded card projection."""
-        # Source-aware URL: ArXiv abs URL for ArXiv rows, source_url for external.
         url_abs = get_paper_abs_url(
             db_paper.source,
             db_paper.arxiv_id,
@@ -491,8 +480,6 @@ class PaperService:
                     identifier, version=None, include_resources=include_resources
                 )
             except PaperNotFoundError:
-                # Fall through to internal-ID lookup; external rows or
-                # unindexed ArXiv IDs are still addressable that way.
                 pass
 
         try:
@@ -542,7 +529,6 @@ class PaperService:
             if version:
                 query = query.filter(DBPaper.version == version)
             else:
-                # Get latest version
                 query = query.filter(DBPaper.is_latest_version)
 
             db_paper = query.first()
@@ -616,11 +602,9 @@ class PaperService:
             if start_date is None and time_window != "all_time":
                 start_date = self._get_published_after_for_time_window(time_window)
 
-            # Set default page size
             if page_size is None:
                 page_size = self.settings.default_page_size
 
-            # Limit page size
             page_size = min(page_size, self.settings.max_page_size)
 
             if order_by not in {"date_published", "citation_count", "trending"}:
@@ -697,8 +681,6 @@ class PaperService:
             if is_repository_feed:
                 latest_only = True
 
-            # The global trending SQL intentionally deduplicates by repository.
-            # Repository-scoped feeds instead retain every linked paper.
             if (
                 order_by == "trending"
                 and not is_repository_feed
@@ -720,7 +702,6 @@ class PaperService:
                 response.applied_filters = applied_filters
                 return response
 
-            # Build base query
             query = self.db.query(DBPaper)
 
             if is_repository_feed:
@@ -757,7 +738,6 @@ class PaperService:
                     )
                 )
 
-            # Apply conference filter
             if conference:
                 conference_filters = [DBPaper.conference.ilike(f"%{conference}%")]
                 if conference_id is not None:
@@ -1189,10 +1169,6 @@ class PaperService:
             return self._get_thumbnail_service().get_external_thumbnail_url(paper_id)
         return None
 
-    # GitHub-only ranking (default + rollback path): rank papers by the EMA
-    # star velocity of their best official repository. Two-step dedup: pick the
-    # best official repo per paper, then keep one paper per repo (most recently
-    # published) so the feed never shows duplicate repo cards.
     _TRENDING_SQL_GITHUB = text(f"""
         WITH paper_trending AS (
             SELECT DISTINCT ON (p.id)
@@ -1258,11 +1234,6 @@ class PaperService:
         LIMIT :limit OFFSET :offset
     """)
 
-    # Composite ranking: rank papers by papers.trending_score (GitHub velocity +
-    # Hugging Face artifact trending) computed by the calculate_paper_trending_scores
-    # cron. Papers with HF-only signal have a NULL repository_id and are NOT deduped
-    # together (the `repository_id IS NULL` branch keeps every one of them); papers
-    # sharing the same official repo are still deduped to the most recent paper.
     _TRENDING_SQL_COMPOSITE = text(f"""
         WITH paper_pool AS (
             SELECT DISTINCT ON (p.id)
@@ -1412,11 +1383,9 @@ class PaperService:
                 page_size=page_size,
             )
 
-            # Execute the query to get paper IDs
             result = self.db.execute(sql_query, query_params).fetchall()
 
             if not result:
-                # No trending data available yet
                 return Papers(
                     count=0,
                     next_page=None,
@@ -1424,7 +1393,6 @@ class PaperService:
                     results=[],
                 )
 
-            # Extract paper IDs and total count
             paper_ids = [row[0] for row in result]
             total_count = result[0][1] if result else 0
 
@@ -1565,7 +1533,6 @@ class PaperService:
             PaperNotFoundError: If either version is not found
         """
         try:
-            # Get both versions
             old_paper = (
                 self.db.query(DBPaper)
                 .filter(DBPaper.arxiv_id == arxiv_id, DBPaper.version == from_version)
@@ -1588,7 +1555,6 @@ class PaperService:
                     f"Paper version {to_version} not found for ArXiv ID {arxiv_id}"
                 )
 
-            # Calculate time difference
             time_between = None
             if old_paper.created_at and new_paper.created_at:
                 time_between = (new_paper.created_at - old_paper.created_at).days
@@ -1779,7 +1745,6 @@ class PaperService:
                 self.db.query(DBPaper).filter(DBPaper.is_latest_version).count()
             )
 
-            # Get papers by year
             year_stats = (
                 self.db.query(
                     func.extract("year", DBPaper.date_published).label("year"),
@@ -1793,7 +1758,6 @@ class PaperService:
                 .all()
             )
 
-            # Get latest paper date
             latest_paper = (
                 self.db.query(DBPaper)
                 .filter(DBPaper.date_published.is_not(None))
@@ -1835,20 +1799,16 @@ class PaperService:
             List of paper summaries with enhanced citation-based ranking
         """
         try:
-            # Get local search results
             local_results = self.search_papers(query, limit)
 
-            # If we have enough results, return them
             if len(local_results) >= limit:
                 return local_results
 
-            # Otherwise, supplement with Semantic Scholar search
             semantic_scholar_service = SemanticScholarService(self.db)
             highly_cited = await semantic_scholar_service.get_highly_cited_papers(
                 query, limit
             )
 
-            # Try to find these papers in our database
             local_titles = {result.title.lower() for result in local_results}
             supplemental_papers = []
 
@@ -1857,7 +1817,6 @@ class PaperService:
                     title.lower() not in local_titles
                     and len(local_results) + len(supplemental_papers) < limit
                 ):
-                    # Try to find this paper in our database
                     db_paper = (
                         self.db.query(DBPaper)
                         .filter(DBPaper.title.ilike(f"%{title}%"))
@@ -1866,14 +1825,12 @@ class PaperService:
                     )
 
                     if db_paper:
-                        # Update citation count if it's higher
                         if citation_count > db_paper.citation_count:
                             db_paper.citation_count = citation_count
                             self.db.commit()
 
                         supplemental_papers.append(db_paper)
 
-            # Combine and return results
             supplemental_results = self._convert_db_papers_to_summaries(
                 supplemental_papers
             )
@@ -1881,7 +1838,6 @@ class PaperService:
             return all_results[:limit]
 
         except Exception:
-            # Fall back to local search if Semantic Scholar fails
             return self.search_papers(query, limit)
 
     def add_paper(
@@ -1907,7 +1863,6 @@ class PaperService:
             Paper ID if successful, None if paper already exists or on error
         """
         try:
-            # Check if paper already exists
             existing = (
                 self.db.query(DBPaper)
                 .filter(
@@ -1918,9 +1873,8 @@ class PaperService:
             )
 
             if existing:
-                return None  # Paper already exists
+                return None
 
-            # Create new paper
             db_paper = DBPaper(
                 arxiv_id=paper_data["arxiv_id"],
                 title=paper_data["title"],
@@ -1984,7 +1938,6 @@ class PaperService:
             for i in range(0, len(papers_data), batch_size):
                 batch = papers_data[i : i + batch_size]
 
-                # Process batch
                 for paper_data in batch:
                     try:
                         paper_id = self.add_paper(paper_data)
@@ -1996,7 +1949,6 @@ class PaperService:
                         stats["errors"] += 1
                         print(f"Error in batch processing: {e}")
 
-                # Progress report
                 if (i + len(batch)) % (batch_size * 10) == 0:
                     print(
                         f"Processed {i + len(batch):,} papers... (added: {stats['added']:,}, skipped: {stats['skipped']:,}, errors: {stats['errors']:,})"

@@ -139,7 +139,6 @@ def get_author_photo(
         raise HTTPException(status_code=404, detail="Photo not available")
     if organization_logo_extension(photo.mime_type) != extension:
         raise HTTPException(status_code=404, detail="Photo format not available")
-    # The URL names the photo's digest, so its bytes never change.
     return Response(
         content=photo.image_data,
         media_type=photo.mime_type,

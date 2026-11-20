@@ -68,13 +68,10 @@ class ProjectPageService:
         if page_size is None:
             page_size = self.settings.default_page_size
 
-        # Ensure page_size doesn't exceed maximum
         page_size = min(page_size, self.settings.max_page_size)
 
         try:
-            # Build base query
             if include_paper_count or order_by == "paper_count":
-                # Query with paper count
                 query = (
                     self.db.query(
                         DBProjectPage,
@@ -87,18 +84,14 @@ class ProjectPageService:
                     .group_by(DBProjectPage.id)
                 )
             else:
-                # Simple query without paper count
                 query = self.db.query(DBProjectPage)
 
-            # Apply filters
             if official_only:
-                # Filter by is_official field in project_pages table (not junction table)
                 query = query.filter(DBProjectPage.is_official)
 
             if source:
                 query = query.filter(DBProjectPage.source == source)
 
-            # Apply ordering
             if order_by == "paper_count" and (
                 include_paper_count or order_by == "paper_count"
             ):
@@ -111,17 +104,14 @@ class ProjectPageService:
             else:
                 query = query.order_by(asc(order_field))
 
-            # Get total count
             if include_paper_count or order_by == "paper_count":
                 total_count = query.count()
             else:
                 total_count = query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             if include_paper_count or order_by == "paper_count":
                 api_project_pages = [
                     self._db_project_page_to_api(result[0]) for result in results
@@ -131,7 +121,6 @@ class ProjectPageService:
                     self._db_project_page_to_api(page) for page in results
                 ]
 
-            # Calculate pagination info
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 
@@ -186,7 +175,6 @@ class ProjectPageService:
             List of ProjectPage objects
         """
         try:
-            # Query using the junction table
             project_pages = (
                 self.db.query(DBProjectPage)
                 .join(
@@ -218,7 +206,6 @@ class ProjectPageService:
             ProjectPageWithPapers object with project page and associated papers
         """
         try:
-            # Get the project page
             project_page = (
                 self.db.query(DBProjectPage)
                 .filter(DBProjectPage.id == int(page_id))
@@ -228,7 +215,6 @@ class ProjectPageService:
             if not project_page:
                 raise PaperNotFoundError(f"Project page with ID {page_id} not found")
 
-            # Get associated papers
             paper_relationships = (
                 self.db.query(DBPaperProjectPage)
                 .filter(DBPaperProjectPage.project_page_id == int(page_id))
@@ -347,22 +333,16 @@ class ProjectPageService:
             ProjectPage object (created or updated)
         """
         try:
-            # Check if project page already exists
             existing_page = (
                 self.db.query(DBProjectPage).filter(DBProjectPage.url == url).first()
             )
 
             if existing_page:
-                # Update existing project page
-                existing_page.is_official = (
-                    is_official or existing_page.is_official
-                )  # Keep true if any source says official
-                # Don't update source - keep original
+                existing_page.is_official = is_official or existing_page.is_official
 
                 self.db.commit()
                 return self._db_project_page_to_api(existing_page)
             else:
-                # Create new project page
                 new_page = DBProjectPage(
                     url=url,
                     is_official=is_official,
@@ -404,12 +384,10 @@ class ProjectPageService:
         try:
             from backend.models.database import Paper as DBPaper
 
-            # Check if paper exists
             paper = self.db.query(DBPaper).filter(DBPaper.id == int(paper_id)).first()
             if not paper:
                 raise PaperNotFoundError(f"Paper with ID {paper_id} not found")
 
-            # Check if project page exists
             project_page = (
                 self.db.query(DBProjectPage)
                 .filter(DBProjectPage.id == int(project_page_id))
@@ -420,7 +398,6 @@ class ProjectPageService:
                     f"Project page with ID {project_page_id} not found"
                 )
 
-            # Check if association already exists
             existing_association = (
                 self.db.query(DBPaperProjectPage)
                 .filter(
@@ -431,11 +408,8 @@ class ProjectPageService:
             )
 
             if existing_association:
-                # Association already exists, return it
-                # Note: is_official and source are stored in project_pages table, not junction table
                 return self._db_paper_project_page_to_api(existing_association)
             else:
-                # Create new association (junction table only stores IDs)
                 new_association = DBPaperProjectPage(
                     paper_id=int(paper_id),
                     project_page_id=int(project_page_id),
@@ -482,7 +456,6 @@ class ProjectPageService:
             DatabaseError: On database errors
         """
         try:
-            # Check if we should skip due to existing official project page
             if skip_if_official_exists:
                 existing_official = (
                     self.db.query(DBProjectPage)
@@ -492,21 +465,19 @@ class ProjectPageService:
                     )
                     .filter(
                         DBPaperProjectPage.paper_id == int(paper_id),
-                        DBProjectPage.source.in_(["hf_api"]),  # Priority sources
+                        DBProjectPage.source.in_(["hf_api"]),
                         DBProjectPage.is_official,
                     )
                     .first()
                 )
 
                 if existing_official:
-                    return None  # Skip - official project page already exists
+                    return None
 
-            # Create or update the project page
             project_page = self.create_or_update_project_page(
                 url=url, is_official=is_official, source=source
             )
 
-            # Associate with paper (junction table only stores IDs)
             self.associate_project_page_with_paper(
                 paper_id=paper_id,
                 project_page_id=project_page.id,
@@ -536,7 +507,6 @@ class ProjectPageService:
             DatabaseError: On database errors
         """
         try:
-            # Check if URL already exists
             existing = (
                 self.db.query(DBProjectPage)
                 .filter(DBProjectPage.url == request.url)
@@ -547,7 +517,6 @@ class ProjectPageService:
                     f"Project page with URL '{request.url}' already exists"
                 )
 
-            # Create new project page
             new_page = DBProjectPage(
                 url=request.url,
                 is_official=request.is_official,
@@ -593,9 +562,7 @@ class ProjectPageService:
             if not project_page:
                 raise PaperNotFoundError(f"Project page with ID {page_id} not found")
 
-            # Update fields if provided
             if request.url is not None:
-                # Check if new URL already exists for a different project page
                 existing = (
                     self.db.query(DBProjectPage)
                     .filter(
@@ -650,7 +617,6 @@ class ProjectPageService:
             if not project_page:
                 raise PaperNotFoundError(f"Project page with ID {page_id} not found")
 
-            # Delete the project page (cascade will handle junction table)
             self.db.delete(project_page)
             self.db.commit()
 

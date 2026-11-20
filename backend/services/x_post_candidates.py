@@ -89,14 +89,9 @@ KINDS = (
     "top_papers_week",
     "top_papers_month",
 )
-# Insight kinds about one paper; `subject_paper_id` reads it from the key.
 PAPER_POST_KINDS = ("new_sota", "open_sota", "open_release", "trending_paper")
-# The agent checks every SOTA board live and rejects saturated ones, so offer it more, fresher
-# results than the 3-day window of x_insight_post_service, which left it about two at a time.
 SOTA_LIMIT = 20
 SOTA_WINDOW = timedelta(days=7)
-# Artificial Analysis also indexes evals, so the account never posts about its
-# boards: its indexes and arena, "-AA" benchmarks, and CritPt (hosted by it).
 COMPETITOR_BOARD = re.compile(
     r"artificial analysis|(^|[\s(-])AA\b|critpt", re.IGNORECASE
 )
@@ -106,20 +101,12 @@ def competitor_board(dataset: Dataset) -> bool:
     return bool(COMPETITOR_BOARD.search(dataset.name or ""))
 
 
-# Boards the agent kept rejecting (2026-11-17: 40 rejections in a day crowded the
-# SOTA list). Saturated legacy benchmarks (Niels, 2026-11-17) never make a story.
 LEGACY_BOARD = re.compile(
     r"^(BBH|Big-?Bench Hard|MMLU|HellaSwag|Wino-?grande|ARC(-[CE]| \((Challenge|Easy)\))?|PIQA|BoolQ"
     r"|GSM8K|HumanEval|MBPP|DROP)$",
     re.IGNORECASE,
 )
-# A leader at or above this (on a 0-100 higher-is-better metric) leaves no headroom for a story.
 SATURATED_AT = 97.0
-# Below this many entries, a board needs a frontier model on it: tiny boards
-# without one are stale splits, while small new frontier boards (OfficeQA Pro,
-# SLE) posted well. Kept low because vision, speech and robotics boards never
-# list a frontier LLM (a 20-row bar hid the pi^4 Sintel SOTA, 2026-11-19); the
-# agent's rejections are remembered, so a weak small board costs one look.
 SMALL_BOARD = 8
 FRONTIER_MODEL = re.compile(r"\b(GPT|Claude|Gemini|Grok)\b", re.IGNORECASE)
 
@@ -145,9 +132,6 @@ OPEN_RELEASE_DAYS = 21
 OPEN_RELEASE_PAPERS = 25
 OPEN_RELEASE_BOARDS = 12
 OPEN_RELEASE_LIMIT = 4
-# The X queue holds 20 posts and, on days without SOTA results, fills with trending
-# papers in homepage order (Niels, 2026-11-17), so offer enough of them; queued drafts
-# are not posted yet and still count against the limit.
 TRENDING_PAPER_LIMIT = 24
 TRENDING_FEED_DEPTH = 60
 HOMEPAGE_RANGE_DAYS = 7
@@ -180,12 +164,9 @@ class Candidate:
         }
 
 
-# --- Leaderboard wins -------------------------------------------------------
-
-
 @dataclass
 class Board:
-    rows: list[Row]  # best first
+    rows: list[Row]
     lower: bool
     open_ids: set[int]
 
@@ -343,7 +324,7 @@ def leaderboard_wins(
             continue
         kind, mine, beaten = win
         if kind == "new_sota" and mine.evaluation_id not in board.open_ids:
-            continue  # the account posts open-model results only
+            continue
         subject = f"{dataset.id}:{metric}:{paper.id}"
         if kind == "new_sota" and sota_posted(db, subject):
             continue
@@ -436,9 +417,6 @@ def leaderboard_wins(
             )
             candidate.draft = open_sota_text(candidate.facts, credit)
     return [candidate for candidate, _ in found[:SOTA_LIMIT]]
-
-
-# --- New open models --------------------------------------------------------
 
 
 def placement(
@@ -632,7 +610,6 @@ def open_releases(
             key=lambda key: (-sizes[key], key),
         )
         placements = []
-        # Keyed by placement: one evaluation can place on several metric boards.
         boards: dict[int, tuple[Board, Dataset]] = {}
         for dataset_id, metric in paper_keys:
             if len(placements) >= OPEN_RELEASE_BOARDS:
@@ -711,9 +688,6 @@ def open_releases(
     return [candidate for candidate, _ in found[:OPEN_RELEASE_LIMIT]]
 
 
-# --- Trending paper explainers ----------------------------------------------
-
-
 def trending_papers(
     db: Session,
     *,
@@ -723,8 +697,6 @@ def trending_papers(
     """The top of the homepage's trending feed (arXiv and external papers
     alike) that the account never posted, for an explainer post with a
     screenshot of the paper page (alphaXiv style)."""
-    # The homepage's trending tab (FeedView) ranks papers published in the
-    # last week by default: today and the 6 days before it, UTC.
     today = now.astimezone(UTC).date()
     feed = PaperService(db).get_papers(
         page=1,
@@ -848,9 +820,6 @@ def x_threads(db: Session, paper_id: int) -> list[dict[str, Any]]:
     ]
 
 
-# --- Concept explainers -----------------------------------------------------
-
-
 def concepts(db: Session, *, now: datetime) -> list[Candidate]:
     """Fast-rising methods with a description, never explained before.
 
@@ -906,9 +875,6 @@ def plain_text(markdown: str) -> str:
     return _MARKDOWN_LINK.sub(r"\1", markdown).strip()
 
 
-# --- Weekly lab league -------------------------------------------------------
-
-
 def lab_league(db: Session, *, now: datetime) -> Candidate | None:
     """Organizations ranked by first places on active leaderboards.
 
@@ -931,7 +897,6 @@ def lab_league(db: Session, *, now: datetime) -> Candidate | None:
         )
         .distinct()
     ).all()
-    # Rank each benchmark+metric across all tasks, as the SOTA posts do.
     leaders: dict[tuple[int, str], int] = {}
     for dataset_id, metric in pairs:
         board = load_board(db, dataset_id, metric)
@@ -982,9 +947,6 @@ def league_text(leaders: list[str], count: int, boards: int) -> str:
         f"{lead} first place on {count} of {boards} active leaderboards on "
         f"Papers with Code, more than any other lab."
     )
-
-
-# --- All candidates ---------------------------------------------------------
 
 
 def gather(

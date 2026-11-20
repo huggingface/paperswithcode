@@ -119,11 +119,6 @@ def autonomous_submission_decision_callback(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-# ---------------------------------------------------------------------------
-# Schemas
-# ---------------------------------------------------------------------------
-
-
 class PendingEditSubmitRequest(BaseModel):
     paper_id: Optional[int] = Field(
         default=None,
@@ -207,11 +202,6 @@ class PendingEditReviewRequest(BaseModel):
     )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _to_response(row: PendingPaperEdit) -> PendingEditResponse:
     response = PendingEditResponse.model_validate(row)
     image = response.proposed_payload.get("image")
@@ -225,11 +215,6 @@ def _to_response(row: PendingPaperEdit) -> PendingEditResponse:
         "url": f"/api/v1/admin/paper-edits/{row.id}/image",
     }
     return response.model_copy(update={"proposed_payload": safe_payload})
-
-
-# ---------------------------------------------------------------------------
-# User submission endpoint
-# ---------------------------------------------------------------------------
 
 
 @router.post(
@@ -280,11 +265,6 @@ def submit_pending_paper_edit(
     except PendingEditError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _to_response(row)
-
-
-# ---------------------------------------------------------------------------
-# Admin endpoints
-# ---------------------------------------------------------------------------
 
 
 @router.get(

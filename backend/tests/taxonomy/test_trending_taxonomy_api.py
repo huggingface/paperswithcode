@@ -122,7 +122,6 @@ def test_trending_methods_rank_by_share_lift(client, trending_catalog):
     rising = body["results"][0]
     assert rising["id"] == "1"
     assert (rising["recent_paper_count"], rising["baseline_paper_count"]) == (3, 2)
-    # (3 / 4 recent) / (2 / 8 baseline)
     assert rising["share_lift"] == pytest.approx(3.0)
     assert rising["trend_score"] == pytest.approx(3.0 * math.log(4))
 
@@ -157,7 +156,6 @@ def test_trending_tasks_keep_ranking_and_level_filter(client, trending_catalog):
 
 
 def test_trending_ignores_external_papers(client, trending_catalog):
-    # A bulk external backfill in the baseline window must not dilute shares.
     db = TestingSessionLocal()
     db.add_all(
         DBPaper(

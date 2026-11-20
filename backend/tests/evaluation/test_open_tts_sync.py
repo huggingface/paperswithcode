@@ -280,7 +280,6 @@ def test_parser_accepts_complete_ranked_subset_from_multilingual_view():
         row[0] = None
         row[2] = None
         row[3] = None
-    # Partial-coverage rows keep their averages but have no rank.
     for row in payload["data"][8:]:
         row[0] = None
 
@@ -486,7 +485,6 @@ def test_unknown_models_match_announcements_or_become_radar_signals(monkeypatch)
         "https://huggingface.co/echo-lab/echo-tts-2"
     }
     assert session.query(PaperTask).filter(PaperTask.paper_id == 10).count() == 1
-    # One signal per sync run, whichever views list the model.
     signal = session.query(ModelReleaseSignal).one()
     assert (signal.lab, signal.model_name) == ("voice-lab", "Voice 9")
     assert signal.sightings == 2
@@ -834,7 +832,6 @@ def test_cron_syncs_both_open_tts_views(monkeypatch):
 
 def test_parser_keeps_the_best_rank_of_a_model_listed_twice():
     payload = _payload()
-    # Upstream lists one repository under two voices.
     payload["data"][9][1] = payload["data"][4][1].replace("model-5 (variant)", "Mira")
 
     entries = parse_open_tts_leaderboard(payload)

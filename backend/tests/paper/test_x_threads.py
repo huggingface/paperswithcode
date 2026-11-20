@@ -28,7 +28,6 @@ POST = {
     "created_at": "2026-10-10T18:08:49.000Z",
     "favorite_count": 729,
     "conversation_count": 34,
-    # X ends the display range before the trailing media shortlink.
     "display_text_range": [0, TEXT.index(" https://t.co/HVb")],
     "text": TEXT,
     "entities": {
@@ -121,7 +120,6 @@ def test_preview_expands_links_and_drops_media_shortlink():
 @pytest.mark.parametrize(
     ("media", "video_url"),
     [
-        # Animated GIFs are a single unrated MP4.
         (
             {
                 "type": "animated_gif",
@@ -138,7 +136,6 @@ def test_preview_expands_links_and_drops_media_shortlink():
             },
             "https://video.twimg.com/tweet_video/g.mp4",
         ),
-        # Without a small enough variant, take the lightest one.
         (
             {
                 "type": "video",

@@ -47,9 +47,6 @@ class PaperIdentity:
             raise ValueError("PaperIdentity requires exactly one stable identity")
 
 
-# Reviewed release identities for upstream model slugs. Other slugs are matched
-# only when the catalog names them unambiguously (a model release or alias),
-# and otherwise handed to the release radar.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "gpt-6-astra": PaperIdentity(source_url="https://openai.com/index/gpt-6-astra/"),
     "gemini-3-8-flash": PaperIdentity(
@@ -160,8 +157,6 @@ MODEL_DISPLAY_NAMES = {
     "gemini-3-1-pro-preview": "Gemini 3.1 Pro Preview",
 }
 
-# These rows predate the managed sync and came from the same DeepSWE v1.1 page.
-# Adopting them avoids duplicate leaderboard entries on the first run.
 LEGACY_MODEL_NAMES = {
     "claude-fable-5": "Claude Fable 5 (max)",
     "gpt-5-5": "GPT-5.5 (xhigh)",
@@ -205,9 +200,7 @@ class DeepSweSyncStats:
     created: int = 0
     updated: int = 0
     deleted: int = 0
-    # Models outside MODEL_PAPER_IDENTITIES that the catalog matched on its own.
     auto_matched: list[str] = field(default_factory=list)
-    # Models with no paper yet; each is a release signal for the radar.
     unmatched_models: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
 
@@ -554,8 +547,6 @@ class DeepSweSyncService:
                 row.updated_at = datetime.now(UTC)
                 stats.matched += 1
 
-            # A validated response is authoritative for model presence. Current
-            # but unresolved models are protected; only disappeared managed rows go.
             for row in managed_rows:
                 key = _managed_model_key(row.methodology)
                 if key is not None and key not in upstream_keys:

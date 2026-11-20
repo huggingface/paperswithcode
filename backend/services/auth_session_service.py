@@ -16,8 +16,6 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import AuthSession
 
-# Expired rows are kept for a day so a just-expired cookie still reads as
-# expired rather than unknown in logs; afterwards logins purge them.
 EXPIRED_ROW_RETENTION = timedelta(days=1)
 
 

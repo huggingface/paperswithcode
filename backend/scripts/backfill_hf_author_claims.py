@@ -67,7 +67,6 @@ def _run(args: argparse.Namespace) -> None:
             "merge": cleanup.merge_namesakes,
             "empty": cleanup.delete_empty_authors,
         }
-        # Phases run in their fixed order; each builds on the previous one.
         for phase in PHASES:
             if phase not in phases:
                 continue

@@ -52,10 +52,7 @@ _related_cache: OrderedDict[tuple, tuple[float, list[RelatedPaperRecommendation]
 )
 _related_cache_lock = threading.Lock()
 _RELATED_CACHE_TTL_SECONDS = 300
-# Punctuation inside a word ("V4.1", "Qwen2.5-VL"), split like the title copy
-# in papers_search_vector_update().
 _INNER_PUNCTUATION = re.compile(r"(?<=[^\W_])[^\w\s]+(?=[^\W_])|_")
-# A split variant ORed in would bring back what a "-term" excludes.
 _NEGATED_TERM = re.compile(r"(?:^|\s)-\S")
 
 
@@ -515,9 +512,6 @@ class PaperRetrievalService:
                 if latest is not None:
                     return latest, "source_paper_latest_version"
 
-        # Citation counts are refreshed from Semantic Scholar. Within the
-        # already-resolved method's paper set, they are a useful canonicality
-        # prior; oldest publication and stable id resolve missing/equal counts.
         fallback_query = (
             self.db.query(DBPaper)
             .join(PaperMethod, PaperMethod.paper_id == DBPaper.id)
@@ -906,10 +900,6 @@ class PaperRetrievalService:
         title_match = self._normalized_title_expression() == normalized_title
         lexical_rank = func.ts_rank_cd(DBPaper.search_vector, ts_query, 32)
 
-        # Keep unindexed identity predicates in their own lane so the lexical
-        # branch remains eligible for the partial GIN index. A paper can occur
-        # in both branches; aggregation retains its best identity tier and FTS
-        # rank before the SQL-level limit is applied.
         date_filters = []
         if start_date is not None:
             date_filters.append(DBPaper.date_published >= start_date)
@@ -983,8 +973,6 @@ class PaperRetrievalService:
             )
             .subquery()
         )
-        # Rank narrow candidate rows before fetching full paper records. The
-        # citation/date tie-breakers are identical in every lane for a paper.
         ranked_candidates = (
             select(ranked_candidates)
             .order_by(
@@ -1066,7 +1054,6 @@ class PaperRetrievalService:
             ],
             rrf_k=self.settings.hybrid_rrf_k,
         )
-        # Preserve deterministic exact-title/ArXiv identity overrides.
         normalized_title = " ".join(query.lower().split())
         normalized_arxiv = self._normalize_arxiv_search_query(query)
         identity_ids = {

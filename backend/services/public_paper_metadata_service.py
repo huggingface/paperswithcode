@@ -64,7 +64,6 @@ CLIENT_LOOKUPS_PER_WINDOW = 20
 WORKER_LOOKUPS_PER_WINDOW = 120
 MAX_CLIENT_BUCKETS = 4096
 TITLE_SEARCH_RESULTS = 10
-# A name shared by more papers than one page holds is never unique.
 NAME_SEARCH_RESULTS = 50
 MIN_TITLE_LENGTH = 8
 USER_AGENT = "paperswithcode-public-metadata/1.0 (+https://paperswithcode.co)"
@@ -102,14 +101,13 @@ class PublicMetadataUnavailableError(PublicMetadataError):
 
 @dataclass(frozen=True)
 class PaperReference:
-    kind: str  # "arxiv", "doi", or "catalog_id"
+    kind: str
     value: str
 
 
 def parse_reference(identifier: str) -> PaperReference | None:
     """Classify an arXiv ID/URL/DOI, a DOI, or a numeric catalog ID."""
     candidate = identifier.strip()
-    # Proxies merge the double slash of a URL embedded in a path segment.
     candidate = re.sub(r"^(https?):/+", r"\1://", candidate, flags=re.IGNORECASE)
     arxiv_id = arxiv_reference(candidate)
     if arxiv_id:
@@ -320,8 +318,6 @@ class PublicPaperSources:
         paper = self._json(f"https://huggingface.co/api/papers/{quoted}")
         if isinstance(paper, dict) and paper.get("title"):
             return _from_hf(paper)
-        # arXiv is authoritative for arXiv IDs, so a Hugging Face failure
-        # alone does not make the lookup unavailable.
         self.failed = False
         body = self._get(f"https://arxiv.org/abs/{quoted}")
         if body is not None:
@@ -331,7 +327,6 @@ class PublicPaperSources:
                 return record
         elif not self.failed:
             return None
-        # The abstract page failed transiently; the export API may still answer.
         query = urllib.parse.urlencode({"id_list": arxiv_id, "max_results": 1})
         body = self._get(f"https://export.arxiv.org/api/query?{query}")
         entries = [
@@ -376,7 +371,6 @@ class PublicPaperSources:
             return None
         entries = self._arxiv_title_search(name, NAME_SEARCH_RESULTS)
         if len(entries) >= NAME_SEARCH_RESULTS:
-            # Later pages may hold another paper with the same name.
             return None
         matches = [entry for entry in entries if title_name(entry["title"]) == name]
         if len(matches) != 1:
@@ -408,8 +402,6 @@ class PublicPaperSources:
             for work in items or []
             if isinstance(work, dict) and work.get("DOI") and work.get("title")
         ]
-        # Reprints and proceedings copies share a title; the earliest is the
-        # original publication.
         matches = [
             record for record in records if normalize_title(record["title"]) == wanted
         ]
@@ -435,7 +427,6 @@ def _from_crossref(doi: str, work: dict[str, Any]) -> dict[str, Any]:
     titles = work.get("title")
     title = titles[0] if isinstance(titles, list) and titles else str(titles)
     parts = (work.get("issued") or {}).get("date-parts") or [[]]
-    # Crossref sends [[null]] for works without an issue date.
     published = (
         "-".join(f"{int(value):02d}" for value in parts[0] or [] if value is not None)
         or None

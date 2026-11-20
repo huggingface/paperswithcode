@@ -64,8 +64,6 @@ def model_family_key(value: str) -> str:
 
 
 _JOINED_SEPARATOR = re.compile(r"(?<=[a-z])[\s_-]+(?=[a-z0-9])")
-# A version number, not a parameter count ("4.2" in "Nanbeige4.2-3B", but
-# nothing in "gpt-oss-120b").
 _VERSION = r"(\d+(?:\.\d+)*)(?![\d.]*[bmk](?![a-z]))"
 _NAME_VERSION = re.compile(rf"^([a-z]{{3,}}){_VERSION}")
 
@@ -99,8 +97,6 @@ def release_version_conflict(
     are left to the evidence checks, and an abstract that names the release's
     own version (a report covering a point release) is accepted.
     """
-    # Judge each family by its most specific version: a coarse alias
-    # ("Nanbeige4") must not cancel the release's own version ("4.3").
     specific: dict[str, str] = {}
     for name in release_names:
         match = _NAME_VERSION.match(_joined(name))
@@ -221,9 +217,6 @@ class TrendingModelResolutionService:
             self.db.add(release)
             self.db.flush()
         else:
-            # A model card may gain an arXiv report after its initial external
-            # release page was curated. Preserve the release identity and move
-            # its canonical paper pointer forward.
             release.paper_id = paper.id
             release.canonical_name = proposal.canonical_name
             release.publisher = proposal.publisher
@@ -335,7 +328,6 @@ class TrendingModelResolutionService:
                 hf_artifact_urls=[f"https://huggingface.co/{candidate.repo_id}"],
             ),
             commit=False,
-            # The resolved candidate starts its own model-card-pinned workflow.
             queue_curation=False,
         )
         paper = self.db.get(Paper, int(result.paper.id))
@@ -396,7 +388,6 @@ class TrendingModelResolutionService:
             "www.arxiv.org",
         }:
             return False
-        # The abstract, PDF, and HTML pages of any version name the same paper.
         match = re.fullmatch(
             r"/(?:abs|pdf|html)/(.+?)(?:v\d+)?(?:\.pdf)?", parsed.path.rstrip("/")
         )
@@ -504,9 +495,6 @@ class TrendingModelResolutionService:
             PaperOrganization,
             PaperHfArtifact,
         )
-        # paper_method_evidence references its (paper_id, method_id) parent
-        # without ON UPDATE CASCADE, so give the target its method links
-        # before the evidence moves, and drop the source links afterwards.
         source_methods = (
             self.db.query(PaperMethod).filter(PaperMethod.paper_id == source.id).all()
         )
@@ -524,7 +512,6 @@ class TrendingModelResolutionService:
                     )
                 )
         self.db.flush()
-        # The two rows often list the same people as different author records.
         target_author_names = {
             name.casefold()
             for (name,) in self.db.query(Author.name)
@@ -567,7 +554,6 @@ class TrendingModelResolutionService:
         for row in source_methods:
             self.db.delete(row)
 
-        # Both rows were often curated; keep the arXiv paper's copy of an entry.
         EvaluationService(self.db).move_paper_evaluations(source.id, target.id)
         releases = (
             self.db.query(ModelRelease)

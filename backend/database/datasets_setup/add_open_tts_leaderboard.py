@@ -47,8 +47,6 @@ DESCRIPTION = (
 )
 SHORT_DESCRIPTION = f"Open TTS models ranked by English WER and RTFx on {DATASETS}."
 CORE_LANGUAGE_NAMES = ", ".join(language_name(label) for label in CORE_LANGUAGES)
-# Variant names end in "(<qualifier>)": the task page lists them as chips
-# labelled by that qualifier under the English board.
 ALL_LANGUAGE_NAME = f"Open TTS Leaderboard ({len(CORE_LANGUAGES)}-language average)"
 ALL_LANGUAGE_DESCRIPTION = (
     "The multilingual view of the Hugging Face Open TTS Leaderboard compares "
@@ -92,8 +90,6 @@ DEEPLINK_CODES = {
     language_dataset_slug(label): code for label, code in LANGUAGE_BOARDS.items()
 }
 SOURCE_TITLE = "Open TTS Leaderboard"
-# The formal citation declares only 2026; use the Space's public createdAt date
-# rather than inventing a January publication date.
 SOURCE_DATE = date(2026, 9, 7)
 SOURCE_ABSTRACT = (
     "A Hugging Face Audio Team leaderboard for open-source text-to-speech "
@@ -152,7 +148,7 @@ def main() -> None:
             dataset.name = name
             dataset.full_name = name
             if parent is None:
-                parent = dataset  # BENCHMARKS lists the English board first.
+                parent = dataset
             else:
                 dataset.parent_dataset_id = parent.id
                 dataset.variant_type = "subset"

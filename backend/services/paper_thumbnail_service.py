@@ -138,10 +138,6 @@ async def regenerate_paper_thumbnail(
             force=force,
         )
         filename = build_thumbnail_filename(paper.arxiv_id, version)
-        # The API gives an explicit thumbnail_url precedence over its derived
-        # arXiv URL. Persist a per-generation version so a regenerated image
-        # cannot remain hidden behind a browser/CDN cache or an older explicit
-        # URL on the paper row.
         cache_bust = str(generated_path.stat().st_mtime_ns)
         thumbnail_url = build_thumbnail_url(filename, cache_bust=cache_bust)
         paper.thumbnail_url = thumbnail_url

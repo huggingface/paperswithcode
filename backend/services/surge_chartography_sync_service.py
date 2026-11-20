@@ -21,20 +21,16 @@ from backend.services.live_leaderboard_sync import (
 
 SURGE_CHARTOGRAPHY_URL = "https://surgehq.ai/benchmarks/chartography"
 TASK_SLUG = "image-understanding"
-# Surge evaluates without tools; the with-tools `chartography` benchmark is
-# curated by hand from vendor model cards and is never touched here.
 DATASET_SLUG = "chartography-no-tools"
 METRIC_NAME = "Pass@1"
 MODEL_NAME_SUFFIX = " (no tools)"
 LEADERBOARD_TITLE = "Chartography Leaderboard"
-# The page is a Webflow site that rejects non-browser user agents.
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/130.0 Safari/537.36 paperswithcode-surge-chartography-sync/1.0"
 )
 MIN_EXPECTED_ROWS = 25
 MAX_EXPECTED_ROWS = 400
-# Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 30
 
 
@@ -42,12 +38,6 @@ _GEMINI_BLOG = "https://blog.google/innovation-and-ai/models-and-research/gemini
 _GPT_5_6 = "https://openai.com/index/gpt-5-6/"
 _GPT_6 = "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
 
-# Exact Surge model labels (provider + model, without the reasoning
-# configuration) are the trust boundary between a leaderboard row and its
-# introducing paper. Model names follow the catalog, reviewed against the 41
-# rows hand-imported on 2026-10-17. Other labels are matched automatically when
-# the catalog names them unambiguously, and otherwise handed to the release
-# radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Gemini 4 Argon": ModelIdentity(
         "Gemini 4 Argon", source_url=f"{_GEMINI_BLOG}/gemini-4-argon/"
@@ -116,7 +106,6 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         source_url="https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/",
     ),
     "Grok 4.6": ModelIdentity("Grok 4.6", source_url="https://x.ai/news/grok-4-6"),
-    # The Qwen Cloud API version of the open-weight Qwen3.8-Flash-Next.
     "Qwen 3.8 Flash": ModelIdentity(
         "Qwen3.8-Flash", source_url="https://huggingface.co/Qwen/Qwen3.8-Flash-Next"
     ),
@@ -193,7 +182,6 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     ),
 }
 
-# Reviewed labels that are deliberately not published.
 EXCLUDED_LABELS: dict[str, str] = {
     "DeepSeek V4 Flash Vision (experimental)": (
         "experimental checkpoint; its catalog paper was deleted on 2026-10-17"
@@ -219,7 +207,6 @@ def _split_label(brand: str, name: str) -> tuple[str, str]:
     model, configuration = (
         (match["model"], match["configuration"]) if match else (name, "default")
     )
-    # "Inkling" + "Inkling" is the model Inkling, not "Inkling Inkling".
     label = (
         model
         if model == brand or model.startswith(f"{brand} ")
@@ -253,14 +240,12 @@ def parse_surge_chartography(html: str) -> list[LeaderboardEntry]:
         score = row.select_one("[data-score]")
         if brand is None or name is None or score is None:
             raise ValueError(f"Surge AI row {position} layout changed")
-        # The logo's alt text ("Google logo") names the lab, when present.
         logo = row.select_one(".lead-model-logo img[alt]")
         alt = " ".join(logo["alt"].split()) if logo is not None else ""
         lab = alt.removesuffix(" logo") if alt.endswith(" logo") else ""
         label, configuration = _split_label(_text(brand), _text(name))
         if not label or len(label) > 200:
             raise ValueError(f"Surge AI row {position} is malformed: {label!r}")
-        # The bar width and the visible text must agree, followed by "%".
         visible = _text(score.parent)
         try:
             value = Decimal(score["data-score"])

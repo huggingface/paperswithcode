@@ -27,8 +27,6 @@ from backend.services.task_service import TaskService
 
 logger = logging.getLogger(__name__)
 
-# Mirrors the frontend defaults: FeedView (30 per page, past week, trending)
-# and the task/method pages (20 per page, all time, trending).
 HOME_PAGES = 3
 HOME_PAGE_SIZE = 30
 ENTITY_PAGE_SIZE = 20

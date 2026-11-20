@@ -374,7 +374,6 @@ def _systemd_execution(job_id, **evidence):
 
 
 def test_timer_enabled_after_last_slot_awaits_first_invocation():
-    # The weekly slot was Sun 2026-08-23 02:35; the timer went live afterwards.
     execution = _systemd_execution(
         "sweep_conference_deadlines",
         timer_activated_at="Fri 2026-08-28 08:12:57 UTC",
@@ -399,9 +398,7 @@ def test_timer_activated_before_last_slot_is_still_overdue():
 @pytest.mark.parametrize(
     "last_trigger_at",
     [
-        # Restarted after an earlier trigger: the missed slot still counts.
         "2026-08-16T02:35:00Z",
-        # Triggered after activation but never exited.
         "2026-08-28T09:00:00Z",
     ],
 )

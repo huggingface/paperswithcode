@@ -61,10 +61,6 @@ def rank_by_share_lift(
     recent_start = today - timedelta(days=recent_days)
     baseline_start = recent_start - timedelta(days=baseline_days)
 
-    # Combined window predicate: only consider latest-version arXiv papers
-    # published anywhere between baseline_start and today. Pushing this into the WHERE
-    # clause lets Postgres skip the bulk of `papers` and the matching junction
-    # rows before aggregation instead of discarding them inside a CASE.
     in_window = and_(
         DBPaper.is_latest_version,
         DBPaper.source == "arxiv",
@@ -96,11 +92,6 @@ def rank_by_share_lift(
     recent_count_expr = func.count(case((in_recent, DBPaper.id)))
     baseline_count_expr = func.count(case((in_baseline, DBPaper.id)))
 
-    # Express the ranking maths in SQL so Postgres can filter, sort and LIMIT
-    # server-side. `all_recent`/`all_baseline` are known non-zero scalars, so:
-    #   share_lift  = (recent * all_baseline) / (baseline * all_recent)
-    # The min_baseline_papers gate (>= 1) guarantees baseline_count > 0. Casts
-    # force float (not integer) division.
     share_lift_expr = (cast(recent_count_expr, Float) * float(all_baseline)) / (
         cast(baseline_count_expr, Float) * float(all_recent)
     )

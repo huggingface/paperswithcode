@@ -18,13 +18,11 @@ async def test_semantic_scholar_service():
     """Test the Semantic Scholar service."""
     print("🔍 Testing Semantic Scholar API service...")
 
-    # Get database session
     db = next(get_database_session())
 
     try:
         service = SemanticScholarService(db)
 
-        # Test searching for a well-known paper
         print("\n📄 Searching for 'Attention Is All You Need'...")
         paper_data = await service.search_paper_by_title("Attention Is All You Need")
 
@@ -35,7 +33,6 @@ async def test_semantic_scholar_service():
         else:
             print("❌ Paper not found")
 
-        # Test searching by ArXiv ID
         print("\n📄 Searching by ArXiv ID '1706.03762' (Transformer paper)...")
         paper_data = await service.search_paper_by_arxiv_id("1706.03762")
 
@@ -45,7 +42,6 @@ async def test_semantic_scholar_service():
         else:
             print("❌ Paper not found")
 
-        # Test searching for highly cited papers
         print("\n🔥 Searching for highly cited 'vision transformer' papers...")
         highly_cited = await service.get_highly_cited_papers(
             "vision transformer", limit=5
@@ -68,13 +64,11 @@ def test_citation_search():
     """Test the citation-based search functionality."""
     print("\n🔍 Testing citation-based search...")
 
-    # Get database session
     db = next(get_database_session())
 
     try:
         service = PaperService(db)
 
-        # Test search with different queries
         test_queries = [
             "vision transformer",
             "attention mechanism",
@@ -108,13 +102,11 @@ async def test_enhanced_search():
     """Test the enhanced search with Semantic Scholar integration."""
     print("\n🚀 Testing enhanced search with Semantic Scholar integration...")
 
-    # Get database session
     db = next(get_database_session())
 
     try:
         service = PaperService(db)
 
-        # Test enhanced search
         query = "vision transformer"
         print(f"\n🔎 Enhanced search for: '{query}'")
         results = await service.search_papers_with_semantic_scholar(query, limit=5)
@@ -141,20 +133,16 @@ async def main():
     """Run all tests."""
     print("🧪 Starting citation-based search tests...\n")
 
-    # Test Semantic Scholar service
     await test_semantic_scholar_service()
 
-    # Test basic citation search
     test_citation_search()
 
-    # Test enhanced search
     await test_enhanced_search()
 
     print("\n✅ All tests completed!")
 
 
 if __name__ == "__main__":
-    # Check if we can import required modules
     import importlib.util
 
     if importlib.util.find_spec("httpx") is not None:
@@ -163,5 +151,4 @@ if __name__ == "__main__":
         print("❌ httpx is not installed. Run: uv add httpx")
         sys.exit(1)
 
-    # Run the tests
     asyncio.run(main())

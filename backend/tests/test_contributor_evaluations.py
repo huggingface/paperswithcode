@@ -27,8 +27,6 @@ def test_snapshot_evaluation_ids_reads_every_recorded_shape():
 
 
 def test_contributor_ids_are_rows_an_edit_added_not_rows_it_touched():
-    # SurGe (paper 85681): the author's first batch created all five rows; later
-    # batches only edited them.
     db = Mock()
     db.execute.return_value = [
         ({"evaluations": []}, {"evaluations": [{"id": 46210}, {"id": 46211}]}),

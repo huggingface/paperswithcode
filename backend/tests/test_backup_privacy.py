@@ -177,7 +177,6 @@ def test_uploaded_old_dump_is_pruned_before_the_new_dump(tmp_path):
         tmp_path, ['{"private": true}'], keep="1", existing=[(old, 100)]
     )
     assert result.returncode == 0, result.stderr
-    # pg_dump ran with the uploaded old dump already gone.
     assert json.loads((tmp_path / "seen").read_text()) == []
     assert old not in {p.name for p in backups.iterdir()}
     assert len(list(backups.glob("*.dump"))) == 1
@@ -188,8 +187,6 @@ def test_old_dump_missing_from_the_bucket_is_kept(tmp_path):
     result, _, _ = run_backup(
         tmp_path, ['{"private": true}'], keep="1", existing=[(old, 100)], remote={}
     )
-    # The upload of the new dump then fails verification, but the old local
-    # dump, never uploaded, is still there when pg_dump runs.
     assert result.returncode != 0
     assert json.loads((tmp_path / "seen").read_text()) == [old]
 
@@ -209,8 +206,6 @@ def test_dump_refuses_to_start_without_room_for_another_dump(tmp_path):
 
 
 def test_dump_without_local_copy_sizes_from_the_bucket(tmp_path):
-    # Production keeps no local dump, so the bucket's newest dump is the only
-    # size estimate; without it the guard used to be skipped entirely.
     old = _old_dump(tmp_path, "22")
     result, calls, _ = run_backup(
         tmp_path,
@@ -233,7 +228,5 @@ def test_dump_without_local_copy_runs_when_bucket_dump_fits(tmp_path):
         remote={old: 1000, f"{old}.sha256": 10},
         available=10**6,
     )
-    # Verification fails because the stub bucket never gains the new dump,
-    # but the dump itself was allowed to start.
     assert "dump" in calls
     assert "Not enough free disk" not in result.stderr

@@ -250,7 +250,6 @@ def _simple(text: str, keywords: str) -> set[int]:
 def test_substring_prefilter_keeps_case_insensitive_and_plural_matches() -> None:
     assert _simple("Large Language Models for code", "large language model") == {1}
     assert _simple("A SURVEY OF OBJECT DETECTION", "object detection") == {1}
-    # The keyword occurs as a substring but not as a word: still rejected.
     assert _simple("Images were transformed twice", "transformer") == set()
 
 
@@ -261,13 +260,10 @@ def test_substring_prefilter_keeps_case_sensitive_word_boundaries() -> None:
 
 
 def test_ignorecase_match_survives_unicode_case_folding() -> None:
-    # U+017F (long s) folds to "s"; re.IGNORECASE matches it, so the
-    # casefolded prefilter must not reject it.
     assert _simple("Long ſequence modeling", "sequence modeling") == {1}
 
 
 def test_ignorecase_match_survives_turkish_dotted_and_dotless_i() -> None:
-    # re.IGNORECASE matches U+0130 and U+0131 to "i", but casefold() does not.
     assert _simple("VİDEO GENERATION benchmark", "video generation") == {1}
     assert _simple("Vıdeo generation benchmark", "video generation") == {1}
 

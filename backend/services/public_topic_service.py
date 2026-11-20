@@ -26,16 +26,12 @@ from backend.models.papers import Paper
 from backend.models.research import PublicTopicView, TopicBubble, TopicPerson
 from backend.services.research_topic_service import THRESHOLD
 
-# Enough to still offer five after hiding the viewer's own and followed topics.
 BUBBLE_LIMIT = 20
 BUBBLE_MIN_RECENT_PAPERS = 5
 RECENT_DAYS = 30
 INDEX_MIN_FOLLOWERS = 3
-# Enough faces to fill the topic sidebar's follower grid; the rest show as "+N".
 AVATAR_LIMIT = 100
 
-# Verdicts at the threshold, plus the embedding preview until the backfill is
-# done, mapped to each paper's latest version (as the following feed does).
 TOPIC_PAPERS_SQL = """
 WITH hits AS (
  SELECT v.paper_id FROM research_topic_verdicts v
@@ -112,7 +108,6 @@ def topic_view(db: Session, topic_id: int, viewer: str | None) -> PublicTopicVie
             ResearchTopicFollow,
             ResearchTopicFollow.hf_subject == UserProfile.hf_subject,
         )
-        # Accounts that never changed the setting have no row and show by default.
         .outerjoin(
             ResearchSubscription,
             ResearchSubscription.hf_subject == UserProfile.hf_subject,

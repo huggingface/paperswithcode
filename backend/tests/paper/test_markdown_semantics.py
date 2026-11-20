@@ -245,7 +245,6 @@ def _canonical(title_line: str, body: str) -> str:
 @pytest.mark.parametrize(
     ("title_line", "body", "error"),
     [
-        # Production stub: arXiv HTML conversion failed, leaving a figure caption.
         (
             "principia_summary_arxiv_final.svg",
             "We present a textual comparison of principia predictions for "

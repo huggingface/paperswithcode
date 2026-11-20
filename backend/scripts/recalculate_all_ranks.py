@@ -17,7 +17,6 @@ from database.connection import get_database_session
 from services.evaluation_service import EvaluationService
 from sqlalchemy import text
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
@@ -52,12 +51,10 @@ def main():
     """Main function to recalculate all ranks."""
     logger.info("Starting rank recalculation for all leaderboards...")
 
-    # Get database session
     db = next(get_database_session())
     service = EvaluationService(db)
 
     try:
-        # Find all unique leaderboards
         logger.info("Finding all unique task+dataset combinations...")
         leaderboards = get_all_leaderboards(db)
         logger.info(f"Found {len(leaderboards)} unique leaderboards")
@@ -66,7 +63,6 @@ def main():
             logger.warning("No leaderboards found!")
             return
 
-        # Recalculate ranks for each leaderboard
         total_updated = 0
         failed_count = 0
 
@@ -91,7 +87,6 @@ def main():
                 failed_count += 1
                 continue
 
-        # Summary
         logger.info("=" * 60)
         logger.info("Recalculation complete!")
         logger.info(f"  Total leaderboards processed: {len(leaderboards)}")

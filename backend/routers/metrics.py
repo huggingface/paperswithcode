@@ -49,7 +49,6 @@ def list_metrics(
     - `/api/v1/metrics/?q=accuracy` - Search for metrics containing "accuracy"
     - `/api/v1/metrics/?ordering=-name` - Order by name descending
     """
-    # Parse ordering
     order_dir = "asc"
     order_by = ordering
     if ordering and ordering.startswith("-"):

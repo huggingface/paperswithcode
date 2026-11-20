@@ -59,7 +59,6 @@ def main() -> int:
         db.close()
 
     print(json.dumps({"dry_run": args.dry_run, **stats}, sort_keys=True))
-    # A run where every generation failed means the model is unavailable.
     return 1 if stats["failed"] and not stats["generated"] else 0
 
 

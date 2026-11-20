@@ -23,9 +23,6 @@ def _configure_hugging_face_cache() -> None:
     runtime_data_dir = os.getenv("PWC_RUNTIME_DATA_DIR")
     if not runtime_data_dir:
         return
-    # Keep request-path Hub/Xet writes separate from the CRON-owned cache. Both
-    # process identities use the same runtime-data root in production, and a
-    # shared cache directory can be readable but not writable by the API user.
     hf_cache_dir = Path(runtime_data_dir) / "hf-app-cache"
     os.environ.setdefault("HF_HOME", str(hf_cache_dir))
     os.environ.setdefault("HF_XET_CACHE", str(hf_cache_dir / "xet"))
@@ -33,8 +30,6 @@ def _configure_hugging_face_cache() -> None:
 
 _configure_hugging_face_cache()
 
-# Hugging Face and its compiled Xet dependency snapshot cache configuration at
-# import time, so these imports must remain below the runtime-path setup.
 import httpx  # noqa: E402
 from huggingface_hub import HfApi  # noqa: E402
 from huggingface_hub.errors import HfHubHTTPError  # noqa: E402
@@ -170,9 +165,6 @@ def copy_paper_to_bucket(
     errors: list[tuple[str, str]] = []
     with tempfile.TemporaryDirectory(prefix="pwc-hf-bucket-cache-") as cache_dir:
         api = HfApi(token=token)
-        # ``copy_files`` downloads small text files through this method but does
-        # not expose a cache_dir argument of its own. Deployed service users have
-        # no writable home directory, so bind an operation-scoped cache explicitly.
         api.hf_hub_download = partial(api.hf_hub_download, cache_dir=cache_dir)
         try:
             if create:

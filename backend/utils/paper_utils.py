@@ -83,7 +83,6 @@ async def _fetch_arxiv_page(arxiv_id: str) -> BeautifulSoup | None:
                 return await response.text()
 
     try:
-        # Shield from cancellation to prevent cancel scope propagation from MCP cleanup
         html_content = await asyncio.shield(_do_fetch())
     except aiohttp.ClientError as e:
         print(f"Error fetching ArXiv page {url}: {e}")
@@ -92,7 +91,6 @@ async def _fetch_arxiv_page(arxiv_id: str) -> BeautifulSoup | None:
         print(f"Timeout error fetching ArXiv page {url}")
         return None
     except asyncio.CancelledError:
-        # If still cancelled despite shield, return None gracefully
         print(f"Request cancelled while fetching ArXiv page {url}")
         return None
 
@@ -113,7 +111,6 @@ async def get_abstract_arxiv(arxiv_id: str) -> str | None:
     if soup is None:
         return None
 
-    # Primary method: Look for the blockquote containing the abstract
     abstract_blockquote = soup.find("blockquote", class_="abstract mathjax")
     if abstract_blockquote:
         full_text = abstract_blockquote.get_text(separator=" ", strip=True)
@@ -122,38 +119,28 @@ async def get_abstract_arxiv(arxiv_id: str) -> str | None:
             abstract_text = full_text[len(prefix_to_remove) :].strip()
             return abstract_text
         else:
-            # If the prefix isn't there for some reason, return the whole text of the blockquote
-            # This might happen if the structure changes slightly or if there's no <span>
-            return full_text  # Or return None if strict prefix matching is required
+            return full_text
 
-    # Fallback methods: Check meta tags
     meta_tags_to_check = [
         {"name": "citation_abstract"},
         {"property": "og:description"},
-        {"name": "description"},  # This one might contain "Abstract page for..."
+        {"name": "description"},
     ]
 
     for tag_attrs in meta_tags_to_check:
         meta_tag = soup.find("meta", attrs=tag_attrs)
         if meta_tag and meta_tag.get("content"):
             content = meta_tag.get("content").strip()
-            # The 'description' meta tag sometimes has a prefix like "Abstract page for arXiv paper XXXXX: "
             if (
                 tag_attrs.get("name") == "description"
                 and "Abstract page for arXiv paper" in content
             ):
-                # Try to remove the generic prefix if it's the 'description' tag
                 parts = content.split(":", 1)
                 if len(parts) > 1:
                     abstract_candidate = parts[1].strip()
-                    # A simple heuristic: if it's long enough and doesn't seem like just a title, use it.
-                    # This is to avoid picking up just "Reasoning Model is Stubborn..." from the generic description.
-                    # The actual abstract from citation_abstract or og:description is usually much longer.
-                    if len(abstract_candidate) > 100:  # Arbitrary length check
+                    if len(abstract_candidate) > 100:
                         return abstract_candidate
-                    # else, continue to next meta tag
             else:
-                # For citation_abstract and og:description, the content is usually the direct abstract
                 return content
 
     print(f"Abstract not found in expected locations for ArXiv ID: {arxiv_id}")
@@ -165,7 +152,6 @@ async def get_abstract_hf_hub(arxiv_id: str) -> str:
     Get the abstract of a paper using the Hugging Face Hub API.
     """
     try:
-        # Shield from cancellation to prevent cancel scope propagation
         paper_details = await asyncio.shield(asyncio.to_thread(paper_info, id=arxiv_id))
         abstract = paper_details.summary
         return abstract
@@ -195,13 +181,12 @@ async def get_title_hf_hub(arxiv_id: str) -> str:
     Get the title of a paper using the Hugging Face Hub API.
     """
     try:
-        # Shield from cancellation to prevent cancel scope propagation
         paper_details = await asyncio.shield(asyncio.to_thread(paper_info, id=arxiv_id))
         title = paper_details.title
         return title
     except asyncio.CancelledError:
         print(f"Request cancelled while fetching HF Hub info for {arxiv_id}")
-        return "No title was found."  # Return fallback value instead of crashing
+        return "No title was found."
 
 
 async def get_title_arxiv(arxiv_id: str) -> str | None:
@@ -218,50 +203,36 @@ async def get_title_arxiv(arxiv_id: str) -> str | None:
     if soup is None:
         return None
 
-    # Method 1: Try the <h1> tag with class "title"
     title_h1 = soup.find("h1", class_="title mathjax")
     if title_h1:
-        # The <h1> often contains a <span class="descriptor">Title:</span>
-        # We want the text after that span.
         title_span = title_h1.find("span", class_="descriptor")
         if title_span and title_span.get_text(strip=True).lower() == "title:":
-            # Get all text nodes following the span directly within h1
-            # or just get the full text and remove the prefix
             full_h1_text = title_h1.get_text(separator=" ", strip=True)
             prefix_to_remove = "Title:"
             if full_h1_text.lower().startswith(prefix_to_remove.lower()):
                 title_text = full_h1_text[len(prefix_to_remove) :].strip()
-                if title_text:  # Ensure it's not empty after stripping
+                if title_text:
                     return title_text
         else:
-            # If no "Title:" descriptor span, take the whole h1 text
-            # This might happen if the structure changes
             title_text = title_h1.get_text(strip=True)
             if title_text:
                 return title_text
 
-    # Method 2: Try meta tags (often more reliable for clean title)
     meta_tags_to_check = [
-        {"name": "citation_title"},  # Usually the most direct and clean
-        {"property": "og:title"},  # OpenGraph title
-        {"name": "twitter:title"},  # Twitter card title
+        {"name": "citation_title"},
+        {"property": "og:title"},
+        {"name": "twitter:title"},
     ]
     for tag_attrs in meta_tags_to_check:
         meta_tag = soup.find("meta", attrs=tag_attrs)
         if meta_tag and meta_tag.get("content"):
             title_text = meta_tag.get("content").strip()
-            # Sometimes og:title or twitter:title might have extra bits for very long titles (e.g., "...")
-            # citation_title is usually precise.
             if title_text:
                 return title_text
 
-    # Method 3: Try the <title> tag in the <head>
-    # This usually looks like "[arxiv_id] Actual Title"
     head_title_tag = soup.find("title")
     if head_title_tag and head_title_tag.string:
         full_title_text = head_title_tag.string.strip()
-        # Try to remove the "[arxiv_id]" part
-        # A more robust way using regex to remove anything in brackets at the start
         cleaned_title = re.sub(r"^\[[^\]]+\]\s*", "", full_title_text).strip()
         if cleaned_title:
             return cleaned_title
@@ -357,7 +328,6 @@ async def get_authors(arxiv_id: str) -> str:
                     return await response.json()
 
         try:
-            # Shield from cancellation to prevent cancel scope propagation
             data = await asyncio.shield(_fetch_authors())
 
             authors = data.get("authors", [])
@@ -366,7 +336,6 @@ async def get_authors(arxiv_id: str) -> str:
                 for author in authors:
                     author_name = author.get("name")
                     current_authors_string += f"Author name: {author_name}\n"
-                    # try to get the Hugging Face username
                     if author.get("user"):
                         author_hf_username = author.get("user").get("user")
                         author_full_name = author.get("user").get("fullname")

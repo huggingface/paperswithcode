@@ -28,7 +28,6 @@ MIME_BY_SUFFIX = {
     ".svg": "image/svg+xml",
 }
 
-# Temporary seed directory for one-off imports and bulk backfill.
 IMAGE_SEED_ROOT = Path(tempfile.gettempdir()) / "paperswithcode_entity_image_seeds"
 
 

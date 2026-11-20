@@ -24,7 +24,6 @@ class OpenAlexInstitution:
 
 
 OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
-    # Universities and research institutes.
     OpenAlexInstitution("I99065089", "tsinghua", "Tsinghua University"),
     OpenAlexInstitution(
         "I4405263052", "tsinghua", "Tsinghua Shenzhen International Graduate School"
@@ -341,7 +340,6 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     ),
     OpenAlexInstitution("I4210110652", "riken", "RIKEN"),
     OpenAlexInstitution("I5681781", "adelaideuniversity", "The University of Adelaide"),
-    # Companies.
     OpenAlexInstitution("I45928872", "alibabagroup", "Alibaba Group"),
     OpenAlexInstitution("I4210095624", "alibabagroup", "Alibaba Group (United States)"),
     OpenAlexInstitution("I4405281272", "alibaba-damo-academy", "DAMO Academy"),

@@ -43,7 +43,6 @@ def test_build_query_github_mode():
     sql_str = str(sql)
     assert "pr.is_official = TRUE" in sql_str
     assert "r.trending_score" in sql_str
-    # GitHub path requires a repo when not searching.
     assert "r.id IS NOT NULL" in sql_str
     assert params["limit"] == 30
     assert params["offset"] == 0
@@ -62,9 +61,7 @@ def test_build_query_composite_mode():
         page_size=20,
     )
     sql_str = str(sql)
-    # Composite ranks by the paper-level score.
     assert "p.trending_score" in sql_str
-    # HF-only papers (NULL repo) are kept, not deduped away.
     assert "repository_id IS NULL OR repo_paper_rank = 1" in sql_str
     assert params["search_term"] == "%vision%"
     assert params["limit"] == 20

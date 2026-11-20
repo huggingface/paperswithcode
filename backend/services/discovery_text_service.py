@@ -12,7 +12,6 @@ from html import escape
 
 META_DESCRIPTION_LIMIT = 155
 
-# Link targets may contain one level of parentheses, as Wikipedia URLs do.
 _LINK_RE = re.compile(r"\[([^\[\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)")
 _CODE_RE = re.compile(r"`([^`]+)`")
 _STRONG_RE = re.compile(r"\*\*(?=\S)(.+?)(?<=\S)\*\*")
@@ -22,7 +21,6 @@ _SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
 
 
 def _safe_href(url: str) -> str | None:
-    # Browsers treat "/\host" like "//host", so backslashes are never safe.
     if "\\" in url:
         return None
     if url.startswith("/") and not url.startswith("//"):

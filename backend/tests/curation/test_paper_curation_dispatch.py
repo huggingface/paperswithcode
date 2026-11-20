@@ -144,8 +144,6 @@ def test_hf_dispatch_retries_with_bounded_exponential_backoff(monkeypatch):
         call["secrets"]["PWC_PAPER_MARKDOWN_HF_TOKEN"] == "test-hf" for call in calls
     )
     assert all(call["image"] == "example/image:sha" for call in calls)
-    # The Hub rejects names over 100 characters, and huggingface_hub derives
-    # one from long digest-pinned images unless a name is passed.
     assert all(call["name"] == f"pwc-enrich-paper-{row.id}" for call in calls)
     assert "name" in inspect.signature(HfApi.run_job).parameters
 
@@ -321,7 +319,6 @@ def test_one_shot_dispatch_calls_only_the_selected_scheduled_row(monkeypatch, tr
     ("trigger", "active_triggers"),
     [
         ("hf-daily-cron", ["hf-trending-cron"]),
-        # The benchmark-gap lane has its own cap, separate from daily work.
         ("benchmark-gap-cron", ["benchmark-gap-cron", "benchmark-gap-cron"]),
     ],
 )
