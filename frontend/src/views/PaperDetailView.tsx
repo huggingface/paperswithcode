@@ -11,6 +11,7 @@ import { evaluationsApi } from "@/lib/api/evaluations";
 import { papersApi } from "@/lib/api/papers";
 import {
   assetUrl,
+  isCodexAddEvalsEnabled,
   isCodexEnrichPaperEnabled,
   isNativePdfReaderEnabled,
   isPaperReaderChatEnabled,
@@ -54,6 +55,7 @@ import { SavePaperButton } from "@/components/paper-detail/SavePaperButton";
 import { TweetItButton } from "@/components/paper-detail/TweetItButton";
 import { EditableActionButton } from "@/components/paper-detail/EditableActionButton";
 import { CodexPaperJobDialog } from "@/components/paper-detail/CodexPaperJobDialog";
+import { PaperCurationHistory } from "@/components/paper-detail/PaperCurationHistory";
 import { organizationShortName } from "@/lib/organizationNames";
 import { AuthorAvatar } from "@/components/AuthorAvatar";
 
@@ -732,6 +734,9 @@ const PaperDetailView: React.FC = () => {
             paper={paper}
             visibleEvaluationCount={visibleEvaluations?.length ?? 0}
           />
+          {isAdmin && (isCodexEnrichPaperEnabled() || isCodexAddEvalsEnabled()) && (
+            <PaperCurationHistory paperId={Number(paper.id)} />
+          )}
 
         </div>
 

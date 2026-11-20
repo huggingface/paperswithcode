@@ -24,7 +24,7 @@ from fastapi.encoders import jsonable_encoder
 from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -227,6 +227,15 @@ class CodexPaperJobsResponse(BaseModel):
     workflows: list[dict] = Field(default_factory=list)
     benchmark_candidates: list[dict] = Field(default_factory=list)
     scheduler: dict = Field(default_factory=dict)
+
+
+class PaperCurationHistoryResponse(BaseModel):
+    """Every curation job that touched one paper, newest first, for admins."""
+
+    paper_id: int
+    jobs: list[CodexPaperJob]
+    # Only set while one of the paper's jobs is queued and dispatch is paused.
+    scheduler_pause: dict | None = None
 
 
 def _now() -> datetime:
@@ -1704,6 +1713,45 @@ class CodexPaperJobService:
                 ),
                 "usage": scheduled_usage,
             },
+        )
+
+    def paper_history(
+        self, db: Session, settings: Settings, paper_id: int, *, limit: int = 50
+    ) -> PaperCurationHistoryResponse:
+        """Return one paper's curation jobs, including its workflows' stages."""
+        workflow_ids = select(PaperCurationWorkflow.id).where(
+            PaperCurationWorkflow.paper_id == paper_id
+        )
+        rows = (
+            db.query(PaperCurationJob)
+            .filter(
+                or_(
+                    PaperCurationJob.paper_id == paper_id,
+                    PaperCurationJob.parent_workflow_id.in_(workflow_ids),
+                )
+            )
+            .order_by(PaperCurationJob.created_at.desc(), PaperCurationJob.id.desc())
+            .limit(limit)
+            .all()
+        )
+        scheduler_pause = None
+        if any(row.status == "queued" for row in rows):
+            state = db.get(PaperCurationSchedulerState, 1)
+            if state is not None and (
+                state.paused_at is not None or not state.dispatch_enabled
+            ):
+                scheduler_pause = {
+                    "dispatch_enabled": bool(state.dispatch_enabled),
+                    "paused_at": state.paused_at.isoformat()
+                    if state.paused_at
+                    else None,
+                    "pause_reason": state.pause_reason,
+                    "pause_condition": state.pause_condition,
+                }
+        return PaperCurationHistoryResponse(
+            paper_id=paper_id,
+            jobs=[self.serialize(row, settings) for row in rows],
+            scheduler_pause=scheduler_pause,
         )
 
     def retry(

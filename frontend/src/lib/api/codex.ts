@@ -1,4 +1,9 @@
-import type { CodexJobFilters, CodexPaperJob, CodexPaperJobsResponse } from "./codex.types";
+import type {
+  CodexJobFilters,
+  CodexPaperJob,
+  CodexPaperJobsResponse,
+  PaperCurationHistory,
+} from "./codex.types";
 export type * from "./codex.types";
 import type { ApiRequest } from "../apiTransport";
 import { apiUrl } from "../apiUrl";
@@ -34,6 +39,11 @@ export class CodexApi {
     const query = new URLSearchParams({ limit: String(limit) });
     Object.entries(filters).forEach(([key, value]) => { if (value) query.set(key, value); });
     return this.request(`${CURATION_JOBS}?${query}`, { cache: "no-store" });
+  }
+
+  /** Curation jobs for one paper, with the scheduler pause if one is queued. */
+  paperHistory(paperId: number): Promise<PaperCurationHistory> {
+    return this.request(`${CURATION_JOBS}/papers/${paperId}`, { cache: "no-store" });
   }
 
   retryJob(jobId: string): Promise<CodexPaperJob> {
