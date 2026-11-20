@@ -206,6 +206,7 @@ class ConferenceDeadlineSweeps:
                 secrets={"ANTHROPIC_API_KEY": credentials.anthropic_api_key},
                 flavor=self.settings.conference_deadlines_job_flavor,
                 timeout=job_timeout_seconds(mode, len(manifests)),
+                name=f"pwc-conference-deadlines-{sweep.id}",
                 labels={
                     "product": "paperswithcode",
                     "workflow": "conference-deadlines",

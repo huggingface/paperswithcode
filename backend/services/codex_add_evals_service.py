@@ -1484,6 +1484,9 @@ class CodexPaperJobService:
                 secrets=secrets_env,
                 flavor="cpu-basic",
                 timeout=f"{2100 if row.kind == 'add-evals' else 1500}s",
+                # huggingface_hub >= 1.33 otherwise derives a name from the
+                # digest-pinned image, which exceeds the Hub's 100-character limit.
+                name=f"pwc-{row.kind}-{row.id}",
                 labels={
                     "product": "paperswithcode",
                     "workflow": "paper-curation",
