@@ -187,3 +187,25 @@ def test_staging_access_request_surface_is_public_and_narrow():
     assert "limit_except POST" in api
     assert "proxy_pass http://pwc_staging_backend;" in api
     assert "return 302 /request-access;" in forbidden
+
+
+def test_staging_chat_gateway_forwards_paper_commands_only_on_staging():
+    repository = Path(__file__).resolve().parents[3]
+    production = (repository / "deploy/nginx/paperswithcode.co.conf").read_text()
+    staging = (repository / "deploy/nginx/staging.paperswithcode.co.conf").read_text()
+    location = "location = /api/internal/chat-gateway/paper"
+
+    assert validate_nginx(production, staging) == []
+    assert location not in production
+
+    missing = validate_nginx(
+        production, staging.replace(location, "location = /missing-paper")
+    )
+    assert "staging chat gateway paper route is missing" in missing
+
+    before, block = staging.split(location, 1)
+    weakened = validate_nginx(
+        production,
+        before + location + block.replace("proxy_read_timeout 140s;", "", 1),
+    )
+    assert "staging paper gateway must be POST-only with a repair timeout" in weakened
