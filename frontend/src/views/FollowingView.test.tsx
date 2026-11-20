@@ -49,6 +49,12 @@ beforeEach(() => {
   vi.spyOn(researchApi, 'followingNewCount').mockResolvedValue({ count: 0 });
 });
 const REWORD = 'Reword Real-time video generation';
+// The feed pop-up keeps your topics on its first tab and catalog follows on the second.
+const CATALOG_TAB = /Tasks, methods/;
+const TOPICS_TAB = /^Topics/;
+async function showTab(name: RegExp) {
+  fireEvent.mouseDown(await screen.findByRole('tab', { name }));
+}
 const topic = { id: 1, text: 'real-time video generation', label: null, set_at: '2026-10-28T10:00:00Z', status: 'done' as const,
   judged: 10, total: 10, suggestions: [], is_public: true, is_creator: true };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); sessionStorage.clear(); localStorage.clear(); login.hfLoginUrl.mockClear(); });
@@ -97,8 +103,11 @@ it('asks signed-out visitors for a topic and picks, and signs them in when they 
   expect(screen.queryByRole('link', { name: /Browse tasks/ })).not.toBeInTheDocument();
   const input = screen.getByRole('textbox', { name: 'Research topic' });
   fireEvent.change(input, { target: { value: '  speculative   decoding ' } });
+  await showTab(CATALOG_TAB);
   fireEvent.click(await screen.findByRole('button', { name: 'Object Detection' }));
-  fireEvent.keyDown(input, { key: 'Enter' });
+  expect(screen.getByRole('tab', { name: CATALOG_TAB })).toHaveTextContent('1');
+  await showTab(TOPICS_TAB);
+  fireEvent.keyDown(screen.getByRole('textbox', { name: 'Research topic' }), { key: 'Enter' });
   expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
   expect(sessionStorage.getItem('pwc:following-pending-topic')).toBe('speculative decoding');
   expect(JSON.parse(sessionStorage.getItem('pwc:following-pending-follows') ?? '[]'))
@@ -143,7 +152,9 @@ it('saves the topic even when a picked follow fails, and reports the failure', a
   vi.spyOn(researchApi, 'setFollow').mockRejectedValue(new Error('down'));
   vi.spyOn(researchApi, 'addTopic').mockResolvedValue({ ...topic, status: 'pending' });
   renderFeed();
+  await showTab(CATALOG_TAB);
   fireEvent.click(await screen.findByRole('button', { name: 'Yann LeCun' }));
+  await showTab(TOPICS_TAB);
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
   fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
   await waitFor(() => expect(researchApi.addTopic).toHaveBeenCalledWith('real-time video generation'));
@@ -216,6 +227,8 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   expect(await screen.findByRole('dialog', { name: 'Build your research feed' })).toBeInTheDocument();
   expect(screen.queryByText(/match these filters/)).not.toBeInTheDocument();
   expect(screen.getAllByRole('textbox', { name: 'Research topic' })).toHaveLength(1);
+  expect(screen.getByRole('tab', { name: TOPICS_TAB })).toHaveAttribute('aria-selected', 'true');
+  await showTab(CATALOG_TAB);
   const task = await screen.findByRole('button', { name: 'Object Detection' });
   expect(task).toHaveAttribute('aria-pressed', 'false');
   fireEvent.click(task);
@@ -225,6 +238,7 @@ it('explains how to follow when a signed-in account follows nothing yet', async 
   const nvidia = await screen.findByRole('button', { name: 'NVIDIA' });
   expect(nvidia.querySelector('img')).toHaveAttribute('src', '/api/v1/organizations/nvidia/logo/abc.png');
   fireEvent.click(nvidia);
+  await showTab(TOPICS_TAB);
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
   fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
   await waitFor(() => expect(researchApi.addTopic).toHaveBeenCalledWith('real-time video generation'));
@@ -245,6 +259,7 @@ it('fills two rows per group with suggestions, then links to browse the rest', a
   vi.mocked(catalogApi.trendingTasks).mockResolvedValue({ results: Array.from({ length: 8 }, (_, i) => (
     { id: String(i + 1), name: `Task ${i + 1}`, slug: `task-${i + 1}`, share_lift: 2 } as never)), recent_days: 7, baseline_days: 30 });
   renderFeed();
+  await showTab(CATALOG_TAB);
   // Eight tasks and the browse link need three rows, so the last task gives way.
   expect(await screen.findByRole('button', { name: 'Task 7' })).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Task 8' })).not.toBeInTheDocument();
@@ -269,6 +284,7 @@ it('shows what the account already follows first, and unfollows on save', async 
   renderFeed();
   fireEvent.click(await screen.findByRole('button', { name: 'Edit feed' }));
   expect(await screen.findByRole('dialog', { name: 'Edit your research feed' })).toBeInTheDocument();
+  await showTab(CATALOG_TAB);
   const followed = await screen.findByRole('button', { name: 'Long-Horizon Agents' });
   expect(followed).toHaveAttribute('aria-pressed', 'true');
   expect(screen.getAllByRole('button', { name: 'Long-Horizon Agents' })).toHaveLength(1);
@@ -294,11 +310,14 @@ it('keeps a chip selected when its follow saved but the topic did not', async ()
   vi.spyOn(researchApi, 'addTopic').mockRejectedValue(new Error('down'));
   renderFeed();
   fireEvent.click(await screen.findByRole('button', { name: 'Edit feed' }));
+  await showTab(CATALOG_TAB);
   fireEvent.click(await screen.findByRole('button', { name: 'Object Detection' }));
+  await showTab(TOPICS_TAB);
   fireEvent.change(screen.getByRole('textbox', { name: 'Research topic' }), { target: { value: 'real-time video generation' } });
   fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
   expect(await screen.findByText('Could not save your feed. Please try again.')).toBeInTheDocument();
   await waitFor(() => expect(vi.mocked(researchApi.follows).mock.calls.length).toBeGreaterThanOrEqual(2));
+  await showTab(CATALOG_TAB);
   await waitFor(() => expect(screen.getByRole('button', { name: 'Object Detection' })).toHaveAttribute('aria-pressed', 'true'));
   fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
   await waitFor(() => expect(researchApi.addTopic).toHaveBeenCalledTimes(2));
@@ -551,8 +570,18 @@ it('keeps popular topics out of the bubble row and offers them in Edit feed', as
   await screen.findByText('A paper');
   expect(within(row).queryByText(/OCR releases/)).not.toBeInTheDocument();
   fireEvent.click(within(row).getByRole('button', { name: 'Edit feed' }));
-  expect(await screen.findByRole('button', { name: /OCR releases/ })).toHaveTextContent('@nielsr');
-  expect(screen.getByRole('link', { name: 'Open the OCR releases page' })).toHaveAttribute('href', '/topics/23-ocr-releases');
+  // Popular topics show as cards on the pop-up's first tab, linking out in a new tab.
+  const follow = await screen.findByRole('button', { name: 'Follow OCR releases' });
+  expect(follow).toHaveAttribute('aria-pressed', 'false');
+  const card = follow.closest('li')!;
+  expect(card).toHaveTextContent('5 followers');
+  const link = within(card).getByRole('link', { name: 'OCR releases' });
+  expect(link).toHaveAttribute('href', '/topics/23-ocr-releases');
+  expect(link).toHaveAttribute('target', '_blank');
+  fireEvent.click(follow);
+  expect(follow).toHaveAttribute('aria-pressed', 'true');
+  expect(follow).toHaveTextContent('Following');
+  expect(screen.getByRole('tab', { name: TOPICS_TAB })).toHaveTextContent('1');
 });
 
 it('follows the popular topics a visitor picked before signing in', async () => {

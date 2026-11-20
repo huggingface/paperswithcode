@@ -180,6 +180,49 @@
   text-transform: uppercase;
 }
 .topic-dialog-hint { margin: 0; color: var(--ink-soft); font-size: 13px; }
+.topic-dialog .topic-dialog-tab-list {
+  display: flex;
+  justify-content: flex-start;
+  gap: 20px;
+  height: auto;
+  padding: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+  background: transparent;
+}
+.topic-dialog .topic-dialog-tab {
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 8px 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  font-weight: 500;
+}
+.topic-dialog .topic-dialog-tab:hover { color: var(--ink); }
+.topic-dialog .topic-dialog-tab[data-state="active"] {
+  border-bottom-color: var(--accent);
+  background: transparent;
+  box-shadow: none;
+  color: var(--ink);
+}
+.topic-dialog-tab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+}
+.topic-dialog .topic-dialog-panel { display: flex; flex-direction: column; gap: 18px; margin-top: 16px; }
+.topic-dialog .topic-dialog-panel[hidden] { display: none; }
+.topic-dialog .topic-dialog-topic-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 560px) {
+  .topic-dialog .topic-dialog-topic-cards { grid-template-columns: minmax(0, 1fr); }
+}
 .topic-dialog .research-topic-input { min-height: 112px; font-size: 15px; }
 .topic-dialog .research-topic-count { align-self: flex-end; margin: 0; }
 .topic-dialog-chips { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -610,6 +653,7 @@
 }
 .home-topic-title { color: var(--ink); font-size: 15px; font-weight: 600; line-height: 1.3; text-decoration: none; }
 .home-topic-title:hover { color: var(--accent-text); }
+.home-topic-creator { margin-top: -4px; color: var(--ink-faint); font-size: 12px; }
 .home-topic-followers,
 .home-topic-meta { display: flex; align-items: center; gap: 8px; color: var(--ink-soft); font-size: 13px; }
 .home-topic-avatars { display: inline-flex; padding-left: 6px; }
