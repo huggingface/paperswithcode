@@ -21,7 +21,9 @@ from backend.utils.auth import require_hf_admin
 PAUSED_AT = datetime(2026, 11, 20, 3, 6, tzinfo=UTC)
 
 
-def _row(status: str, kind: str = "enrich-paper") -> SimpleNamespace:
+def _row(
+    status: str, kind: str = "enrich-paper", trigger: str = "hf-daily-cron"
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid.uuid4(),
         paper_id=133629,
@@ -39,7 +41,7 @@ def _row(status: str, kind: str = "enrich-paper") -> SimpleNamespace:
         error=None,
         attempt_count=0,
         thumbnail_requested_at=None,
-        trigger="hf-daily-cron",
+        trigger=trigger,
         trace_status="pending",
     )
 
@@ -85,9 +87,18 @@ def _paused_state():
     )
 
 
-def _history(rows, state) -> tuple[PaperCurationHistoryResponse, _Database]:
+def _history(
+    rows, state, *, scheduler_enabled: bool = True
+) -> tuple[PaperCurationHistoryResponse, _Database]:
     db = _Database(rows, state)
-    result = CodexPaperJobService().paper_history(db, get_settings(), 133629, limit=20)
+    service = CodexPaperJobService()
+    reconciled = []
+    service.reconcile_if_due = lambda db, settings: reconciled.append(db)
+    settings = get_settings().model_copy(
+        update={"codex_curation_scheduler_enabled": scheduler_enabled}
+    )
+    result = service.paper_history(db, settings, 133629, limit=20)
+    assert reconciled == [db]
     return result, db
 
 
@@ -105,14 +116,33 @@ def test_history_includes_workflow_stages_for_the_paper():
 
 
 def test_queued_job_reports_scheduler_pause():
-    result, _db = _history([_row("queued"), _row("completed")], _paused_state())
+    queued = _row("queued")
+    result, _db = _history([queued, _row("completed")], _paused_state())
     assert [job.status for job in result.jobs] == ["queued", "completed"]
     assert result.scheduler_pause == {
         "dispatch_enabled": True,
         "paused_at": PAUSED_AT.isoformat(),
         "pause_reason": "trace upload failures",
         "pause_condition": "trace_upload_failures",
+        "job_ids": [str(queued.id)],
     }
+
+
+def test_pause_does_not_hold_admin_jobs():
+    result, _db = _history([_row("queued", trigger="admin")], _paused_state())
+    assert result.scheduler_pause is None
+
+
+def test_scheduler_disabled_in_settings_holds_scheduled_jobs():
+    running_state = SimpleNamespace(
+        dispatch_enabled=True,
+        paused_at=None,
+        pause_reason=None,
+        pause_condition=None,
+    )
+    result, _db = _history([_row("queued")], running_state, scheduler_enabled=False)
+    assert result.scheduler_pause["dispatch_enabled"] is False
+    assert result.scheduler_pause["pause_reason"] == "scheduler disabled in settings"
 
 
 def test_pause_is_omitted_without_a_queued_job_or_pause():

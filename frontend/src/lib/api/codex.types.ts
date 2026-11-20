@@ -75,6 +75,8 @@ export interface CodexSchedulerPause {
   paused_at: string | null;
   pause_reason: string | null;
   pause_condition: string | null;
+  /** Queued scheduled jobs held back by the pause; admin jobs still dispatch. */
+  job_ids: string[];
 }
 
 /** Every curation job that touched one paper, newest first. */

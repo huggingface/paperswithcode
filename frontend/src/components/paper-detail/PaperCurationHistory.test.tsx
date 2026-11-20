@@ -36,6 +36,7 @@ it("lists the paper's jobs and explains a paused queue", async () => {
       paused_at: "2026-11-20T03:06:00Z",
       pause_reason: "trace upload failures",
       pause_condition: "trace_upload_failures",
+      job_ids: ["queued-job"],
     },
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

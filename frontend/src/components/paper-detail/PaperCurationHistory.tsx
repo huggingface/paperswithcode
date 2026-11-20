@@ -58,7 +58,7 @@ function CurationJob({ job, pause }: { job: CodexPaperJob; pause: CodexScheduler
         <span className="text-muted-foreground">{formatTime(job.created_at)}</span>
       </summary>
       <div className="mt-3 min-w-0 space-y-3">
-        {job.status === "queued" && pause && (
+        {pause?.job_ids.includes(job.id) && (
           <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-sm">
             {pauseMessage(pause)}
           </div>

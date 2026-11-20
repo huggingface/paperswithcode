@@ -1719,6 +1719,7 @@ class CodexPaperJobService:
         self, db: Session, settings: Settings, paper_id: int, *, limit: int = 50
     ) -> PaperCurationHistoryResponse:
         """Return one paper's curation jobs, including its workflows' stages."""
+        self.reconcile_if_due(db, settings)
         workflow_ids = select(PaperCurationWorkflow.id).where(
             PaperCurationWorkflow.paper_id == paper_id
         )
@@ -1734,20 +1735,34 @@ class CodexPaperJobService:
             .limit(limit)
             .all()
         )
+        # Admin and benchmark-promotion jobs still dispatch during a pause, so
+        # only queued scheduled jobs are held back by it.
+        held_job_ids = [
+            row.id
+            for row in rows
+            if row.status == "queued" and row.trigger in SCHEDULED_TRIGGERS
+        ]
         scheduler_pause = None
-        if any(row.status == "queued" for row in rows):
-            state = db.get(PaperCurationSchedulerState, 1)
-            if state is not None and (
-                state.paused_at is not None or not state.dispatch_enabled
-            ):
-                scheduler_pause = {
-                    "dispatch_enabled": bool(state.dispatch_enabled),
-                    "paused_at": state.paused_at.isoformat()
-                    if state.paused_at
-                    else None,
-                    "pause_reason": state.pause_reason,
-                    "pause_condition": state.pause_condition,
-                }
+        state = db.get(PaperCurationSchedulerState, 1) if held_job_ids else None
+        enabled = settings.codex_curation_scheduler_enabled
+        if held_job_ids and (
+            not enabled
+            or state is None
+            or state.paused_at is not None
+            or not state.dispatch_enabled
+        ):
+            reason = state.pause_reason if state else None
+            if not enabled:
+                reason = reason or "scheduler disabled in settings"
+            scheduler_pause = {
+                "dispatch_enabled": bool(enabled and state and state.dispatch_enabled),
+                "paused_at": state.paused_at.isoformat()
+                if state and state.paused_at
+                else None,
+                "pause_reason": reason,
+                "pause_condition": state.pause_condition if state else None,
+                "job_ids": [str(job_id) for job_id in held_job_ids],
+            }
         return PaperCurationHistoryResponse(
             paper_id=paper_id,
             jobs=[self.serialize(row, settings) for row in rows],
