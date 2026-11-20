@@ -36,6 +36,7 @@ from backend.services.codex_add_evals_service import (
     BENCHMARK_GAP_KINDS,
     CodexPaperJob,
     CodexPaperJobsResponse,
+    PaperCurationHistoryResponse,
     codex_paper_job_service,
 )
 from backend.services.codex_curation_callback_service import (
@@ -175,6 +176,19 @@ def list_jobs(
         cohort_date=cohort_date,
         review_status=review_status,
     )
+
+
+@router.get("/papers/{paper_id}", response_model=PaperCurationHistoryResponse)
+def paper_curation_history(
+    paper_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    _admin: dict = Depends(require_hf_admin),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Explain why scheduled or admin curation did or did not change one paper."""
+    _require_enabled(settings)
+    return codex_paper_job_service.paper_history(db, settings, paper_id, limit=limit)
 
 
 @router.post("/benchmark-candidates/{candidate_id}/promote")

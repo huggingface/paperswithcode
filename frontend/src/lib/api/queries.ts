@@ -457,6 +457,10 @@ export const adminQueries = {
     queryKey: [...adminKeys.codexPaperJobs, filters],
     queryFn: () => codexApi.listJobs(100, filters),
   }),
+  paperCurationHistory: (paperId: number) => queryOptions({
+    queryKey: ["admin", "paperCurationHistory", paperId],
+    queryFn: () => codexApi.paperHistory(paperId),
+  }),
   codexPaperJob: (kind: CodexPaperJobKind, jobId: string | null) => queryOptions({
     queryKey: ["admin", "codexPaperJob", kind, jobId],
     queryFn: when(jobId, (id) => codexApi.getPaperJob(kind, id)),
