@@ -464,7 +464,11 @@ def _record_trace_failure(
     A runner retries a failed upload several times. Only the first failure of
     a job counts, so one job's retries cannot pause the whole scheduled lane.
     A successful upload resets the counter and the job's failed status.
+    Retries can overlap a still-running upload, so re-read the job and the
+    scheduler state under a lock instead of trusting the copies loaded when
+    this request started.
     """
+    db.refresh(row, with_for_update=True)
     logger.warning(
         "curation trace upload failed job=%s stage=%s attempt=%s error=%s: %s",
         row.id,
@@ -476,7 +480,9 @@ def _record_trace_failure(
     first_failure = row.trace_status not in TRACE_FAILURE_STATUSES
     row.trace_status = trace_status
     row.trace_attempt_count += 1
-    state = db.get(PaperCurationSchedulerState, 1)
+    state = db.get(
+        PaperCurationSchedulerState, 1, with_for_update=True, populate_existing=True
+    )
     if (
         first_failure
         and state

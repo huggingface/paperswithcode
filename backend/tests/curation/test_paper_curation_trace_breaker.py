@@ -12,14 +12,26 @@ from backend.routers import codex_curation_callbacks as callbacks
 
 
 class _FakeDb:
+    """Keeps each job's committed trace fields, as the database would."""
+
     def __init__(self, state):
         self.state = state
         self.commits = 0
+        self.persisted = {}
+        self.loaded = []
 
-    def get(self, _model, _key):
+    def get(self, _model, _key, **_options):
         return self.state
 
+    def refresh(self, row, **_options):
+        if row.id in self.persisted:
+            row.trace_status, row.trace_attempt_count = self.persisted[row.id]
+        self.loaded.append(row)
+
     def commit(self):
+        for row in self.loaded:
+            self.persisted[row.id] = (row.trace_status, row.trace_attempt_count)
+        self.loaded.clear()
         self.commits += 1
 
 
@@ -73,6 +85,23 @@ def test_one_jobs_retries_do_not_pause_scheduled_dispatch(monkeypatch):
     assert state.consecutive_trace_failures == 1
     assert state.paused_at is None
     assert db.commits == 5
+
+
+def test_overlapping_retries_of_one_job_count_once(monkeypatch):
+    """Each overlapping request loaded the job before any failure was saved."""
+    state = _scheduler()
+    db = _FakeDb(state)
+    job_id = uuid.uuid4()
+    stale_copies = [_job() for _ in range(3)]
+    for row in stale_copies:
+        row.id = job_id
+
+    for row in stale_copies:
+        _finalize(monkeypatch, db, row)
+
+    assert db.persisted[job_id] == ("finalize_failed", 3)
+    assert state.consecutive_trace_failures == 1
+    assert state.paused_at is None
 
 
 def test_three_failing_jobs_pause_scheduled_dispatch(monkeypatch):
