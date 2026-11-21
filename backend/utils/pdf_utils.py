@@ -266,67 +266,55 @@ async def async_retry_with_backoff(
     raise RuntimeError(f"Unexpected error in retry logic for {operation_name}")
 
 
+class PDFDownloadError(Exception):
+    """An arXiv PDF could not be downloaded; retrying later may succeed."""
+
+
+class PDFNotFoundError(PDFDownloadError):
+    """arXiv has no PDF for the paper."""
+
+
 @asynccontextmanager
 async def temp_pdf_download(arxiv_id: str):
     """
-    Temporarily download a PDF from arXiv asynchronously.
+    Temporarily download a PDF from arXiv and yield its local path.
+
+    Raises PDFNotFoundError when arXiv has no PDF and PDFDownloadError for
+    other download failures.
     """
+    pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+    timeout = aiohttp.ClientTimeout(total=120, connect=10, sock_read=60)
 
-    filepath = None
-    error_message = None
+    async def download_pdf():
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(pdf_url) as response:
+                if response.status in (404, 410):
+                    raise PDFNotFoundError(f"{pdf_url} returned HTTP {response.status}")
+                response.raise_for_status()
+                return await response.read()
+
+    try:
+        content = await async_retry_with_backoff(
+            func=download_pdf,
+            max_retries=3,
+            base_delay=1.0,
+            backoff_factor=2.0,
+            retry_exceptions=(asyncio.TimeoutError, aiohttp.ClientError),
+            operation_name=f"PDF download from {pdf_url}",
+        )
+    except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+        raise PDFDownloadError(
+            f"Failed to download {pdf_url}: {type(e).__name__}: {e}"
+        ) from e
+
+    if not _is_valid_pdf_content(content):
+        raise PDFDownloadError(f"{pdf_url} did not return a valid PDF")
+
     with tempfile.TemporaryDirectory() as temp_dir:
-        try:
-            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}.pdf"
-
-            timeout = aiohttp.ClientTimeout(total=120, connect=10, sock_read=60)
-
-            async def download_pdf():
-                """Inner function to download PDF that will be retried."""
-                async with aiohttp.ClientSession(timeout=timeout) as session:
-                    async with session.get(pdf_url) as response:
-                        response.raise_for_status()
-                        content = await response.read()
-                        print(f"Downloaded {len(content)} bytes")
-                        return content
-
-            content = await async_retry_with_backoff(
-                func=download_pdf,
-                max_retries=3,
-                base_delay=1.0,
-                backoff_factor=2.0,
-                retry_exceptions=(
-                    asyncio.TimeoutError,
-                    aiohttp.ClientError,
-                    aiohttp.ServerTimeoutError,
-                ),
-                operation_name=f"PDF download from {pdf_url}",
-            )
-
-            if not _is_valid_pdf_content(content):
-                raise Exception("Downloaded content is not a valid PDF file")
-
-            filename = f"{arxiv_id}.pdf"
-            filepath = os.path.join(temp_dir, filename)
-
-            with open(filepath, "wb") as f:
-                f.write(content)
-
-            print(f"PDF downloaded successfully to temporary location: {filepath}")
-
-        except Exception as e:
-            error_details = f"{type(e).__name__}: {str(e)}"
-            print(
-                f"An error occurred while downloading PDF at {pdf_url}: {error_details}"
-            )
-            filepath = None
-            error_message = error_details
-
-        try:
-            yield filepath, error_message
-        except GeneratorExit:
-            pass
-        except Exception:
-            pass
+        filepath = os.path.join(temp_dir, f"{arxiv_id.replace('/', '_')}.pdf")
+        with open(filepath, "wb") as f:
+            f.write(content)
+        yield filepath
 
 
 async def find_project_page_url(pdf_path: str) -> str:
