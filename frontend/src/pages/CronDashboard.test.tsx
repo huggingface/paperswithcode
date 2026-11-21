@@ -153,32 +153,31 @@ describe("CronJobCard health axes", () => {
     expect(screen.getByText("Scheduler evidence")).toBeInTheDocument();
   });
 
-  it("shows the Slack failure alert threshold and an open alert", () => {
+  it("shows the failure alert threshold and an open alert", () => {
     const failureAlert = {
       after_consecutive_failures: 3,
       consecutive_failures: 1,
       alerting: false,
-      since: null,
-      notified_at: null,
+      last_failure_at: null,
     };
     const { rerender } = renderWithClient(
       <CronJobCard job={{ ...job, failure_alert: failureAlert }} expanded={false} onToggle={() => undefined} />,
     );
-    expect(screen.getByText("Slack alert after 3 consecutive failures (now 1)")).toBeInTheDocument();
-    expect(screen.queryByText("Slack alert open")).not.toBeInTheDocument();
+    expect(screen.getByText("Alerts after 3 consecutive failures (now 1)")).toBeInTheDocument();
+    expect(screen.queryByText("Failure alert")).not.toBeInTheDocument();
 
     rerender(
       <CronJobCard
         job={{
           ...job,
-          failure_alert: { ...failureAlert, consecutive_failures: 4, alerting: true, since: "2026-11-16T23:15:00Z" },
+          failure_alert: { ...failureAlert, consecutive_failures: 4, alerting: true, last_failure_at: "2026-11-16T23:15:00Z" },
         }}
         expanded={false}
         onToggle={() => undefined}
       />,
     );
-    expect(screen.getByText("Slack alert open")).toBeInTheDocument();
-    expect(screen.getByText(/^Slack alert open since /)).toBeInTheDocument();
+    expect(screen.getByText("Failure alert")).toBeInTheDocument();
+    expect(screen.getByText(/^Last 4 runs failed \(alert at 3\); latest /)).toBeInTheDocument();
   });
 
   it("explains paper Markdown spend, reservations, and rolling window", async () => {

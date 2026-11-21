@@ -442,7 +442,7 @@ export function CronJobCard({
                 <h3 className="font-semibold">{job.display_name}</h3>
                 {job.critical && <Badge variant="outline" className="text-[10px] uppercase tracking-wide">Critical</Badge>}
                 {job.lock_stale && <StatusBadge tone="broken">Held lock</StatusBadge>}
-                {job.failure_alert?.alerting && <StatusBadge tone="broken">Slack alert open</StatusBadge>}
+                {job.failure_alert?.alerting && <StatusBadge tone="broken">Failure alert</StatusBadge>}
                 <AxisBadge label="Execution" axis={job.execution_health} />
                 <AxisBadge label="Output" axis={job.output_health} />
                 {expanded ? <ChevronUp className="h-4 w-4 cron-muted" /> : <ChevronDown className="h-4 w-4 cron-muted" />}
@@ -460,8 +460,8 @@ export function CronJobCard({
                   <span className="cron-fact md:col-span-2">
                     <AlertTriangle />
                     {job.failure_alert.alerting
-                      ? `Slack alert open since ${formatCronDate(job.failure_alert.since)}`
-                      : `Slack alert after ${job.failure_alert.after_consecutive_failures} consecutive failures (now ${job.failure_alert.consecutive_failures})`}
+                      ? `Last ${job.failure_alert.consecutive_failures} runs failed (alert at ${job.failure_alert.after_consecutive_failures}); latest ${formatCronDate(job.failure_alert.last_failure_at)}`
+                      : `Alerts after ${job.failure_alert.after_consecutive_failures} consecutive failures (now ${job.failure_alert.consecutive_failures})`}
                   </span>
                 )}
               </div>

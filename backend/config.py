@@ -199,7 +199,6 @@ class Settings(BaseSettings, ChatSettings):
     autonomous_submission_hf_token: str = Field(default="")
     autonomous_submission_openai_api_key: str = Field(default="")
     autonomous_submission_job_image: str = Field(default="")
-    cron_alert_slack_webhook_url: str = Field(default="", max_length=2000)
     autonomous_alert_slack_webhook_url: str = Field(default="", max_length=2000)
     autonomous_alert_fallback_webhook_url: str = Field(default="", max_length=2000)
     autonomous_digest_webhook_url: str = Field(default="", max_length=2000)

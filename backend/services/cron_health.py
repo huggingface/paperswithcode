@@ -21,11 +21,6 @@ from psycopg2.extras import RealDictCursor
 
 from backend.config import get_settings
 from backend.services.autonomous_cron_probe import build_job_findings
-from backend.services.cron_failure_alerts import (
-    STATE_FILE as FAILURE_ALERT_STATE_FILE,
-    dashboard_status as failure_alert_status,
-    load_state as load_failure_alert_state,
-)
 from backend.services.cron_registry import CronJobDefinition, list_cron_jobs
 from backend.services.cron_artifact_health import enrichment_snapshot_metrics
 
@@ -558,6 +553,20 @@ def fetch_launcher_history(
         if job_id not in streak_closed:
             summary["consecutive_failures"] += 1
     return history
+
+
+def failure_alert_status(
+    job: CronJobDefinition, runs: Dict[str, Any] | None
+) -> Dict[str, Any] | None:
+    if not job.failure_alert_after:
+        return None
+    streak = int((runs or {}).get("consecutive_failures") or 0)
+    return {
+        "after_consecutive_failures": job.failure_alert_after,
+        "consecutive_failures": streak,
+        "alerting": streak >= job.failure_alert_after,
+        "last_failure_at": (runs or {}).get("last_failure_at"),
+    }
 
 
 def _launcher_history_health(
@@ -2931,9 +2940,6 @@ def build_cron_dashboard(
         workflow_by_id, workflow_ms = workflow_future.result()
         thumbnail_metrics, thumbnail_ms = thumbnail_future.result()
         launcher_history = launcher_future.result()
-        failure_alert_state = load_failure_alert_state(
-            Path(get_settings().cron_log_dir) / FAILURE_ALERT_STATE_FILE
-        )
     supplemental_db_metrics = {"thumbnail_cache": thumbnail_metrics}
 
     def get_recent_log_status(job: CronJobDefinition) -> Dict[str, Any]:
@@ -2987,7 +2993,7 @@ def build_cron_dashboard(
             launcher_history=launcher_history.get(job.id),
         )
         evaluated["failure_alert"] = failure_alert_status(
-            job, launcher_history.get(job.id), failure_alert_state
+            job, launcher_history.get(job.id)
         )
         health_findings = build_job_findings(job, evaluated, collection_now)
         evaluated["health_findings"] = [
@@ -3007,7 +3013,8 @@ def build_cron_dashboard(
     critical_issues = [
         f"{job['display_name']}: {job['status_reason']}"
         for job in jobs
-        if job["critical"] and job["status"] in {"broken", "stuck", "degraded"}
+        if (job["critical"] and job["status"] in {"broken", "stuck", "degraded"})
+        or (job["failure_alert"] or {}).get("alerting")
     ]
 
     what_to_check_next = next(

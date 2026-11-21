@@ -106,11 +106,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Import Hugging Face daily papers hourly",
     ),
     TimerSpec(
-        job="monitor_cron_failures",
-        on_calendar=("*-*-* *:07/15:00",),
-        description="Alert on CRON jobs that keep failing every 15 minutes",
-    ),
-    TimerSpec(
         job="refresh_paper_embeddings",
         on_calendar=("*-*-* *:15:00",),
         description="Refresh paper embeddings hourly",
