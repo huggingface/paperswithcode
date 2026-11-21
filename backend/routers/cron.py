@@ -90,14 +90,21 @@ class PaperMarkdownJobsResponse(BaseModel):
 def get_cron_status(
     background_tasks: BackgroundTasks,
     days: int = Query(
-        1, ge=1, le=7, description="Number of days to look back for status"
+        1,
+        ge=1,
+        le=7,
+        deprecated=True,
+        description=(
+            "Deprecated and ignored. Status comes from the shared health "
+            "snapshot, whose log look-back is set per job from its staleness "
+            "threshold. Use /cron/job/{job_name}?days= for history."
+        ),
     ),
     force_refresh: bool = Query(
         False, description="Synchronously refresh the shared health snapshot"
     ),
 ):
     """Return the shared registry-backed CRON health snapshot."""
-    _ = days
     service = CronDashboardSnapshotService()
     try:
         payload, schedule_refresh = service.get_status(force_refresh=force_refresh)

@@ -187,7 +187,7 @@ def test_nontrending_endpoint_ties_and_direction_contract(feeds):
     assert not any("papers.id DESC" in sql for sql in statements)
     assert ids(
         TaskService(db).get_task_papers("1", order_by="unknown", order_dir="DESC")
-    ) == ["1", "2", "3"]
+    ) == ["3", "2", "1"]
 
 
 @pytest.mark.parametrize("task_feed", [False, True])
@@ -336,7 +336,8 @@ def test_entity_feed_filters_ties_empty_pages_and_hydration(entity_feeds, entity
     assert ids(result) == ["3", "2"] and result.count == 3 and result.next_page == 2
     assert hydrated[-1] == ([3, 2], True)
     assert ids(get(order_by="title", order_dir="asc")) == ["1", "2", "3"]
-    assert ids(get(order_by="unknown", order_dir="DESC")) == ["1", "2", "3"]
+    assert ids(get(order_by="unknown", order_dir="DESC")) == ["3", "2", "1"]
+    assert ids(get(order_by="unknown", order_dir="ASC")) == ["1", "2", "3"]
     assert ids(get(latest_only=False)) == ["4", "3", "2", "1"]
     assert ids(
         get(

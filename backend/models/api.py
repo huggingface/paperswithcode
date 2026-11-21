@@ -93,6 +93,7 @@ from backend.models.papers import (
     RepositoryTrendingRepository as RepositoryTrendingRepository,
     RepositoryTrendingScore as RepositoryTrendingScore,
     RepositoryTrendingTask as RepositoryTrendingTask,
+    RepositoryWithPaperCount as RepositoryWithPaperCount,
     TaskSummary as TaskSummary,
     VersionComparison as VersionComparison,
     XThread as XThread,

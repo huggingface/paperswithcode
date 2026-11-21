@@ -353,7 +353,6 @@ class PendingEditMutationService:
     def _new_benchmark(
         self, _paper_id: int | None, payload: Payload
     ) -> tuple[str, str]:
-        task_ids = payload["task_ids"]
         created = DatasetService(self.db).create_dataset(
             DatasetCreateRequest(
                 name=payload["name"],
@@ -364,16 +363,11 @@ class PendingEditMutationService:
                 paper_url=payload.get("paper_url"),
                 license_name=payload.get("license_name"),
                 license_url=payload.get("license_url"),
-                task_ids=task_ids,
+                task_ids=payload["task_ids"],
             ),
             commit=False,
         )
-        entity = self.db.get(Dataset, int(created.id))
-        assert entity is not None
-        for task_id in task_ids:
-            self.db.add(TaskDataset(task_id=task_id, dataset_id=entity.id))
-        self.db.flush()
-        return "dataset", str(entity.id)
+        return "dataset", created.id
 
     def _new_metric(self, _paper_id: int | None, payload: Payload) -> tuple[str, str]:
         entity = MetricService(self.db).create_metric(

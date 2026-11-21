@@ -35,11 +35,10 @@ if TYPE_CHECKING:
 class FeedOrdering:
     nulls_last: bool = False
     id_tiebreaker: bool = False
-    case_insensitive_direction: bool = False
     fallback_to_date: bool = False
 
 
-GENERAL_ORDERING = FeedOrdering(nulls_last=True, case_insensitive_direction=True)
+GENERAL_ORDERING = FeedOrdering(nulls_last=True)
 SCOPED_ORDERING = FeedOrdering(id_tiebreaker=True, fallback_to_date=True)
 
 
@@ -138,10 +137,7 @@ class PaperFeedExecutor:
                 if not ordering.fallback_to_date:
                     raise ValueError(f"Unsupported order_by: {order_by}")
                 field = DBPaper.date_published
-            direction = (
-                order_dir.lower() if ordering.case_insensitive_direction else order_dir
-            )
-            sort = desc if direction == "desc" else asc
+            sort = desc if order_dir.lower() == "desc" else asc
             primary = sort(field)
             if ordering.nulls_last:
                 primary = primary.nullslast()

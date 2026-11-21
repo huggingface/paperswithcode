@@ -1246,6 +1246,11 @@ class DatasetService:
             )
 
             self.db.add(db_dataset)
+            self.db.flush()
+            self.db.add_all(
+                TaskDataset(task_id=task_id, dataset_id=db_dataset.id)
+                for task_id in sorted(existing_task_ids)
+            )
             if commit:
                 self.db.commit()
             else:
