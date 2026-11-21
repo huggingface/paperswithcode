@@ -62,6 +62,16 @@ describe('TopicView', () => {
     expect(screen.getByRole('button', { name: 'Follow' })).toHaveAttribute('aria-pressed', 'false');
   });
 
+  it('shows the topic\'s one-line summary under its title, and nothing before one is written', async () => {
+    const view = vi.spyOn(researchApi, 'publicTopic')
+      .mockResolvedValue({ ...topic, summary: 'Papers on new OCR models and document parsing releases.' });
+    renderAt('/topics/23-ocr-releases');
+    expect(await screen.findByText('Papers on new OCR models and document parsing releases.')).toHaveClass('topic-summary');
+    view.mockResolvedValue({ ...topic, summary: null });
+    const { container } = renderAt('/topics/23-ocr-releases');
+    await screen.findAllByRole('heading', { name: 'OCR releases' });
+    expect(container.querySelector('.topic-summary')).toBeNull();
+  });
   it('keeps thin topics out of search engines', async () => {
     vi.spyOn(researchApi, 'publicTopic').mockResolvedValue({ ...topic, indexable: false });
     renderAt('/topics/23');

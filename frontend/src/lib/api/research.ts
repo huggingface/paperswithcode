@@ -56,6 +56,8 @@ export interface PublicTopic {
   id: number;
   text: string;
   label: string | null;
+  /** One LLM-written sentence on what the topic collects; null until the topic CRON writes it. */
+  summary?: string | null;
   status: ResearchTopic['status'];
   creator: TopicPerson | null;
   is_public: boolean;
