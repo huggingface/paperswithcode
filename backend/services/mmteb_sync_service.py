@@ -55,14 +55,8 @@ _ARXIV_PATTERNS = (
     re.compile(r"\barXiv\s*:\s*([0-9]{4}\.[0-9]{4,5})", re.IGNORECASE),
 )
 
-# Some model cards cite both the model's own report and an earlier report whose
-# paper is linked to the same HF repository. These curated picks name the
-# model's own report; they apply only when the upstream citation includes it.
 MODEL_ARXIV_OVERRIDES = {
-    # The card's Paper badge points to KaLM-Embedding-V2; 2501.01028 is V1.
     "KaLM-Embedding-Gemma3-12B-2511": "2506.20923",
-    # "Improving Text Embeddings with LLMs" introduces E5-Mistral; 2212.03533
-    # is the original E5 report.
     "e5-mistral-7b-instruct": "2401.00368",
 }
 
@@ -93,7 +87,6 @@ class MmtebEntry:
     total_params: int | None
     is_open: bool
     hf_model_url: str | None
-    # Hub organization of the upstream model name ("intfloat/e5-..." -> "intfloat").
     organization: str = ""
 
     def score_for(self, lane: MmtebLane) -> float | None:
@@ -417,8 +410,6 @@ class MmtebSyncService:
             ]
             stats.scored = len(scored_entries)
             papers_by_model = self._resolve_papers(scored_entries, stats)
-            # Models without a cited local paper go to the shared matcher; the
-            # rest become release-radar signals. Ambiguous citations stay out.
             ambiguous = set(stats.ambiguous_papers)
             unknown = [
                 LeaderboardModel(entry.model_name, entry.organization)
@@ -539,8 +530,6 @@ class MmtebSyncService:
                         paper.hf_models = hf_models
                 stats.matched += 1
 
-            # Auto-matched models are published, so they are not reported as
-            # missing; the rest become release-radar signals.
             published = set(stats.auto_matched)
             stats.no_arxiv_models = [
                 name for name in stats.no_arxiv_models if name not in published

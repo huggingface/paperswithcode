@@ -107,52 +107,6 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   gap: 8px;
   min-width: 0;
 }
-.site-announcement {
-  position: relative;
-  min-height: 28px;
-  padding: 5px 52px 6px;
-  border-top: 1px solid var(--hairline);
-  background: var(--bg-subtle);
-  color: var(--ink-soft);
-  font-size: 12px;
-  line-height: 16px;
-  text-align: center;
-}
-.site-announcement a {
-  color: var(--accent-text);
-  font-weight: 600;
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-}
-.site-announcement a:hover {
-  color: var(--ink);
-}
-.site-announcement-close {
-  position: absolute;
-  top: 50%;
-  right: 20px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--ink-soft);
-  cursor: pointer;
-  transform: translateY(-50%);
-}
-.site-announcement-close:hover {
-  background: var(--hairline);
-  color: var(--ink);
-}
-.site-announcement-close:focus-visible {
-  outline: 2px solid var(--accent-text);
-  outline-offset: 1px;
-}
 .brand {
   display: flex;
   align-items: baseline;

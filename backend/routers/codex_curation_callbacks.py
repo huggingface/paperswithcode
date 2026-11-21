@@ -36,6 +36,7 @@ from backend.services.codex_add_evals_service import (
     BENCHMARK_GAP_KINDS,
     CodexPaperJob,
     CodexPaperJobsResponse,
+    PaperCurationHistoryResponse,
     codex_paper_job_service,
 )
 from backend.services.codex_curation_callback_service import (
@@ -79,11 +80,6 @@ def _callback_job(
             db, job_id, token
         )
         if token_owner is not None:
-            # The worker holding this token may be compromised: stop its job
-            # (which also invalidates the token) rather than pausing every
-            # scheduled job, which one worker must not be able to do.
-            # Revoke the token first and commit, so it is dead even if the
-            # remote cancel or the next dispatch below fails.
             token_owner.callback_token_hash = None
             token_owner.error = "Callback token was presented for another job"
             db.commit()
@@ -110,7 +106,6 @@ def _service(db: Session) -> CodexCurationCallbackService:
 
 def _autonomous_callback_context(db: Session, row: PaperCurationJob) -> RunContext:
     context = ensure_curation_run(db, row)
-    # Monitoring remains durable while a later policy check may reject writes.
     db.commit()
     return context
 
@@ -120,9 +115,6 @@ def _leaderboard_inventory(db: Session, query: str) -> list[dict]:
     return _service(db).leaderboard_inventory(query)
 
 
-# Frontier LLM model cards list 40+ benchmarks, and the skill asks for each
-# name plus common variants, so leaderboard lookups need a larger budget than
-# taxonomy searches. Paper 131976 (Ripple-65B) ran out at 30 and got no evals.
 QUERY_LIMITS = {"taxonomy_query_count": 30, "leaderboard_query_count": 150}
 QUERY_LABELS = {
     "taxonomy_query_count": "taxonomy and catalog searches",
@@ -135,7 +127,6 @@ def _consume_query(db: Session, row: PaperCurationJob, field: str) -> None:
     value = getattr(row, field)
     if value >= QUERY_LIMITS[field]:
         db.rollback()
-        # Agents read a bare 429 as a rate limit and sleep; say it is final.
         raise HTTPException(
             status_code=429,
             detail=(
@@ -175,6 +166,19 @@ def list_jobs(
         cohort_date=cohort_date,
         review_status=review_status,
     )
+
+
+@router.get("/papers/{paper_id}", response_model=PaperCurationHistoryResponse)
+def paper_curation_history(
+    paper_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    _admin: dict = Depends(require_hf_admin),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Explain why scheduled or admin curation did or did not change one paper."""
+    _require_enabled(settings)
+    return codex_paper_job_service.paper_history(db, settings, paper_id, limit=limit)
 
 
 @router.post("/benchmark-candidates/{candidate_id}/promote")
@@ -231,7 +235,6 @@ def retry_job(
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if getattr(row, "runner", "codex") == "pi":
-        # Pairs are best effort: a failed Pi run is itself a comparison result.
         raise HTTPException(status_code=409, detail="Pi shadow jobs are not retried")
     return codex_paper_job_service.retry(db, row, settings)
 
@@ -397,7 +400,6 @@ def apply_mutation(
     row = _callback_job(job_id, authorization, db)
     try:
         service = _service(db)
-        # Pi shadow jobs never write, so they need no autonomous run context.
         pi_shadow = getattr(row, "runner", "codex") == "pi"
         context = (
             _autonomous_callback_context(db, row)
@@ -464,7 +466,11 @@ def _record_trace_failure(
     A runner retries a failed upload several times. Only the first failure of
     a job counts, so one job's retries cannot pause the whole scheduled lane.
     A successful upload resets the counter and the job's failed status.
+    Retries can overlap a still-running upload, so re-read the job and the
+    scheduler state under a lock instead of trusting the copies loaded when
+    this request started.
     """
+    db.refresh(row, with_for_update=True)
     logger.warning(
         "curation trace upload failed job=%s stage=%s attempt=%s error=%s: %s",
         row.id,
@@ -476,7 +482,9 @@ def _record_trace_failure(
     first_failure = row.trace_status not in TRACE_FAILURE_STATUSES
     row.trace_status = trace_status
     row.trace_attempt_count += 1
-    state = db.get(PaperCurationSchedulerState, 1)
+    state = db.get(
+        PaperCurationSchedulerState, 1, with_for_update=True, populate_existing=True
+    )
     if (
         first_failure
         and state

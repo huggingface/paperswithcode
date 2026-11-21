@@ -11,8 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 def _run_batch(connect, operation):
-    # Reads and ON CONFLICT inserts are safe even if a commit acknowledgement
-    # was lost. Never replay the linker's destructive rebuild operation here.
     for attempt in range(3):
         try:
             with closing(connect()) as conn, conn:

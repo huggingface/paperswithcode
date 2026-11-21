@@ -138,7 +138,7 @@ def get_repositories_by_owner(
         RepositoryService(db)
         .get_repositories(
             page=1,
-            page_size=1000,  # Large limit to get all repos by owner
+            page_size=1000,
             owner=owner,
         )
         .results
@@ -374,9 +374,6 @@ def delete_project_page(
     """
     ProjectPageService(db).delete_project_page(page_id)
     return None
-
-
-# Paper-specific endpoints
 
 
 @router.get(

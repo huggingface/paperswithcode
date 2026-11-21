@@ -76,7 +76,6 @@ class PaperEditDocument(StrictModel):
     version: str = Field(min_length=64, max_length=64)
     idempotency_key: UUID
     operations: list[PaperEditOperation] = Field(max_length=50)
-    # Exported reference material is never interpreted as an edit.
     current: dict[str, Any] | None = None
 
     @model_validator(mode="after")

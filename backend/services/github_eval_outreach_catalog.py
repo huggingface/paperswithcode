@@ -31,7 +31,6 @@ class OutreachPaper:
 def candidates(
     db: Session, settled_before: datetime
 ) -> dict[str, dict[int, OutreachPaper]]:
-    # Rows the paper's authors added themselves are not ours to announce.
     native = (
         select(Evaluation.paper_id, func.max(Evaluation.created_at).label("last_added"))
         .where(

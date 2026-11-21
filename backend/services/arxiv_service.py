@@ -22,16 +22,14 @@ import httpx
 
 from backend.config import get_settings
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
-# ArXiv API configuration
 ARXIV_API_BASE_URL = "https://export.arxiv.org/api/query"
 ARXIV_ABS_BASE_URL = "https://arxiv.org/abs"
 ARXIV_PDF_BASE_URL = "https://arxiv.org/pdf"
 REQUEST_TIMEOUT = 30.0
 METADATA_REQUEST_TIMEOUT = httpx.Timeout(8.0, connect=3.0, read=5.0)
-RATE_LIMIT_DELAY = 3.0  # ArXiv requires 3 seconds between requests
+RATE_LIMIT_DELAY = 3.0
 MAX_RETRIES = 3
 METADATA_MAX_RETRIES = 2
 EXPORT_429_FALLBACK_DELAY = 10 * 60.0
@@ -322,7 +320,7 @@ class ArxivService:
                     logger.warning(
                         f"ArXiv API request failed (attempt {attempt + 1}): {e}"
                     )
-                    await asyncio.sleep(2**attempt)  # Exponential backoff
+                    await asyncio.sleep(2**attempt)
 
     async def _make_export_request(
         self, url: str, params: Optional[Dict[str, Any]] = None
@@ -442,7 +440,6 @@ class ArxivService:
         try:
             root = ET.fromstring(xml_content)
 
-            # Find entries in the response
             entries = root.findall("{http://www.w3.org/2005/Atom}entry")
 
             if not entries:
@@ -465,7 +462,6 @@ class ArxivService:
 
             entry = entries[0]
 
-            # Extract basic information
             title_elem = entry.find("{http://www.w3.org/2005/Atom}title")
             title = (
                 title_elem.text.strip().replace("\n", " ")
@@ -480,7 +476,6 @@ class ArxivService:
                 else ""
             )
 
-            # Extract dates
             published_elem = entry.find("{http://www.w3.org/2005/Atom}published")
             published = (
                 datetime.fromisoformat(published_elem.text.replace("Z", "+00:00"))
@@ -495,7 +490,6 @@ class ArxivService:
                 else published
             )
 
-            # Extract ArXiv ID and version from the entry ID
             id_elem = entry.find("{http://www.w3.org/2005/Atom}id")
             full_id = (
                 id_elem.text.split("/")[-1]
@@ -503,7 +497,6 @@ class ArxivService:
                 else requested_arxiv_id
             )
 
-            # Parse ArXiv ID and version (e.g., "1810.04805v2" -> "1810.04805", "v2")
             arxiv_match = re.match(r"(\d+\.\d+)(v\d+)?", full_id)
             if arxiv_match:
                 arxiv_id = arxiv_match.group(1)
@@ -512,7 +505,6 @@ class ArxivService:
                 arxiv_id = requested_arxiv_id
                 version = "v1"
 
-            # Extract authors
             authors = []
             author_elements = entry.findall("{http://www.w3.org/2005/Atom}author")
             for author_elem in author_elements:
@@ -520,7 +512,6 @@ class ArxivService:
                 if name_elem is not None:
                     authors.append(name_elem.text.strip())
 
-            # Extract categories
             categories = []
             category_elements = entry.findall("{http://www.w3.org/2005/Atom}category")
             for cat_elem in category_elements:
@@ -530,7 +521,6 @@ class ArxivService:
 
             primary_category = categories[0] if categories else ""
 
-            # Extract URLs
             pdf_url = ""
             abs_url = ""
 
@@ -588,7 +578,6 @@ class ArxivService:
         Returns:
             ArxivPaperMetadata object with paper information
         """
-        # Clean the ArXiv ID
         clean_arxiv_id = arxiv_id.replace("arXiv:", "").strip()
 
         logger.debug(f"Fetching ArXiv metadata for: {clean_arxiv_id}")
@@ -691,15 +680,10 @@ class ArxivService:
 
             pdf_url = metadata.pdf_url
 
-            # If specific version requested and it's different from what we got
             if version and version != metadata.version:
-                # Modify URL to get specific version
-                # Remove existing version if present, then add requested version
                 import re
 
-                # Remove existing version pattern (e.g., v1, v2, etc.)
                 pdf_url = re.sub(r"v\d+", "", pdf_url)
-                # Add requested version before .pdf extension
                 if pdf_url.endswith(".pdf"):
                     pdf_url = pdf_url.replace(".pdf", f"{version}.pdf")
                 else:
@@ -741,7 +725,6 @@ class ArxivService:
                 timeout=REQUEST_TIMEOUT, follow_redirects=True
             ) as client:
                 for attempt in range(MAX_RETRIES):
-                    # Rate limit before each PDF download attempt.
                     await self._rate_limit()
 
                     response = await client.get(pdf_url, headers=self.headers)
@@ -771,7 +754,6 @@ class ArxivService:
                         await asyncio.sleep(retry_delay)
                         continue
 
-                    # Check if we got HTML (reCAPTCHA) instead of PDF
                     content_type = response.headers.get("content-type", "")
                     if "text/html" in content_type:
                         logger.warning(
@@ -781,7 +763,6 @@ class ArxivService:
 
                     response.raise_for_status()
 
-                    # Verify we got PDF content
                     content = response.content
                     if not content.startswith(b"%PDF"):
                         logger.warning(

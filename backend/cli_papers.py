@@ -443,7 +443,6 @@ def update_paper(args: argparse.Namespace) -> int:
                 for url in urls
             ]
             if command == "repositories":
-                # `--unofficial` is explicit, so never promote it to official.
                 result = service.update_repositories(
                     paper.id, resources, promote_lone_repository=False
                 )

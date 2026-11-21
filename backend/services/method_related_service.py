@@ -33,8 +33,6 @@ CURATED_RELATED_METHODS: dict[str, list[str]] = {
     "agent-skills": ["mcp"],
 }
 
-# A co-tagged method must share at least this many papers and reach this
-# cosine score; below that the overlap is dominated by generic components.
 MIN_SHARED_PAPERS = 3
 MIN_COSINE = 0.05
 

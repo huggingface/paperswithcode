@@ -229,3 +229,165 @@ def test_deploy_parser_accepts_expiring_chat_config_override():
         ["staging", "main", "--allow-expiring-chat-config"]
     )
     assert args.allow_expiring_chat_config is True
+
+
+def _git(*arguments: str, cwd: Path | None = None) -> str:
+    return subprocess.run(
+        ["git", *arguments], cwd=cwd, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def _commit(source: Path, name: str, text: str) -> str:
+    (source / name).write_text(text)
+    _git("add", name, cwd=source)
+    _git("commit", "-m", f"Change {name}", cwd=source)
+    return _git("rev-parse", "HEAD", cwd=source)
+
+
+@pytest.fixture
+def sync_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    source = tmp_path / "source"
+    origin = tmp_path / "origin.git"
+    source.mkdir()
+    _git("init", "--initial-branch=main", cwd=source)
+    _git("config", "user.name", "Deployment Test", cwd=source)
+    _git("config", "user.email", "deployment-test@example.invalid", cwd=source)
+    base = _commit(source, "shared.txt", "base\n")
+    _git("checkout", "-b", "staging-line", cwd=source)
+    staging = _commit(source, "chat.txt", "staging only\n")
+    _git("checkout", "main", cwd=source)
+    _git("init", "--bare", str(origin))
+    _git("push", str(origin), "main", "staging-line", cwd=source)
+    # Like the host's release repository, a mirror clone of origin.
+    repository = tmp_path / "repository.git"
+    _git("clone", "--mirror", str(origin), str(repository))
+    monkeypatch.setattr(deploy_cli, "REPOSITORY", repository)
+    return source, origin, base, staging
+
+
+def _fetch(origin: Path) -> None:
+    _git("--git-dir", str(deploy_cli.REPOSITORY), "fetch", "origin")
+
+
+def test_staging_sync_merges_production_into_the_staging_line(sync_repository):
+    source, origin, _, staging = sync_repository
+    production = _commit(source, "shared.txt", "production fix\n")
+    _git("push", str(origin), "main", cwd=source)
+    _fetch(origin)
+
+    commit = deploy_cli.staging_sync_source(production, staging, push=True)
+
+    assert commit
+    branch = f"refs/heads/staging-sync/main-{production[:12]}-{staging[:12]}"
+    assert _git("--git-dir", str(origin), "rev-parse", branch) == commit
+    # A retry after a failed staging deploy rebuilds and pushes the same commit.
+    assert deploy_cli.staging_sync_source(production, staging, push=True) == commit
+    parents = _git("--git-dir", str(origin), "rev-list", "--parents", "-n1", commit)
+    assert parents.split()[1:] == [production, staging]
+    assert _git("--git-dir", str(origin), "show", f"{commit}:shared.txt") == (
+        "production fix"
+    )
+    assert _git("--git-dir", str(origin), "show", f"{commit}:chat.txt") == (
+        "staging only"
+    )
+
+
+def test_staging_sync_skips_when_staging_carries_production(sync_repository):
+    _, origin, base, staging = sync_repository
+    _fetch(origin)
+
+    assert deploy_cli.staging_sync_source(base, staging, push=True) is None
+
+
+def test_staging_sync_deploys_production_when_staging_has_nothing_extra(
+    sync_repository,
+):
+    source, origin, base, _ = sync_repository
+    production = _commit(source, "shared.txt", "production fix\n")
+    _git("push", str(origin), "main", cwd=source)
+    _fetch(origin)
+
+    assert deploy_cli.staging_sync_source(production, base, push=True) == production
+
+
+def test_staging_sync_refuses_conflicts_without_pushing(sync_repository):
+    source, origin, _, staging = sync_repository
+    production = _commit(source, "chat.txt", "production chat\n")
+    _git("push", str(origin), "main", cwd=source)
+    _fetch(origin)
+
+    with pytest.raises(deploy_cli.DeployError, match="chat.txt"):
+        deploy_cli.staging_sync_source(production, staging, push=True)
+    assert "staging-sync" not in _git("--git-dir", str(origin), "branch")
+
+
+def test_production_deploy_parser_syncs_staging_by_default():
+    assert parser_for("pwc-deploy").parse_args(["production", "abc"]).staging_sync
+    assert not (
+        parser_for("pwc-deploy")
+        .parse_args(["production", "abc", "--no-staging-sync"])
+        .staging_sync
+    )
+    args = parser_for("pwc-sync-staging").parse_args(["--dry-run"])
+    assert args.handler.__name__ == "sync_staging"
+    assert args.dry_run
+
+
+def test_failed_staging_sync_does_not_fail_production(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    events = []
+
+    def fail(args):
+        raise deploy_cli.DeployError("staging conflicts")
+
+    monkeypatch.setattr(deploy_cli, "sync_staging", fail)
+    monkeypatch.setattr(
+        deploy_cli, "log_event", lambda *args, **kwargs: events.append(args)
+    )
+
+    deploy_cli._sync_staging_after_production()
+
+    assert "staging was not synced: staging conflicts" in capsys.readouterr().err
+    assert events == [("sync-staging", "staging", "failed")]
+
+
+def test_superseded_staging_sync_deploy_is_skipped(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A sync whose production or staging moved while it waited for the lock."""
+    monkeypatch.setattr(deploy_cli, "DEPLOY_LOCK", tmp_path / "deployment.lock")
+    monkeypatch.setattr(deploy_cli, "APP_ROOT", tmp_path)
+    monkeypatch.setattr(deploy_cli, "_recover_interrupted_activation", lambda env: None)
+    live = {"production": "new-production", "staging": "old-staging"}
+    monkeypatch.setattr(deploy_cli, "_live_sha", live.__getitem__)
+    events = []
+    monkeypatch.setattr(
+        deploy_cli, "log_event", lambda *args, **kwargs: events.append(args)
+    )
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("a superseded sync must not resolve or deploy")
+
+    monkeypatch.setattr(deploy_cli, "resolve_sha", unexpected)
+    args = parser_for("pwc-deploy").parse_args(["staging", "merge-sha"])
+    args.expected_live = {"production": "old-production", "staging": "old-staging"}
+
+    assert deploy_cli.deploy(args) == 0
+    assert events == [("deploy", "staging", "superseded")]
+
+
+def test_staging_sync_deploy_refuses_when_only_staging_moved(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A recovery rollback or new staging work is not a newer sync; report it."""
+    monkeypatch.setattr(deploy_cli, "DEPLOY_LOCK", tmp_path / "deployment.lock")
+    monkeypatch.setattr(deploy_cli, "APP_ROOT", tmp_path)
+    monkeypatch.setattr(deploy_cli, "_recover_interrupted_activation", lambda env: None)
+    live = {"production": "production", "staging": "rolled-back-staging"}
+    monkeypatch.setattr(deploy_cli, "_live_sha", live.__getitem__)
+    args = parser_for("pwc-deploy").parse_args(["staging", "merge-sha"])
+    args.expected_live = {"production": "production", "staging": "old-staging"}
+
+    with pytest.raises(deploy_cli.DeployError, match="rerun pwc-sync-staging"):
+        deploy_cli.deploy(args)

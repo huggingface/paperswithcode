@@ -93,7 +93,6 @@ def test_first_follower_is_the_creator_and_keeps_it(db, now):
     topic = db.get(ResearchTopic, topic_id)
     assert topic.created_by_hf_subject == "alice"
     assert topic.is_public
-    # The creator moving to other text keeps their name on the old topic.
     topics.follow_topic(db, "alice", "OCR models", now, replace=topic_id)
     assert db.get(ResearchTopic, topic_id).created_by_hf_subject == "alice"
     views = {v.text: v for v in topics.topic_views(db, "bob")}
@@ -114,7 +113,6 @@ def test_only_the_creator_changes_visibility_and_private_topics_refuse_strangers
 ):
     topic_id = topics.follow_topic(db, "alice", "agent memory", now)
     topics.follow_existing_topic(db, "bob", topic_id, now)
-    # A follower's topic list names the creator; the creator's own does not.
     assert topics.topic_view(db, "bob", topic_id).creator.username == "alice"
     assert topics.topic_view(db, "alice", topic_id).creator is None
     with pytest.raises(LookupError):
@@ -127,7 +125,6 @@ def test_only_the_creator_changes_visibility_and_private_topics_refuse_strangers
         public.topic_view(db, topic_id, "carol")
     with pytest.raises(LookupError):
         public.topic_view(db, topic_id, None)
-    # Existing followers keep the topic and can still open it.
     assert public.topic_view(db, topic_id, "bob").following
     assert public.topic_view(db, topic_id, "alice").is_creator
     topics.follow_existing_topic(db, "bob", topic_id, now)
@@ -300,14 +297,12 @@ def test_accounts_reorder_topics_and_edits_keep_their_place(db, now):
     c = topics.follow_topic(db, "alice", "world models", now + timedelta(seconds=2))
     ids = lambda: [t.id for t in topics.topic_views(db, "alice")]  # noqa: E731
     assert ids() == [a, b, c]
-    # Before any reorder, an edit keeps its slot too.
     b = topics.follow_topic(
         db, "alice", "robot manipulation", now + timedelta(seconds=5), replace=b
     )
     assert ids() == [a, b, c]
     topics.reorder_topics(db, "alice", [c, a, b])
     assert ids() == [c, a, b]
-    # Editing a topic keeps its slot; a new topic goes last.
     d = topics.follow_topic(db, "alice", "agent memory", now, replace=a)
     e = topics.follow_topic(db, "alice", "ocr releases", now + timedelta(seconds=3))
     assert ids() == [c, d, b, e]

@@ -152,7 +152,6 @@ def test_process_publishes_canonical_markdown_and_layout_from_one_pass(
 
     assert result["status"] == "succeeded"
     assert (content / "2610/2610.00001.md").read_text().startswith(f"Title: {TITLE}")
-    # The anchored Markdown goes last: it marks the layout as complete.
     assert result["layout_keys"] == [
         "2610/2610.00001.layout.json",
         "2610/2610.00001.blocks.json",
@@ -323,7 +322,6 @@ def test_live_lane_leaves_papers_from_the_last_day_to_the_fresh_lane(
 
     job.run()
 
-    # Missing 00000 and layout-only 00001 are fresh; 00003 and 00002 are not.
     assert [
         (item["arxiv_id"], bool(item.get("layout_only")))
         for item in job._launch.call_args.args[0]
@@ -371,7 +369,6 @@ def test_fresh_lane_dispatches_recent_layout_on_its_own_slots(tmp_path, monkeypa
         "2607.00002",
         "2607.00001",
     ]
-    # The 5-minute lane leaves hourly coverage history alone.
     assert not (tmp_path / MODULE.COVERAGE_HISTORY_NAME).exists()
 
 

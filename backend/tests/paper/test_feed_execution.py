@@ -33,7 +33,6 @@ def _sqlite_json(_type, _compiler, **_kwargs):
 @pytest.fixture
 def feeds(monkeypatch):
     engine = create_engine("sqlite://")
-    # PostgreSQL ``cardinality`` over the JSON the SQLite array variant stores.
     event.listen(
         engine,
         "connect",
@@ -130,8 +129,8 @@ def test_task_trending_dedup_is_not_general_taxonomy_filter_policy(
         "robotics", order_by="trending", include_resources=True
     )
     general = PaperService(db).get_papers(task="robotics", order_by="trending")
-    assert ids(task) == ["2", "3"]  # unscored paper remains
-    assert ids(general) == ["2", "1", "3"]  # same repo can appear twice
+    assert ids(task) == ["2", "3"]
+    assert ids(general) == ["2", "1", "3"]
     assert task.count == 2 and general.count == 3
     assert hydrated == [([2, 3], True), ([2, 1, 3], False)]
 
@@ -163,9 +162,7 @@ def test_task_trending_winner_is_chosen_before_requested_date_filter(feeds):
     result = TaskService(db).get_task_papers(
         "1", order_by="trending", end_date=date(2026, 1, 1)
     )
-    assert (
-        result.count == 0
-    )  # newer linked paper outside window still displaces old one
+    assert result.count == 0
 
 
 def test_nontrending_endpoint_ties_and_direction_contract(feeds):
@@ -188,7 +185,6 @@ def test_nontrending_endpoint_ties_and_direction_contract(feeds):
         "ORDER BY papers.citation_count DESC NULLS LAST" in sql for sql in statements
     )
     assert not any("papers.id DESC" in sql for sql in statements)
-    # Task's existing internal contract treats uppercase DESC as ascending.
     assert ids(
         TaskService(db).get_task_papers("1", order_by="unknown", order_dir="DESC")
     ) == ["1", "2", "3"]
@@ -209,7 +205,6 @@ def test_latest_only_can_be_disabled(feeds, task_feed):
 
 def test_hf_artifact_filter_matches_explicit_hub_links(feeds):
     db, _ = feeds
-    # External papers list Hub links on the row instead of the junction table.
     db.get(Paper, 3).hf_spaces = ["https://huggingface.co/spaces/org/demo"]
     db.commit()
     result = PaperService(db).get_papers(

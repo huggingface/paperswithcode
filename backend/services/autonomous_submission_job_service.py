@@ -326,6 +326,7 @@ class AutonomousSubmissionJobService:
             },
             flavor="cpu-basic",
             timeout=f"{settings.autonomous_submission_job_timeout_seconds}s",
+            name=f"pwc-submission-review-{manifest['run_id']}"[:100],
             labels={
                 "product": "paperswithcode",
                 "workflow": "autonomous-submission-review",

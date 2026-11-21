@@ -29,7 +29,6 @@ TOKEN = "callback-token"
 def db():
     engine = create_engine("sqlite://")
     metadata = MetaData()
-    # Only storage is simplified; service queries and ORM mappings are real.
     for model in (
         Paper,
         PaperCurationJob,
@@ -99,16 +98,13 @@ def test_first_admin_attempt_without_paper_text_waits(db, kind):
     assert row.status == "awaiting_markdown"
     assert row.error == AWAITING_ERROR
     assert row.hf_job_id == "hf-job-1"
-    # The finished attempt can no longer call back or apply mutations.
     assert CodexPaperJobService().authenticate(db, row.id, TOKEN) is None
 
 
 @pytest.mark.parametrize(
     ("trigger", "attempt_count", "error"),
     [
-        # A released attempt that still finds no text must not loop.
         ("admin", 2, AWAITING_ERROR),
-        # Scheduled jobs defer their workflow instead.
         ("hf-daily-cron", 1, AWAITING_ERROR),
         ("admin", 1, "Remote job failed for another reason."),
     ],
@@ -186,7 +182,6 @@ def test_release_never_overwrites_a_concurrent_cancel(db):
     _complete(db, row)
 
     def cancel_while_checking(_paper, _settings):
-        # An admin cancel commits between the release scan and its update.
         db.query(PaperCurationJob).filter(PaperCurationJob.id == row.id).update(
             {"status": "canceled"}
         )

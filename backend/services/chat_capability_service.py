@@ -244,15 +244,19 @@ class ChatCapabilityService:
         self.db.flush()
 
     def provider_error_for_turn(
-        self, chat_session_id: uuid.UUID, turn_id: uuid.UUID
+        self,
+        chat_session_id: uuid.UUID,
+        turn_id: uuid.UUID,
+        model: str | None = None,
     ) -> str | None:
+        """Latest provider error of the turn, optionally of one route only."""
+        query = select(ChatTurnCapability.provider_error_code).where(
+            ChatTurnCapability.chat_session_id == chat_session_id,
+            ChatTurnCapability.turn_id == turn_id,
+            ChatTurnCapability.provider_error_code.is_not(None),
+        )
+        if model is not None:
+            query = query.where(ChatTurnCapability.model == model)
         return self.db.scalar(
-            select(ChatTurnCapability.provider_error_code)
-            .where(
-                ChatTurnCapability.chat_session_id == chat_session_id,
-                ChatTurnCapability.turn_id == turn_id,
-                ChatTurnCapability.provider_error_code.is_not(None),
-            )
-            .order_by(ChatTurnCapability.created_at.desc())
-            .limit(1)
+            query.order_by(ChatTurnCapability.created_at.desc()).limit(1)
         )

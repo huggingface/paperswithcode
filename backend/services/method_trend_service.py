@@ -19,8 +19,6 @@ from backend.services.paper_method_link_service import (
 from backend.services.catalog_errors import CatalogNotFoundError
 
 
-# Catalog-wide monthly paper counts are identical for every method trend and
-# cost a full scan of `papers`, so share them briefly across requests.
 CATALOG_MONTH_COUNTS_TTL_SECONDS = 300
 _catalog_month_counts: dict[tuple[str, date], tuple[float, dict[date, int]]] = {}
 
@@ -80,9 +78,6 @@ class MethodTrendService:
         baseline_start = recent_start - timedelta(days=baseline_days)
         query_start = min(history_start, baseline_start)
 
-        # paper_methods is unique per (paper, method), so the join yields each
-        # paper once; no DISTINCT needed. Counting per day keeps popular
-        # methods from shipping tens of thousands of rows to Python.
         rows = (
             self.db.query(DBPaper.date_published, func.count())
             .join(PaperMethod, PaperMethod.paper_id == DBPaper.id)

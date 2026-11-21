@@ -7,8 +7,6 @@ import re
 
 EvaluationDisplayEntryKey = tuple[int, int, int, str, str]
 
-# Case, spacing and separators never distinguish two models ("I-DLM-32B" and
-# "I-DLM (32B)"); symbols such as "+" or "*" do ("DAT" and "DAT+").
 _MODEL_NAME_SEPARATORS = re.compile(r"[\s\-_.,:;()\[\]/]+")
 
 

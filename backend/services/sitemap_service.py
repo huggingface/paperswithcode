@@ -33,10 +33,6 @@ SITEMAP_BUCKET_SIZE = 50_000
 SITEMAP_BATCH_SIZE = 1_000
 ARCHIVE_PAGE_SIZE = 100
 
-# Sitemaps and archives only need a few narrow columns. Loading whole ``Paper``
-# rows pulled the abstract and the full-text search vector along for up to
-# ``SITEMAP_BUCKET_SIZE`` papers per shard, which is what grew a production web
-# worker past 1 GB while crawlers walked the shards.
 SITEMAP_PAPER_COLUMNS = (
     DBPaper.id,
     DBPaper.source,

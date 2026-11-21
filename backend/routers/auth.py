@@ -71,9 +71,8 @@ def session_cookie_name() -> str:
     return settings.shared_session_cookie_name or settings.session_cookie_name
 
 
-SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
-STATE_TTL_SECONDS = 5 * 60  # 5 minutes
-# Binds the OAuth state to the browser that started the login (login CSRF).
+SESSION_TTL_SECONDS = 30 * 24 * 60 * 60
+STATE_TTL_SECONDS = 5 * 60
 OAUTH_STATE_COOKIE_NAME = "pwc_oauth_state"
 OAUTH_CALLBACK_PATH = "/api/v1/auth/hf/callback"
 POSTHOG_SIGNUP_COOKIE_NAME = "pwc_posthog_signup"
@@ -127,9 +126,6 @@ def _safe_return_to(value: Optional[str]) -> str:
         ):
             return value
         return "/"
-    # Browsers read "//host", "/\\host" and paths with stripped control
-    # characters (e.g. "/\t/host") as another origin, so only plain
-    # single-slash paths count as local.
     if (
         not value.startswith("/")
         or value[1:2] in ("/", "\\")
@@ -148,8 +144,6 @@ def _role(payload: dict) -> Optional[Literal["admin", "contributor"]]:
 def _is_admin(user: dict | str) -> bool:
     if isinstance(user, dict):
         return _role(user) == "admin"
-    # Session encoding has a subject; retain this compatibility helper only for
-    # legacy tests/callers that pass a username.
     settings = get_settings()
     return (
         not settings.admin_hf_subject_set
@@ -421,8 +415,6 @@ def _is_secure_origin(request: Request) -> bool:
 
 
 def _set_oauth_state_cookie(response: Response, nonce: str, secure: bool) -> None:
-    # Host-only: the login handler and the callback share the redirect URI's
-    # origin (staging forwards logins to the auth authority first).
     response.set_cookie(
         OAUTH_STATE_COOKIE_NAME,
         nonce,

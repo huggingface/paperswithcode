@@ -26,8 +26,6 @@ from backend.database.connection import get_database_session
 from backend.config import get_settings
 
 
-# Trending scores older than 24h are treated as missing, so test repos/papers
-# stamp a fresh timestamp to be eligible for the trending sort.
 _FRESH = datetime.now(timezone.utc)
 _STALE = datetime.now(timezone.utc) - timedelta(hours=48)
 
@@ -348,9 +346,6 @@ def test_method_papers_trending_orders_by_official_repo_trending_score(
 
     titles = [paper["title"] for paper in data["results"]]
 
-    # Papers 1 and 2 have official trending scores (10.0 and 2.5) and must
-    # come first, in that order. The remaining three papers have no
-    # qualifying official trending score and follow.
     assert titles[:2] == ["Paper 1", "Paper 2"]
     assert set(titles[2:]) == {"Paper 3", "Paper 4", "Paper 5"}
     assert data["count"] == 5
@@ -470,8 +465,6 @@ def test_method_papers_trending_composite_ranks_by_paper_score(
     data = response.json()
     titles = [paper["title"] for paper in data["results"]]
 
-    # Paper 1 (score 80) and Paper 2 (score 40) lead in that order; the stale
-    # and unscored papers follow without being dropped.
     assert titles[:2] == ["Paper 1", "Paper 2"]
     assert set(titles[2:]) == {"Paper 3", "Paper 4"}
     assert data["count"] == 4

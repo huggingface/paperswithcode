@@ -29,6 +29,7 @@ COMMANDS = (
     "pwc-status",
     "pwc-cleanup",
     "pwc-reap",
+    "pwc-sync-staging",
 )
 RUNTIME_CONTRACT_PATHS = (
     "backend/__init__.py",

@@ -57,7 +57,6 @@ FEED = "https://mistral.ai/sitemap.xml"
 def db():
     engine = create_engine("sqlite://")
     metadata = MetaData()
-    # Only storage is simplified; service queries and ORM mappings are real.
     for model in (
         Paper,
         ModelRelease,
@@ -76,7 +75,7 @@ def db():
             elif kind.__class__.__name__ in {"ARRAY", "TSVECTOR", "Vector"}:
                 kind = String()
             elif column.primary_key and kind.__class__.__name__ == "BigInteger":
-                kind = Integer()  # SQLite autoincrements only INTEGER keys
+                kind = Integer()
             default = column.server_default if column.name.endswith("_at") else None
             columns.append(
                 Column(
@@ -216,7 +215,6 @@ def fake_external(monkeypatch):
             None,
             True,
         ),
-        # News sites, mirrors, and the lead's own host are never sources.
         (
             "https://siliconangle.com/2026/10/23/kimi-k3-1-pro",
             ["Moonshot AI", "Kimi K3.1 Pro"],
@@ -237,7 +235,6 @@ def fake_external(monkeypatch):
         ),
         ("https://mistralnews.com/voxtral-3", ["Mistral AI", "Voxtral 3"], None, False),
         ("https://x.ai/news/grok-5", ["xAI", "Grok 5"], None, True),
-        # A public TLD is not a name: a ".pro" news site is not Kimi's.
         ("https://ainews.pro/kimi-k3-1", ["Moonshot AI", "Kimi K3.1 Pro"], None, False),
         (
             "https://blog.google/technology/gemini-4",
@@ -309,11 +306,8 @@ def test_record_upserts_unindexed_signals_and_closes_indexed_ones(db):
     assert signals.record_release_signals(db, report, now=NOW) == 2
     kimi = db.query(ModelReleaseSignal).filter_by(model_name="Kimi K3.1 Pro").one()
     assert kimi.sightings == 2
-    assert (
-        db.query(ModelReleaseSignal).count() == 2
-    )  # Artificial Analysis stays report-only
+    assert db.query(ModelReleaseSignal).count() == 2
 
-    # A vendor feed sighting replaces the news lead.
     feed = _radar_signal(
         "Kimi K3.1 Pro",
         source="https://kimi.com/feed",
@@ -350,7 +344,6 @@ def test_queue_waits_for_a_second_web_sighting_and_caps_each_day(db):
     )
     signals.record_release_signals(db, report, now=NOW)
     first = signals.queue_release_signals(db, SETTINGS, jobs=jobs, now=NOW)
-    # The vendor feed qualifies at once; the news-only signal waits.
     assert [row.model_name for row in first] == ["Voxtral 3"]
 
     signals.record_release_signals(db, report, now=NOW)
@@ -498,7 +491,6 @@ def test_duplicate_release_resolves_to_the_indexed_paper(db, fake_external):
     )
     assert result["paper_id"] == 102554
     release = db.query(ModelRelease).one()
-    # The radar's name becomes an alias, so later scans match the release.
     assert release.aliases == ["Hunyuan Hy3"]
     assert row.status == "resolved" and row.paper_id == 102554
 
@@ -672,7 +664,6 @@ def test_news_lead_is_upgraded_to_an_official_web_hit(db):
     signals.record_release_signals(db, RadarReport(14, [official]), now=NOW)
     assert row.lead_url == "https://www.kimi.com/blog/kimi-k3-1-pro"
     assert row.lead_is_official is True
-    # A later news-only sighting keeps the official lead.
     signals.record_release_signals(db, RadarReport(14, [news]), now=NOW)
     assert row.lead_url == "https://www.kimi.com/blog/kimi-k3-1-pro"
 

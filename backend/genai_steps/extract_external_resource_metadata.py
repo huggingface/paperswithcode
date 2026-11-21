@@ -173,8 +173,6 @@ async def extract_external_resource_metadata(
         return ExternalResourceMetadata()
 
     generator = generator or OpenRouterGenerator()
-    # Many providers (e.g. Gemini) don't accept a `system` role; embed the
-    # instruction prefix in the single user message instead.
     instructions = (
         "You extract structured metadata from AI/ML release pages. "
         "Return JSON conforming to the schema. Never invent values.\n\n"
@@ -190,19 +188,11 @@ async def extract_external_resource_metadata(
         messages, schema=ExternalResourceMetadata
     )
 
-    # Some providers (notably the GoogleGenerator) return a dict rather than
-    # a parsed Pydantic instance even when a schema is requested. Coerce.
     if isinstance(response, dict):
         response = ExternalResourceMetadata(**response)
     elif isinstance(response, str):
         response = ExternalResourceMetadata(**json.loads(response))
 
-    # Defence in depth: cross-check the LLM-suggested links against the actual
-    # page HTML so the LLM cannot hallucinate links that are not on the page.
-    # GitHub links become official repositories, so a page link the LLM did not
-    # present as the release's own code (a dependency, benchmark, or baseline)
-    # is never added back. HF links are artifacts, so an empty LLM answer
-    # falls back to every artifact on the page.
     if raw_html:
         response.github_repository_urls = _keep_page_urls(
             response.github_repository_urls,

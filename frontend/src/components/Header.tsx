@@ -1,6 +1,6 @@
 import React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 
 import HfSignInButton from "@/components/HfSignInButton";
 import UserMenu from "@/components/UserMenu";
@@ -37,9 +37,6 @@ interface HeaderProps {
 
 const GITHUB_URL = "https://github.com/huggingface/paperswithcode";
 const X_URL = "https://x.com/paperswithcodee";
-const CANONICAL_FOLLOWING_URL = "https://paperswithcode.co/following";
-// A new key per announcement, so readers who closed an earlier one still see it.
-const ANNOUNCEMENT_DISMISSED_KEY = "pwc:announcement:following-feed:v1:dismissed";
 
 type HeaderNavLink = {
   to: string;
@@ -83,15 +80,11 @@ const SearchShortcutHint: React.FC = () => {
 
 const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [showAnnouncement, setShowAnnouncement] = React.useState(
-    () => localStorage.getItem(ANNOUNCEMENT_DISMISSED_KEY) !== "1",
-  );
   const navRef = React.useRef<HTMLElement>(null);
   const navIndicatorRef = React.useRef<HTMLSpanElement>(null);
   const closeMobile = () => setMobileOpen(false);
   const { user, logout } = useAuth();
   const location = useLocation();
-  const isReaderRoute = location.pathname.startsWith("/pdf/");
   const returnTo = `${location.pathname}${location.search}` || "/";
   const authDisabled = isAuthDisabled();
   const chatLink: HeaderNavLink | null = isChatEnabled()
@@ -243,29 +236,6 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
             </button>
           </Dialog.Trigger>
         </div>
-        {!isReaderRoute && showAnnouncement && (
-          <div className="site-announcement" role="status">
-            <span>New: </span>
-            {authDisabled ? (
-              // The Space renders in a cross-origin iframe that the canonical site refuses to frame.
-              <a href={CANONICAL_FOLLOWING_URL} target="_blank" rel="noreferrer">following feed</a>
-            ) : (
-              <Link to="/following">following feed</Link>
-            )}
-            <span>, follow your favorite tasks, benchmarks, authors or organizations</span>
-            <button
-              type="button"
-              className="site-announcement-close"
-              aria-label="Dismiss announcement"
-              onClick={() => {
-                localStorage.setItem(ANNOUNCEMENT_DISMISSED_KEY, "1");
-                setShowAnnouncement(false);
-              }}
-            >
-              <HeaderIcon name="close" size={11} />
-            </button>
-          </div>
-        )}
       </header>
       <Dialog.Portal>
         <Dialog.Overlay className="mobile-nav-drawer">

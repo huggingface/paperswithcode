@@ -831,7 +831,6 @@ def test_dispatch_starts_the_overseer_past_the_lane_and_health_pauses(
             settings=settings,
             priority=20,
         )
-        # Two creation jobs fill the benchmark-gap lane.
         row.status = "running" if index < 2 else "queued"
     review = jobs.enqueue_benchmark_job(
         db,
@@ -963,7 +962,6 @@ def test_review_decides_exactly_the_batch_it_was_served(db):
         str(skipped.id),
         str(gone.id),
     ]
-    # After the snapshot: a new candidate outranks the batch, one leaves it.
     late = add_candidate(db, "BrandNewBench", papers=30)
     gone.status = "rejected"
     gone.reviewed_paper_count = 4
@@ -1055,7 +1053,6 @@ def test_skipped_merges_do_not_block_eligible_merges_into_them(db):
     middle = add_candidate(db, "TinyImageNet", papers=4)
     alias = add_candidate(db, "Tiny ImageNet 200", papers=3)
     scope = [str(keep.id), str(middle.id), str(alias.id)]
-    # Deferred after the snapshot: no longer eligible, still a merge target.
     middle.deferred_until = datetime.now(UTC) + timedelta(days=1)
 
     result = service(db).apply_review(
@@ -1098,7 +1095,6 @@ def test_review_refuses_one_templated_reason_across_candidates(db):
             decisions=[
                 {"candidate_id": tiny.id, "decision": "approve", "reason": tiny_reason},
                 {"candidate_id": pets.id, "decision": "approve", "reason": pets_reason},
-                # Merges may share a reason.
                 *(
                     {
                         "candidate_id": item.id,
@@ -1117,10 +1113,8 @@ def test_review_refuses_one_templated_reason_across_candidates(db):
     )
     with pytest.raises(ValueError, match="2 decisions reuse 1 templates") as error:
         service(db).apply_review(templated)
-    # The error names every clashing candidate so one retry can fix them all.
     assert f"{tiny.id}, {pets.id}" in str(error.value)
 
-    # The runner's apply helper refuses the same proposal before the server.
     context = {"review": {"candidates": service(db)._summaries([tiny, pets])}}
     with pytest.raises(ValueError, match="no apply attempted") as error:
         curation_api.check_review_reasons(
@@ -1157,13 +1151,11 @@ def votes_setup(db):
         ]
     )
     db.flush()
-    # The first report proposed Retrieval, so the candidate's task_ids do too.
     candidate = add_candidate(
         db, "DomainNet", papers=5, status="approved", task_ids=[23]
     )
     add_evidence(db, candidate, [1], metric="mAP@200", task_id=23)
     add_evidence(db, candidate, [2, 3, 4, 5], metric="Accuracy", task_id=1)
-    # A paper reported twice still counts once.
     add_evidence(db, candidate, [3, 2], metric="Accuracy", task_id=1)
     job = service(db).job_service.enqueue_benchmark_job(
         db,
@@ -1237,7 +1229,6 @@ def test_creation_holds_task_and_metric_to_the_reporting_papers(db):
             ),
         )
 
-    # A descendant of a leading task fits, as does an explained choice.
     result = review.apply_add_benchmark(
         job,
         domainnet_mutation(

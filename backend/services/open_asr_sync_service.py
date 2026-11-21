@@ -50,14 +50,12 @@ MIN_EXPECTED_ENTRIES = 40
 MAX_EXPECTED_ENTRIES = 150
 
 MAIN_TABLE_API = "/_main_table_update"
-# Read for open/proprietary status; text columns do not enter the WER average.
 LICENSE_COLUMN = "License"
 
 
 def _leaderboard_value(payload: Any) -> Any:
     """Accept the current Gradio component-update response shape."""
     if isinstance(payload, (list, tuple)) and payload:
-        # Since 2026-10-28 the endpoint returns (table update, plot update).
         payload = payload[0]
     if isinstance(payload, dict):
         value = payload.get("value")
@@ -66,9 +64,6 @@ def _leaderboard_value(payload: Any) -> Any:
     return payload
 
 
-# Exact, reviewed model-to-paper overrides. Models without a defensible paper
-# remain unmatched; legacy importer rows provide additional continuity during
-# the first live synchronization.
 MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
     "distil-whisper/distil-large-v3.5": "2311.00430",
     "efficient-speech/lite-whisper-large-v3-acc": "2502.20583",
@@ -124,15 +119,12 @@ MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
     "usefulsensors/moonshine-tiny": "2410.15608",
 }
 
-# Display names for upstream ids whose derived name would drop the vendor.
 MODEL_DISPLAY_NAMES: dict[str, str] = {
     "sophea/asr-k1 (preview)": "Sophea ASR K1 (preview)",
     "sophea/asr-k1": "Sophea ASR K1",
 }
 
 _TAG_RE = re.compile(r"<[^>]+>")
-# Badges after the model link, e.g. <span title="Open weights">🤗</span>
-# (added upstream 2026-11-13); they are display markers, not identity.
 _BADGE_RE = re.compile(r"\s*<span\b[^>]*>[^<]*</span>", re.IGNORECASE)
 
 
@@ -146,7 +138,6 @@ _LEGACY_MODEL_RE = re.compile(r"sourced from ([^/]+/[^/]+)/\.eval_results")
 _MANAGED_MODEL_RE = re.compile(
     rf"^{re.escape(MANAGED_METHODOLOGY_PREFIX)} Upstream model (.+?); rank \d+;"
 )
-# Upstream appends the inference runtime, e.g. "(fast-gpu-asr)", to a Hub id.
 _RUNTIME_SUFFIX_RE = re.compile(r"\s+\([^()]*\)$")
 _HF_SUFFIX_RE = re.compile(r"-hf$", re.IGNORECASE)
 _MODEL_TOKEN_RE = re.compile(r"[a-z][a-z0-9]*")
@@ -311,7 +302,6 @@ def display_model_names(entries: list[OpenAsrEntry]) -> dict[str, str]:
     counts: dict[str, int] = {}
     for name in derived.values():
         counts[name.casefold()] = counts.get(name.casefold(), 0) + 1
-    # Two upstream ids that collapse to one name keep their full ids.
     return {
         model_id: name if counts[name.casefold()] == 1 else model_id
         for model_id, name in derived.items()
@@ -432,8 +422,6 @@ def fetch_open_asr_leaderboard(
 ) -> list[OpenAsrEntry]:
     """Fetch the Space's exact default English leaderboard table."""
     client = client_factory(SPACE_APP_URL, verbose=False)
-    # Keywords keep the call stable when the Space adds inputs; on 2026-10-22
-    # a new leading version_id input made positional arguments misalign.
     payload = client.predict(
         version_id="latest",
         search_query="",
@@ -475,8 +463,6 @@ class OpenAsrPaperDiscoveryService:
                     expand=["safetensors", "tags"],
                 )
             except HFValidationError:
-                # Proprietary display names (for example a preview linked to
-                # a documentation Space) are not necessarily Hub model IDs.
                 result.unavailable_models.append(model_id)
                 continue
             except HfHubHTTPError as exc:
@@ -686,8 +672,6 @@ class OpenAsrSyncService:
             managed_by_id = {
                 self._managed_model_id(row).casefold(): row for row in managed_rows
             }
-            # One row per Hub model: when upstream's best runtime variant
-            # changes, the new variant takes over the row (and its paper).
             for row in managed_rows:
                 managed_by_id.setdefault(
                     hub_model_id(self._managed_model_id(row)).casefold(), row
@@ -698,9 +682,6 @@ class OpenAsrSyncService:
                     hub_model_id(model_id).casefold()
                 )
 
-            # A curated row naming an upstream model on the same paper (for
-            # example a paper-reported score from an older board version) is
-            # superseded by the live score instead of shown beside it.
             owned_ids = {row.id for row in [*managed_rows, *legacy_rows]}
             other_rows = {
                 (row.paper_id, (row.model_name or "").casefold()): row
@@ -713,8 +694,6 @@ class OpenAsrSyncService:
                 for row in legacy_rows
             }
             published: set[str] = set()
-            # Models without a reviewed, carried-over or discovered paper go
-            # to the shared matcher; the rest become release-radar signals.
             unknown = [
                 LeaderboardModel(
                     display_names[entry.model_id], entry.model_id.split("/", 1)[0]
@@ -744,8 +723,6 @@ class OpenAsrSyncService:
                 discovered = (
                     discovery.resolved.get(hub_id.casefold()) if discovery else None
                 )
-                # A reviewed paper corrects rows carried over from the legacy
-                # importer; otherwise keep the row's (possibly curated) paper.
                 arxiv_id = self._reviewed_arxiv_id(entry.model_id)
                 paper_id = papers_by_arxiv.get(arxiv_id) if arxiv_id else None
                 if paper_id is None:
@@ -764,7 +741,6 @@ class OpenAsrSyncService:
                     if paper_id is None:
                         stats.missing_papers.append(f"{entry.model_id}:{arxiv_id}")
                         continue
-                # Model cards, repositories, and release posts are not papers.
                 paper = self.db.get(Paper, paper_id)
                 if paper is None or not is_paper_backed(paper):
                     stats.no_paper_models.append(entry.model_id)
@@ -836,15 +812,11 @@ class OpenAsrSyncService:
                 if self._managed_model_id(row).casefold() not in published:
                     self.db.delete(row)
                     stats.deleted += 1
-            # These rows came from the retired one-shot importer. Once a valid
-            # live table has been processed, its replacements are authoritative.
             for row in legacy_rows:
                 self.db.delete(row)
                 stats.deleted += 1
 
             self.db.flush()
-            # Live rows also carry RTFx, which affects preserved paper-native
-            # rows whose primary metric is throughput.
             evaluation_service = EvaluationService(self.db)
             for metric in (WER_METRIC, RTFX_METRIC):
                 evaluation_service.recalculate_ranks(

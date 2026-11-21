@@ -117,7 +117,6 @@ def _service(existing):
 
 
 def test_curator_cannot_update_a_sync_managed_row():
-    # Job 3339830c moved Vals row 40025 from 54.93 to the model card's 59.81.
     service = _service(_existing(VALS_HEAD))
     body = ApplyMutationRequest(
         evaluations=[_proposal(methodology="Official model-card chart.")]

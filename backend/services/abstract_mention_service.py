@@ -87,7 +87,6 @@ from sqlalchemy.orm import Session
 
 MAX_NAME_TOKENS = 16
 
-# "@" stays inside a token, so metrics such as Pass@1 match only as written.
 _TOKEN = re.compile(r"[^\W_](?:[\w.+@]*[\w+])?")
 _PLAIN_TOKEN = re.compile(r"[^\W_](?:[\w.+]*[\w+])?")
 _SEPARATOR = re.compile(r"[\s\-_/'’]+")
@@ -95,8 +94,6 @@ _QUALIFIER = re.compile(r"\s*(?:\([^()]*\)|\s—\s.*)\s*$")
 _MATH = re.compile(r"\$\$.+?\$\$|\$[^$]+\$|https?://\S+", re.S)
 _PLAIN_WORD = re.compile(r"[A-Za-z][a-z]*")
 _VARIANT_WORD = re.compile(r"[A-Z0-9]")
-# A trailing bracket of up to three words, one with two capitals: (DiT), (WAMs),
-# (KV cache), (Online RL); not (Delayed Generalization) or (cross-encoder).
 _ABBREVIATION = re.compile(
     r"\s*\(((?=[^)]*?\b[A-Za-z0-9\-]*[A-Z][A-Za-z0-9\-]*[A-Z])"
     r"[A-Za-z0-9\-]+(?: [A-Za-z0-9\-]+){0,2})\)\s*$"
@@ -105,9 +102,7 @@ _SIZE_SUFFIX = re.compile(
     r"-(?:(?:XXL|XL|XS)(?:/\d+)?|[SMLBHG]\+?/\d+|\d+(?:\.\d+)?[BMKT]|\d+x\d+[BM]?)(?![\w.])"
 )
 _VERSIONED = re.compile(r"^(.*?)(?:[\s\-]v(\d+(?:\.\d+)*)|\s(\d+\.\d+))$", re.I)
-# "Terminal-Bench (TB) 3.0": an abbreviation between a name and its version.
 _INFIX_ABBREVIATION = re.compile(r"(?<=\w)[ \t]+\([A-Za-z0-9\-]{1,10}\)(?=[ \t]+\d)")
-# "autoregressive (AR) models": an abbreviation inside a longer name.
 _BRACKET_GAP = re.compile(
     r"[ \t]+\((?=[^)]*[A-Z][^)]*[A-Z])[A-Za-z0-9\-]{2,10}\)[ \t]+"
 )
@@ -117,23 +112,19 @@ _VARIANT_SUFFIX = re.compile(
 )
 _PAREN_ALIAS = re.compile(r"[ \t]*\([ \t]*([^()\n]{1,40}?)[ \t]*\)")
 
-# Lower ranks win when two entities claim the same surface.
 NAME, ABBREVIATION, ALIAS, PLURAL = 0, 1, 1.5, 2
 
 
 @dataclass(frozen=True)
 class CatalogEntity:
-    entity_type: str  # "method", "dataset", or "framework"
+    entity_type: str
     entity_id: int
     name: str
     slug: str
     parent_id: int | None = None
     full_name: str | None = None
-    # Curated alternative names: "Multimodal Large Language Model (MLLM)" for VLM.
     aliases: tuple[str, ...] = ()
-    # "always" links every clean match, "judge" asks the judge, "never" skips.
     mode: str = "judge"
-    # Leaderboard evaluations; breaks ties between sibling benchmark splits.
     evals: int = 0
 
 
@@ -160,11 +151,8 @@ class MentionIndex:
     surfaces: dict[tuple[str, ...], list[_Surface]]
     max_tokens: int
     unresolved: list[tuple[str, list[CatalogEntity]]]
-    # (entity_type, entity_id) -> lowercased tokens of its matchable name
     names: dict[tuple[str, int], tuple[str, ...]]
-    # (entity_type, entity_id) -> lowercased tokens of full-name long forms
     long_forms: dict[tuple[str, int], set[tuple[str, ...]]]
-    # entities named with ordinary words only (Transformer, Diffusion Policy)
     plain_names: set[tuple[str, int]]
 
 
@@ -197,12 +185,12 @@ def benchmark_base_name(name: str) -> str:
 
 def _case_sensitive(entity: CatalogEntity, tokens: tuple[str, ...]) -> bool:
     if entity.entity_type == "framework":
-        return True  # product names: "Browser Use", not "browser-use agents"
+        return True
     if len(tokens) > 1:
         return False
     token = tokens[0]
     if re.search(r"\d|[a-z][A-Z]|@", token):
-        return False  # GSM8K, ImageNet, LLaVA, DeltaNet, pass@k never spell an ordinary word
+        return False
     return not (entity.entity_type == "method" and _PLAIN_WORD.fullmatch(token))
 
 
@@ -233,7 +221,7 @@ def _compact_variants(written: str, entity: CatalogEntity) -> list[tuple[str, fl
     """
     variants: list[tuple[str, float]] = []
     numbered = re.fullmatch(r"(.*\S)\s+(\d+(?:\.\d+)+)", written)
-    if numbered:  # SQuAD 1.1 -> SQuAD v1.1
+    if numbered:
         variants.append((f"{numbered.group(1)} v{numbered.group(2)}", ABBREVIATION))
     joined = re.sub(r"(?<=[A-Za-z])[ \-](?=\d)", "", written)
     if joined != written:
@@ -272,8 +260,6 @@ def _resolve_benchmark_group(
     if len(roots) == 1 and len(members) > 1:
         return roots[0]
     if len(members) == 1:
-        # A lone qualified split resolves to its parent when the parent names
-        # the same benchmark (`WEAR (Inertia-1 Protocol)` -> `WEAR Outdoor ...`).
         child = members[0]
         parent = by_id.get(child.parent_id) if child.parent_id else None
         if parent and normalize_name(parent.name).startswith(
@@ -302,7 +288,6 @@ def _default_split(candidates: list[CatalogEntity]) -> CatalogEntity:
 def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
     entities = list(entities)
     datasets = {e.entity_id: e for e in entities if e.entity_type == "dataset"}
-    # name tokens -> (rank, owning entity, the name as written)
     targets: dict[tuple[str, ...], list[tuple[int, CatalogEntity, str]]] = defaultdict(
         list
     )
@@ -316,9 +301,9 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         if entity.entity_type == "method" and rank != PLURAL and key:
             last = tokenize(written)[-1]
             if re.search(r"[a-z]{3,}[^s]s$", last) and len(tokenize(written)) > 1:
-                add(written[:-1], entity, PLURAL)  # World Action Models -> Model
+                add(written[:-1], entity, PLURAL)
             elif re.search(r"(?:s|x|z|ch|sh)$", last, re.I):
-                add(written + "es", entity, PLURAL)  # harness -> harnesses
+                add(written + "es", entity, PLURAL)
             elif last[-1:].isalpha():
                 add(written + "s", entity, PLURAL)
         if rank != PLURAL:
@@ -326,12 +311,10 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
                 add(variant, entity, variant_rank)
         prefixed = re.fullmatch(r"([A-Z][a-z]+)([A-Z]{2,}[A-Za-z0-9]*)", written)
         if rank != PLURAL and prefixed:
-            add(
-                f"{prefixed.group(1)}-{prefixed.group(2)}", entity, ABBREVIATION
-            )  # Bi-LSTM
+            add(f"{prefixed.group(1)}-{prefixed.group(2)}", entity, ABBREVIATION)
         british = re.sub(r"iz(ation|e|ed|ing|er)\b", r"is\1", written)
         if rank != PLURAL and british != written:
-            add(british, entity, max(rank, ABBREVIATION))  # quantisation
+            add(british, entity, max(rank, ABBREVIATION))
 
     def add_named(
         written: str, entity: CatalogEntity, long_form: bool, rank: float = NAME
@@ -347,7 +330,7 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             short = abbreviation.group(1)
             add(short, entity, max(rank, ABBREVIATION))
             if re.fullmatch(r"[A-Z][A-Za-z0-9\-]*[A-Z]s", short):
-                add(short[:-1], entity, max(rank, ABBREVIATION))  # WAMs -> WAM
+                add(short[:-1], entity, max(rank, ABBREVIATION))
 
     for entity in entities:
         for alias in entity.aliases:
@@ -357,7 +340,6 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         if entity.entity_type == "method":
             add_named(entity.name, entity, long_form=True)
             if entity.full_name and entity.full_name != entity.name:
-                # Only the abbreviation: full names' long forms are often generic.
                 add_named(entity.full_name, entity, long_form=False)
         elif entity.entity_type == "framework":
             add(entity.name, entity, NAME)
@@ -371,7 +353,7 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         target = _resolve_benchmark_group(members, datasets)
         for member in members:
             if _SPLIT_WORD.search(base_name(member.name)):
-                add(base_name(member.name), member, NAME)  # "RefCOCOg val" itself
+                add(base_name(member.name), member, NAME)
         written = benchmark_base_name(
             (target if target in members else members[0]).name
         )
@@ -400,7 +382,7 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             other.split()[: len(key)] == list(key) and not _VERSIONED.match(other)
             for other in group_names
         ):
-            continue  # Humanoid-v2; ImageNet V2 next to Imagenet-1k
+            continue
         if key not in latest or version > latest[key][0]:
             latest[key] = (version, dataset, family)
     for key, (_, dataset, family) in latest.items():
@@ -418,7 +400,6 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             if len(distinct) == 1:
                 chosen, chosen_rank = next(iter(distinct.values())), rank
                 break
-            # Two entities share this name; a lower-ranked unique owner may still win.
             unresolved.append((" ".join(key), [o for o, _ in distinct.values()]))
         if chosen is None:
             continue
@@ -427,8 +408,6 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         surfaces[key] = [
             _Surface(owner, tokens, _case_sensitive(owner, tokens), chosen_rank)
         ]
-        # A benchmark named GQA and the method Grouped-Query Attention (GQA): keep
-        # one owner per other entity type, and let the judge pick by context.
         for entity_type in sorted(
             {o.entity_type for _, o, _ in owners} - {owner.entity_type}
         ):
@@ -465,7 +444,7 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
 
 
 def _blank(match: re.Match) -> str:
-    return " " * len(match.group())  # keeps character offsets stable
+    return " " * len(match.group())
 
 
 def _masked(abstract: str) -> str:
@@ -481,14 +460,14 @@ def _continues_as_variant(text_value: str, end: int, surface: _Surface) -> bool:
     if surface.entity.entity_type == "method" and _CHECKPOINT_SUFFIX.match(
         text_value, end
     ):
-        return False  # Qwen2.5-Math-7B, Qwen3-8B-Instruct are still Qwen2.5 / Qwen3
+        return False
     versioned = rest[0] in ".-" and rest[1].isdigit()
     if versioned and _is_unversioned_method(surface):
-        return False  # LLaVA-1.5 is still LLaVA
+        return False
     if rest[0] == "." and rest[1].isdigit():
         return True
     if rest[0] == "-" and (rest[1].isspace() or _VARIANT_SUFFIX.match(text_value, end)):
-        return True  # COCO-$20^i$ (masked maths), MMAU-mini
+        return True
     return rest[0] == "-" and (rest[1].isupper() or rest[1].isdigit())
 
 
@@ -503,7 +482,6 @@ def _has_hyphenated_prefix(text_value: str, start: int) -> bool:
     (``multi-agent harness``) is not a different name."""
     if start < 2 or text_value[start - 1] != "-" or not text_value[start - 2].isalnum():
         return False
-    # [^\W_] is exactly str.isalnum(), so "α-GRPO" or "é-GRPO" match too.
     prefix = re.search(r"([^\W_]+)-$", text_value[:start]).group(1)
     return not (prefix.isalpha() and prefix.islower() and text_value[start].islower())
 
@@ -511,7 +489,7 @@ def _has_hyphenated_prefix(text_value: str, start: int) -> bool:
 def _followed_by_variant_word(text_value: str, end: int) -> bool:
     match = re.match(r"[ \t]+(\S+)", text_value[end:])
     word = match.group(1) if match else ""
-    return bool(_VARIANT_WORD.match(word) or re.match(r"v\d", word))  # GDPval v2
+    return bool(_VARIANT_WORD.match(word) or re.match(r"v\d", word))
 
 
 def _preceded_by_name_word(text_value: str, start: int) -> bool:
@@ -680,8 +658,6 @@ def _expand_long_form(index, masked, before, start, end, surface):
     return None
 
 
-# Function words never start an expansion, so "during preference optimization
-# (DPO)" still shortens Direct Preference Optimization.
 _FUNCTION_WORDS = {
     "a", "about", "after", "also", "an", "and", "are", "as", "at", "be",
     "before", "between", "both", "but", "by", "called", "can", "do", "does",
@@ -691,8 +667,6 @@ _FUNCTION_WORDS = {
     "through", "to", "under", "using", "via", "we", "what", "when", "where",
     "which", "while", "with", "within", "without",
 }  # fmt: skip
-# Words an expansion may add without naming something else: "Segment Anything
-# Foundation Model (SAM)", "iterative closest point algorithm (ICP)".
 _IGNORED_WORDS = _FUNCTION_WORDS | {
     "algorithm", "based", "foundation", "like", "model", "models", "pre",
     "pretrained", "trained",
@@ -743,8 +717,6 @@ def _shares_long_form(
         for i, word in enumerate(words)
         if word.startswith(first) and word not in _FUNCTION_WORDS
     ]
-    # The nearest start with something to compare: a trailing "Model" alone
-    # says nothing about which long form the abstract means.
     content = next((found for found in reversed(expansions) if found), None)
     if content is None:
         return any(set(words[-4:]) & set(form) for form in forms)
@@ -771,7 +743,7 @@ def _drop_subsumed(candidates: list[Candidate], index: MentionIndex) -> list[Can
     def subsumed(key: tuple[str, int]) -> bool:
         name = names[key]
         if not name or key not in index.plain_names:
-            return False  # acronyms such as GRPO keep their link next to Dr. GRPO
+            return False
         return any(
             other != key and len(longer) > len(name) and _contains(longer, name)
             for other, longer in names.items()
@@ -816,7 +788,6 @@ def _text_tokens(masked: str, index: MentionIndex) -> list[re.Match]:
 
 def _longest_match(index, masked, tokens, words, lowered, i):
     for n in range(min(index.max_tokens + 1, len(tokens) - i), 0, -1):
-        # "autoregressive (AR) models": skip a bracketed abbreviation inside the window.
         kept = [
             k
             for k in range(i, i + n)

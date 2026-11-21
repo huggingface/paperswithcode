@@ -48,7 +48,6 @@ class Repository(Base):
     num_stars: Mapped[int] = mapped_column(Integer, default=0)
     source: Mapped[str] = mapped_column(String(50), default="unknown")
 
-    # Trending metrics (EMA-based)
     trending_score: Mapped[Optional[float]] = mapped_column(
         Numeric(10, 4), nullable=True, comment="EMA trending score (stars/hour)"
     )
@@ -56,7 +55,6 @@ class Repository(Base):
         DateTime(timezone=True), nullable=True
     )
 
-    # Timestamps
     num_stars_updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -67,19 +65,16 @@ class Repository(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Many-to-many relationship with papers through PaperRepository
     papers: Mapped[List["Paper"]] = relationship(
         "Paper", secondary="paper_repositories", back_populates="repositories"
     )
 
-    # One-to-many relationship with star history
     star_history: Mapped[List["RepositoryStarHistory"]] = relationship(
         "RepositoryStarHistory",
         back_populates="repository",
         cascade="all, delete-orphan",
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_repositories_url", "url"),
         Index("idx_repositories_stars", "num_stars"),
@@ -120,16 +115,12 @@ class RepositoryStarHistory(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    # Relationships
     repository: Mapped["Repository"] = relationship(
         "Repository", back_populates="star_history"
     )
 
-    # Constraints and indexes
     __table_args__ = (
         UniqueConstraint("repository_id", "snapshot_at", name="uq_repo_snapshot_time"),
-        # uq_repo_snapshot_time also serves newest-first reads per repository,
-        # and idx_star_history_recent (migration) serves snapshot_at scans.
         Index("idx_star_history_repository_id", "repository_id"),
     )
 
@@ -151,9 +142,7 @@ class HfArtifact(Base):
     __tablename__ = "hf_artifacts"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    # One of: 'model', 'dataset', 'space'.
     kind: Mapped[str] = mapped_column(String(20), nullable=False)
-    # Hugging Face repo id, e.g. 'deepseek-ai/DeepSeek-V4-Pro'.
     repo_id: Mapped[str] = mapped_column(Text, nullable=False)
     url: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -310,12 +299,9 @@ class ProjectPage(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
-    is_official: Mapped[bool] = mapped_column(
-        Boolean, default=False
-    )  # Use paper_project_pages.is_official for relationship-specific data
+    is_official: Mapped[bool] = mapped_column(Boolean, default=False)
     source: Mapped[str] = mapped_column(String(50), default="unknown")
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -323,12 +309,10 @@ class ProjectPage(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     papers: Mapped[List["Paper"]] = relationship(
         "Paper", secondary="paper_project_pages", back_populates="project_pages"
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_project_pages_url", "url"),
         Index("idx_project_pages_source", "source"),
@@ -354,13 +338,11 @@ class PaperProjectPage(Base):
         BigInteger, ForeignKey("project_pages.id", ondelete="CASCADE"), primary_key=True
     )
 
-    # Relationships
     paper: Mapped["Paper"] = relationship("Paper", overlaps="project_pages,papers")
     project_page: Mapped["ProjectPage"] = relationship(
         "ProjectPage", overlaps="papers,project_pages"
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_paper_project_pages_paper_id", "paper_id"),
         Index("idx_paper_project_pages_project_page_id", "project_page_id"),
@@ -448,13 +430,10 @@ class XPostMetrics(Base):
     tweet_id: Mapped[str] = mapped_column(String(32), primary_key=True)
     posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     like_count: Mapped[Optional[int]] = mapped_column(Integer)
-    # Smoothed likes per hour (EMA over readings).
     like_velocity: Mapped[Optional[float]] = mapped_column(Float)
     last_read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    # "syndication" or "api".
     last_source: Mapped[Optional[str]] = mapped_column(String(16))
     read_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    # NULL once the reading schedule is finished or the post is gone.
     next_read_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     gone_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
@@ -520,7 +499,6 @@ class PaperRepository(Base):
     )
     is_official: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Indexes
     __table_args__ = (
         Index("idx_paper_repositories_paper_id", "paper_id"),
         Index("idx_paper_repositories_repository_id", "repository_id"),

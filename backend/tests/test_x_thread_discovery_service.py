@@ -108,10 +108,10 @@ def test_match_posts_keeps_best_original_post_per_author():
     response = _response(
         ("10", "10", "u1", "2026-10-11T10:00:00Z", 511),
         ("11", "11", "u1", "2026-10-11T12:00:00Z", 20),
-        ("12", "10", "u1", "2026-10-11T10:05:00Z", 900),  # reply in own thread
-        ("13", "13", "u3", "2026-10-11T09:00:00Z", 2000),  # not an author
+        ("12", "10", "u1", "2026-10-11T10:05:00Z", 900),
+        ("13", "13", "u3", "2026-10-11T09:00:00Z", 2000),
         ("14", "14", "u2", "2026-10-11T11:00:00Z", 40),
-        ("15", "15", "u2", "2026-08-01T11:00:00Z", 999),  # before the paper
+        ("15", "15", "u2", "2026-08-01T11:00:00Z", 999),
     )
     matches = match_posts(
         response, ["Ruijin Hua", "Zichuan Liu", "Zhuokai Zhao"], date(2026, 10, 10)

@@ -76,8 +76,6 @@ class Github:
         if args[0] == "search/issues":
             page = int(next(value[5:] for value in args if value.startswith("page=")))
             query = next(value[2:] for value in args if value.startswith("q="))
-            # GitHub search ignores URL paths; only the site-name phrase that
-            # outreach issues carry finds them (GAIR-NLP/ASI-Evolve#12).
             items = [
                 row
                 for row in rows
@@ -196,8 +194,6 @@ def test_closed_arxiv_url_among_many_unrelated_issues_blocks_via_search(state):
     )
     assert runner(state, github).run()["counts"]["already_contacted"] == 1
     assert not github.posts
-    # Coverage detection must not walk the repository-wide issue list, which
-    # rejects page-based pagination on large repositories (HTTP 422).
     assert any(call[0] == "search/issues" for call in github.calls)
     assert not any(
         call[0] == "repos/lab/code/issues" and "creator=Example-Bot" not in call

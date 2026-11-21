@@ -26,7 +26,6 @@ from sqlalchemy import create_engine, text
 from backend.config import get_settings
 
 
-# Keep in step with papers_search_vector_update() in add_paper_search_vector.sql.
 SEARCH_VECTOR = """
     setweight(to_tsvector('english', coalesce(p.title, '')), 'A') ||
     setweight(to_tsvector('english', regexp_replace(
@@ -96,8 +95,6 @@ def rebuild(
     try:
         for _ in range(max_batches):
             with engine.begin() as connection:
-                # A search-index rewrite is not a content change; replica mode
-                # skips the updated_at trigger (requires a superuser).
                 connection.execute(text("SET LOCAL session_replication_role = replica"))
                 ids = (
                     connection.execute(

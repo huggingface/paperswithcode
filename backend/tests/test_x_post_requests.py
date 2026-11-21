@@ -162,4 +162,4 @@ def test_a_sota_post_resolves_the_request_and_links_the_post(db):
         "posted",
         "https://x.com/paperswithcodee/status/42",
     )
-    assert x_post_requests.post_url(db, 12) is None  # key ends with "2", not ":12"
+    assert x_post_requests.post_url(db, 12) is None

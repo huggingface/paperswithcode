@@ -18,3 +18,11 @@ repos:
     rev: v8.21.2
     hooks:
     -   id: gitleaks
+-   repo: local
+    hooks:
+    -   id: backend-comments
+        name: backend comment ratchet
+        entry: python3 scripts/backend_comments.py check
+        language: system
+        pass_filenames: false
+        files: ^(backend/.*\.py|backend/comment-baseline\.json|scripts/backend_comments\.py)$

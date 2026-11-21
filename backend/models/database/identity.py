@@ -63,14 +63,9 @@ class UserPreference(Base):
     hf_username: Mapped[str] = mapped_column(
         String(255), primary_key=True, nullable=False
     )
-    # When True, the user hides closed-source model rows (Evaluation.is_open is
-    # False) on benchmark leaderboards and paper evaluation tables.
     hide_closed_source_evals: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )
-    # First time the user's saved papers were read from their HF Bucket. The
-    # Bucket token lives in a per-browser cookie, so this tells other devices
-    # to offer a reconnect instead of a fresh migration.
     saved_papers_bucket_migrated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

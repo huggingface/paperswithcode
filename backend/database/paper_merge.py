@@ -289,7 +289,6 @@ def merge_external_release_duplicate(
     paper = db.get(Paper, paper_id)
     if paper is None or paper.source != "arxiv" or not paper.title:
         return None
-    # A savepoint keeps a failed lookup or merge from aborting the caller.
     with db.begin_nested():
         external = find_external_release_for_arxiv_paper(db, paper)
         if external is None:
@@ -370,7 +369,6 @@ def _merge_hf_artifacts(
         arxiv_paper.hf_spaces,
     )
     stats["hf_artifact_links_created"] += synced["links_added"]
-    # Reconcile the transferred explicit links with ArXiv discovery next run.
     arxiv_paper.hf_artifacts_scanned_at = None
 
 
@@ -697,7 +695,6 @@ def merge_external_paper_into_arxiv(
         ),
         {"arxiv_id": arxiv_paper_id, "external_id": external_id},
     )
-    # Model identities would otherwise cascade away with the external row.
     kept = {
         release.canonical_name: release
         for release in db.query(ModelRelease).filter(

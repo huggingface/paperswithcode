@@ -633,9 +633,6 @@ def test_trending_endpoint_deduplicates_view_rows_by_paper():
     assert response.json() == []
     assert "PARTITION BY tp.paper_id" in captured["sql"]
     assert "paper_repo_rank = 1" in captured["sql"]
-    # Each GitHub repository should contribute at most one paper to the
-    # trending list; when several latest papers share a repo we keep the
-    # most recently published one.
     assert "PARTITION BY repository_id" in captured["sql"]
     assert "repo_paper_rank = 1" in captured["sql"]
     assert captured["params"]["limit"] == 30
@@ -664,8 +661,6 @@ def test_trending_feed_uses_official_repository_ema_scores():
     assert "r.trending_score" in captured["sql"]
     assert "repository_star_history" not in captured["sql"]
     assert "MAX(rsh.num_stars)" not in captured["sql"]
-    # Repository-level dedup: prevents two trending papers from sharing the
-    # same GitHub URL (e.g. older + newer paper pointing at the same repo).
     assert "PARTITION BY repository_id" in captured["sql"]
     assert "repo_paper_rank = 1" in captured["sql"]
 
@@ -743,6 +738,5 @@ def test_trending_feed_filters_to_linked_hf_artifacts_when_requested():
     assert response.count == 0
     assert "paper_hf_artifacts" in captured["sql"]
     assert "pha.paper_id = p.id" in captured["sql"]
-    # External papers list Hub links in explicit arrays, as feed badges do.
     assert "cardinality(p.hf_models) > 0" in captured["sql"]
     assert captured["params"]["has_hf_artifacts"] is True

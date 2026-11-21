@@ -7,7 +7,6 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute
 
 PUBLIC_SCHEMA_PATH = "/api/v1/openapi.json"
-# Examples are small requests; path identifiers can be replaced with lookup results.
 PUBLIC_ENDPOINTS = {
     "/api/v1/papers/": {"page_size": 5, "include_resources": True},
     "/api/v1/papers/search": {"q": "attention", "mode": "keyword", "page_size": 5},
@@ -43,7 +42,6 @@ def public_openapi(app: FastAPI) -> dict:
         and route.path in PUBLIC_ENDPOINTS
         and "GET" in route.methods
     ]
-    # Routes can also declare writes; explicitly project GET below.
     schema = get_openapi(
         title="Papers With Code public API",
         version="1.0.0-beta",
@@ -85,7 +83,6 @@ def public_openapi(app: FastAPI) -> dict:
                     parameter["description"] = (
                         "Send keyword explicitly. Semantic and hybrid search are outside the public beta."
                     )
-                    # No invented default: the existing endpoint defaults differently.
                     parameter["schema"] = {"type": "string", "enum": ["keyword"]}
                     parameter["required"] = True
         schema["paths"][path] = {"get": operation}

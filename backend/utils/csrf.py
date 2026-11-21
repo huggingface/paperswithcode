@@ -9,8 +9,6 @@ from fastapi import Request
 from backend.config import Settings
 
 UNSAFE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-# Browsers post CSP violation reports without an Origin header, sometimes with
-# cookies. The endpoint only appends to a log and never reads the session.
 CSRF_EXEMPT_PATHS = frozenset({"/api/v1/csp-reports"})
 
 

@@ -52,11 +52,8 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# The "Chartography Leaderboard" block of https://surgehq.ai/benchmarks/chartography,
-# 2026-10-17 (element ids and image URLs stripped).
 HTML = (Path(__file__).parent / "fixtures" / "surge_chartography.html").read_text()
 
-# The 41 rows hand-imported on 2026-10-17: model_name -> stored Pass@1.
 PRODUCTION_ROWS = {
     "Gemini 4 Argon (no tools)": 71.6,
     "GPT-6 Astra (no tools)": 71,
@@ -194,7 +191,6 @@ def _seed_production(session: Session) -> None:
                 external=True,
             )
         )
-    # A with-tools row on the same paper the sync must never touch.
     session.add(
         Evaluation(
             paper_id=_paper_id(MODEL_IDENTITIES["Claude Opus 5.5"].paper_key),
@@ -294,7 +290,7 @@ def test_first_run_adopts_every_hand_imported_row():
         0,
         0,
     )
-    assert stats.excluded == 1  # DeepSeek V4 Flash Vision (experimental)
+    assert stats.excluded == 1
     assert stats.unreviewed == []
     assert stats.missing_papers == [] and stats.missing_upstream == []
     rows = _rows(session)
@@ -356,7 +352,6 @@ def test_new_mapped_rows_are_created_and_new_labels_reported():
     assert created.metrics == {METRIC_NAME: 9.0}
     assert created.is_open and created.external_source_url == SURGE_CHARTOGRAPHY_URL
     assert created.evaluated_on is not None
-    # Its row shows no lab logo, so there is no lab to hand to the radar.
     assert session.query(ModelReleaseSignal).count() == 0
 
 
@@ -439,7 +434,6 @@ def test_rows_written_by_the_former_surge_service_keep_their_notes():
     entries = parse_surge_chartography(HTML)
     _sync(session, entries)
     argon = _rows(session)["Gemini 4 Argon (no tools)"]
-    # The head the dedicated Chartography service wrote, with reviewer notes.
     argon.methodology = (
         "Managed by the Papers with Code Surge AI Chartography live sync. "
         'Official leaderboard entry "Gemini 4 Argon" (High reasoning): 71.6% '

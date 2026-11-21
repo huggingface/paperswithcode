@@ -203,7 +203,7 @@ def build_snapshot(
 
     for row in evaluations:
         day = _day(row["created_at"])
-        daily[day]["evaluations_created"] += 0  # counted from job result above
+        daily[day]["evaluations_created"] += 0
 
     unique_gaps: dict[tuple[str, str], dict[str, Any]] = {}
     for row in gaps:

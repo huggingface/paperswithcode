@@ -537,8 +537,6 @@ class BenchmarkGapService:
     ) -> list[dict]:
         keyed_gaps = [(benchmark_candidate_identity_key(gap), gap) for gap in gaps]
         results = {}
-        # Lock candidates in key order so concurrent jobs sharing benchmarks
-        # cannot deadlock; results keep the agent's gap order.
         for identity_key, gap in sorted(keyed_gaps, key=lambda item: item[0]):
             normalized = gap.pop("_normalized")
             row = (
@@ -548,8 +546,6 @@ class BenchmarkGapService:
                 .one_or_none()
             )
             if row is None:
-                # Pre-v2 rows hashed the evidence URL. Reuse a same-name
-                # candidate so later papers still aggregate onto it.
                 name_key = re.sub(r"[^a-z0-9]", "", normalized["name"].lower())
                 row = (
                     self.db.query(BenchmarkCurationCandidate)
@@ -569,8 +565,6 @@ class BenchmarkGapService:
                 )
                 if row is not None:
                     row.identity_key = identity_key
-            # A reviewed duplicate keeps its identity; new reports join the
-            # candidate it was merged into.
             while getattr(row, "merged_into_id", None) is not None:
                 row = self.db.get(BenchmarkCurationCandidate, row.merged_into_id)
             if row is None:

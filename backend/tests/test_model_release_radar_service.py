@@ -120,7 +120,6 @@ PAGES = {
     "https://mistral.ai/news/mistral-large-4/": _article(
         "Introducing Mistral Large 4", "2026-10-06T12:00:27.000Z"
     ),
-    # Its JSON-LD keeps the draft's date; the page shows the real one.
     "https://mistral.ai/news/timestral/": (
         b'<html><head><meta property="og:title" content="Timestral: Mistral\'s'
         b' time-series foundation models | Mistral">'
@@ -205,7 +204,6 @@ def _leaderboard() -> ArtificialAnalysisLeaderboard:
         "4",
         [
             entry("claude-opus-6", "Claude Opus 6", date(2026, 10, 1)),
-            # Reviewed identity-map slugs are already handled by the AA sync.
             entry("claude-opus-5", "Claude Opus 5", date(2026, 10, 1)),
             entry("grok-5", "Grok 5 (Reasoning)", date(2026, 10, 9)),
             entry("grok-5-non-reasoning", "Grok 5 (Non-reasoning)", date(2026, 10, 9)),
@@ -244,8 +242,6 @@ def test_release_model_name_keeps_only_model_announcements():
     ):
         source = MISTRAL if "Mistral" in headline else OPENAI
         assert release_model_name(headline, source) is None, headline
-    # A bare known family or a name outside the "-stral" convention is a
-    # product page, not a new family.
     for headline in (
         "Magistral: reasoning for everyone",
         "Spaces: A CLI Built for Humans and Agents",
@@ -297,7 +293,6 @@ def test_scan_reports_recent_releases_against_the_catalog():
         123033,
         "source_url",
     )
-    # The vendor post wins over the duplicate leaderboard slug.
     assert mistral.lab == "Mistral AI"
     assert by_name["Claude Opus 6"].matched_by == "provider_alias"
     assert by_name["Grok 5"].status == "unindexed"
@@ -310,11 +305,9 @@ def test_scan_reports_recent_releases_against_the_catalog():
     assert len(report.unindexed) == 4
     assert report.errors == []
     assert report.sources_checked == 4
-    # Old sitemap pages, non-article paths and undated slugs are never fetched.
     assert "https://mistral.ai/news/old-post/" not in feeds.requested
     assert "https://mistral.ai/pricing" not in feeds.requested
     assert "https://api-docs.deepseek.com/news/news1226" not in feeds.requested
-    # The scan is read-only.
     assert not db.new and not db.dirty
 
 
@@ -419,7 +412,6 @@ def test_web_search_reports_releases_from_any_lab():
 
     def search(query: str, since: date) -> list[SearchHit]:
         searches.append((query, since))
-        # Every query returns the same coverage; hits are deduplicated.
         return WEB_HITS
 
     def extract(hits: list[SearchHit]) -> list[ExtractedRelease]:
@@ -428,7 +420,6 @@ def test_web_search_reports_releases_from_any_lab():
             _release("Reflection", "Beam", [1], official=0),
             _release("Aleph Alpha", "Kolibri", [2]),
             _release("Odyssey", "Odyssey-3", [3]),
-            # Uncited and invented hit ids never become signals.
             _release("Nobody", "Ghost-1", [42]),
         ]
 
@@ -446,7 +437,6 @@ def test_web_search_reports_releases_from_any_lab():
     by_name = {signal.model_name: signal for signal in report.signals}
     assert set(by_name) == {"Beam", "Kolibri", "Odyssey-3"}
     beam = by_name["Beam"]
-    # The lab's own page is the reported URL; the earliest cited hit dates it.
     assert (beam.source, beam.url, beam.published, beam.status) == (
         WEB_SEARCH_PROVIDER,
         "https://reflection.ai/blog/introducing-beam",

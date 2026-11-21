@@ -50,8 +50,6 @@ HF_PAPER_SOCIAL_THUMBNAIL_TEMPLATE = (
     "papers/{arxiv_id}/gradient.png"
 )
 
-# The default OG image (backend/services/default_og_image.py) is a 1200x630 PNG,
-# the standard summary_large_image size.
 FALLBACK_IMAGE_MIME = "image/png"
 FALLBACK_IMAGE_WIDTH = 1200
 FALLBACK_IMAGE_HEIGHT = 630
@@ -332,9 +330,6 @@ def build_paper_meta(
     )
 
 
-# --- HTML injection ----------------------------------------------------------
-
-
 _HEAD_CLOSE_RE = re.compile(r"</head\s*>", re.IGNORECASE)
 _TITLE_TAG_RE = re.compile(r"<title>.*?</title>", re.IGNORECASE | re.DOTALL)
 _META_NAME_RE_TEMPLATE = r'<meta\s+name=["\']{name}["\'][^>]*/?>'
@@ -343,9 +338,6 @@ _CANONICAL_LINK_RE = re.compile(
     r'<link\s+rel=["\']canonical["\'][^>]*/?>', re.IGNORECASE
 )
 
-# Static social tags shipped in frontend/index.html that we replace with
-# paper-specific values. Listed exhaustively so crawlers never see a generic
-# site-wide tag ahead of (or alongside) the per-paper one.
 _STATIC_META_NAMES = (
     "description",
     "twitter:card",

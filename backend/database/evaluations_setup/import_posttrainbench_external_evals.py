@@ -42,7 +42,6 @@ BASE_MODELS = [
     "gemma-3-4b-pt",
 ]
 
-# PostTrainBench agent key -> import spec.
 AGENT_SPECS: dict[str, dict] = {
     "fable-5": {
         "paper_id": 98110,

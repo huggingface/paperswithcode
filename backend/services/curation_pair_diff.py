@@ -60,7 +60,6 @@ def _enrich_additions(enrich: dict | None, before: dict[str, set]) -> dict[str, 
         },
         **{field: set(enrich.get(field) or []) for field in ENRICH_NAME_FIELDS},
     }
-    # A field left out of the proposal keeps its current value: no additions.
     return {
         field: values - before[field] if enrich.get(field) is not None else set()
         for field, values in proposed.items()

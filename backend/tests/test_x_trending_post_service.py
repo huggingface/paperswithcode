@@ -64,7 +64,6 @@ def test_good_lead_needs_a_comparison_for_numbers_and_no_small_delta():
     assert not service.good_lead("History Forcing reaches 79.82 on VBench-Long.")
     assert not service.good_lead("It improves scores by 0.3 points over Beta.")
     assert not service.good_lead("Alpha is +0.4% better than Beta.")
-    # Words that merely start like a comparison do not count.
     assert not service.good_lead("Alpha scores 79.82 on the VBench leaderboard.")
     assert not service.good_lead("Alpha recorded 12 topics.")
     assert service.good_lead("Alpha scores 87, topping Beta.")
@@ -99,10 +98,10 @@ def test_accept_post_allows_only_fact_numbers_and_the_given_mentions():
     ok = "FooNet beats BarNet by 9.1 on BarBench.\n\nFooNet by @foolab"
     assert service.accept_post(ok, facts=facts, mentions=["foolab"], max_chars=280)
     for bad in (
-        ok.replace("9.1", "9.2"),  # invented number
-        "FooNet scores 91.2 on BarBench.\n\nFooNet by @foolab",  # bare score
-        ok.replace("@foolab", "Foo Lab"),  # dropped mention
-        ok + " and @elonmusk",  # extra mention
+        ok.replace("9.1", "9.2"),
+        "FooNet scores 91.2 on BarBench.\n\nFooNet by @foolab",
+        ok.replace("@foolab", "Foo Lab"),
+        ok + " and @elonmusk",
         ok + " https://x.co",
         ok + " #ML",
     ):
@@ -207,7 +206,7 @@ def test_sota_result_needs_five_entries_and_a_one_percent_margin(monkeypatch):
     db, paper = SotaDb([(evaluation, "BarBench")]), SimpleNamespace(id=1)
     boards = {
         "clear": _board(87, 81, 80, 70, 60),
-        "small": _board(79.82, 79.5, 70, 60, 50),  # +0.3 points
+        "small": _board(79.82, 79.5, 70, 60, 50),
         "few": _board(87, 81, 80, 70),
     }
     for name, board in boards.items():
@@ -230,7 +229,7 @@ def test_notable_handles_use_the_reviewed_map_then_verified_sources():
             SimpleNamespace(name="Tencent", slug="tencent", hf_slug="tencent"),
         ],
     )
-    db = SotaDb([])  # no threads
+    db = SotaDb([])
     assert service.notable_handles(db, paper, lambda slug: None) == ["NVIDIAAIDev"]
     assert service.notable_handles(db, paper, lambda slug: "TencentGlobal") == [
         "NVIDIAAIDev",
@@ -249,7 +248,6 @@ def test_organization_x_handle_needs_a_thread_by_the_org_or_its_hf_link():
         service.organization_x_handle(org, [("alice", "Alice")], lambda s: "snow")
         == "snow"
     )
-    # An author's thread or a name that merely contains the org is no proof.
     assert (
         service.organization_x_handle(
             org, [("alice", "Alice"), ("x", "NotServiceNow")], lambda s: None
@@ -269,7 +267,7 @@ def test_weighted_length_counts_wide_characters_twice():
 def test_render_first_page_returns_png_of_page_one():
     image = render_first_page(_pdf())
     assert image.startswith(b"\x89PNG")
-    assert fitz.Pixmap(image).width == 595 * 2  # A4 page at 2x
+    assert fitz.Pixmap(image).width == 595 * 2
 
 
 def test_oauth1_header_signs_only_oauth_parameters():
@@ -363,7 +361,7 @@ LAB = {
 
 def test_post_trending_paper_skips_papers_not_worth_posting(monkeypatch):
     papers = [_paper(index, f"2610.0000{index}") for index in (1, 2, 3, 4)]
-    papers[1].tldr = "Beta scores 79.82 on VBench."  # bare score: no good lead
+    papers[1].tldr = "Beta scores 79.82 on VBench."
     monkeypatch.setattr(service, "candidate_papers", lambda db, **_: papers)
     report = service.post_trending_paper(
         FakeDb(),
@@ -374,7 +372,6 @@ def test_post_trending_paper_skips_papers_not_worth_posting(monkeypatch):
         find_results=lambda paper: [],
         find_sota=lambda paper: SOTA if paper.id in (3, 4) else None,
     )
-    # Paper 4 has both a SOTA and a tagged lab, so it goes first.
     assert (report.paper_id, report.reason, report.handles) == (
         4,
         "sota_and_notable_lab",

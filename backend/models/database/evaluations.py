@@ -45,25 +45,21 @@ class Dataset(Base):
     url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     hf_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    # Additional metadata from PapersWithCode
     short_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     homepage: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    # Dataset hierarchy and variants
     parent_dataset_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("datasets.id", ondelete="SET NULL"), nullable=True
     )
     variant_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     split_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
-    # Image/media URLs
     image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     thumbnail_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     verified_image_url: Mapped[Optional[str]] = mapped_column(
         String(500), nullable=True
     )
 
-    # Paper reference (the paper that introduced this dataset)
     introducing_paper_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("papers.id", ondelete="SET NULL"), nullable=True
     )
@@ -72,37 +68,24 @@ class Dataset(Base):
     )
     paper_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    # Licensing information
     license_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     license_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    # Introduction date/year
     introduced_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     introduced_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # JSONB fields for arrays
-    modalities: Mapped[Optional[dict]] = mapped_column(
-        JSONB, nullable=True
-    )  # e.g., ["Images", "Videos"]
-    languages: Mapped[Optional[dict]] = mapped_column(
-        JSONB, nullable=True
-    )  # e.g., ["English", "Chinese"]
-    variants: Mapped[Optional[dict]] = mapped_column(
-        JSONB, nullable=True
-    )  # e.g., ["COCO test-dev", "COCO 2017"]
+    modalities: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    languages: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    variants: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
-    # Usage count
     num_papers: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
 
-    # Warning/notes
     warning: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # PWC source URL
     pwc_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -110,7 +93,6 @@ class Dataset(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     papers: Mapped[List["Paper"]] = relationship(
         "Paper", secondary="paper_datasets", back_populates="datasets"
     )
@@ -121,7 +103,6 @@ class Dataset(Base):
         "Evaluation", back_populates="dataset"
     )
 
-    # Self-referential relationship for parent datasets
     parent_dataset: Mapped[Optional["Dataset"]] = relationship(
         "Dataset", remote_side=[id], foreign_keys=[parent_dataset_id]
     )
@@ -149,17 +130,10 @@ class Evaluation(Base):
     )
 
     model_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    # Optional harness/runtime used to evaluate the model (e.g. "Claude Code",
-    # "Terminus"). Some benchmarks like Terminal-Bench are effectively
-    # model+harness combinations; this column lets us render them separately
-    # from `model_name` instead of cramming both into the model column.
     harness: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     methodology: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)  # JSONB field
+    metrics: Mapped[dict] = mapped_column(JSONB, nullable=False)
     uses_additional_data: Mapped[bool] = mapped_column(Boolean, default=False)
-    # Whether the evaluated model is open-source. Defaults to True; closed-source
-    # models (proprietary APIs, unreleased flagship LLMs) set this to False so the
-    # frontend can optionally hide them based on a per-user preference.
     is_open: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true"), default=True
     )
@@ -173,16 +147,9 @@ class Evaluation(Base):
     external: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
     )
-    # Raw number of model parameters for this evaluation row (e.g. 7000000000
-    # for a 7B model). Kept on the evaluation rather than baked into
-    # `model_name` so future leaderboards can filter / sort by size.
     num_parameters: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
-    # Optional link to the Hugging Face model page for the evaluated model
-    # (e.g. https://huggingface.co/MiniMaxAI/MiniMax-M3). Stored per evaluation
-    # so each leaderboard row can link the model name directly to its HF page.
     hf_model_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -190,12 +157,10 @@ class Evaluation(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     paper: Mapped["Paper"] = relationship("Paper", back_populates="evaluations")
     task: Mapped["Task"] = relationship("Task", back_populates="evaluations")
     dataset: Mapped[Dataset] = relationship("Dataset", back_populates="evaluations")
 
-    # Indexes
     __table_args__ = (
         Index(
             "idx_evaluations_paper_task_dataset", "paper_id", "task_id", "dataset_id"
@@ -260,15 +225,10 @@ class Metric(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    direction: Mapped[str] = mapped_column(
-        String(20), nullable=False
-    )  # "higher_is_better" or "lower_is_better"
-    scale: Mapped[Optional[str]] = mapped_column(
-        String(50), nullable=True
-    )  # e.g., "0-1", "0-100", "percentage", "milliseconds", "unbounded"
+    direction: Mapped[str] = mapped_column(String(20), nullable=False)
+    scale: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -276,7 +236,6 @@ class Metric(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Indexes
     __table_args__ = (Index("idx_metrics_name", "name"),)
 
     def __repr__(self) -> str:
@@ -339,7 +298,6 @@ class TaskDatasetMetric(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_task_dataset_metrics_task_id", "task_id"),
         Index("idx_task_dataset_metrics_dataset_id", "dataset_id"),

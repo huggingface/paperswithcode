@@ -35,7 +35,6 @@ def test_allows_explicit_test_database(environ):
 
 def test_sqlalchemy_postgres_engine_is_refused_without_opt_in(monkeypatch):
     monkeypatch.delenv("PWC_TEST_DATABASE", raising=False)
-    # Port 9 is unused; the guard must refuse before any network attempt.
     engine = create_engine("postgresql://guard@127.0.0.1:9/paperswithcode_hf")
     with pytest.raises(LiveDatabaseRefused, match="PWC_TEST_DATABASE=1"):
         with engine.connect():

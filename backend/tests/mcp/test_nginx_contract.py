@@ -283,9 +283,6 @@ def test_mcp_access_log_excludes_identifiers_and_request_content():
 def test_internal_mcp_api_bridge_is_loopback_only(
     config, environment, port, backend, host
 ):
-    # The MCP service reads the catalog through this bridge in both
-    # environments, so its traffic never leaves the host or shares the public
-    # per-IP rate limits.
     assert f"listen 127.0.0.1:{port};" in config
     marker = config.index(f"server_name pwc-{environment}-mcp-api;")
     bridge_start = config.rfind("server {", 0, marker)

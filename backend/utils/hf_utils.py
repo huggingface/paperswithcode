@@ -140,8 +140,6 @@ def classify_hf_artifact_url(url: str) -> Optional[HfArtifactKind]:
         return "space"
     if head in _HF_NON_ARTIFACT_PATHS:
         return None
-    # `huggingface.co/<namespace>/<name>` is a model; bare `huggingface.co/<name>`
-    # is a user/org profile and is not considered an artifact link.
     if len(segments) >= 2:
         return "model"
     return None
@@ -165,11 +163,9 @@ def hf_artifact_repo_id(url: str) -> Optional[tuple[HfArtifactKind, str]]:
     path = urlparse(normalized).path.lstrip("/")
     segments = [seg for seg in path.split("/") if seg]
     if kind in ("dataset", "space"):
-        # Drop the leading 'datasets'/'spaces' segment.
         repo_segments = segments[1:]
     else:
         repo_segments = segments
-    # Repo ids are 'namespace/name' (2 segments) or a bare canonical name.
     repo_id = "/".join(repo_segments[:2])
     if not repo_id:
         return None
@@ -180,9 +176,6 @@ def _hf_api_path_for_kind(kind: HfArtifactKind) -> str:
     return {"model": "models", "dataset": "datasets", "space": "spaces"}[kind]
 
 
-# Expandable metric fields per kind.  Spaces have no downloads counter and the
-# Hub rejects the entire request with HTTP 400 when an unsupported field is
-# expanded, so asking for it fails every Space refresh.
 _HF_METRIC_FIELDS: dict[HfArtifactKind, tuple[str, ...]] = {
     "model": ("trendingScore", "likes", "downloads"),
     "dataset": ("trendingScore", "likes", "downloads"),
@@ -392,25 +385,18 @@ async def get_user_organizations(username: str) -> list[str]:
                 return await response.text()
 
     try:
-        # Shield from cancellation to prevent cancel scope propagation
         html_content = await asyncio.shield(_fetch_profile())
 
         organizations = []
 
-        # Look for the Organizations section in the HTML
-        # The HTML structure typically has an Organizations heading followed by organization links
-        # Pattern 1: Look for text "Organizations" followed by links
         orgs_section_pattern = r"(?i)organizations.*?(?=<h[1-6]|$)"
         orgs_section_match = re.search(orgs_section_pattern, html_content, re.DOTALL)
 
         if orgs_section_match:
             orgs_section = orgs_section_match.group(0)
-            # Look for organization profile links in this section
-            # Organizations typically appear as href="/{org_name}" links
             org_links_pattern = r'href="/([^/\s"]+)"'
             org_matches = re.findall(org_links_pattern, orgs_section)
 
-            # Filter out common non-organization paths and the username itself
             for org in org_matches:
                 if (
                     org != username
@@ -434,13 +420,10 @@ async def get_user_organizations(username: str) -> list[str]:
                 ):
                     organizations.append(org)
 
-        # Fallback pattern: Look for organization-style links throughout the page
         if not organizations:
-            # Look for links that could be organizations (simple names without special characters)
             all_links_pattern = r'href="/([a-zA-Z0-9][a-zA-Z0-9_-]*)"'
             all_matches = re.findall(all_links_pattern, html_content)
 
-            # Count occurrences and filter likely organization names
             link_counts = {}
             for link in all_matches:
                 if (
@@ -467,13 +450,10 @@ async def get_user_organizations(username: str) -> list[str]:
                 ):
                     link_counts[link] = link_counts.get(link, 0) + 1
 
-            # Organizations typically appear multiple times on a profile page
-            # (in different sections like "Recent Activity", etc.)
             for link, count in link_counts.items():
-                if count >= 2:  # Appears multiple times, likely an organization
+                if count >= 2:
                     organizations.append(link)
 
-        # Remove duplicates while preserving order
         seen = set()
         unique_orgs = []
         for org in organizations:

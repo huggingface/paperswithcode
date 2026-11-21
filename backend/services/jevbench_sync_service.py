@@ -34,16 +34,11 @@ TASK_SLUG = "decision-making"
 DATASET_SLUG = "jevbench"
 METRIC_NAME = "Composite Score"
 SCHEMA_VERSION = 2
-# A new method restates every score on another scale; a reviewer decides
-# whether the managed rows move with it.
 METHOD = "v1.7"
 MIN_EXPECTED_ENTRIES = 20
 MAX_EXPECTED_ENTRIES = 300
-# Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 4
 
-# Vendors by the host of a system's source URL; the upstream names often end
-# in the vendor, which the row name then leaves out ("Drex Max (Nace AI)").
 _HOST_LABS = {
     "alphanimble.com": "AlphaNimble",
     "attest.engineering": "Attest",
@@ -68,8 +63,6 @@ _HOST_LABS = {
     "vansa.org": "Vansa",
 }
 
-# Vendors of systems whose source URL is a third-party host (OpenRouter, a
-# Hugging Face repo) or missing, by the start of the row name.
 _NAME_LABS = {
     "Amos ": "Scira",
     "Fastino ": "Fastino",
@@ -78,19 +71,13 @@ _NAME_LABS = {
 
 _GPT_6 = "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
 
-# Exact JevBench row names are the trust boundary between a system and its
-# introducing paper. Other names are matched automatically when the catalog
-# names them unambiguously, and otherwise handed to the release radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
-    # The Drex technical report; the model-card page was merged into it.
     "Drex Max": ModelIdentity(
         "Drex Max",
         arxiv_id="2611.07854",
         is_open=True,
         hf_model_url="https://huggingface.co/nace-ai/drex-max-v1",
     ),
-    # JevBench measures general LLMs as decision models through their chat
-    # API; each keeps its best reasoning setting on the board.
     "GPT-6 Luna (low reasoning effort)": ModelIdentity("GPT-6 Luna", source_url=_GPT_6),
     "GPT-6 Luna (default medium reasoning effort)": ModelIdentity(
         "GPT-6 Luna", source_url=_GPT_6
@@ -114,7 +101,6 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "DeepSeek V4.1 Flash (thinking default)": ModelIdentity(
         "DeepSeek V4.1 Flash", arxiv_id="2609.19969", is_open=True
     ),
-    # The Gemini Decisions API post introduces "our new Gemini Decision 1 model".
     "Gemini Decision 1": ModelIdentity(
         "Gemini Decision 1",
         source_url=(
@@ -200,8 +186,6 @@ def parse_jevbench(text: str) -> list[LeaderboardEntry]:
 
         lab = _host_lab(system.get("source_url"))
         label = name.strip()
-        # Only a whole trailing "(Lab)" is the vendor, never the end of a
-        # larger parenthetical such as "(hosted by Foo (Lab))".
         stripped = label.removesuffix(f" ({lab})") if lab else label
         if stripped != label and stripped.count("(") == stripped.count(")"):
             label = stripped

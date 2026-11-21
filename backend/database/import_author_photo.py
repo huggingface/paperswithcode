@@ -55,7 +55,6 @@ def square_jpeg(data: bytes, zoom: float = 1.0) -> bytes:
     image = Image.open(io.BytesIO(data)).convert("RGB")
     side = int(min(image.size) / zoom)
     left = (image.width - side) // 2
-    # Portraits frame the face high, so keep the top of a tall photo.
     top = (image.height - side) // 6
     image = image.crop((left, top, left + side, top + side)).resize(
         (SIZE, SIZE), Image.LANCZOS

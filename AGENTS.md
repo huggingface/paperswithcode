@@ -18,6 +18,11 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
 - Preserve public API, route, CLI, and persisted-data contracts. Compatibility is
   optional only for clearly unshipped internal work.
 - Keep logic simple and readable; avoid broad defensive `try`/`except` blocks.
+- Do not write comments in backend Python. Record non-obvious decisions in
+  `docs/adr/` and hacks as `comment-debt` GitHub issues
+  ([ADR 0001](docs/adr/0001-no-comments-in-backend.md)).
+  `python3 scripts/backend_comments.py check` enforces a ratchet; the
+  `delete-comment` skill removes what remains.
 - Preserve unrelated work in dirty trees and edit files narrowly.
 - Run Python and repository CLIs with
   `uv run --env-file backend/keys.env …`. Read `docs/database.md` before
@@ -135,6 +140,11 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   production is `paperswithcode-backend@production` on `:8000`, staging is
   `paperswithcode-backend@staging` on `:8001`, and nginx serves each environment's
   `current/frontend-dist`.
+- Staging runs production plus staging-only work. A successful production
+  deploy automatically merges the live staging commit into production and
+  deploys the result to staging (`pwc-sync-staging`); on a merge conflict it
+  leaves staging alone and reports it, so resolve the conflict and deploy
+  staging by hand. Build staging-only branches on the live staging commit.
 - Use `pwc-status`, `pwc-deploy`, and `pwc-rollback` for lifecycle operations.
   Use `pwc-nginx` separately for nginx changes.
 - Scheduled production work must use the installed `pwc-cron` allowlist. Never

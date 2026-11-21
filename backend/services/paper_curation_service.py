@@ -437,7 +437,7 @@ class PaperCurationService:
                 for key in ("hf_models", "hf_datasets", "hf_spaces")
             }
         elif section == "x_threads":
-            payload = {}  # Restored from captured previews below.
+            payload = {}
         else:
             payload = {"source_url": (value or {}).get("source_url")}
 
@@ -465,7 +465,6 @@ class PaperCurationService:
                 commit=False,
             ),
             "source_url": lambda: self._restore_source_url(paper_id, value or {}),
-            # Restore the captured previews rather than re-fetching from X.
             "x_threads": lambda: self.paper_associations.replace_x_threads(
                 paper_id,
                 [

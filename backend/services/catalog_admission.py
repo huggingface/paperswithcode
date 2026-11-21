@@ -26,7 +26,6 @@ _CATALOG_RESOURCES = frozenset(
 _CATALOG_PAGES = _CATALOG_RESOURCES | {"paper", "orgs"}
 
 
-# Read-only catalog queries sent as POST because their input is a large body.
 _CATALOG_POST_READS = frozenset({"/api/v1/papers/lookup"})
 
 
@@ -60,8 +59,6 @@ class CatalogAdmissionMiddleware:
         if not is_catalog_read(scope):
             await self.app(scope, receive, send)
             return
-        # No await between checking and reserving: admission is atomic on the
-        # worker's event loop and never creates an unbounded waiting queue.
         if self.active >= self.limit:
             response = JSONResponse(
                 {"detail": "Catalog is busy. Please retry shortly."},

@@ -51,7 +51,6 @@ from backend.generators.google_generator import GoogleGenerator
 from backend.database.logging_config import setup_logging
 from backend.utils.github_utils import parse_github_url
 
-# Set up logging with INFO level for clean extraction results
 logger = setup_logging("batch_extract", log_level=logging.INFO)
 
 
@@ -69,10 +68,8 @@ class BatchURLExtractor:
         self.dry_run = dry_run
         self.start_year = start_year
 
-        # Initialize Google Gemini generator with free tier limits
-        # URL extraction uses Gemini 3.5 Flash (fallback: 2.5 Flash)
         requests_per_minute = 10
-        requests_per_day = 350 if not use_paid_tier else 10000  # Free tier or Tier 1
+        requests_per_day = 350 if not use_paid_tier else 10000
         self.generator = GoogleGenerator(
             requests_per_minute=requests_per_minute,
             requests_per_day=requests_per_day,
@@ -88,11 +85,10 @@ class BatchURLExtractor:
             "github_skipped_existing": 0,
             "project_page_skipped_existing": 0,
             "api_errors": 0,
-            "papers_skipped_critical_errors": 0,  # Papers not marked as processed due to errors
+            "papers_skipped_critical_errors": 0,
             "start_time": time.time(),
         }
 
-        # Memory monitoring
         self.process = psutil.Process()
         self.memory_limit_mb = 3500
 
@@ -111,7 +107,6 @@ class BatchURLExtractor:
         """Check if memory usage is safe for continued processing."""
         memory_stats = self.get_memory_usage()
 
-        # Check if we're approaching memory limits
         if memory_stats["process_memory_mb"] > self.memory_limit_mb:
             return (
                 False,
@@ -141,10 +136,8 @@ class BatchURLExtractor:
         This keeps the query simple and efficient.
         """
 
-        # Create start date from year
         start_date = f"{self.start_year}-01-01"
 
-        # Simple query: just check the urls_extracted flag
         query = """
         SELECT
             p.id,
@@ -181,10 +174,9 @@ class BatchURLExtractor:
             for row in result
         ]
 
-        # Log sample of papers being processed
         if papers:
             logger.info("📋 Sample of papers to process:")
-            for i, paper in enumerate(papers[:3]):  # Log first 3 papers
+            for i, paper in enumerate(papers[:3]):
                 logger.info(
                     f"  {i + 1}. {paper['arxiv_id']} - {paper['title'][:100]}..."
                 )
@@ -217,16 +209,12 @@ class BatchURLExtractor:
             from backend.services.repository_service import RepositoryService
             from backend.services.project_page_service import ProjectPageService
 
-            # Initialize services
             repo_service = RepositoryService(db)
             project_service = ProjectPageService(db)
 
-            # Handle GitHub repository if found
             if github_url and github_url.strip():
-                # Extract owner and name from GitHub URL
                 owner, name = parse_github_url(github_url.strip())
 
-                # Use service method to create repository and associate with paper
                 repository = repo_service.create_repository_for_paper(
                     paper_id=str(paper_id),
                     url=github_url.strip(),
@@ -247,9 +235,7 @@ class BatchURLExtractor:
                     )
                     self.stats["github_skipped_existing"] += 1
 
-            # Handle project page if found
             if project_page_url and project_page_url.strip():
-                # Use service method to create project page and associate with paper
                 project_page = project_service.create_project_page_for_paper(
                     paper_id=str(paper_id),
                     url=project_page_url.strip(),
@@ -267,7 +253,6 @@ class BatchURLExtractor:
                     )
                     self.stats["project_page_skipped_existing"] += 1
 
-            # Always mark the paper as processed (regardless of whether URLs were found)
             update_paper = """
             UPDATE papers
             SET urls_extracted = TRUE, updated_at = CURRENT_TIMESTAMP
@@ -275,7 +260,6 @@ class BatchURLExtractor:
             """
             db.execute(text(update_paper), {"paper_id": paper_id})
 
-            # Log the processing status
             if github_url or project_page_url:
                 logger.info(f"✅ Marked paper {paper_id} as processed with URLs found")
             else:
@@ -294,7 +278,6 @@ class BatchURLExtractor:
         abstract = paper["abstract"]
 
         try:
-            # Call AI extraction directly - no caching needed since database handles deduplication
             try:
                 logger.info(
                     f"🤖 Starting AI extraction for {arxiv_id}: {paper.get('title', 'N/A')[:80]}..."
@@ -303,7 +286,7 @@ class BatchURLExtractor:
                 reasoning, response = await get_project_github_urls(
                     arxiv_id=arxiv_id,
                     session_id=None,
-                    use_reasoning=False,  # Keep simple for better performance
+                    use_reasoning=False,
                     abstract=abstract,
                     generator=self.generator,
                 )
@@ -313,7 +296,6 @@ class BatchURLExtractor:
                     response.get("project_page_url", "") if response else ""
                 )
 
-                # Log concise results
                 github_status = f"✅ {github_url}" if github_url else "❌ None"
                 project_status = (
                     f"✅ {project_page_url}" if project_page_url else "❌ None"
@@ -325,7 +307,6 @@ class BatchURLExtractor:
             except Exception as e:
                 error_str = str(e).lower()
 
-                # Check if it's a critical error that should stop processing this paper
                 is_rate_limit = "rate limit" in error_str or "429" in str(e)
                 is_quota_exceeded = (
                     "quota exceeded" in error_str or "daily quota" in error_str
@@ -333,7 +314,6 @@ class BatchURLExtractor:
                 is_pdf_download_fail = "failed to download pdf" in error_str
                 is_recaptcha = "recaptcha" in error_str or "captcha" in error_str
 
-                # Broaden invalid-auth detection to catch more provider messages
                 auth_markers = [
                     "api key",
                     "invalid_api_key",
@@ -350,7 +330,6 @@ class BatchURLExtractor:
                 ]
                 is_api_key_invalid = any(marker in error_str for marker in auth_markers)
 
-                # Check if it's a critical error that should stop processing this paper
                 if (
                     is_rate_limit
                     or is_quota_exceeded
@@ -358,7 +337,6 @@ class BatchURLExtractor:
                     or is_recaptcha
                     or is_api_key_invalid
                 ):
-                    # Critical errors - do NOT mark as processed
                     error_type = (
                         "API authentication"
                         if is_api_key_invalid
@@ -376,10 +354,9 @@ class BatchURLExtractor:
                         "project_page_url": "",
                         "error": str(e),
                         "success": False,
-                        "should_retry": True,  # Flag for retry
+                        "should_retry": True,
                     }
                 else:
-                    # Non-critical errors - treat as "no URLs found"
                     logger.warning(
                         f"⚠️  Non-critical error for {arxiv_id} (will mark as processed): {e}"
                     )
@@ -387,7 +364,6 @@ class BatchURLExtractor:
                     github_url = ""
                     project_page_url = ""
 
-            # Save results with appropriate source (only if no critical error)
             source = "ai_extraction"
 
             self.save_results_to_db(
@@ -398,14 +374,12 @@ class BatchURLExtractor:
                 source,
             )
 
-            # Update stats (note: individual URL stats are now tracked in save_results_to_db)
             self.stats["papers_processed"] += 1
             if github_url and project_page_url:
                 self.stats["papers_with_both"] += 1
             if not github_url and not project_page_url:
                 self.stats["papers_with_neither"] += 1
 
-            # Final status summary
             github_final = "✅ Saved" if github_url else "❌ None"
             project_final = "✅ Saved" if project_page_url else "❌ None"
             logger.info(
@@ -438,8 +412,7 @@ class BatchURLExtractor:
         """Process a batch of papers with controlled concurrency."""
         logger.info(f"🚀 Processing batch of {len(papers)} papers (UNIFIED MODE)")
 
-        # Lower concurrency for AI methods to respect rate limits
-        semaphore = asyncio.Semaphore(3)  # Only 3 concurrent requests
+        semaphore = asyncio.Semaphore(3)
 
         async def process_with_semaphore(paper):
             async with semaphore:
@@ -449,7 +422,6 @@ class BatchURLExtractor:
             *[process_with_semaphore(paper) for paper in papers], return_exceptions=True
         )
 
-        # Handle any exceptions
         processed_results = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
@@ -466,7 +438,6 @@ class BatchURLExtractor:
         """Print processing statistics."""
         elapsed = time.time() - self.stats["start_time"]
 
-        # Get current memory usage
         memory_stats = self.get_memory_usage()
 
         print("\n" + "=" * 60)
@@ -501,7 +472,6 @@ class BatchURLExtractor:
             f"⏭️  Project Pages Skipped (existing): {self.stats['project_page_skipped_existing']}"
         )
 
-        # Memory information
         print(
             f"💾 Memory Usage: {memory_stats['process_memory_mb']:.1f}MB process, {memory_stats['system_memory_percent']:.1f}% system"
         )
@@ -511,10 +481,8 @@ class BatchURLExtractor:
             rate = self.stats["papers_processed"] / elapsed
             print(f"⚡ Processing Rate: {rate:.2f} papers/second")
 
-            # Estimate daily capacity based on rate limits
-            # Assume all papers may use AI (conservative estimate)
             daily_limit = self.generator.requests_per_day
-            estimated_daily = daily_limit  # Conservative: 1 request per paper
+            estimated_daily = daily_limit
 
             print(f"📈 Estimated Daily Capacity: {estimated_daily:.0f} papers")
             if estimated_daily > 0:
@@ -530,7 +498,6 @@ class BatchURLExtractor:
             f"🚀 Starting batch URL extraction (limit={limit}, batch_size={self.batch_size}, dry_run={self.dry_run})"
         )
 
-        # Warm PDF cache for few-shot examples
         logger.info("📋 Warming PDF cache for few-shot examples...")
         try:
             cache_info = await warm_pdf_cache()
@@ -540,12 +507,10 @@ class BatchURLExtractor:
         except Exception as e:
             logger.warning(f"⚠️  Failed to warm PDF cache: {e}")
 
-        # Get database session
         db_session_gen = get_database_session()
         db = next(db_session_gen)
 
         try:
-            # Get papers that need processing
             papers = self.get_papers_missing_urls(db, limit)
             self.stats["papers_found"] = len(papers)
             logger.info(f"📄 Found {len(papers)} papers needing URL extraction")
@@ -554,9 +519,7 @@ class BatchURLExtractor:
                 logger.info("✅ No papers found that need processing")
                 return
 
-            # Process in batches
             for i in range(0, len(papers), self.batch_size):
-                # Check memory safety before each batch
                 memory_safe, memory_message = self.check_memory_safety()
                 if not memory_safe:
                     logger.warning(f"⚠️  Memory limit reached: {memory_message}")
@@ -571,15 +534,12 @@ class BatchURLExtractor:
 
                 await self.process_batch(batch, db)
 
-                # Print progress every 3 batches
                 if batch_num % 3 == 0 or batch_num == total_batches:
                     self.print_stats()
 
-                # Delay between batches for rate limiting
                 if batch_num < total_batches:
-                    await asyncio.sleep(2)  # 2 second delay
+                    await asyncio.sleep(2)
 
-            # Final statistics
             self.print_stats()
 
         except Exception as e:

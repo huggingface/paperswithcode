@@ -67,12 +67,9 @@ class MetricService:
             DatabaseError: If database query fails
         """
         try:
-            # Base query
             query = self.db.query(DBMetric)
 
-            # Apply filters
             if search:
-                # Use ilike for case-insensitive search
                 query = query.filter(
                     or_(
                         DBMetric.name.ilike(f"%{search}%"),
@@ -88,25 +85,20 @@ class MetricService:
             if direction:
                 query = query.filter(DBMetric.direction == direction)
 
-            # Apply ordering
             order_column = getattr(DBMetric, order_by, DBMetric.name)
             if order_dir == "desc":
                 query = query.order_by(desc(order_column))
             else:
                 query = query.order_by(asc(order_column))
 
-            # Get total count
             total_count = query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = query.offset(offset).limit(page_size).all()
 
-            # Calculate pagination info
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 
-            # Convert to Pydantic models
             metric_models = [Metric.model_validate(metric) for metric in results]
 
             return Metrics(
@@ -175,10 +167,8 @@ class MetricService:
             DatabaseError: If database query fails
         """
         try:
-            # Query all metrics, selecting only name and direction
             metrics = self.db.query(DBMetric.name, DBMetric.direction).all()
 
-            # Build dictionary
             directions = {metric.name: metric.direction for metric in metrics}
 
             return directions

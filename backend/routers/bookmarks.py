@@ -27,11 +27,6 @@ from backend.utils.auth import require_user
 router = APIRouter(prefix="/me", tags=["bookmarks"])
 
 
-# ---------------------------------------------------------------------------
-# Response shapes
-# ---------------------------------------------------------------------------
-
-
 class BookmarkIdsResponse(BaseModel):
     paper_ids: list[int] = Field(
         default_factory=list,
@@ -73,11 +68,6 @@ class SavedPapersResponse(BaseModel):
             "only needs to reconnect"
         ),
     )
-
-
-# ---------------------------------------------------------------------------
-# Endpoints
-# ---------------------------------------------------------------------------
 
 
 def _bucket_error(error: PaperBucketError) -> HTTPException:

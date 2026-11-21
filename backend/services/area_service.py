@@ -70,38 +70,31 @@ class AreaService:
             DatabaseError: If database query fails
         """
         try:
-            # Base query
             query = self.db.query(DBArea)
 
-            # Apply filters
             if search:
-                # Use ilike for case-insensitive search
                 query = query.filter(DBArea.name.ilike(f"%{search}%"))
 
             if name:
                 query = query.filter(DBArea.name.ilike(f"%{name}%"))
 
-            # Apply ordering
             if order_by == "name":
                 order_field = DBArea.name
             elif order_by == "created_at":
                 order_field = DBArea.created_at
             else:
-                order_field = DBArea.name  # Default to name
+                order_field = DBArea.name
 
             if order_dir == "desc":
                 query = query.order_by(desc(order_field))
             else:
                 query = query.order_by(asc(order_field))
 
-            # Get total count
             total_count = query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             areas = []
             for db_area in results:
                 area_dict = {
@@ -113,7 +106,6 @@ class AreaService:
                 }
                 areas.append(Area(**area_dict))
 
-            # Calculate pagination
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 
@@ -197,7 +189,6 @@ class AreaService:
             DatabaseError: If database query fails
         """
         try:
-            # Use case-insensitive search
             db_query = self.db.query(DBArea).filter(
                 or_(
                     DBArea.name.ilike(f"%{query}%"),
@@ -207,17 +198,13 @@ class AreaService:
                 )
             )
 
-            # Order by name
             db_query = db_query.order_by(DBArea.name)
 
-            # Get total count
             total_count = db_query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = db_query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             areas = []
             for db_area in results:
                 area_dict = {
@@ -229,7 +216,6 @@ class AreaService:
                 }
                 areas.append(Area(**area_dict))
 
-            # Calculate pagination
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 

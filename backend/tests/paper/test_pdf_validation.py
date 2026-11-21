@@ -11,7 +11,6 @@ from backend.utils.pdf_utils import _is_valid_pdf
 
 def test_valid_pdf():
     """Test that a valid PDF is recognized."""
-    # Minimal valid PDF content
     content = b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n" + b"x" * 2000 + b"\n%%EOF"
     is_valid, error_msg = _is_valid_pdf(content)
     assert is_valid, f"Valid PDF not recognized: {error_msg}"
@@ -63,7 +62,7 @@ def test_missing_magic_bytes():
 
 def test_truncated_pdf():
     """Test that truncated PDFs are detected."""
-    content = b"%PDF-1.4\n" + b"x" * 2000  # Missing %%EOF
+    content = b"%PDF-1.4\n" + b"x" * 2000
     is_valid, error_msg = _is_valid_pdf(content)
     assert not is_valid, "Truncated PDF should be invalid"
     assert "truncated" in error_msg.lower() or "eof" in error_msg.lower(), (
@@ -74,7 +73,7 @@ def test_truncated_pdf():
 
 def test_too_small_file():
     """Test that files smaller than 1KB are rejected."""
-    content = b"%PDF-1.4\n" + b"x" * 100 + b"\n%%EOF"  # Only ~120 bytes
+    content = b"%PDF-1.4\n" + b"x" * 100 + b"\n%%EOF"
     is_valid, error_msg = _is_valid_pdf(content)
     assert not is_valid, "Too-small file should be invalid"
     assert "too small" in error_msg.lower(), (
@@ -92,7 +91,6 @@ def test_captcha_variant():
 </html>"""
     is_valid, error_msg = _is_valid_pdf(content)
     assert not is_valid, "CAPTCHA HTML should be invalid"
-    # Should be caught as HTML first, then checked for captcha
     print(f"✅ CAPTCHA variant detected: {error_msg}")
 
 

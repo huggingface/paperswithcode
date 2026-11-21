@@ -255,7 +255,6 @@ def test_external_release_title_must_announce_the_report_model():
     assert external_title_announces_report(
         "Muse Glimmer-30B", "Muse Glimmer 30B: An On-Device Agentic Model"
     )
-    # Later releases of a reported family stay separate papers.
     for release, report in [
         (
             "Distil-Whisper: Distil-Large-v3.5",

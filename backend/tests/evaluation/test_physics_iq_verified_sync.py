@@ -59,14 +59,10 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# Snapshot of the official README taken 2026-10-13, cut after both tables.
 README = (
     Path(__file__).parent / "fixtures" / "physics_iq_verified_readme.md"
 ).read_text()
 
-# The 33 rows hand-imported on 2026-10-13 and reviewed with the user:
-# (model_name, track) -> stored score. Physis-Lang keeps the unrounded value
-# submitted in its PR, which the README lists at one decimal.
 PRODUCTION_ROWS = {
     ("Odyssey-3 Pro", "v2v"): 63.37,
     ("Odyssey-3 Pro", "i2v"): 49.99,
@@ -221,7 +217,6 @@ def test_parse_and_fetch_readme_table():
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         entries = fetch_physics_iq_leaderboard(client)
 
-    # Only the Verified table is read; the Original table follows it.
     assert len(entries) == 45
     assert [entry.position for entry in entries] == list(range(1, 46))
     flux = entries[2]
@@ -288,7 +283,6 @@ def test_import_policy_publishes_exactly_the_reviewed_rows():
         assert row.metrics[row.best_metric] == pytest.approx(
             PRODUCTION_ROWS[key], abs=0.05
         )
-    # Odyssey-3's custom-prompt runs beat its best-practice-prompt runs.
     for track in ("i2v", "v2v"):
         assert '"Odyssey-3 (custom prompts)"' in rows[("Odyssey-3", track)].methodology
 
@@ -538,8 +532,6 @@ def test_rows_written_by_the_former_physics_iq_service_keep_their_notes():
     entries = parse_physics_iq_leaderboard(README)
     _sync(session, entries)
     physis = _rows(session)[("Physis-Lang (Cosmos3 Super)", "i2v")]
-    # The head the dedicated Physics-IQ service wrote, an unrounded reviewed
-    # score, and reviewer notes.
     physis.methodology = (
         f"{MANAGED_METHODOLOGY_PREFIX} Official leaderboard entry "
         '"Physis-Lang (Cosmos3 Super)" (i2v): 48.2 ± 1.4, added 2026-09-28, '

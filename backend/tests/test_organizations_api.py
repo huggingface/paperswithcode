@@ -65,8 +65,6 @@ def _sqlite_jsonb_typeof(dbapi_connection, _connection_record):
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
-# Trending scores older than 24h are treated as missing, so test rows stamp a
-# fresh timestamp to be eligible for the trending sort.
 _FRESH = datetime.now(timezone.utc)
 _STALE = datetime.now(timezone.utc) - timedelta(hours=48)
 
@@ -444,11 +442,9 @@ def test_featured_detail_rank_matches_list_order_including_ties(
                     display_order=5,
                     trending_score=5.0,
                 ),
-                # Tied with acme on (missing) trending score; fewer papers.
                 Organization(
                     id=3, name="Gamma", slug="gamma", is_featured=True, display_order=2
                 ),
-                # Tied with gamma on score and paper count; later display order.
                 Organization(
                     id=4, name="Delta", slug="delta", is_featured=True, display_order=3
                 ),

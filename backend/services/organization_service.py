@@ -41,11 +41,6 @@ from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.organization_logos import organization_logo_path
 
 
-# The public directory builds ~200 cards with a top paper each (~1 s), and
-# featuring and trending change once a day. Each worker keeps its cards and,
-# once they are older than the TTL, serves them while one background thread
-# rebuilds them. Deployed workers start building them at startup, so visitors
-# almost never wait on the query.
 ORGANIZATION_INDEX_TTL_SECONDS = 600
 _organization_index_cache: dict[str, tuple[float, Organizations]] = {}
 _organization_index_refreshing: set[str] = set()
@@ -167,7 +162,6 @@ class OrganizationService:
         now = time.monotonic()
         warming = _organization_index_warmed.get(key)
         if cached is None and warming is not None:
-            # The startup warm-up is already building these cards.
             warming.wait()
             cached = _organization_index_cache.get(key)
         if cached is None:
@@ -197,9 +191,6 @@ class OrganizationService:
             active_score, _max_stars = correlated_paper_score_expressions(
                 get_settings().trending_ranking_mode
             )
-            # One pass over the eligible linked papers yields each
-            # organization's paper stats and its top paper; the eligibility
-            # predicate trims every abstract, so a second pass costs ~1 s.
             linked = (
                 select(
                     PaperOrganization.organization_id.label("organization_id"),
@@ -274,8 +265,6 @@ class OrganizationService:
                 )
             )
             if curated_only:
-                # The reviewed manifest plus every org established enough to be
-                # auto-featured, so backfilled institutions reach the directory.
                 rows = rows.filter(
                     or_(
                         DBOrganization.slug.in_(BY_PWC_SLUG),

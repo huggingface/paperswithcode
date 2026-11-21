@@ -34,11 +34,8 @@ S2_BATCH_URL = "https://api.semanticscholar.org/graph/v1/paper/batch"
 SERPAPI_URL = "https://serpapi.com/search.json"
 SERPAPI_ACCOUNT_URL = "https://serpapi.com/account.json"
 
-# Scholar user IDs are 12 URL-safe characters; Wikidata also holds junk values.
 SCHOLAR_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12}$")
 
-# One shard per first character of the Scholar ID keeps each query far below
-# the Wikidata Query Service's 60 s limit (~2k people, under 20 s each).
 WIKIDATA_QUERY = """
 PREFIX wdt: <http://www.wikidata.org/prop/direct/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -59,9 +56,7 @@ SCHOLAR_ID_FIRST_CHARS = (
 
 MIN_MATCHED_PAPERS = 2
 MIN_MATCHED_SHARE = 0.5
-# Names shared by several Wikidata researchers need a clearer majority.
 COMMON_NAME_MIN_SHARE = 0.7
-# An overlap in this range on a truncated profile is rechecked on the full one.
 BORDERLINE_SHARE = (0.4, 0.7)
 
 
@@ -161,7 +156,6 @@ def _fetch_wikidata_shard(client: httpx.Client, first_char: str, attempts: int) 
             params={"query": WIKIDATA_QUERY % first_char},
             headers={
                 "Accept": "text/tab-separated-values",
-                # Wikimedia asks automated clients to identify themselves.
                 "User-Agent": "PapersWithCode-ScholarLinks/1.0 (https://paperswithcode.co)",
             },
             timeout=120,
@@ -339,15 +333,12 @@ class SerpApiScholar:
                     "engine": "google_scholar_author",
                     "author_id": scholar_id,
                     "num": 100,
-                    # PwC papers are mostly recent, so newest-first finds them
-                    # within the first pages even on long profiles.
                     "sort": "pubdate",
                     "start": page * 100,
                     "api_key": self.api_key,
                 },
                 timeout=60,
             )
-            # httpx errors quote the URL, which carries the API key.
             if response.status_code == 429:
                 raise SerpApiQuotaExhausted(f"SerpAPI quota exhausted at {scholar_id}")
             if response.status_code != 200:
@@ -425,7 +416,6 @@ def decide(rows: list[dict]) -> None:
     `evidence_json`, `serpapi` may be None).
     """
     for row in rows:
-        # Scholar's own list is the stronger proof; it decides when present.
         row["status"] = (row["serpapi"] or row["s2"])["verdict"]
     by_author = defaultdict(list)
     for row in rows:
@@ -440,9 +430,7 @@ def decide(rows: list[dict]) -> None:
         if row["status"] == "proposed":
             by_scholar[row["scholar_id"]].append(row)
     for scholar_rows in by_scholar.values():
-        # Two Wikidata items may carry one Scholar ID; only distinct authors count.
         if len({r["author_id"] for r in scholar_rows}) > 1:
-            # Several PwC rows for one person: likely duplicates to merge first.
             for row in scholar_rows:
                 row["status"] = "shared_scholar_id"
 

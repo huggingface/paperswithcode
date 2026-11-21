@@ -24,7 +24,6 @@ from backend.models.database import (
     CatalogMutationIdempotency,
 )
 
-# Deferred trigger in add_single_benchmark_board_guard.sql.
 SINGLE_BOARD_CONSTRAINT = "evaluations_single_benchmark_board"
 
 
@@ -138,8 +137,6 @@ class CatalogMutationService:
             apply()
             self.db.flush()
             after = json_safe(snapshot())
-            # A long-running batch may cross an expiry or UTC quota boundary.
-            # Recheck before recording and committing its publication.
             if paper_id is not None:
                 access.check_write(
                     actor, paper_id, entity_type, operation, request_payload

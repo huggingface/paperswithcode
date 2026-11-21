@@ -202,7 +202,6 @@ def render_digest(
 
 def prepare_digest(db: Session, subject: str, now: datetime) -> ResearchDigest | None:
     start, end = weekly_window(now)
-    # Do not resurrect missed weeks or create a backlog when delivery is enabled.
     if now - end >= timedelta(hours=23):
         return None
     existing = db.get(ResearchDigest, (subject, end))
@@ -255,7 +254,6 @@ def sample_digest(db: Session, subject: str, now: datetime) -> dict | None:
     sub = db.get(ResearchSubscription, subject)
     if not sub:
         return None
-    # The last seven days including today; render_digest treats ``end`` as exclusive.
     start = now - timedelta(days=6)
     entries = matching_entries(db, subject, now, cutoff=start.date())
     topic_entries, selected = digest_sections(entries)
@@ -313,7 +311,6 @@ def expire_pending_digests(db: Session, now: datetime) -> int:
 def deliver_digest(db: Session, subject: str, end: datetime, now: datetime) -> str:
     if not delivery_ready():
         return "disabled"
-    # Lock the subscription too: unsubscribe/opt-out serialize with the send.
     sub = db.scalar(
         select(ResearchSubscription)
         .where(ResearchSubscription.hf_subject == subject)
@@ -337,14 +334,13 @@ def deliver_digest(db: Session, subject: str, end: datetime, now: datetime) -> s
         digest.status = "cancelled"
         db.commit()
         return "cancelled"
-    # Resend retains keys for 24h. Never retry an ambiguous request beyond 23h.
     if digest.first_attempt_at and now - digest.first_attempt_at >= timedelta(hours=23):
         digest.status = "uncertain"
         db.commit()
         return "uncertain"
     if digest.first_attempt_at is None:
         digest.first_attempt_at = now
-        db.commit()  # Durable pre-POST checkpoint, before any network side effect.
+        db.commit()
         return deliver_digest(db, subject, end, now)
     key = (
         "research-"
@@ -362,7 +358,7 @@ def deliver_digest(db: Session, subject: str, end: datetime, now: datetime) -> s
         )
         response.raise_for_status()
     except httpx.HTTPError:
-        db.rollback()  # Keep the immutable payload/key pending for bounded retries.
+        db.rollback()
         return "retry"
     digest.provider_id = response.json()["id"]
     digest.status = "sent"
@@ -409,7 +405,6 @@ def record_suppression(db: Session, event: dict) -> None:
             .values(email=email, reason=event["type"])
             .on_conflict_do_nothing()
         )
-        # Suppression is address-wide, including any other account using it.
         db.query(ResearchSubscription).filter(
             ResearchSubscription.email == email
         ).update({"enabled": False})

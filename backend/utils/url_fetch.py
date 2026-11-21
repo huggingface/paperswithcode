@@ -86,14 +86,11 @@ def html_to_text(html: str, max_chars: int = 100_000) -> str:
 _GITHUB_RE = re.compile(
     r"https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", re.IGNORECASE
 )
-# Up to three path segments so `datasets/<owner>/<name>` and
-# `spaces/<owner>/<name>` are not cut down to a bare owner.
 _HF_REPO_RE = re.compile(
     r"https?://huggingface\.co/(?!papers/)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
     r"(?:/[A-Za-z0-9_.-]+)?",
     re.IGNORECASE,
 )
-# First path segments that are GitHub site pages rather than repository owners.
 _GITHUB_NON_OWNER_PATHS = frozenset(
     {
         "about",
@@ -109,7 +106,6 @@ _GITHUB_NON_OWNER_PATHS = frozenset(
         "user-attachments",
     }
 )
-# First path segments on huggingface.co that are not `<owner>/<model>` repos.
 _HF_NON_REPO_PATHS = frozenset(
     {
         "api",
@@ -150,8 +146,6 @@ def _absolute_links_from_html(html: str, base_url: str) -> List[str]:
                 urls.append(href)
             elif href.startswith("/"):
                 urls.append(urljoin(base_url, href))
-    # Raw URLs in the visible text catch the case where the link is not
-    # wrapped in an anchor tag (common in plain-text reports).
     urls.extend(_GITHUB_RE.findall(html))
     urls.extend(_HF_REPO_RE.findall(html))
     return urls
@@ -167,7 +161,6 @@ def _url_path_parts(url: str, host: str) -> List[str]:
 
 def canonical_github_repo_url(url: str) -> Optional[str]:
     """``https://github.com/<owner>/<name>`` for a GitHub repository link."""
-    # Drop trailing path segments (e.g. /tree/main/...).
     parts = _url_path_parts(url, "github.com")[:2]
     if len(parts) < 2 or parts[0].lower() in _GITHUB_NON_OWNER_PATHS:
         return None
@@ -197,8 +190,6 @@ def canonical_hf_repo_url(url: str) -> Optional[str]:
 
 
 def _unique_page_urls(html: str, base_url: str, canonicalize) -> List[str]:
-    # GitHub and Hub repo ids are case-insensitive, so case variants keep the
-    # first spelling seen on the page.
     seen: set = set()
     out: List[str] = []
     for url in _absolute_links_from_html(html, base_url):
@@ -285,10 +276,6 @@ async def _framer_search_index_text(html: str, page_url: str) -> Optional[str]:
     path = urlparse(page_url).path or "/"
     entry = payload.get(path) or payload.get(path.rstrip("/"))
 
-    # Some pages (e.g. PDF-hosting "technical report" pages) exist in the
-    # index with only a site-level title and no body. Fall back to a related
-    # companion post whose slug shares a stem with this URL after stripping
-    # common suffixes.
     if not isinstance(entry, dict) or not _entry_has_body(entry):
         slug = path.strip("/").split("/")[-1].lower()
         suffix_words = ("-technical-report", "-paper", "-report", "-blog")
@@ -318,7 +305,6 @@ async def _framer_search_index_text(html: str, page_url: str) -> Optional[str]:
                 candidates.append((score, cand_path, cand))
 
         if candidates:
-            # Prefer /post/... entries (announcement bodies) over /models/...
             candidates.sort(
                 key=lambda item: (
                     item[0],

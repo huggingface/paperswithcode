@@ -30,7 +30,6 @@ from backend.services.paper_markdown_service import (
 from backend.utils.auth import has_session
 
 router = APIRouter()
-# Bounded so a reader's first open stays inside the browser's patience.
 ON_DEMAND_SCRAPE_TIMEOUT_SECONDS = 30
 _NO_STORE = {"Cache-Control": "no-store"}
 
@@ -76,7 +75,6 @@ def get_paper_web_markdown(
             bucket_id=settings.paper_markdown_hf_bucket_id,
             token=settings.hf_token or None,
         )
-        # A copy scraped from the paper's previous source URL is not served.
         markdown = (
             None if markdown_stale(status, page_url) else _read(paper_id, settings)
         )
@@ -85,8 +83,6 @@ def get_paper_web_markdown(
     except ValueError:
         markdown = None
     if markdown is None:
-        # Scraping spends the server's Firecrawl credits, so only a signed-in
-        # reader triggers it; the Markdown backfill prepares pages for everyone.
         if not has_session(request):
             raise _error(503, "Paper content is still being prepared")
         try:

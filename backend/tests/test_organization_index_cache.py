@@ -45,7 +45,6 @@ def test_stale_directory_cards_are_served_while_one_refresh_runs(monkeypatch):
 
     assert service.get_organization_index().count == 1
     assert service.get_organization_index().count == 1
-    # Past the TTL the stale cards return at once and only one refresh starts.
     assert service.get_organization_index().count == 1
     assert service.get_organization_index().count == 1
     assert len(threads) == 1

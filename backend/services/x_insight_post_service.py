@@ -129,13 +129,10 @@ def sota_posted(db: Session, subject_key: str) -> bool:
     return db.scalar(query.limit(1)) is not None
 
 
-# --- Top papers -----------------------------------------------------------
-
-
 def top_papers(db: Session, *, period: str, now: datetime) -> Insight | None:
     today = now.date()
     if period == "week":
-        end = today - timedelta(days=today.weekday())  # this Monday
+        end = today - timedelta(days=today.weekday())
         start = end - timedelta(days=7)
         subject = f"{start.isocalendar().year}-W{start.isocalendar().week:02d}"
         heading = "Top trending papers of the week"
@@ -189,9 +186,6 @@ def compose_list(head: str, labels: list[str], max_chars: int = 280) -> str:
         if weighted_length(text) <= max_chars or len(labels) <= 3:
             return text
         labels = labels[:-1]
-
-
-# --- New SOTA -------------------------------------------------------------
 
 
 def _distinct_models(rows: list[Row], limit: int) -> list[Row]:
@@ -254,7 +248,7 @@ def new_sota(
         top = _distinct_models(rows, 6)
         if mine not in top:
             top = [mine, *top[:5]]
-        text = ""  # written below for the chosen leaderboard only
+        text = ""
         link = f"{SITE}/benchmark/{dataset.slug}?task={task.slug}&eval={evaluation.id}"
         image = render_bar_card(
             f"New SOTA on {dataset.name}",
@@ -332,9 +326,6 @@ def sota_text(
     )
 
 
-# --- Trending benchmarks, methods, tasks ------------------------------------
-
-
 def benchmark_growth(recent: int, baseline: int) -> str:
     """Change in monthly reporting rate, recent window vs. baseline window."""
     if not baseline:
@@ -349,7 +340,6 @@ def trending_benchmark(db: Session, *, now: datetime) -> Insight | None:
     recent_start = today - timedelta(days=BENCHMARK_RECENT_DAYS)
     baseline_start = recent_start - timedelta(days=BENCHMARK_BASELINE_DAYS)
     published = Paper.date_published
-    # Exclusive starts, as in BenchmarkTrendService: exactly 90 vs. 180 days.
     recent = func.count(func.distinct(case((published > recent_start, Paper.id))))
     baseline = func.count(func.distinct(case((published <= recent_start, Paper.id))))
     rows = db.execute(
@@ -492,9 +482,6 @@ BUILDERS: dict[str, Callable[..., Insight | None]] = {
 }
 
 
-# --- Scheduling -----------------------------------------------------------
-
-
 def plan_kinds(db: Session, now: datetime) -> list[str]:
     """Kinds to try, in order, for this run.
 
@@ -528,9 +515,6 @@ def plan_kinds(db: Session, now: datetime) -> list[str]:
     return periodic + sota + rotation
 
 
-# --- Writing --------------------------------------------------------------
-
-
 def accept_rewrite(
     draft: str, rewrite: str, *, facts: str = "", max_chars: int
 ) -> bool:
@@ -551,7 +535,7 @@ def write_with_luna(
 ) -> str:
     """Luna's rewrite of the template text, or the template if it fails."""
     if insight.kind.startswith("top_papers"):
-        return insight.text  # a list reads best as is
+        return insight.text
     facts = json.dumps(insight.facts, ensure_ascii=False)
     try:
         rewrite = luna_text(
@@ -572,9 +556,6 @@ def write_with_luna(
         return rewrite
     logger.warning("x_insight_rewrite_rejected kind=%s", insight.kind)
     return insight.text
-
-
-# --- Posting --------------------------------------------------------------
 
 
 @dataclass

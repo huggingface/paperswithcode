@@ -412,8 +412,6 @@ def test_external_workflow_releases_deferred_stage_to_admin_lane(enriched, kind)
         def query(self, model):
             if model is PaperCurationWorkflow:
                 return Query([workflow])
-            # The workflow's completed enrich-paper job, unless enrichment
-            # itself deferred while the page Markdown was pending.
             return Query([SimpleNamespace(id=uuid.uuid4())] if enriched else [])
 
         def get(self, model, key):

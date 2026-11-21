@@ -86,10 +86,6 @@ def external(
     )
 
 
-# Exact, reviewed introducing papers or official release pages for every model
-# present on FrontierCode 1.1 when it was last reviewed. Other models are
-# matched automatically when the catalog names them unambiguously, and
-# otherwise handed to the release radar.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "Claude Haiku 5.5": external(
         "https://www.anthropic.com/claude-haiku-5-5",
@@ -312,7 +308,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "Gemini 4 Argon: our next era of frontier intelligence",
         "2026-09-30",
     ),
-    # "Mistral Large 4 (Preview)" left the leaderboard on 2026-10-28.
 }
 
 
@@ -355,9 +350,7 @@ class FrontierCodeSyncStats:
     deleted: int = 0
     matched: int = 0
     indexed_papers: int = 0
-    # Models outside MODEL_PAPER_IDENTITIES that the catalog matched on its own.
     auto_matched: list[str] = field(default_factory=list)
-    # Models with no paper yet; each is a release signal for the radar.
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
     datasets: dict[str, int] = field(default_factory=dict)
@@ -403,8 +396,6 @@ def parse_frontiercode_leaderboard(payload: Any) -> FrontierCodeLeaderboard:
     missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(models))
     if missing:
         raise ValueError(f"FrontierCode reviewed models are missing: {missing!r}")
-    # The legend colors each model by its lab; a lab is known only when
-    # exactly one lab has the model's color.
     colors = revision.get("colors")
     lab_colors = revision.get("lab_colors")
     if not isinstance(colors, dict) or not isinstance(lab_colors, dict):

@@ -35,9 +35,7 @@ from backend.services.author_service import normalize_arxiv_author_name
 
 HF_PAPERS_URL = "https://huggingface.co/api/papers"
 HF_PAPERS_PAGE_SIZE = 100
-# HF allows 500 requests per 5 minutes; stay well below it.
 HF_PAGE_PAUSE_SECONDS = 1.0
-# HF's own name-based guesses, not yet confirmed (or rejected) by the author.
 UNCONFIRMED_STATUSES = frozenset({"extracted_pending", "extracted_infirmed"})
 
 
@@ -80,7 +78,6 @@ def iter_hf_papers(
             if published_at < published_since:
                 return
             yield paper
-        # The cursor link already carries the page size.
         url = response.links.get("next", {}).get("url")
         params = None
         if url and pause_seconds:
@@ -130,7 +127,6 @@ class AuthorHfProfileSyncService:
             .filter(PaperAuthor.paper_id == paper.id)
         ):
             key = _name_key(author.name)
-            # Two coauthors that normalize to one name are ambiguous: skip both.
             links[key] = None if key in links else (link, author)
         for name, user, status in claims:
             self.stats.claims_seen += 1
@@ -162,18 +158,13 @@ class AuthorHfProfileSyncService:
             .all()
         )
         if len(owners) > 1:
-            # The id and the username belong to different rows (a rename
-            # collided with an older row); leave it for a human.
             self.stats.conflicts += 1
             return
         owner = owners[0] if owners else None
         if owner is not None:
             if owner.hf_id and owner.hf_id != profile["hf_id"]:
-                # Only the username matches: HF reassigned a freed username to
-                # another account. Never rebind the row's identity.
                 self.stats.conflicts += 1
                 return
-            # Refresh the profile (avatar, renamed username, Pro status).
             self._update(owner, profile)
             self._adopt_full_name(owner, byline, user)
             owner_link = (
@@ -187,7 +178,6 @@ class AuthorHfProfileSyncService:
             if owner_link is not None:
                 link = name_link[0] if name_link else None
                 if link is not None and link is not owner_link and not link.claimed:
-                    # The name-matched duplicate of the claiming author.
                     self.db.delete(link)
                 self._mark_claimed(owner_link)
                 return
@@ -197,7 +187,6 @@ class AuthorHfProfileSyncService:
             return
         link, author = name_link
         if link.claimed:
-            # Another HF account already claimed this author on this paper.
             self.stats.conflicts += 1
             return
         if owner is None:
@@ -212,8 +201,6 @@ class AuthorHfProfileSyncService:
     def _adopt_full_name(
         self, author: Author, byline: str, user: dict[str, Any]
     ) -> None:
-        # Only a full name the account publishes under: HF full names can be
-        # nicknames or handles.
         fullname = user.get("fullname")
         if not fullname or _name_key(fullname) != _name_key(byline):
             return

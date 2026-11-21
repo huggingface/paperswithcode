@@ -39,7 +39,6 @@ from backend.services.leaderboard_sync_catalog import (
 from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.paper_ingestion_service import PaperIngestionService
 
-# The README top-10 table and parsebench.ai are both rendered from this CSV.
 PARSEBENCH_CSV_URL = (
     "https://raw.githubusercontent.com/run-llama/parsebench/main/leaderboard.csv"
 )
@@ -68,14 +67,9 @@ REQUIRED_COLUMNS = frozenset(
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("ParseBench")
 MIN_EXPECTED_ENTRIES = 40
 MAX_EXPECTED_ENTRIES = 400
-# Refuse to replace the managed leaderboard when the reviewed subset collapses.
 MIN_REVIEWED_ENTRIES = 30
-# Categories whose rows are single models ("VLM - Proprietary", "VLM - Open
-# Weight"); parsing products and PDF libraries need a reviewed identity.
 MODEL_CATEGORY_PREFIX = "VLM"
 
-# ParseBench-2 is a separate benchmark with its own CSV, six dimensions and
-# provider labels ("Claude Opus 5.5", not "Anthropic Opus 5.5").
 PARSEBENCH_2_CSV_URL = (
     "https://raw.githubusercontent.com/run-llama/parsebench/main/leaderboard-v2.csv"
 )
@@ -197,7 +191,6 @@ _QWEN_3_5 = external(
 _INFINITY_PARSER2 = arxiv("2607.07836")
 _GEMMA_4 = arxiv("2607.02770")
 _DEEPSEEK_V4_1_FLASH = arxiv("2609.19969")
-# The ParseBench paper is LlamaIndex's own report on its LlamaParse pipelines.
 _LLAMAPARSE = arxiv("2604.08538", is_open=False)
 
 _GPT_6_1_SOL = external(
@@ -305,9 +298,6 @@ _DOTS_MOCR = arxiv("2603.13032")
 _FALCON_OCR = arxiv("2603.27365")
 _JINA_OCR_V1 = arxiv("2609.03181")
 
-# Exact upstream `Provider` labels are the trust boundary between a leaderboard
-# row and its reviewed introducing paper or official release page. Rows whose
-# label is not reviewed here stay unpublished and are reported by the job.
 _HY4 = external(
     "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/",
     "Hy4",
@@ -468,8 +458,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         is_open=True,
     ),
     "KDL-Frontier-Parser-nano": _KDL_NANO,
-    # The v2 checkpoint has no release page of its own; KoreaDeep publishes it
-    # as the next version of the nano parser.
     "KDL-Frontier-Parser-nano-v2": _KDL_NANO,
     "Infinity-Parser2-Pro": _INFINITY_PARSER2,
     "Infinity-Parser2-Flash": _INFINITY_PARSER2,
@@ -535,8 +523,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "GLM-OCR": arxiv("2603.10910"),
 }
 
-# Parsing products and PDF libraries without an introducing paper or official
-# model release page. They are reviewed exclusions, not unreviewed rows.
 EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
     {
         "Pulse Ultra 2",
@@ -570,7 +556,6 @@ EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
         "OpenDataLoader",
         "pdf-inspector",
         "MarkItDown",
-        # API snapshot document-parse-260930; Upstage publishes only a changelog.
         "Upstage Document Parse 2 (Enhanced)",
     }
 )
@@ -590,9 +575,6 @@ _MISTRAL_OCR_4_1 = external(
     "https://docs.mistral.ai/models/ocr-4-1", "Mistral OCR 4.1", "2026-07-16"
 )
 
-# ParseBench-2 `Provider` labels with their reviewed paper and, for open-weight
-# models, the Hub checkpoint (the v2 CSV has no HF_Model_ID column). Seeded
-# from the reviewed one-time import of 2026-11-16.
 _MUSE_EMBER = external(
     "https://research.meta.ai/blog/muse-ember",
     "Introducing Our Smallest, Most Efficient Model: Muse Ember",
@@ -601,7 +583,6 @@ _MUSE_EMBER = external(
 
 PARSEBENCH_2_MODELS: dict[str, tuple[PaperIdentity, str | None]] = {
     "Muse Ember 1.0 (low)": (_MUSE_EMBER, None),
-    # The ParseBench-2 report is LlamaIndex's own report on LlamaParse.
     "LlamaParse (Agentic Plus)": (_PARSEBENCH_2, None),
     "LlamaParse (Agentic)": (_PARSEBENCH_2, None),
     "LlamaParse (Cost Effective)": (_PARSEBENCH_2, None),
@@ -644,7 +625,6 @@ PARSEBENCH_2_MODELS: dict[str, tuple[PaperIdentity, str | None]] = {
     "gemma-4-E4B-it": (_GEMMA_4, "google/gemma-4-E4B-it"),
 }
 
-# Commercial parsing products without an introducing paper, as on ParseBench.
 PARSEBENCH_2_EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
     {
         "Reducto (r-1)",
@@ -673,18 +653,13 @@ class ParseBenchBoard:
     csv_url: str
     dataset_slug: str
     primary_metric: str
-    # (metric name, CSV column) for every dimension score.
     dimensions: tuple[tuple[str, str], ...]
     identities: dict[str, PaperIdentity]
     excluded: frozenset[str]
-    # Category prefixes of single-model rows; other rows need a reviewed identity.
     model_categories: tuple[str, ...]
-    # How Overall is derived, quoted in every managed methodology.
     overall_note: str
     matcher_provider: str
-    # CSV column naming each row's Hub checkpoint, if the board publishes one.
     hf_column: str | None = None
-    # Hub checkpoints for reviewed labels on boards without an HF column.
     hf_model_ids: dict[str, str] = field(default_factory=dict)
     source_url: str = PARSEBENCH_SOURCE_URL
     task_slug: str = TASK_SLUG
@@ -783,7 +758,6 @@ class ParseBenchSyncStats:
     matched: int = 0
     created: int = 0
     updated: int = 0
-    # Hand-imported rows for the same paper and label that the sync now owns.
     adopted: int = 0
     deleted: int = 0
     excluded: int = 0
@@ -801,9 +775,6 @@ def _hf_model_url(entry: ParseBenchEntry, board: ParseBenchBoard) -> str | None:
 
 
 def _leaderboard_model(entry: ParseBenchEntry) -> LeaderboardModel:
-    # Open-weight rows name their Hub organization. Proprietary rows take the
-    # lab of a known model family ("GLM-5.3 Flash"), else the vendor the
-    # label leads with ("OpenAI GPT-6.1 Sol (Reasoning Low)").
     lab = entry.hf_model_id.split("/", 1)[0] if entry.hf_model_id else ""
     return vendor_label_model(entry.provider, lab)
 
@@ -972,8 +943,6 @@ class ParseBenchSyncService:
                 .all()
             )
             managed: dict[str, Evaluation] = {}
-            # Hand-imported rows keyed by (paper, label) that a published
-            # entry takes over instead of duplicating.
             adoptable: dict[tuple[int, str], Evaluation] = {}
             for row in board_rows:
                 if (provider := _managed_provider(row, board)) is not None:
@@ -1002,8 +971,6 @@ class ParseBenchSyncService:
                     f"{board.source} has only {len(reviewed)} reviewed rows; "
                     "refusing to replace the managed leaderboard"
                 )
-            # New single-model rows are matched to an indexed paper; the rest
-            # become release-radar signals and match on a later run.
             matcher = LeaderboardModelMatcher(
                 self.db,
                 provider=board.matcher_provider,
@@ -1011,7 +978,6 @@ class ParseBenchSyncService:
                 leaderboard_url=board.source_url,
             )
             matched = matcher.match([_leaderboard_model(e) for e in new_models])
-            # (entry, paper id, is_open, HF model URL)
             publishable: list[tuple[ParseBenchEntry, int, bool, str | None]] = []
             for entry in reviewed:
                 identity = board.identities[entry.provider]
@@ -1030,7 +996,6 @@ class ParseBenchSyncService:
                 if (match := matched.get(_leaderboard_model(entry).name)) is None:
                     stats.unreviewed.append(entry.provider)
                     continue
-                # A published Hub checkpoint makes the row open-weight.
                 publishable.append(
                     (
                         entry,

@@ -22,8 +22,6 @@ from backend.services.live_leaderboard_sync import (
     fetch_text,
 )
 
-# physics-iq-verified.anates.ai renders the same table from data compiled into
-# its Next.js bundle and exposes no JSON endpoint, so the README is canonical.
 PHYSICS_IQ_README_URL = (
     "https://raw.githubusercontent.com/google-deepmind/physics-IQ-benchmark/"
     "main/README.md"
@@ -47,7 +45,6 @@ TABLE_HEADER = (
 )
 MIN_EXPECTED_ROWS = 30
 MAX_EXPECTED_ROWS = 300
-# Refuse to touch a track when its reviewed subset collapses.
 MIN_SELECTED_BY_TRACK = {"i2v": 20, "v2v": 5}
 
 
@@ -74,11 +71,6 @@ _ODYSSEY_3 = ModelIdentity("Odyssey-3", source_url=_ODYSSEY)
 _ODYSSEY_3_PRO = ModelIdentity("Odyssey-3 Pro", source_url=_ODYSSEY)
 _PHYSICS_IQ_PAPER_I2V = "https://arxiv.org/abs/2606.18943"
 
-# Exact plain-text leaderboard labels (links reduced to their text, <small>
-# notes kept in parentheses) per track are the trust boundary between a README
-# row and its introducing paper. Several labels may resolve to one model when
-# the leaderboard lists more than one single-generation run of it; the best of
-# those runs is published. Unreviewed labels are reported, never imported.
 MODEL_IDENTITIES: dict[tuple[str, str], ModelIdentity] = {
     ("Odyssey-3 Pro (custom prompts)", "v2v"): _ODYSSEY_3_PRO,
     ("Odyssey-3 Pro (custom prompts)", "i2v"): _ODYSSEY_3_PRO,
@@ -88,14 +80,10 @@ MODEL_IDENTITIES: dict[tuple[str, str], ModelIdentity] = {
     ("Odyssey-3 (bpp)", "i2v"): _ODYSSEY_3,
     ("FLUX 3 [large] (Claude Opus 5.5 prompts)", "v2v"): _FLUX_3,
     ("FLUX 3 [large] (Claude Opus 5.5 prompts)", "i2v"): _FLUX_3,
-    # GeoPhys's best-of-N reranker is the paper's own contribution, unlike the
-    # third-party WMReward rerankers excluded below.
     ("Magi-1 24B + GeoPhys (BoN) (op)", "v2v"): _GEOPHYS,
     ("Magi-1 24B + GeoPhys (BoN) (op)", "i2v"): _GEOPHYS,
     ("Magi-1 24B (op)", "v2v"): _MAGI_1,
     ("Magi-1 24B (op)", "i2v"): _MAGI_1,
-    # NVIDIA's single-generation runs with GPT-6 Astra upsampled prompts; like
-    # the FLUX 3 prompt rows, the prompts change but the model is Cosmos 3.
     ("Cosmos3-Super + Prompt Upsampling", "v2v"): _COSMOS_3_SUPER,
     ("Cosmos3-Super + Prompt Upsampling", "i2v"): _COSMOS_3_SUPER,
     ("Cosmos3-Nano + Prompt Upsampling", "v2v"): _COSMOS_3_NANO,
@@ -160,7 +148,6 @@ MODEL_IDENTITIES: dict[tuple[str, str], ModelIdentity] = {
     ("Hunyuan Video 1.5", "i2v"): ModelIdentity(
         "HunyuanVideo 1.5", arxiv_id="2511.18870", is_open=True
     ),
-    # Wan 2.2 has no report of its own; its README cites the Wan paper.
     ("Wan 2.2 14B", "i2v"): ModelIdentity(
         "Wan2.2-I2V-A14B",
         arxiv_id="2503.20314",

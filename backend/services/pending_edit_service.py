@@ -58,8 +58,6 @@ from backend.utils.exceptions import PaperNotFoundError
 
 STATUSES = frozenset({"pending", "approved", "rejected"})
 
-# Human-only suggestions whose approval only records the decision; admins
-# create the entity separately. Approving an organization suggestion creates it.
 RECORD_ONLY_EDIT_TYPES = HUMAN_ONLY_EDIT_TYPES - {"new_organization"}
 
 logger = logging.getLogger(__name__)
@@ -663,8 +661,6 @@ class PendingEditService:
         else:
             entity_type = f"submission_created_{row.result_entity_type}"
             entity_id = row.result_entity_id
-        # Auto-applied edits are attributed to the submitter so that contributor
-        # history and bulk revert by account see them.
         return CatalogMutationEvent(
             actor_hf_subject=row.hf_subject
             if auto

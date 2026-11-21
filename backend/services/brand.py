@@ -52,11 +52,11 @@ LIGHT = Palette(
     ink_faint=_hex("#8E8678"),
     hairline=_hex("#E4DFD4"),
     hairline_strong=_hex("#C8C2B3"),
-    accent=_hex("#305880"),  # oklch(0.45 0.08 250)
-    accent_soft=_hex("#D6E7F8"),  # oklch(0.92 0.03 250)
-    accent_text=_hex("#003C6C"),  # oklch(0.35 0.10 250)
-    highlight_bg=_hex("#FFF1D9"),  # oklch(0.97 0.04 70)
-    highlight_text=_hex("#733D00"),  # oklch(0.42 0.10 60)
+    accent=_hex("#305880"),
+    accent_soft=_hex("#D6E7F8"),
+    accent_text=_hex("#003C6C"),
+    highlight_bg=_hex("#FFF1D9"),
+    highlight_text=_hex("#733D00"),
 )
 
 DARK = Palette(
@@ -68,18 +68,18 @@ DARK = Palette(
     ink_faint=_hex("#989084"),
     hairline=_hex("#332F29"),
     hairline_strong=_hex("#514A40"),
-    accent=_hex("#79A9DB"),  # oklch(0.72 0.09 250)
-    accent_soft=_hex("#192A3C"),  # oklch(0.28 0.04 250)
-    accent_text=_hex("#97C2F0"),  # oklch(0.80 0.08 250)
-    highlight_bg=_hex("#33230F"),  # oklch(0.27 0.04 70)
-    highlight_text=_hex("#EEB97B"),  # oklch(0.82 0.10 70)
+    accent=_hex("#79A9DB"),
+    accent_soft=_hex("#192A3C"),
+    accent_text=_hex("#97C2F0"),
+    highlight_bg=_hex("#33230F"),
+    highlight_text=_hex("#EEB97B"),
 )
 
 FAMILIES = {
-    "serif": "Newsreader.ttf",  # headings, titles, wordmark
-    "serif-italic": "Newsreader-Italic.ttf",  # "with Code", ranks, emphasis
-    "sans": "Inter.ttf",  # body text and subtitles
-    "mono": "JetBrainsMono.ttf",  # eyebrows, labels, numbers, domain
+    "serif": "Newsreader.ttf",
+    "serif-italic": "Newsreader-Italic.ttf",
+    "sans": "Inter.ttf",
+    "mono": "JetBrainsMono.ttf",
 }
 
 
@@ -240,7 +240,7 @@ def frame(
     1080x1080, x0.97 on 1200x630); use `Frame.px` for your own sizes.
     """
     width, height = size
-    scale = (width * height / (1200 * 675)) ** 0.5  # 1.0 on X cards, 1.2 square
+    scale = (width * height / (1200 * 675)) ** 0.5
     image = Image.new("RGB", size, palette.bg)
     draw = ImageDraw.Draw(image)
     margin = round(72 * scale)

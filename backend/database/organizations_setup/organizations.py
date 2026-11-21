@@ -34,6 +34,7 @@ FEATURED_ORGANIZATIONS: tuple[FeaturedOrganization, ...] = (
             "facebook-research",
             "metaresearch",
             "MetaSuperintelligenceLab",
+            "meta-models",
         ),
         logo_url_override=(
             "https://cdn-avatars.huggingface.co/v1/production/uploads/"

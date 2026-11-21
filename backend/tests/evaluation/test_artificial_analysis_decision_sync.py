@@ -176,7 +176,6 @@ def test_sync_binds_collapses_retires_and_reports(monkeypatch):
     prefix = "https://artificialanalysis.ai/"
     session.add_all(
         [
-            # Owned row for a contestant the page no longer lists.
             Evaluation(
                 paper_id=1,
                 task_id=31,

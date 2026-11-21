@@ -27,6 +27,7 @@ restart, cleanup, rollback, or nginx reload.
 | Intent | Interface |
 | --- | --- |
 | Inspect releases and services | `pwc-status` |
+| Carry production to staging | `pwc-sync-staging` (runs after every production deploy) |
 | Deploy backend plus frontend | `pwc-deploy` |
 | Restore the prior complete release | `pwc-rollback` |
 | Remove unreferenced releases | `pwc-cleanup` |
@@ -57,6 +58,11 @@ range, atomically updates the pointer, restarts only staging, and runs live
 smoke checks. Report the resulting `current` and `previous` releases from
 `pwc-status`.
 
+Staging runs production plus a line of staging-only work (for example
+unreleased chat changes). To add staging-only work, merge it onto the live
+staging commit, not onto plain `main`, so the existing staging-only line is
+kept, then push that branch and deploy its SHA.
+
 Staging is static, admin-gated, and owns only staging user/workflow state. A
 staging deployment must not start Vite, use production port 8000, mutate the
 production catalog, or enable production CRON. The release feature manifest
@@ -71,6 +77,17 @@ exact commit reachable from `origin/main`:
 ```bash
 sudo pwc-deploy production <exact-main-sha> --confirm DEPLOY_PRODUCTION
 ```
+
+After a successful production activation, `pwc-deploy production` runs
+`pwc-sync-staging`: when the live staging commit lacks the production commit,
+it merges the staging commit into production, pushes the merge as
+`staging-sync/main-<production sha12>-<staging sha12>`, and deploys it to
+staging. If staging holds nothing beyond production, staging gets the
+production commit itself. A merge conflict or failed staging deploy leaves
+staging as it was and is reported without failing the production deploy;
+resolve the conflict by hand on a branch from production, then deploy staging.
+Pass `--no-staging-sync` to skip it, and run `sudo pwc-sync-staging
+[--dry-run]` to sync later; a retry rebuilds the same merge commit.
 
 Do not infer production authorization from approval to deploy staging, test a
 branch, merge code, or prepare a release. Preserve the environment feature

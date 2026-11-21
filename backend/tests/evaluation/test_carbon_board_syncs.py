@@ -57,7 +57,6 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# Trimmed snapshots of each official leaderboard taken on 2026-10-29.
 FIXTURES = Path(__file__).parent / "fixtures" / "carbon_boards"
 
 
@@ -124,8 +123,6 @@ def test_fetch_vending_bench_2_follows_imports_to_the_data_chunk():
 
 
 def test_parse_vending_bench_2_reads_the_json_parse_chunk():
-    # Since 2026-11-02 the run data is a JSON.parse string with quoted keys,
-    # next to other runs (arena matches) that must be ignored.
     chunk = _fixture("vending_bench_2_chunk_2026-11-06.js")
     assert 'runs:JSON.parse(`{"vb2":{' in chunk
     entries = _by_name(boards.parse_vending_bench_2(chunk))
@@ -137,8 +134,6 @@ def test_parse_vending_bench_2_reads_the_json_parse_chunk():
 
 
 def test_fetch_vending_bench_2_resolves_the_route_node_through_the_app_entry():
-    # The page preloads only layout nodes; node 26 is named by node_ids and
-    # the app entry's dynamic-import table.
     pages = {
         boards.VENDING_BENCH_2_URL: (
             '<link href="../_app/immutable/entry/app.xyz.js">'
@@ -177,12 +172,9 @@ def test_parse_blueprint_bench_2_skips_human_and_floor_rows():
 
 
 def test_parse_riemann_bench_reads_visible_percentages():
-    # v1.1 (2026-11-02): answer keys changed for four problems and only the
-    # 21 current models were re-run.
     entries = _by_name(boards.parse_riemann_bench(_fixture("riemann_bench.html")))
     assert len(entries) == 21
     assert entries["GPT 5.6 Sol"].value == pytest.approx(83.2)
-    # "Hy" + "Hy4 Preview" names the model once.
     assert "Hy4 Preview" in entries
     board = boards.BOARD_SYNCS["sync_riemann_bench"].board
     assert "v1.1 answer keys" in board.protocol
@@ -197,7 +189,6 @@ def test_parse_cwe_bench_reads_the_v2_json_ld_item_list():
     assert (opus.value, opus.harness) == (67.1, "Claude Code")
     assert opus.detail == "pass@1 67.1% over all 250 tasks (pass@4 79.2%)"
     board = boards.BOARD_SYNCS["sync_cwe_bench"].board
-    # v2 has its own board; the v1 board stays a frozen snapshot.
     assert board.dataset_slug == "cwe-bench-v2"
     assert set(entries) == set(board.identities)
 
@@ -207,7 +198,6 @@ def test_parse_exploitgym_keeps_only_six_hour_full_set_runs():
     assert entries["GPT-5.6 Sol"].value == 33.7
     assert entries["GPT-5.6 Sol"].harness == "Codex CLI"
     assert entries["Claude Opus 5.5"].harness == "Not reported"
-    # 2h runs, token-budgeted runs, and selected subsets are other protocols.
     assert "GPT-5.4" not in entries
     assert "GPT-6 Astra" not in entries
     assert all("subset" not in entry.detail for entry in entries.values())
@@ -219,12 +209,9 @@ def test_parse_cybergym_keeps_the_default_model_focused_level_1_view():
     )
     by_label = {entry.label: entry for entry in entries}
     assert by_label["DeepSeek-V4-Pro (DeepSeek Agent)"].value == 83.3
-    # One model can appear under several agents; each is its own row.
     assert by_label["GPT-5.4 (OpenAI Agent)"].value == 79.0
     assert by_label["GPT-5.4 (Codex CLI)"].value == 66.3
     names = {entry.name for entry in entries}
-    # Agent-focused systems, 30-trial runs, and dynamic / test-time-memory
-    # runs are other views of the board.
     assert "Multi-model (DeepSeek-V4.1-Flash, Abliterated GLM-5.2)" not in names
     assert all("dynamic" not in entry.detail for entry in entries)
     assert len(entries) == 44
@@ -236,7 +223,6 @@ def test_parse_critpt_reads_the_original_no_harness_scores():
     assert entries["GPT-6 Astra (max)"].value == 31.71
     assert entries["GPT-6 Astra (max)"].lab == "OpenAI"
     assert entries["GPT-6 Astra (max)"].harness is None
-    # Models charted only on the v2 page have no original-dataset score.
     assert "Gemini 4 Carbon (high)" not in entries
 
 
@@ -263,7 +249,6 @@ def test_parse_terminal_bench_science_tags_aa_runs_with_mini_swe_agent():
     assert len(entries) == 28
     assert entries["Gemini 4 Carbon (high)"].value == 64.76
     assert entries["Gemini 4 Carbon (high)"].harness == "mini-SWE-agent"
-    # A zero is a real result, not a missing score.
     assert entries["Inkling (xhigh)"].value == 0
     board = boards.BOARD_SYNCS["sync_terminal_bench_science"].board
     assert not board.adopt_unmanaged
@@ -274,7 +259,6 @@ def test_critpt_keeps_self_reported_rows_and_reviews_aa_names():
     for name in ("K2 Horizon 375B A23B", "Nemotron 3.5 Super VL", "Beam 1.0"):
         assert board.excluded[name]
         assert name not in board.identities
-    # Hand-imported Artificial Analysis rows keep their model names.
     assert board.identities["Inkling (xhigh)"].model_name == "Inkling"
     assert board.identities["GPT-5.6 Sol (max)"].model_name == "GPT-5.6 Sol (max)"
     v2 = boards.BOARD_SYNCS["sync_critpt_v2"].board
@@ -411,8 +395,6 @@ def test_every_board_has_identities_and_a_configured_fetcher():
             assert sync.board.identities is IDENTITIES[sync.board.dataset_slug]
 
 
-# --- Engine -------------------------------------------------------------------
-
 TASK_ID = 15
 DATASET_ID = 9000
 METRIC = "Resolved"
@@ -543,13 +525,11 @@ def test_sync_adopts_a_hand_imported_row_and_its_unreported_harness():
     )
     assert (hand.harness, hand.metrics) == ("mini-SWE-agent", {METRIC: 3.61})
     assert hand.source_url == "https://example.com/board"
-    # The hand-written methodology stays as reviewer notes beneath the head.
     assert hand.methodology.endswith(
         "listed at https://example.com/board. Test protocol. "
         "Hand import from the system card."
     )
 
-    # A second run only reports unchanged managed rows.
     again = LiveLeaderboardSyncService(session, _board()).sync(
         [_entry("Opus 5.5 (xhigh)", 3.61), _entry("Sol 5.6 (xhigh)", 4.7)]
     )
@@ -603,7 +583,7 @@ def test_sync_skips_excluded_names_and_reports_rows_that_leave_upstream():
     )
     assert gone.missing_upstream == []
     rows = _rows(session)
-    assert len(rows) == 2  # never deleted
+    assert len(rows) == 2
 
 
 def test_sync_reports_unknown_models_to_the_release_radar():
@@ -722,7 +702,6 @@ def test_cybergym_excludes_preview_and_training_checkpoints(name):
 def test_vals_index_maps_the_open_mistral_large_4_release():
     identity = IDENTITIES["vals-index-v2-2"]["Mistral Large 4 OSS"]
     assert identity.is_open
-    # The paper's source moved to the technical report on 2026-11-02.
     assert identity.source_url == (
         "https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/"
         "assets/technical_report.pdf"
@@ -808,13 +787,11 @@ def test_sync_keeps_an_unrounded_score_at_the_published_precision():
     opus.metrics = {METRIC: 3.614}
     session.commit()
 
-    # 3.614 is 3.61 at the board's two decimals: kept, not a revision.
     listed = LeaderboardEntry(
         "Opus 5.5 (xhigh)", Decimal("3.61"), "3.61% resolved", "mini-SWE-agent"
     )
     assert service.sync([listed, *sol]).changed == 0
     assert opus.metrics == {METRIC: 3.614}
-    # A trailing zero is still precision: 3.614 is not 3.60.
     revised = LeaderboardEntry(
         "Opus 5.5 (xhigh)", Decimal("3.60"), "3.60% resolved", "mini-SWE-agent"
     )
@@ -824,7 +801,6 @@ def test_sync_keeps_an_unrounded_score_at_the_published_precision():
 
 def test_collapse_floor_counts_distinct_models_not_labels():
     session = _session()
-    # Two labels name GPT-5.6 Sol, so three labels are only two models.
     board = _board(min_selected=3)
     entries = [
         _entry("Opus 5.5 (xhigh)", 3.61),

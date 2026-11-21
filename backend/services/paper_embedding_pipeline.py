@@ -339,9 +339,6 @@ def activate_generation(db: Session, generation_id: int) -> None:
     ).scalar_one_or_none()
     if ready != "ready":
         raise ValueError(f"Generation {generation_id} must be ready, got {ready!r}")
-    # Keep the corpus checked below unchanged until the active-generation flip
-    # commits. SHARE conflicts with INSERT/UPDATE/DELETE's ROW EXCLUSIVE lock,
-    # while ordinary paper reads remain available during this rare operation.
     db.execute(text("LOCK TABLE papers IN SHARE MODE"))
     missing = stale = 0
     rows = db.execute(

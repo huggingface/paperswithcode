@@ -13,7 +13,6 @@ from backend.utils.pdf_utils import temp_pdf_download
 
 async def test_real_pdf_download():
     """Test downloading a real PDF from arXiv."""
-    # Using a small, well-known paper
     arxiv_id = "2410.00337"
 
     print(f"🔄 Testing PDF download for {arxiv_id}...")
@@ -22,11 +21,9 @@ async def test_real_pdf_download():
         async with temp_pdf_download(arxiv_id) as pdf_path:
             print(f"✅ PDF downloaded to: {pdf_path}")
 
-            # Verify the file exists and is readable
             with open(pdf_path, "rb") as f:
                 content = f.read()
 
-            # Verify it's actually a PDF
             assert content.startswith(b"%PDF-"), (
                 "File should start with PDF magic bytes"
             )
@@ -44,7 +41,7 @@ async def test_real_pdf_download():
 
 async def test_invalid_arxiv_id():
     """Test handling of invalid arXiv ID."""
-    arxiv_id = "9999.99999"  # Invalid ID
+    arxiv_id = "9999.99999"
 
     print(f"\n🔄 Testing invalid arXiv ID: {arxiv_id}...")
 
@@ -68,10 +65,8 @@ async def main():
     """Run all integration tests."""
     print("🧪 Running PDF download integration tests...\n")
 
-    # Test 1: Real PDF download
     await test_real_pdf_download()
 
-    # Test 2: Invalid arXiv ID
     await test_invalid_arxiv_id()
 
     print("\n✅ All integration tests completed!")

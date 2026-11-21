@@ -46,14 +46,11 @@ class LeaderboardEntry:
     """One official leaderboard row, already on the board's metric scale."""
 
     name: str
-    # A Decimal keeps the precision the board publishes (65.40, not 65.4).
     value: float | Decimal
     detail: str
     harness: str | None = None
     lab: str = ""
-    # Where this entry's result is reported, when not the board page itself.
     source_url: str | None = None
-    # When the board added this entry; otherwise the day the sync creates it.
     evaluated_on: date | None = None
 
     @property
@@ -78,15 +75,9 @@ class LiveLeaderboard:
     metric: str
     identities: dict[str, ModelIdentity]
     min_selected: int
-    # Board-wide evaluation setup appended to every managed head.
     protocol: str = ""
-    # Appended to every catalog model name on the board, e.g. " (no tools)".
     model_name_suffix: str = ""
-    # Upstream names the board deliberately leaves out, with the reason.
     excluded: dict[str, str] = field(default_factory=dict)
-    # Whether a hand-imported row for the same paper and model name becomes
-    # managed. Off for third-party reruns that must sit beside self-reported
-    # rows instead of overwriting them.
     adopt_unmanaged: bool = True
 
     @property
@@ -99,7 +90,6 @@ class LiveLeaderboard:
         protocol = f" {re.escape(self.protocol)}" if self.protocol else ""
         return re.compile(
             f"{re.escape(self.managed_prefix)} Official leaderboard entry "
-            # Physics-IQ Verified heads before 2026-11-09 end "reported at".
             rf".*?, (?:listed|reported) at \S+\.{protocol}(?: (?P<notes>.*))?$",
             re.DOTALL,
         )
@@ -113,9 +103,7 @@ class LiveSyncStats:
     created: int = 0
     changed: int = 0
     adopted: int = 0
-    # Names outside the reviewed map that the catalog matched on its own.
     auto_matched: list[str] = field(default_factory=list)
-    # Names with no paper yet; each is a release signal for the radar.
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
     missing_upstream: list[str] = field(default_factory=list)
@@ -234,8 +222,6 @@ class LiveLeaderboardSyncService:
         fetched = len(entries)
         entries = [e for e in entries if e.name not in board.excluded]
         reviewed = [e for e in entries if e.name in board.identities]
-        # Several labels (settings, prompt variants) can name one model, so
-        # the floor counts the distinct models the board would publish.
         reviewed_models = {
             (
                 board.identities[e.name].paper_key,
@@ -269,7 +255,6 @@ class LiveLeaderboardSyncService:
             matched = matcher.match(
                 [LeaderboardModel(e.name, e.lab) for e in new_entries]
             )
-            # (paper id, catalog model name, is_open, HF model URL, entry)
             selected = []
             for entry in reviewed:
                 identity = board.identities[entry.name]
@@ -303,8 +288,6 @@ class LiveLeaderboardSyncService:
                     if e.name not in matched
                 ]
             )
-            # Several upstream rows (reasoning settings, providers) can name
-            # one catalog model; the board keeps that model's best row.
             best: dict[tuple[int, str, str | None], tuple] = {}
             for item in selected:
                 paper_id, model_name, _, _, entry = item
@@ -349,7 +332,6 @@ class LiveLeaderboardSyncService:
                 hf_model_url,
                 entry,
             ) in best.items():
-                # A hand-imported row may record the harness as "Not reported".
                 row = rows_by_identity.get(key)
                 if row is None and board.adopt_unmanaged:
                     fallback = unmanaged_by_model.get((paper_id, model_name))
@@ -369,7 +351,6 @@ class LiveLeaderboardSyncService:
                         source_url=source_url,
                         external=True,
                         uses_additional_data=False,
-                        # The leaderboard's year column reads this date.
                         evaluated_on=entry.evaluated_on or now.date(),
                     )
                     self.db.add(row)
@@ -377,8 +358,6 @@ class LiveLeaderboardSyncService:
                     stats.created += 1
                     notes, managed = "", False
                 elif not (row.methodology or "").startswith(board.managed_prefix):
-                    # A hand-imported row for the same model becomes managed;
-                    # its reviewer methodology stays as notes beneath the head.
                     notes, managed = (row.methodology or "").strip(), False
                     row.external_source_url = source_url
                     row.source_url = source_url
@@ -392,13 +371,10 @@ class LiveLeaderboardSyncService:
                     if isinstance(entry.value, Decimal)
                     else Decimal(str(entry.value))
                 )
-                # A reviewer may have stored the unrounded value (48.23) the
-                # board lists at lower precision (48.2); that is not a revision.
                 value = stored if score_matches(stored, listed) else float(entry.value)
                 methodology = self._methodology(entry, notes)
                 if managed and (stored, row.methodology) != (value, methodology):
                     stats.changed += 1
-                # Other metrics a hand-imported row carries stay untouched.
                 row.metrics = {**(row.metrics or {}), board.metric: value}
                 row.methodology = methodology
                 row.best_metric = board.metric

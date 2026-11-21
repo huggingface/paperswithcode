@@ -81,8 +81,6 @@ class CurationOrganizationService:
     @property
     def hf_client(self) -> HFOrganizationClient:
         if self._hf_client is None:
-            # Lookups run inside the curator's apply request; fail fast and
-            # skip the organization rather than wait out long rate limits.
             self._hf_client = HFOrganizationClient(attempts=2)
         return self._hf_client
 
@@ -137,9 +135,6 @@ class CurationOrganizationService:
                 {"name": proposal.name, "hf_slug": proposal.hf_slug, "reason": reason}
             )
 
-        # Settle on the canonical HF handle before consulting the catalog, which
-        # already holds a few look-alike rows (for example a second "Stanford
-        # University" under a squatted handle).
         try:
             profile = self.hf_client.fetch_profile(proposal.hf_slug)
             if profile is not None:
@@ -170,13 +165,9 @@ class CurationOrganizationService:
             skip("hf_organization_not_established")
             return None
 
-        # Only a row without a handle can be this org's catalog entry: one with
-        # another handle is a look-alike or a different, same-named org.
         handleless = self._handleless_by_name(profile.name)
         if handleless is not None:
             self.apply_profile(handleless, profile)
-            # Sessions run without autoflush; persist the handle so a later
-            # proposal in this call no longer sees the row as handleless.
             self.db.flush()
             return handleless
 
@@ -260,7 +251,6 @@ class CurationOrganizationService:
                 organization.logo_sha256 = hashlib.sha256(logo_data).hexdigest()
 
     def _by_hf_slug(self, hf_slug: str) -> Organization | None:
-        # A featured organization's alias handle resolves to its canonical row.
         featured = featured_for_hf_handle(hf_slug)
         if featured is not None:
             hf_slug = featured.hf_slug

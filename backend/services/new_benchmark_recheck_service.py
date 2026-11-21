@@ -47,20 +47,13 @@ logger = logging.getLogger(__name__)
 
 TRIGGER = "benchmark-promotion"
 PRIORITY = 50
-# One popular benchmark must not flood the admin lane, which dispatches ahead
-# of daily curation; the dispatcher also caps this lane's active jobs.
 MAX_PER_BENCHMARK = 5
 MAX_PER_RUN = 20
-# Newest sibling-board papers scanned per benchmark, and stored Markdown
-# reads per run (~1 s each).
 SCAN_PER_BENCHMARK = 50
 MAX_TEXT_READS = 400
 MARKDOWN_MAX_BYTES = 400_000
-# A full paper names a benchmark once in related work; ask for a second
-# mention. An abstract that names it at all is enough.
 MIN_MARKDOWN_MENTIONS = 2
 _ACTIVE = ("queued", "dispatching", "running")
-# Failed or canceled re-checks free their paper and their slot in the cap.
 _HELD = (*_ACTIVE, "completed")
 _REFERENCES = re.compile(
     r"^(#{1,6})\s*(?:\d+\.?\s*)?(references|bibliography)\s*$", re.I
@@ -92,9 +85,7 @@ class NewBenchmark:
     dataset: Dataset
     task_ids: list[int]
     created_at: datetime
-    # Evals on any of these mean the paper already reports the benchmark.
     family_ids: set[int] = field(default_factory=set)
-    # Mentions of these count: the dataset, its parent, and its splits.
     match_ids: set[int] = field(default_factory=set)
 
 
@@ -184,8 +175,6 @@ class NewBenchmarkRecheckService:
                 Evaluation.paper_id.in_(paper_ids),
             )
         }
-        # Skip papers with add-evals in flight, already checked after the
-        # board existed, or already queued by this mechanism for it.
         checked = {
             row.paper_id
             for row in self.db.query(PaperCurationJob.paper_id).filter(
@@ -236,8 +225,6 @@ class NewBenchmarkRecheckService:
         text_value, from_markdown = self._texts[paper.id]
         heads = {tokens[0] for tokens in index.surfaces}
         count = 0
-        # The matcher is slow over a whole paper; run it only on the lines
-        # that could hold a mention.
         for line in text_value.splitlines():
             lowered = line.lower()
             if not any(head in lowered for head in heads):
@@ -262,7 +249,6 @@ class NewBenchmarkRecheckService:
             if len(queued) >= MAX_PER_RUN:
                 unscanned.append(benchmark.dataset.id)
                 continue
-            # The cap holds across runs: earlier runs' jobs count against it.
             budget = MAX_PER_BENCHMARK - self._queued_before(benchmark)
             if budget <= 0:
                 continue
@@ -277,8 +263,6 @@ class NewBenchmarkRecheckService:
                     hits.append((count, paper))
             if not complete:
                 unscanned.append(benchmark.dataset.id)
-            # One add-evals run reads the whole paper, so it also covers every
-            # other new board the paper mentions.
             queued_papers = {item["paper_id"] for item in queued}
             hits = [hit for hit in hits if hit[1].id not in queued_papers]
             hits.sort(key=lambda hit: (-hit[0], -hit[1].id))
@@ -367,7 +351,7 @@ class NewBenchmarkRecheckService:
         except (PaperMarkdownStorageError, HfHubHTTPError) as error:
             logger.warning("Markdown storage failed for paper %s: %s", paper.id, error)
             return None
-        except ValueError as error:  # not converted yet, or not readable
+        except ValueError as error:
             logger.info("No stored Markdown for paper %s: %s", paper.id, error)
             return paper.abstract or "", False
         return markdown, True

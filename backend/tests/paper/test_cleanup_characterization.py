@@ -394,7 +394,6 @@ def test_card_relations_link_displayed_authors_and_exclude_detail_projection():
     assert detail.predecessor_papers[1][0].title == "Predecessor"
     assert detail.successor_papers[1][0].title == "Successor"
     assert detail.conferences[1].slug == "icml-2026"
-    # Details always carry a list; [] tells the page to generate on demand.
     assert detail.suggested_questions == {1: []}
 
 
@@ -419,8 +418,6 @@ def test_card_author_links_cover_only_the_displayed_authors():
     assert len(detail.author_links[1]) == 5
 
 
-# Fields declared by the frontend's public `Paper` interface and read by its
-# feed cards, paper preview, paper detail, saved-paper, and chat surfaces.
 FRONTEND_PAPER_FIELDS = {
     "id",
     "arxiv_id",

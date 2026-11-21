@@ -66,14 +66,7 @@ class DatabaseManager:
     def engine(self) -> Engine:
         """Get the SQLAlchemy engine."""
         if self._engine is None:
-            # JIT compiles any plan whose estimated cost passes jit_above_cost.
-            # Catalog queries finish in tens of milliseconds, yet compilation
-            # took ~0.5 s per affected request, so application connections skip it.
             options = f"-c search_path={self.settings.db_search_path} -c jit=off"
-            # The staging role defaults to read-only for every ad hoc login.
-            # The application explicitly opts its connections into read/write
-            # transactions; PostgreSQL privileges still limit those writes to
-            # the staging-owned schema.
             if self.settings.environment == "staging":
                 options += " -c default_transaction_read_only=off"
             pool_configuration = database_pool_configuration(self.settings)
@@ -81,19 +74,12 @@ class DatabaseManager:
                 self.settings.database_url,
                 connect_args={"options": options},
                 poolclass=QueuePool,
-                # Production stays conservative because it shares Postgres with
-                # CRON jobs. Staging is sized for the isolated 32-turn durability
-                # qualification. Divide that aggregate budget across Uvicorn
-                # workers so scaling the web tier cannot multiply connections.
                 pool_size=pool_configuration["pool_size"],
                 max_overflow=pool_configuration["max_overflow"],
-                # Under burst traffic, fail DB checkout quickly so requests
-                # release worker threads instead of sitting behind Cloudflare's
-                # timeout window.
                 pool_timeout=pool_configuration["pool_timeout"],
                 pool_pre_ping=True,
                 pool_recycle=300,
-                echo=self.settings.is_development,  # Log SQL queries in development
+                echo=self.settings.is_development,
             )
         return self._engine
 
@@ -135,7 +121,6 @@ class DatabaseManager:
             session.close()
 
 
-# Global database manager instance
 db_manager = DatabaseManager()
 
 
@@ -166,9 +151,6 @@ def create_tables():
 def drop_tables(confirm_database: str | None = None):
     """Drop all tables; ``confirm_database`` must name a disposable DB."""
     db_manager.drop_tables(confirm_database)
-
-
-# Utility functions for testing and development
 
 
 def reset_database(confirm_database: str | None = None):

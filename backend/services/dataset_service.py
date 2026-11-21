@@ -70,8 +70,6 @@ from backend.utils.slug_utils import slugify
 from backend.utils.task_hierarchy import collect_descendant_task_ids
 from backend.utils.task_slugs import task_slug_candidates
 
-# Separator unlikely to collide with real data, used to build the logical
-# leaderboard-row key (see `_leaderboard_row_count`).
 _ROW_KEY_SEP = "\x1f"
 _LIVING_EXTERNAL_WARNING_PREFIX = "Living external leaderboard:"
 
@@ -294,7 +292,6 @@ class DatasetService:
         if not dataset_ids:
             return {}
 
-        # Step 1: per dataset, find the metric carried by the most ranked rows.
         metric_counts = self.db.query(
             DBEvaluation.dataset_id,
             DBEvaluation.best_metric,
@@ -319,7 +316,6 @@ class DatasetService:
         if not primary_metric:
             return {}
 
-        # Step 2: fetch each dataset's best visible model for its primary metric.
         ranked_rows = (
             self.db.query(
                 DBEvaluation.dataset_id,
@@ -548,13 +544,6 @@ class DatasetService:
             )
 
         try:
-            # Base query with paper count and task count.
-            # `paper_count` here means leaderboard entry count: the number of
-            # *logical* leaderboard rows on this dataset, i.e. distinct
-            # (paper, task, dataset, model, harness) groups. This matches the
-            # row count the benchmark page renders after merging per-metric
-            # evaluation records, so a single model evaluated on four metrics
-            # counts as one entry, not four.
             task_dataset_filter = aliased(TaskDataset)
             scoped_task_ids: Optional[List[int]] = None
             if task_id is not None:
@@ -566,10 +555,6 @@ class DatasetService:
 
             eval_join = DBDataset.id == DBEvaluation.dataset_id
             if scoped_task_ids is not None:
-                # Same dataset can host separate leaderboards per task (e.g.
-                # supervised Video segmentation vs unsupervised VIS). When a task
-                # filter is active, count only evaluations on that task's
-                # leaderboard — not every row on the shared dataset.
                 eval_join = eval_join & DBEvaluation.task_id.in_(scoped_task_ids)
 
             query = (
@@ -583,7 +568,6 @@ class DatasetService:
                 .group_by(DBDataset.id)
             )
 
-            # Apply filters
             if _dataset_ids is not None:
                 query = query.filter(DBDataset.id.in_(_dataset_ids))
 
@@ -594,23 +578,12 @@ class DatasetService:
                 query = query.filter(DBDataset.full_name.ilike(f"%{full_name}%"))
 
             if scoped_task_ids is not None:
-                # Filter datasets by task association via task_datasets so display
-                # metadata stays independent from per-metric leaderboard triples.
-                # When `include_descendants` is true, expand the filter to all
-                # subtasks under `task_id` so a parent task page can roll up
-                # benchmarks from its child tasks (subtasks).
                 query = query.join(
                     task_dataset_filter,
                     DBDataset.id == task_dataset_filter.dataset_id,
                 ).filter(task_dataset_filter.task_id.in_(scoped_task_ids))
 
             if min_eval_count is not None and min_eval_count > 0:
-                # Hide sparse benchmarks. `paper_count` is the count of
-                # distinct logical leaderboard rows on a dataset, so a HAVING
-                # on the same aggregate suppresses low-signal benchmarks from
-                # default task-page lists without touching the underlying
-                # data or the dataset detail page (which loads benchmarks
-                # by slug directly, bypassing this filter).
                 query = query.having(
                     or_(
                         _leaderboard_row_count() >= min_eval_count,
@@ -618,12 +591,10 @@ class DatasetService:
                     )
                 )
 
-            # Get total count before pagination
             total_count = (
                 _count_override if _count_override is not None else query.count()
             )
 
-            # Apply ordering
             if order_by == "name":
                 order_field = DBDataset.name
             elif order_by == "full_name":
@@ -631,7 +602,6 @@ class DatasetService:
             elif order_by == "created_at":
                 order_field = DBDataset.created_at
             elif order_by == "paper_count":
-                # Order by the aggregated leaderboard entry count (logical rows).
                 order_field = _leaderboard_row_count()
             else:
                 order_field = DBDataset.name
@@ -653,31 +623,22 @@ class DatasetService:
             else:
                 query = query.order_by(order_clause)
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = query.offset(offset).limit(page_size).all()
 
             page_dataset_ids = [row[0].id for row in results]
 
-            # Best (rank 1) model per benchmark, only when task-scoped. The
-            # dataset index (no task filter) skips this so it stays untouched.
             best_results: dict = {}
             if scoped_task_ids is not None:
                 best_results = self._best_results_for_datasets(
                     page_dataset_ids, scoped_task_ids, is_open=is_open
                 )
 
-            # Batched harness-support lookup for the whole page in one query.
-            # When rolling up descendants, harness support belongs to the
-            # owning child task, not the requested parent, so drop the task
-            # scoping and reflect whether *any* leaderboard allows harness
-            # values.
             harness_task_id = None if include_descendants else task_id
             supports_harness_map = self._supports_harness_for_datasets(
                 page_dataset_ids, harness_task_id
             )
 
-            # Convert to API models
             dataset_list = []
             for row in results:
                 db_dataset, paper_count, task_count = row[:3]
@@ -691,39 +652,31 @@ class DatasetService:
                     "description": db_dataset.description,
                     "url": db_dataset.url,
                     "hf_url": db_dataset.hf_url,
-                    # PWC enriched fields
                     "short_description": db_dataset.short_description,
                     "homepage": db_dataset.homepage,
-                    # Hierarchy and variant fields
                     "parent_dataset_id": str(db_dataset.parent_dataset_id)
                     if db_dataset.parent_dataset_id
                     else None,
                     "variant_type": db_dataset.variant_type,
                     "split_name": db_dataset.split_name,
-                    # Images
                     "image_url": db_dataset.image_url,
                     "thumbnail_url": db_dataset.thumbnail_url,
                     "verified_image_url": db_dataset.verified_image_url,
-                    # Paper reference
                     "introducing_paper_id": str(db_dataset.introducing_paper_id)
                     if db_dataset.introducing_paper_id
                     else None,
                     "introducing_paper_title": db_dataset.introducing_paper_title,
                     "paper_url": db_dataset.paper_url,
-                    # Licensing
                     "license_name": db_dataset.license_name,
                     "license_url": db_dataset.license_url,
-                    # Dates
                     "introduced_year": db_dataset.introduced_year,
                     "introduced_date": db_dataset.introduced_date,
-                    # Metadata
                     "modalities": db_dataset.modalities,
                     "languages": db_dataset.languages,
                     "variants": db_dataset.variants,
                     "num_papers": db_dataset.num_papers,
                     "warning": db_dataset.warning,
                     "pwc_url": db_dataset.pwc_url,
-                    # Legacy counts
                     "paper_count": paper_count,
                     "task_count": task_count,
                     "supports_harness": supports_harness,
@@ -734,7 +687,6 @@ class DatasetService:
                 }
                 dataset_list.append(Dataset(**dataset_dict))
 
-            # Calculate pagination
             total_pages = (total_count + page_size - 1) // page_size
             next_page = page + 1 if page < total_pages else None
             previous_page = page - 1 if page > 1 else None
@@ -972,7 +924,6 @@ class DatasetService:
             CatalogPersistenceError: If database query fails
         """
         try:
-            # Get distinct task IDs from task_datasets
             task_ids = (
                 self.db.query(TaskDataset.task_id)
                 .filter(TaskDataset.dataset_id == dataset_id)
@@ -1251,17 +1202,14 @@ class DatasetService:
             CatalogNotFoundError: If a requested task does not exist
         """
         try:
-            # Generate slug from name
             slug = slugify(request.name)
 
-            # Check if slug already exists
             existing_dataset = (
                 self.db.query(DBDataset).filter(DBDataset.slug == slug).first()
             )
             if existing_dataset:
                 raise CatalogConflictError(f"Dataset with slug '{slug}' already exists")
 
-            # Validate that all task IDs exist
             existing_task_ids = set(
                 self.db.query(DBTask.id).filter(DBTask.id.in_(request.task_ids)).all()
             )
@@ -1273,7 +1221,6 @@ class DatasetService:
                     f"Task IDs not found: {sorted(missing_task_ids)}"
                 )
 
-            # Create the dataset
             db_dataset = DBDataset(
                 name=request.name,
                 slug=slug,
@@ -1282,7 +1229,6 @@ class DatasetService:
                 url=request.url,
                 hf_url=request.hf_url,
                 paper_url=request.paper_url,
-                # Additional PWC fields
                 short_description=request.short_description,
                 homepage=request.homepage,
                 image_url=request.image_url,
@@ -1305,12 +1251,6 @@ class DatasetService:
             else:
                 self.db.flush()
 
-            # Note: Task-dataset relationships are now defined via TASK_DATASET_METRICS.
-            # If task_ids were provided in the request, use the leaderboard metrics API
-            # (/api/v1/datasets/{dataset_id}/tasks/{task_id}/metrics) to define metrics
-            # for each task-dataset pair.
-
-            # Return the created dataset using the existing get_dataset method
             return self.get_dataset(db_dataset.id)
 
         except CatalogError:
@@ -1336,17 +1276,14 @@ class DatasetService:
             CatalogNotFoundError: If the dataset does not exist
         """
         try:
-            # Get the existing dataset
             db_dataset = (
                 self.db.query(DBDataset).filter(DBDataset.id == dataset_id).first()
             )
             if not db_dataset:
                 raise CatalogNotFoundError(f"Dataset with ID {dataset_id} not found")
 
-            # Update only provided fields
             if request.name is not None:
                 db_dataset.name = request.name
-                # Regenerate slug if name changes
                 db_dataset.slug = slugify(request.name)
 
             if request.full_name is not None:
@@ -1364,7 +1301,6 @@ class DatasetService:
             if request.paper_url is not None:
                 db_dataset.paper_url = request.paper_url
 
-            # Additional PWC fields
             if request.short_description is not None:
                 db_dataset.short_description = request.short_description
 
@@ -1409,7 +1345,6 @@ class DatasetService:
 
             self.db.commit()
 
-            # Return the updated dataset using the existing get_dataset method
             return self.get_dataset(db_dataset.id)
 
         except CatalogError:

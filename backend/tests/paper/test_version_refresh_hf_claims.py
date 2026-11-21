@@ -56,7 +56,6 @@ def _session(tmp_path, author_name: str):
         Metric,
     )
     Base.metadata.create_all(bind=engine, tables=[m.__table__ for m in models])
-    # Like production sessions, which never autoflush.
     db = sessionmaker(bind=engine, autoflush=False)()
     db.add_all(
         [
@@ -125,7 +124,6 @@ def _refresh_links(db):
 def test_refresh_keeps_a_claim_under_the_authors_former_name(
     monkeypatch, tmp_path
 ) -> None:
-    # Ada's row took her new HF full name; arXiv still prints the former one.
     db = _session(tmp_path, "Ada King")
     fetched = []
 

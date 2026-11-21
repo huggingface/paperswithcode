@@ -523,7 +523,14 @@ active release, and keeps insufficient pre-soak samples distinct from failures.
 Model discovery is defined in `backend/chat_configuration/registry.py`.
 Production exposes GPT-6 Luna through the direct OpenAI route plus the
 HF-org-funded DeepSeek V4.1 Flash when `PWC_CHAT_SPONSORED_DEEPSEEK_ENABLED` is
-set; GLM-5.3-Flash is hidden and its sessions continue on Luna. Staging
+set; GLM-5.3-Flash is hidden and its sessions continue on Luna.
+`PWC_CHAT_PROVIDER_FAILOVER_ENABLED` makes the same sponsored route a hidden
+fallback for Luna: when direct OpenAI fails before a turn shows any output, the
+external Pi worker replays that turn once on DeepSeek from the transcript
+position before the prompt, and the answer records the DeepSeek model. Sessions
+with uploaded files are not eligible. The flag needs the huggingface-billed title
+credential but not `PWC_CHAT_SPONSORED_DEEPSEEK_ENABLED`, so the model can stay
+out of the picker. Staging
 defaults to direct GPT-6 Luna when the direct route is enabled and also exposes
 DeepSeek V4 Flash under one stable public model ID plus comparison models.
 `PWC_CHAT_DEEPSEEK_V4_FLASH_PROVIDER` selects the user-funded Hugging Face

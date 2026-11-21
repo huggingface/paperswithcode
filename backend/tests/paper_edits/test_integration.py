@@ -384,7 +384,7 @@ def test_http_browser_consent_and_scoped_bearer_flow(db, monkeypatch):
                 ).status_code
                 == 401
             )
-        assert browser.post(path).status_code == 403  # no same-origin header
+        assert browser.post(path).status_code == 403
         assert (
             browser.post(
                 path, headers={"Origin": "https://paperswithcode.co"}
@@ -617,7 +617,6 @@ def test_legacy_batch_rollback_preserves_unrecorded_organization_links(db):
     service = PaperEditService(db)
     result = service.submit(document(db), ACTOR, "legacy")
     event = db.get(CatalogMutationEvent, uuid.UUID(result["event_id"]))
-    # Reproduce pre-organization event snapshots in this isolated test database.
     for attr in ("before_snapshot", "after_snapshot"):
         snapshot = getattr(event, attr)
         setattr(

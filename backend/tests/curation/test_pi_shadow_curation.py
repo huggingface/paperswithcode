@@ -93,9 +93,6 @@ def _job(**overrides):
     return SimpleNamespace(**values)
 
 
-# Sampling and dispatch
-
-
 def test_sampling_is_off_by_default_and_stable_per_paper():
     row = _codex_row()
     assert get_settings().curation_pi_shadow_sample_rate == 0
@@ -109,7 +106,6 @@ def test_sampling_is_off_by_default_and_stable_per_paper():
         )
         for paper_id in range(400)
     }
-    # Both stages of one paper get the same decision.
     assert all(
         CodexPaperJobService._pi_shadow_sampled(
             half, _codex_row(paper_id=paper_id, kind="add-evals")
@@ -207,7 +203,6 @@ def test_pairing_freezes_the_codex_context_and_launches_a_pi_job(monkeypatch):
     assert row.model == "deepseek-ai/DeepSeek-V4.1-Flash-1017"
     assert row.reasoning_effort == "medium"
     assert row.codex_cli_version == "pi@1.3.0"
-    # The snapshot is JSON-ready and holds no job-specific state.
     assert row.context_snapshot == {
         "source_candidate": None,
         "paper": {"id": 42, "date_published": "2026-01-02"},
@@ -324,9 +319,6 @@ def test_codex_jobs_keep_their_openai_launch(monkeypatch):
     assert call["labels"]["runner"] == "codex"
 
 
-# Frozen context and shadow validation
-
-
 def test_pi_job_is_served_its_frozen_context():
     snapshot = {"paper": {"id": 42, "tasks": []}, "source_candidate": None}
     row = _codex_row(runner="pi", trigger=PI_SHADOW_TRIGGER, context_snapshot=snapshot)
@@ -357,7 +349,6 @@ class _Rows:
         return self
 
     def filter(self, *criteria):
-        # Task/Method id lookups: every proposed id exists in the catalog.
         values = [
             getattr(getattr(criterion, "right", None), "value", None)
             for criterion in criteria
@@ -420,7 +411,6 @@ def test_pi_enrichment_is_validated_on_its_snapshot_not_on_codex_writes():
     assert rebased.enrich.task_ids == [3, 5, 9]
     assert rebased.enrich.method_ids == [12]
     assert body.enrich.task_ids == [3, 5]
-    # The pre-apply trace holds Pi's own proposal, so compare against that.
     policy = callback_module.CodexCurationCallbackService._validate_scheduled_policy
     with pytest.raises(ValueError, match="cannot remove manual task links"):
         policy(service, row, body)
@@ -433,9 +423,6 @@ def test_codex_proposals_are_not_rebased():
     service = CodexCurationCallbackService(_LiveCatalog(), association_service=object())
 
     assert service.shadow_validation_body(_codex_row(), body) is body
-
-
-# Pair diff
 
 
 def test_enrich_pair_diff_compares_additions_over_the_snapshot():
@@ -481,7 +468,6 @@ def test_enrich_pair_diff_compares_additions_over_the_snapshot():
         "codex_only": [2],
         "pi_only": [4],
     }
-    # Pi left method_ids out, which keeps the current value: no additions.
     assert diff["enrich"]["method_ids"] == {
         "both": [],
         "codex_only": [7],
@@ -578,9 +564,6 @@ def test_unpaired_codex_stages_skip_the_partner_lookup():
     )
 
 
-# Configuration
-
-
 def test_enabled_pi_shadow_requires_a_separate_token_and_pinned_image():
     base = _pi_settings(
         environment="production",
@@ -600,9 +583,6 @@ def test_enabled_pi_shadow_requires_a_separate_token_and_pinned_image():
             validate_codex_jobs_configuration(base.model_copy(update=overrides))
 
 
-# Runner
-
-
 @pytest.fixture
 def pi_runner(monkeypatch):
     monkeypatch.setenv("PWC_CURATION_API_URL", "https://paperswithcode.co/api/v1")
@@ -612,7 +592,6 @@ def pi_runner(monkeypatch):
     monkeypatch.setenv("PWC_GIT_SHA", "a" * 40)
     monkeypatch.setenv("PWC_CURATION_MODEL", "deepseek-ai/DeepSeek-V4.1-Flash-1017")
     monkeypatch.setenv("PWC_CURATION_PI_PROVIDER", "novita")
-    # The image ships both runners side by side in /runner.
     monkeypatch.syspath_prepend(str(Path("jobs").resolve()))
     for name in ("run_paper_curation", "run_pi_curation"):
         sys.modules.pop(name, None)
@@ -679,9 +658,6 @@ def test_pi_dockerfile_pins_both_runner_files():
     assert "@earendil-works/pi-coding-agent@${PI_CLI_VERSION}" in dockerfile
     assert "ARG PI_CLI_VERSION=1.3.0" in dockerfile
     assert get_settings().curation_pi_cli_version == "1.3.0"
-
-
-# Callback routes
 
 
 def test_pi_apply_stays_shadow_even_with_direct_apply_enabled(monkeypatch):
@@ -800,7 +776,6 @@ def test_codex_completion_locks_and_rereads_its_pi_pair():
             return Query()
 
         def refresh(self, row, *, with_for_update):
-            # A concurrent Pi completion committed while this one waited.
             refreshed.append(with_for_update)
             row.status = "completed"
 

@@ -73,7 +73,7 @@ interface CodexPaperJobDialogProps {
   onComplete: () => void;
 }
 
-function CodexJobReport({ report }: { report: string }) {
+export function CodexJobReport({ report }: { report: string }) {
   return (
     <div className="min-w-0 max-h-[50vh] overflow-y-auto overflow-x-hidden rounded-md border bg-muted/40 p-4 text-sm leading-relaxed">
       <ReactMarkdown

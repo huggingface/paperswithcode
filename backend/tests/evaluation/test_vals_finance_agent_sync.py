@@ -53,10 +53,8 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# The leaderboard table from https://www.vals.ai/benchmarks/fabv2, 2026-10-16.
 HTML = (Path(__file__).parent / "fixtures" / "vals_finance_agent_v2.html").read_text()
 
-# The 69 rows hand-imported on 2026-10-14: model_name -> stored accuracy.
 PRODUCTION_ROWS = {
     "Gemini 4 Argon": 65.4,
     "Gemini 3.8 Flash": 61.44,
@@ -252,8 +250,6 @@ def test_parser_ignores_relabelled_trailing_columns():
 
 
 def test_parser_picks_leaderboard_next_to_sample_answer_tables():
-    # Since 2026-11-02 the page also renders a sample answer whose Markdown
-    # contains a second table; the leaderboard must still be chosen by header.
     current = (
         Path(__file__).parent / "fixtures" / "vals_finance_agent_v2_2026-11-06.html"
     ).read_text()
@@ -308,7 +304,7 @@ def test_first_run_adopts_creates_and_keeps_reviewer_notes():
     assert stats.fetched == 78
     assert stats.matched == 78
     assert stats.adopted == 69
-    assert stats.created == 9  # Muse Spark 1.3 and the eight newly indexed models
+    assert stats.created == 9
     assert stats.unreviewed == []
     assert stats.missing_papers == [] and stats.missing_upstream == []
     rows = _rows(session)
@@ -337,7 +333,6 @@ def test_rows_written_by_the_former_vals_service_are_unchanged():
     entries = parse_vals_finance_agent(HTML)
     _sync(session, entries)
     row = _rows(session)["Gemini 4 Argon"]
-    # The head the dedicated Finance Agent service wrote, with reviewer notes.
     legacy = (
         "Managed by the Papers with Code Vals AI Finance Agent v2 live sync. "
         'Official leaderboard entry "Gemini 4 Argon": 65.40% Accuracy, listed '

@@ -33,13 +33,9 @@ from backend.services.model_release_identity_service import ModelReleaseIdentity
 from backend.services.paper_ingestion_service import PaperIngestionService
 
 API_ENDPOINT = "https://artificialanalysis.ai/api/v2/language/models/free"
-# The free Data API key allows 100 requests per day and a full fetch costs one
-# request per 200-model page. The every-two-hours sync and the three-hourly
-# release radar share that budget.
 SOURCE_URL_PREFIX = "https://artificialanalysis.ai/models/"
 METRIC_NAME = "Score"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Artificial Analysis")
-# "Claude Opus 5.5 (Max, Default Fallback)" names the base model "Claude Opus 5.5".
 _SETTINGS_SUFFIX = re.compile(r"\s*\([^()]*\)\s*$")
 
 
@@ -47,8 +43,6 @@ def _identity_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
-# Reviewed upstream renames. Only previously managed rows may carry their
-# existing paper binding across these exact slug changes.
 MODEL_SLUG_RENAMES = {
     "k2-4b-ph1": "k2-horizon-3-7b",
     "k2-7b-ph2": "k2-horizon-7b",
@@ -75,7 +69,6 @@ INDEXES: tuple[ArtificialAnalysisIndex, ...] = (
         dataset_slug="artificial-analysis-intelligence-index",
         task_slug="language-modeling",
         label="Intelligence Index",
-        # Index v5 (2026-10-27) re-scored only 77 models.
         min_expected_models=50,
         max_expected_models=1_000,
     ),
@@ -96,7 +89,6 @@ DATASET_SLUG = INTELLIGENCE_INDEX.dataset_slug
 TASK_SLUG = INTELLIGENCE_INDEX.task_slug
 MIN_EXPECTED_MODELS = INTELLIGENCE_INDEX.min_expected_models
 MAX_EXPECTED_MODELS = INTELLIGENCE_INDEX.max_expected_models
-# Refuse a response that drops more than a quarter of the reviewed models.
 MAX_MISSING_REVIEWED_DIVISOR = 4
 
 
@@ -126,9 +118,6 @@ def external(source_url: str, title: str, published: str, *, is_open: bool = Fal
     )
 
 
-# Exact, reviewed links for the model variants plotted on the Artificial
-# Analysis homepage chart. Upstream additions remain unmatched until their
-# canonical technical report or official release page has been reviewed.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "a-x-k2": external(
         "https://github.com/SKT-AI/A.X-K2/blob/main/A_X_K2_Tech_Report.pdf",
@@ -233,12 +222,7 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         is_open=True,
     ),
     "motif-3": PaperIdentity(arxiv_id="2608.09119", is_open=True),
-    "muse-glimmer": external(
-        "https://huggingface.co/meta-models/Muse-Glimmer-30B",
-        "Muse Glimmer-30B",
-        "2026-08-09",
-        is_open=True,
-    ),
+    "muse-glimmer": PaperIdentity(arxiv_id="2610.24628", is_open=True),
     "muse-spark-1-2": external(
         "https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/",
         "Introducing Muse Spark 1.1",
@@ -254,7 +238,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "Muse Wonder: A Frontier Model For Personal & Professional AI Agents",
         "2026-10-12",
     ),
-    # The Nemotron 3.5 Super and Lightning tech report introduces Lightning.
     "nemotron-3-5-lightning": PaperIdentity(arxiv_id="2610.38095", is_open=True),
     "nvidia-nemotron-3-super-120b-a12b": PaperIdentity(
         arxiv_id="2512.20856", is_open=True
@@ -295,12 +278,9 @@ class ArtificialAnalysisEntry:
 class ArtificialAnalysisLeaderboard:
     index_version: str
     entries: list[ArtificialAnalysisEntry]
-    # Daily API budget left after this fetch, from the last page's headers.
     quota_remaining: str | None = None
     quota_limit: str | None = None
-    # Reviewed slugs Artificial Analysis no longer lists.
     missing_reviewed: list[str] = field(default_factory=list)
-    # Indexes with no scores at all; their rows are kept until scores return.
     withdrawn_indexes: list[str] = field(default_factory=list)
 
 
@@ -309,7 +289,6 @@ class ArtificialAnalysisDiscovery:
     papers: dict[str, int] = field(default_factory=dict)
     indexed_papers: list[str] = field(default_factory=list)
     would_index: list[str] = field(default_factory=list)
-    # Base models (not settings variants) that no catalog paper announces yet.
     unmatched: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -493,9 +472,7 @@ def fetch_artificial_analysis_leaderboard(
             )
         unique_entries[entry.slug] = entry
     all_entries = list(unique_entries.values())
-    # Listed-but-unscored models (deprecated or awaiting re-scoring) are present.
     missing = sorted(set(MODEL_PAPER_IDENTITIES) - listed_slugs)
-    # A few withdrawn models are normal; a large gap means a broken response.
     if len(missing) > len(MODEL_PAPER_IDENTITIES) // MAX_MISSING_REVIEWED_DIVISOR:
         raise ValueError(
             "Artificial Analysis is missing reviewed models: " + ",".join(missing)
@@ -504,7 +481,6 @@ def fetch_artificial_analysis_leaderboard(
     for index in INDEXES:
         scored = [entry.slug for entry in all_entries if index.key in entry.scores]
         if not scored:
-            # Artificial Analysis cleared the whole index (Agentic, 2026-10-29).
             withdrawn.append(index.key)
             continue
         if not index.min_expected_models <= len(scored) <= index.max_expected_models:
@@ -593,8 +569,6 @@ class ArtificialAnalysisPaperDiscoveryService:
                     if entry.slug not in result.papers
                 ],
             )
-            # Frontier API models have no Hub repo or release row, only the
-            # lab's launch page in the catalog.
             resolved_releases.update(
                 identity_service.bind_release_pages(
                     "artificial-analysis",
@@ -696,8 +670,6 @@ class ArtificialAnalysisSyncService:
                 if entry is not None:
                     replacement = rows_by_slug.get(renamed_slug)
                     if replacement is not None:
-                        # Retire only an owned duplicate of the same paper and
-                        # metric. Manual rows and conflicting bindings need review.
                         if (
                             (replacement.methodology or "").startswith(
                                 MANAGED_METHODOLOGY_PREFIX
@@ -711,8 +683,6 @@ class ArtificialAnalysisSyncService:
                     rows_by_slug[renamed_slug] = row
                     slug = renamed_slug
             if entry is None:
-                # The index version is the Intelligence Index's; a new version
-                # rescales every score, so unlisted older rows stop comparing.
                 if index is INTELLIGENCE_INDEX and _stale_index_version(
                     row.methodology, index, leaderboard.index_version
                 ):
@@ -723,7 +693,6 @@ class ArtificialAnalysisSyncService:
                 self.db.delete(row)
                 stats.retired += 1
             elif slug not in papers:
-                # Preserve the already curated paper binding for managed rows.
                 papers[slug] = row.paper_id
                 selected.append(entry)
         stats.selected = len(selected)
@@ -786,7 +755,6 @@ class ArtificialAnalysisSyncService:
             row.source_url = source_url
             row.external = True
             row.updated_at = now
-            # Several AA slugs can share a paper; the session does not autoflush.
             if (
                 paper_id not in tagged_paper_ids
                 and self.db.query(PaperTask)

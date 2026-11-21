@@ -60,8 +60,6 @@ def test_parse_language_table_reads_links_and_optional_rtfx():
 
 
 def test_parse_language_table_accepts_error_rate_column_and_badges():
-    # 2026-11-13: "Average WER" became "Average ER" and open-weights models
-    # gained a trailing badge span after the link.
     table = _table()
     table["headers"][2] = "Average ER ⬇️"
     table["data"][1][1] += ' <span title="Open weights">🤗</span>'
@@ -125,7 +123,6 @@ def _add_hindi_board(session):
             is_latest_version=True,
         )
     )
-    # English board rows give the language boards their papers.
     for paper_id, model_id in ((1, "org/model-a"), (3, "org/card-only")):
         session.add(
             Evaluation(

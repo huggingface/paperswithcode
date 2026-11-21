@@ -293,8 +293,6 @@ class PaperEditService:
             )
         }
         current = self.snapshot(int(event.entity_id), lock=lock, project_urls=urls)
-        # Older batches did not capture organizations. Their rollback must leave
-        # those associations alone and compare only the sections they recorded.
         current["sections"] = {
             key: current["sections"][key] for key in event.after_snapshot["sections"]
         }

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import inspect
 import hashlib
 import os
 import uuid
@@ -12,6 +13,7 @@ from threading import Event
 from types import SimpleNamespace
 
 import pytest
+from huggingface_hub import HfApi
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
@@ -142,6 +144,8 @@ def test_hf_dispatch_retries_with_bounded_exponential_backoff(monkeypatch):
         call["secrets"]["PWC_PAPER_MARKDOWN_HF_TOKEN"] == "test-hf" for call in calls
     )
     assert all(call["image"] == "example/image:sha" for call in calls)
+    assert all(call["name"] == f"pwc-enrich-paper-{row.id}" for call in calls)
+    assert "name" in inspect.signature(HfApi.run_job).parameters
 
 
 def test_space_image_revision_is_verified_and_mismatch_pauses_daily_dispatch(
@@ -315,7 +319,6 @@ def test_one_shot_dispatch_calls_only_the_selected_scheduled_row(monkeypatch, tr
     ("trigger", "active_triggers"),
     [
         ("hf-daily-cron", ["hf-trending-cron"]),
-        # The benchmark-gap lane has its own cap, separate from daily work.
         ("benchmark-gap-cron", ["benchmark-gap-cron", "benchmark-gap-cron"]),
     ],
 )

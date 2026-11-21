@@ -162,7 +162,6 @@ def test_concurrent_appends_at_cap_rotate_cleanly(tmp_path, monkeypatch):
     rotated = tmp_path / "csp.jsonl.1"
     monkeypatch.setattr(csp_report_service, "MAX_LOG_BYTES", 200)
     with ThreadPoolExecutor(8) as pool:
-        # list() re-raises any worker error, e.g. a vanished file mid-rotation.
         list(
             pool.map(
                 lambda i: append_csp_reports([{"directive": f"d{i}"}], log),
@@ -172,6 +171,5 @@ def test_concurrent_appends_at_cap_rotate_cleanly(tmp_path, monkeypatch):
     record_bytes = max(len(line) + 1 for line in log.read_text().splitlines())
     for path in (log, rotated):
         lines = path.read_text().splitlines()
-        # Whole, uninterleaved records, and no file grows past one append over cap.
         assert len({json.loads(line)["directive"] for line in lines}) == len(lines)
         assert path.stat().st_size < 200 + record_bytes

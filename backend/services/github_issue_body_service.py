@@ -491,8 +491,6 @@ def generate_github_issue_draft(
         try:
             github_repositories.append(normalize_repository_url(url))
         except ValueError:
-            # A paper can also have official GitLab/Bitbucket or malformed links.
-            # These are not GitHub outreach targets and do not invalidate its draft.
             continue
     repositories = tuple(dict.fromkeys(github_repositories))
 

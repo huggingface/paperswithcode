@@ -75,9 +75,9 @@ def test_classify_win_rejects_closed_or_beaten_entries():
         [(1, 30, "Closed", 95.0), (2, 10, "Mine", 90.0), (3, 20, "Open", 91.0)],
         open_ids={3},
     )
-    assert classify_win(b, 10, ALL) is None  # mine is closed
+    assert classify_win(b, 10, ALL) is None
     b.open_ids = {2, 3}
-    assert classify_win(b, 10, ALL) is None  # another open model is better
+    assert classify_win(b, 10, ALL) is None
     assert classify_win(board([(1, 10, "Only", 1.0)], open_ids={1}), 10, ALL) is None
 
 
@@ -131,9 +131,9 @@ def test_gather_adds_roundups_only_early_in_the_period(monkeypatch):
         or Candidate(f"top_papers_{period}", "k", "d", "l"),
     )
     kinds = [c.kind for c in service.gather(None, now=datetime(2026, 6, 1, tzinfo=UTC))]
-    assert kinds == ["top_papers_month", "top_papers_week"]  # Monday the 1st
+    assert kinds == ["top_papers_month", "top_papers_week"]
     calls.clear()
-    assert service.gather(None, now=datetime(2026, 6, 11, tzinfo=UTC)) == []  # Thursday
+    assert service.gather(None, now=datetime(2026, 6, 11, tzinfo=UTC)) == []
     assert calls == []
 
 
@@ -176,7 +176,6 @@ def _rows(models, values):
 @pytest.mark.parametrize(
     ("name", "models", "values", "lower", "reason"),
     [
-        # Small new frontier board: posts well (OfficeQA Pro, SLE).
         (
             "OfficeQA Pro",
             ["Sage S2.1 Flash", "Claude Opus 5.5", "x"],
@@ -184,7 +183,6 @@ def _rows(models, values):
             False,
             None,
         ),
-        # Tiny board without a frontier model: stale or obscure.
         (
             "TempCompass (MCQ)",
             ["MetaEncoder v1", "STEER-4B", "y"],
@@ -192,7 +190,6 @@ def _rows(models, values):
             False,
             "small_without_frontier",
         ),
-        # Vision boards never list a frontier LLM; 14 rows is enough (pi^4 on Sintel).
         (
             "Sintel",
             [f"m{i}" for i in range(14)],
@@ -200,7 +197,6 @@ def _rows(models, values):
             True,
             None,
         ),
-        # Big boards need no frontier model (robotics, TTS).
         (
             "Open TTS Leaderboard",
             [f"m{i}" for i in range(25)],
@@ -236,7 +232,6 @@ def _rows(models, values):
             False,
             "saturated",
         ),
-        # Lower is better: a WER of 98 is not saturation.
         (
             "Odd WER board",
             [f"m{i}" for i in range(30)],
@@ -340,7 +335,7 @@ def test_placement_counts_open_papers_ahead_and_the_best_closed():
     assert place["overall_rank"] == 3
     assert place["best_closed_model"] == "GPT-6"
     assert place["ahead_of_best_closed"] is False
-    assert placement(b, 10) is None  # closed entries never place
+    assert placement(b, 10) is None
     assert placement(b, 30, eligible={4})["model"] == "Mine 7B"
 
 

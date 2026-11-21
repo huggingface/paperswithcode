@@ -105,8 +105,6 @@ def task_dataset_fixture(db_session):
     ]
     db_session.add_all(metrics)
 
-    # Dataset 3 has two metrics for the same task-dataset pair. The task-filtered
-    # dataset query should still return it once.
     db_session.add_all(
         [
             TaskDatasetMetric(task_id=1, dataset_id=2, metric_id=1),
@@ -221,8 +219,6 @@ def test_paper_count_merges_per_metric_evaluation_rows(db_session):
         )
     )
 
-    # Same paper/task/dataset/model, one row per metric — these collapse to a
-    # single logical leaderboard row.
     db_session.add_all(
         [
             DBEvaluation(
@@ -274,7 +270,6 @@ def test_paper_count_distinguishes_models_and_papers(db_session):
 
     db_session.add_all(
         [
-            # Paper 1 / Model A across two metrics -> 1 row.
             DBEvaluation(
                 id=101,
                 paper_id=1,
@@ -293,7 +288,6 @@ def test_paper_count_distinguishes_models_and_papers(db_session):
                 metrics={"RMSE": "2.0"},
                 best_metric="RMSE",
             ),
-            # Paper 1 / Model B -> 1 row.
             DBEvaluation(
                 id=103,
                 paper_id=1,
@@ -303,7 +297,6 @@ def test_paper_count_distinguishes_models_and_papers(db_session):
                 metrics={"MAE": "1.5"},
                 best_metric="MAE",
             ),
-            # Paper 2 / Model A -> 1 row (different paper).
             DBEvaluation(
                 id=104,
                 paper_id=2,

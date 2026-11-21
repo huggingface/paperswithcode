@@ -105,7 +105,6 @@ def _seed_corpus(db: Session) -> None:
     db.commit()
 
 
-# Fake client used by linking tests. Mimics the iter_citations / lookup contract.
 class FakeClient:
     def __init__(self, citations_by_paper, lookups: Optional[dict] = None):
         self._citations_by_paper = citations_by_paper
@@ -170,7 +169,6 @@ def test_iter_citations_paginates_until_no_next_and_stops_on_max():
                     }
                 },
             ],
-            # Missing `next` => last page.
         },
     ]
     requests_seen: list[dict] = []
@@ -211,10 +209,8 @@ def test_iter_citations_respects_semantic_scholar_offset_limit_cap():
         requests_seen.append(params)
         offset = int(params["offset"])
         limit = int(params["limit"])
-        # Mimic the live API: enforce the hard cap.
         if offset + limit >= 10000:
             return httpx.Response(400, json={"error": "offset + limit must be < 10000"})
-        # Return a full page until we hit the cap.
         next_offset = offset + limit
         return httpx.Response(
             200,
@@ -241,10 +237,8 @@ def test_iter_citations_respects_semantic_scholar_offset_limit_cap():
 
     citations = list(client.iter_citations("ss-source", page_size=1000))
     assert len(citations) == 9999
-    # We should never request a (offset, limit) pair where offset + limit >= 10000.
     for params in requests_seen:
         assert int(params["offset"]) + int(params["limit"]) < 10000
-    # API errors counter must stay at zero because we never trigger the 400.
     assert client.api_errors == 0
 
 
@@ -297,14 +291,13 @@ def test_dry_run_does_not_insert_paper_methods():
     assert stats.total_new_links == 2
 
     pm_pairs = {(row.paper_id, row.method_id) for row in db.query(PaperMethod).all()}
-    # Only the seed (1, 10) row should remain; no inserts in dry-run mode.
     assert pm_pairs == {(1, 10)}
 
 
 def test_write_mode_inserts_new_links_and_skips_duplicates():
     db = _build_in_memory_session()
     _seed_corpus(db)
-    db.add(PaperMethod(paper_id=2, method_id=10))  # Pre-existing duplicate for BERT.
+    db.add(PaperMethod(paper_id=2, method_id=10))
     db.commit()
 
     client = FakeClient(
@@ -332,14 +325,12 @@ def test_write_mode_inserts_new_links_and_skips_duplicates():
 
     assert stats.methods_processed == 1
     assert stats.total_citations_fetched == 4
-    # Only BERT and ViT match local papers; BERT dup is deduped.
     assert stats.total_matched_papers == 2
-    assert stats.total_new_links == 1  # ViT only; BERT was already linked.
+    assert stats.total_new_links == 1
 
     pm_pairs = {(row.paper_id, row.method_id) for row in db.query(PaperMethod).all()}
     assert pm_pairs == {(1, 10), (2, 10), (3, 10)}
 
-    # Re-running should be a no-op (dedupe via existing paper_methods).
     client_rerun = FakeClient(
         citations_by_paper={
             "ss-source": [
@@ -513,7 +504,7 @@ def test_filters_with_no_matches_return_empty_stats(kwargs, expected_skip):
     )
     assert stats.methods_processed == 0
     assert stats.methods_skipped == expected_skip
-    assert db.query(PaperMethod).count() == 1  # Seed only.
+    assert db.query(PaperMethod).count() == 1
 
 
 def test_paper_methods_only_inserts_for_latest_versions():
@@ -531,9 +522,7 @@ def test_paper_methods_only_inserts_for_latest_versions():
     )
 
     stats = link_papers_by_source_citations(db, client, write=True, log=_no_log)
-    # Old version was excluded from the local index, so no match.
     assert stats.total_matched_papers == 0
-    # Sanity-check we did not somehow add the non-latest paper to paper_methods.
     rows = db.execute(
         text("SELECT paper_id FROM paper_methods WHERE method_id = 10")
     ).all()

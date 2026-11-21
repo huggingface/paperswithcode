@@ -61,7 +61,6 @@ def main() -> int:
     if not 1 <= args.max_posts <= 2000:
         parser.error("--max-posts must be between 1 and 2000")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    # One line per request would flood the journal with every hourly read.
     logging.getLogger("httpx").setLevel(logging.WARNING)
     apply = args.apply or os.environ.get("PWC_X_LIKES_APPLY") == "true"
 
@@ -111,7 +110,6 @@ def main() -> int:
             sort_keys=True,
         )
     )
-    # A failing paid fallback (bad token, no credits) must show on the dashboard.
     return 1 if report.api_error else 0
 
 

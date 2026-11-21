@@ -458,7 +458,6 @@ def test_dry_run_rolls_back_all_evaluation_and_paper_changes():
 
 def test_curated_override_resolves_a_cited_but_ambiguous_report(monkeypatch):
     session = _session()
-    # An override applies only when the upstream citation includes its report.
     monkeypatch.setattr(
         mmteb_sync_service,
         "MODEL_ARXIV_OVERRIDES",

@@ -102,13 +102,10 @@ def require_admin(
 
     settings = get_settings()
 
-    # 1) Session cookie set by the HF OAuth callback.
-
     actor = _session_actor(request)
     if actor and actor["role"] == "admin":
         return actor
 
-    # 2) X-Admin-Token header fallback (CLI / cron tooling).
     if (
         settings.admin_api_token
         and admin_token
@@ -192,8 +189,6 @@ def _require_mutator(
                 status_code=403,
                 detail="Paper credentials cannot edit shared catalog definitions",
             )
-        # Credentials scoped to papers never fall back to a broader cookie or
-        # admin identity when invalid.
         from backend.database.connection import get_database_session
         from backend.services.paper_edit_access import PaperEditAccess
 

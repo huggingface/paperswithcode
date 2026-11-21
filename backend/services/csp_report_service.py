@@ -42,7 +42,6 @@ def _url(value: object) -> str:
     text = _text(value)
     parts = urlsplit(text)
     if not parts.scheme or not parts.netloc:
-        # Keywords such as "inline", "eval", "data" or "blob".
         return text.split("?", 1)[0].split("#", 1)[0]
     return f"{parts.scheme}://{parts.netloc}{parts.path}"[:FIELD_LIMIT]
 
@@ -108,12 +107,9 @@ def append_csp_reports(records: list[dict[str, object]], path: Path) -> None:
         json.dumps({"at": received_at, **record}, separators=(",", ":")) + "\n"
         for record in records
     )
-    # Backend workers are separate processes; serialize check, rotate, append.
     with path.with_name(path.name + ".lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if path.exists() and path.stat().st_size >= MAX_LOG_BYTES:
-            # Keep one previous file, so a flood shortens history instead of
-            # hiding every later report.
             os.replace(path, path.with_name(path.name + ".1"))
         with path.open("a", encoding="utf-8") as handle:
             handle.write(lines)

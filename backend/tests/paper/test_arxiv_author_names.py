@@ -293,8 +293,6 @@ def test_version_refresh_keeps_a_claim_under_another_case(tmp_path) -> None:
 
 
 def test_version_refresh_drops_a_claim_it_cannot_place(tmp_path) -> None:
-    # A respelled name may be a namesake: neither it nor whoever now holds
-    # the old position inherits the claim.
     assert _refresh_links(2, ["Grace Hopper", "T. Aarsen"], tmp_path) == [
         ("Grace Hopper", None, False),
         ("T. Aarsen", None, False),

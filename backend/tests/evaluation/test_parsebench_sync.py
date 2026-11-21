@@ -326,7 +326,6 @@ def test_unknown_models_match_announcements_or_become_radar_signals():
     assert row.is_open is True
     assert row.hf_model_url == "https://huggingface.co/nova-lab/NovaOCR-3"
     assert session.query(PaperTask).filter(PaperTask.paper_id == 2000).count() == 1
-    # Products never become release signals; unmatched models do.
     signals = {
         signal.model_name: signal.lab
         for signal in session.query(ModelReleaseSignal).all()
@@ -477,13 +476,11 @@ def test_parsebench_2_reviewed_map_is_well_formed():
     assert len(board.identities) == 41
     assert not set(board.identities) & board.excluded
     assert set(board.hf_model_ids) <= set(board.identities)
-    # Open-weight rows carry their Hub checkpoint; API models do not.
     for label, identity in board.identities.items():
         assert (label in board.hf_model_ids) == identity.is_open, label
     assert board.identities["LlamaParse (Agentic Plus)"].title == (
         "ParseBench-2: Severity-Aware Evaluation of Document Parsing"
     )
-    # Reviewed once its release post was indexed (paper 133391, 2026-11-16).
     assert board.identities["Muse Ember 1.0 (low)"].source_url == (
         "https://research.meta.ai/blog/muse-ember"
     )
@@ -529,7 +526,6 @@ def test_parsebench_2_adopts_hand_imported_rows_and_leaves_v1_alone():
     )
     session.add_all(
         [
-            # The reviewed one-time import: same paper and label.
             Evaluation(
                 paper_id=1000,
                 task_id=4,
@@ -539,7 +535,6 @@ def test_parsebench_2_adopts_hand_imported_rows_and_leaves_v1_alone():
                 metrics={"Overall (ParseBench-2)": 1},
                 best_metric="Overall (ParseBench-2)",
             ),
-            # Same label on another paper stays a separate manual row.
             Evaluation(
                 paper_id=1002,
                 task_id=4,
@@ -549,7 +544,6 @@ def test_parsebench_2_adopts_hand_imported_rows_and_leaves_v1_alone():
                 metrics={"Overall (ParseBench-2)": 2},
                 best_metric="Overall (ParseBench-2)",
             ),
-            # The v1 board's managed rows are never touched by the v2 sync.
             Evaluation(
                 paper_id=1000,
                 task_id=4,

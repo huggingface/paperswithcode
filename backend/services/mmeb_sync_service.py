@@ -43,8 +43,6 @@ MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("MMEB")
 
 LANES = {
     "v2": ("mmeb-v2", "MMEB-v2 Score", "Overall-V2"),
-    # The Space ranks v3 by "Overall" (all V3 datasets). "Overall-V3🆕" averages
-    # only the datasets new in V3, a subset, so it is not the board score.
     "v3": ("mmeb-v3", "MMEB-v3 Score", "Overall"),
 }
 
@@ -454,8 +452,6 @@ class MmebSyncService:
             ]
             stats.scored = len(scored)
             papers_by_model = self._resolve_papers(scored, stats)
-            # Models with no linked local paper go to the shared matcher; the
-            # rest become release-radar signals. Ambiguous links stay out.
             unresolved = set(stats.unresolved_models)
             unknown = [
                 LeaderboardModel(entry.model_name, _lab(entry.model_url))

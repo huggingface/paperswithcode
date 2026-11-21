@@ -61,9 +61,7 @@ def test_later_readings_blend_the_new_rate_into_the_ema():
         like_velocity=20.0,
         last_read_at=NOW - timedelta(hours=2),
     )
-    # 40 new likes over 2 hours = 20/h; EMA 0.75 * 20 + 0.25 * 20.
     assert service.like_velocity(metrics, 140, NOW) == pytest.approx(20.0)
-    # Like counts can drop (unlikes, removed accounts); the rate never goes negative.
     assert service.like_velocity(metrics, 90, NOW) == pytest.approx(5.0)
 
 
@@ -96,13 +94,11 @@ def test_posts_syndication_cannot_serve_fall_back_to_the_capped_api(monkeypatch)
         api_budget=2,
     )
 
-    # Only two of the three fallback posts fit the remaining daily budget.
     assert requested == [["1", "2"]]
     assert report.api_reads == 2
     assert posts[1].last_source == "api" and posts[1].like_count == 90
     assert posts[2].gone_at == NOW and posts[2].next_read_at is None
     assert report.gone == 1
-    # The post over budget stays due for the next run.
     assert posts[3].last_read_at is None
     assert report.unread == 1
 

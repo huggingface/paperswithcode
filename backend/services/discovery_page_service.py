@@ -46,8 +46,6 @@ from backend.utils.task_slugs import canonical_task_slug, task_slug_candidates
 PRODUCTION_ORIGIN = "https://paperswithcode.co"
 DISCOVERY_PAPER_LIMIT = 20
 
-# Reserved /conferences/{slug}/{listing} paths rendered by ConferenceTaskView
-# as presentation and award listings rather than task filters.
 CONFERENCE_LISTINGS = {
     "all": "All papers",
     "oral": "Oral papers",
@@ -57,10 +55,8 @@ CONFERENCE_LISTINGS = {
 }
 LEADERBOARD_ROW_LIMIT = 100
 TASK_BENCHMARK_LIMIT = 50
-# Most-evaluated benchmarks summarized in a task page's "Best models" table.
 TASK_TOP_MODEL_BENCHMARKS = 5
 
-# Curated landing page for GPT-6 Astra robotics work (/astra-for-robotics).
 ASTRA_ROBOTICS_PATH = "/astra-for-robotics"
 ASTRA_ROBOTICS_TASK_SLUG = "robotics"
 ASTRA_ROBOTICS_METHOD_SLUG = "gpt-6-astra"
@@ -79,9 +75,6 @@ class DiscoveryLink:
     label: str
 
 
-# Top-level browse pages with fixed copy. Without an entry here the SPA shell
-# is served with the generic site title and no canonical tag.
-# path -> (title, heading, description)
 STATIC_INDEX_PAGES = {
     "/ai-deadlines": (
         "AI Conference Deadlines 2026 | Papers with Code",
@@ -176,8 +169,6 @@ class DiscoveryPage:
     entity_links: tuple[DiscoveryLink, ...]
     paper_links: tuple[DiscoveryPaperLink, ...]
     robots: str = "index,follow"
-    # Inline Markdown shown in the page body; ``description`` is the short
-    # plain-text summary used for meta tags.
     body_markdown: Optional[str] = None
     trends_markdown: tuple[str, ...] = ()
     benchmark_links: tuple[DiscoveryLink, ...] = ()
@@ -190,7 +181,6 @@ class DiscoveryPage:
         return f"{PRODUCTION_ORIGIN}{self.canonical_path}"
 
 
-# Index pages that exist for each entity kind's breadcrumb trail.
 INDEX_BREADCRUMBS = {
     "Task": DiscoveryLink("/tasks", "Tasks"),
     "Method": DiscoveryLink("/methods", "Methods"),
@@ -324,8 +314,6 @@ class DiscoveryPageService:
             .limit(10)
             .all()
         )
-        # Most-evaluated leaderboards first, so crawlers reach the benchmark
-        # pages that carry this task's results.
         evaluation_count = func.count(Evaluation.id)
         benchmarks = (
             self.db.query(Dataset.id, Dataset.slug, Dataset.name, evaluation_count)
@@ -409,8 +397,6 @@ class DiscoveryPageService:
         )
         if not best:
             return ()
-        # The open leader must come from the overall leader's metric; an
-        # open-only primary metric could name another leaderboard's winner.
         open_leaders: dict[int, str] = {}
         for dataset_id, metric, model_name in (
             self.db.query(
@@ -575,7 +561,6 @@ class DiscoveryPageService:
                 .all()
             )
         ]
-        # Same rows and order as the SPA's `ordering=best_rank` request.
         evaluations = [
             RankableEvaluation(
                 id=int(row.id),
@@ -605,7 +590,6 @@ class DiscoveryPageService:
             )
             .all()
         ]
-        # A task filter needs the leaderboard association or evaluations.
         if requested is not None:
             task_ids = {task.id for task in tasks}
             task_ids.update(evaluation.task_id for evaluation in evaluations)

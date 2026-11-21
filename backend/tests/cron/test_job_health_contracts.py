@@ -147,7 +147,6 @@ def test_hot_zero_seed_does_not_mark_paper_propagation_stale():
                 "recent_writes": 1,
                 "hot_repository_count": 1,
                 "one_snapshot_over_30m": 0,
-                # The SQL excludes the repository's one-snapshot 0.0 seed.
                 "stale_paper_scores": 0,
                 "oldest_eligible_wait_minutes": 0,
             },
@@ -770,8 +769,6 @@ def test_thumbnail_preload_bounded_failures_degrade_output():
 
 
 def test_hot_health_reserve_stop_on_contended_token_is_degraded_not_broken():
-    # 2026-11-16: the stars job spent the shared token, so the hot run saw 440
-    # remaining and stopped at its 500 reserve. The reserve worked.
     job = _job("update_hot_github_trending")
     recent = datetime.now(timezone.utc) - timedelta(minutes=5)
     with patch("backend.services.cron_health.is_process_running", return_value=False):
@@ -803,8 +800,6 @@ def test_hot_health_reserve_stop_on_contended_token_is_degraded_not_broken():
 
 
 def test_coverage_only_query_without_write_timestamp_trusts_the_run_log():
-    # paper_organizations has no timestamp, so link_openalex_organizations
-    # can never report `last_write`; that is not stale output.
     job = _job("link_openalex_organizations")
     assert job.db_freshness_reports_writes is False
     recent = datetime.now(timezone.utc) - timedelta(minutes=5)

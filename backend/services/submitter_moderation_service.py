@@ -61,7 +61,6 @@ class SubmitterModerationService:
         actor: dict,
         request_id: str,
     ) -> int:
-        # Preserve the public count's historical pre-lock snapshot semantics.
         before = self.profiles.moderation_snapshot(hf_subject)
         CatalogMutationService(self.db).mutate(
             actor=actor,

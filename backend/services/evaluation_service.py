@@ -49,8 +49,6 @@ from backend.services.catalog_errors import (
 RankScopes = set[tuple[int, int, str]]
 
 _PAPER_REF = re.compile(r"^paper:(\d+)$", re.IGNORECASE)
-# Hugging Face paper pages and their markdown mirrors are surfaces of the arXiv
-# paper, e.g. https://huggingface.co/papers/2111.12993.md.
 _HF_PAPER_URL = re.compile(
     r"^https?://(?:www\.)?huggingface\.co/papers/(\d{4}\.\d{4,5})(?:v\d+)?(?:\.md)?/?(?:[?#].*)?$",
     re.IGNORECASE,
@@ -60,7 +58,6 @@ _CVF_OPENACCESS_PATH = re.compile(
     re.IGNORECASE,
 )
 
-# First path segments on huggingface.co that are site sections, not model owners.
 _HUGGINGFACE_NON_REPO_ROOTS = frozenset(
     {
         "api",
@@ -84,7 +81,6 @@ _HUGGINGFACE_NON_REPO_ROOTS = frozenset(
         "tasks",
     }
 )
-# Path segments after `{owner}/{repo}` that address files in the repository.
 _HUGGINGFACE_REPO_SUBPATHS = frozenset({"blob", "raw", "resolve", "tree"})
 
 
@@ -124,10 +120,6 @@ def _normalize_url_for_match(url: Optional[str]) -> Optional[str]:
         netloc = netloc[4:]
     path = parsed.path.rstrip("/")
 
-    # OpenReview exposes the same submission through /forum?id=... and
-    # /pdf?id=.... Preserve the submission id while treating those surfaces as
-    # equivalent; dropping the query would collapse every OpenReview paper to
-    # the same host/path key.
     if netloc == "openreview.net" and path.lower() in {"/forum", "/pdf"}:
         submission_id = parse_qs(parsed.query).get("id", [None])[0]
         if submission_id:
@@ -176,7 +168,6 @@ def _huggingface_repo_key(path_parts: list[str]) -> Optional[str]:
         return None
     if not parts:
         return None
-    # The repo id ends where a file action (blob/resolve/raw/tree) starts.
     id_length = 1 if len(parts) > 1 and parts[1] in _HUGGINGFACE_REPO_SUBPATHS else 2
     if len(parts) > id_length and parts[id_length] not in _HUGGINGFACE_REPO_SUBPATHS:
         return None
@@ -207,17 +198,11 @@ def _source_match_keys(url: Optional[str]) -> set[str]:
     path = parsed.path.rstrip("/")
     path_parts = [part for part in path.split("/") if part]
 
-    # A report, result file, or README inside a linked GitHub repository is
-    # first-party evidence for that paper. Give both repository roots and files
-    # below them the same key while keeping different repositories distinct.
     if netloc in {"github.com", "raw.githubusercontent.com"} and len(path_parts) >= 2:
         owner = path_parts[0].lower()
         repository = path_parts[1].removesuffix(".git").lower()
         keys.add(f"githubrepo:{owner}/{repository}")
 
-    # Files inside a linked Hugging Face model, dataset, or Space repository
-    # (README, tech report under /resolve/, results under /blob/) are likewise
-    # first-party evidence. Repository kinds stay distinct.
     if netloc in {"huggingface.co", "hf.co"}:
         hf_repo_key = _huggingface_repo_key(path_parts)
         if hf_repo_key:
@@ -300,7 +285,6 @@ def evaluation_public_source_url(
     if paper_ref:
         paper_id = int(paper_ref.group(1))
         if db is not None:
-            # `get` reuses papers already loaded by batch serialization.
             paper = db.get(DBPaper, paper_id)
             if paper and paper.arxiv_id:
                 return f"/paper/{paper.arxiv_id}"
@@ -415,8 +399,6 @@ class EvaluationService:
             if paper_ref:
                 source_paper_ids.add(int(paper_ref.group(1)))
 
-        # Holding these objects keeps them in the session identity map, so
-        # `db.get` lookups in the URL helpers do not query again.
         papers = {
             paper.id: paper
             for paper in self.db.query(DBPaper)
@@ -452,7 +434,6 @@ class EvaluationService:
             self.db.query(DBPaperRepository.paper_id, DBRepository.url)
             .join(DBRepository, DBRepository.id == DBPaperRepository.repository_id)
             .filter(DBPaperRepository.paper_id.in_(paper_ids))
-            # Same choice as dataset leaderboards: official, then most starred.
             .order_by(
                 desc(DBPaperRepository.is_official),
                 desc(DBRepository.num_stars),
@@ -567,7 +548,6 @@ class EvaluationService:
         Returns:
             Tuple of (is_valid, error_message)
         """
-        # Check if this task-dataset pair has any metrics defined
         has_metrics = (
             self.db.query(TaskDatasetMetric)
             .filter(
@@ -578,7 +558,6 @@ class EvaluationService:
         )
 
         if not has_metrics:
-            # Get task and dataset names for error message
             task = self.db.query(DBTask).filter(DBTask.id == task_id).first()
             dataset = (
                 self.db.query(DBDataset).filter(DBDataset.id == dataset_id).first()
@@ -743,12 +722,9 @@ class EvaluationService:
             DatabaseError: If database query fails
         """
         try:
-            # Base query
             query = self.db.query(DBEvaluation)
 
-            # Apply filters
             if search:
-                # Use ilike for case-insensitive search in model name, harness and methodology
                 query = query.filter(
                     or_(
                         DBEvaluation.model_name.ilike(f"%{search}%")
@@ -785,13 +761,7 @@ class EvaluationService:
             if external is not None:
                 query = query.filter(DBEvaluation.external == external)
 
-            # Apply ordering
             if order_by == "benchmark_popularity":
-                # Popularity = total number of evaluation rows on each row's
-                # dataset across the whole table. We aggregate in a subquery
-                # so the per-evaluation result set is preserved (no GROUP BY
-                # on the outer query) and so the count reflects the full
-                # database, not just the filtered slice for this caller.
                 popularity_sq = (
                     self.db.query(
                         DBEvaluation.dataset_id.label("dataset_id"),
@@ -810,11 +780,6 @@ class EvaluationService:
                     if order_dir == "desc"
                     else asc(popularity_field)
                 )
-                # Tie-breakers: keep all rows for the same benchmark together,
-                # then sort by best_rank (ascending, nulls last) so the strongest
-                # entries on each benchmark surface first — mirroring the
-                # benchmark leaderboard view. Fall back to evaluation id for a
-                # fully stable order when ranks tie or are absent.
                 query = query.order_by(
                     primary,
                     asc(DBEvaluation.dataset_id),
@@ -847,9 +812,6 @@ class EvaluationService:
                 else:
                     query = query.order_by(asc(order_field))
 
-            # Parameter metadata belongs to a displayed leaderboard entry, not
-            # to an individual metric row. Calculate coverage in SQL so the
-            # ordinary, paginated leaderboard endpoint remains bounded.
             parameter_coverage_total = 0
             parameter_coverage_known = 0
             parameter_counts = func.count(func.distinct(DBEvaluation.num_parameters))
@@ -876,9 +838,6 @@ class EvaluationService:
             ).count()
 
             if max_parameters_exclusive is not None:
-                # Keep sibling metric rows together by the same identity used
-                # by the frontend table. A bound is an explicit leaderboard
-                # request, so it is the only path that materializes entries.
                 parameter_entries = self._parameter_entries(query.all())
                 filtered_entries = [
                     rows
@@ -894,15 +853,12 @@ class EvaluationService:
                     for row in rows
                 ]
             else:
-                # Preserve the established row-level pagination contract for
-                # ordinary evaluation queries.
                 total_count = query.count()
                 offset = (page - 1) * page_size
                 results = query.offset(offset).limit(page_size).all()
 
             evaluation_list = self._serialize_evaluations(results)
 
-            # Calculate pagination
             total_pages = (total_count + page_size - 1) // page_size
             next_page = page + 1 if page < total_pages else None
             previous_page = page - 1 if page > 1 else None
@@ -1072,14 +1028,12 @@ class EvaluationService:
             DatabaseError: If database operation fails
         """
         try:
-            # Validate that the task is consistent with the dataset's officially linked tasks
             is_valid, error_message = self._validate_dataset_task_consistency(
                 task_id, dataset_id
             )
             if not is_valid:
                 raise CatalogValidationError(error_message)
 
-            # Validate metrics against leaderboard's allowed metrics
             metric_service = LeaderboardMetricService(self.db)
             metric_keys = list(metrics.keys())
             is_valid, error_message = metric_service.validate_metrics_for_leaderboard(
@@ -1214,26 +1168,21 @@ class EvaluationService:
             if not db_evaluation:
                 raise CatalogNotFoundError(f"Evaluation {evaluation_id} not found")
 
-            # Capture the original leaderboard before changing its keys or metrics.
             old_task_id = db_evaluation.task_id
             old_dataset_id = db_evaluation.dataset_id
             affected_scopes = self._rank_scopes(db_evaluation)
 
-            # Determine which dataset to validate against
             target_dataset_id = dataset_id if dataset_id is not None else old_dataset_id
 
-            # Determine which metrics and best_metric to validate
             target_metrics = metrics if metrics is not None else db_evaluation.metrics
             target_best_metric = (
                 best_metric if best_metric is not None else db_evaluation.best_metric
             )
 
-            # Determine which task to validate against
             target_task_id = task_id if task_id is not None else old_task_id
 
             target_harness = harness if harness_set else db_evaluation.harness
 
-            # Validate dataset-task consistency if task or dataset is changing
             if task_id is not None or dataset_id is not None:
                 is_valid, error_message = self._validate_dataset_task_consistency(
                     target_task_id, target_dataset_id
@@ -1247,8 +1196,6 @@ class EvaluationService:
             if not is_valid:
                 raise CatalogValidationError(error_message)
 
-            # Existing rows keep editing freely; only a change of leaderboard or
-            # model identity must not land on another row's entry.
             target_model_name = (
                 model_name if model_name is not None else db_evaluation.model_name
             )
@@ -1272,7 +1219,6 @@ class EvaluationService:
                     exclude_id=evaluation_id,
                 )
 
-            # Validate metrics if they are being changed or task/dataset is changing
             if (
                 metrics is not None
                 or dataset_id is not None
@@ -1293,7 +1239,6 @@ class EvaluationService:
                 if not is_valid:
                     raise CatalogValidationError(error_message)
 
-            # Update only provided fields
             if task_id is not None:
                 db_evaluation.task_id = task_id
             if dataset_id is not None:
@@ -1513,7 +1458,6 @@ class EvaluationService:
             self.recalculate_ranks(
                 task_id, dataset_id, metric_name=metric, commit=False
             )
-        # Required with autoflush=False, including before audit snapshots/reloads.
         self.db.flush()
 
     def recalculate_ranks(
@@ -1553,8 +1497,6 @@ class EvaluationService:
             DatabaseError: If database operation fails
         """
         try:
-            # If metric_name is provided, recalculate only for that metric
-            # Otherwise, recalculate for all unique metrics in this task-dataset pair
             if metric_name:
                 metrics_to_process = [metric_name]
             else:
@@ -1589,7 +1531,6 @@ class EvaluationService:
 
             total_updated = 0
 
-            # Process each metric separately
             for current_metric in metrics_to_process:
                 query = self.db.query(DBEvaluation).filter(
                     DBEvaluation.task_id == task_id,
@@ -1606,10 +1547,8 @@ class EvaluationService:
                 if not evaluations:
                     continue
 
-                # Determine the ranking direction from the metrics table
-                metric_direction = "higher_is_better"  # Default
+                metric_direction = "higher_is_better"
 
-                # Query metrics table for ranking direction
                 metric_def = (
                     self.db.query(DBMetric)
                     .filter(DBMetric.name == current_metric)
@@ -1619,7 +1558,6 @@ class EvaluationService:
                 if metric_def:
                     metric_direction = metric_def.direction
                 else:
-                    # Log warning if metric not found in database
                     import logging
 
                     logger = logging.getLogger(__name__)
@@ -1635,11 +1573,7 @@ class EvaluationService:
                     )
                     eval_scores.append((eval_obj, metric_value))
 
-                # Sort by metric value based on direction
-                # Place evaluations without valid metric values at the end
                 if metric_direction == "lower_is_better":
-                    # For "lower is better" metrics (WER, error rates, perplexity)
-                    # Lower values should get rank 1
                     eval_scores.sort(
                         key=lambda x: (
                             x[1] is None,
@@ -1647,13 +1581,10 @@ class EvaluationService:
                         )
                     )
                 else:
-                    # For "higher is better" metrics (AP, accuracy, F1)
-                    # Higher values should get rank 1 (default behavior)
                     eval_scores.sort(
                         key=lambda x: (x[1] is None, -x[1] if x[1] is not None else 0)
                     )
 
-                # Assign ranks (same value = same rank)
                 current_rank = 1
                 previous_score = None
 
@@ -1675,7 +1606,6 @@ class EvaluationService:
 
                     previous_score = score
 
-            # Commit all rank updates
             if commit:
                 self.db.commit()
 

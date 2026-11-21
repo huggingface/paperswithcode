@@ -19,12 +19,10 @@ class Area(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Core area identification
     id: str = Field(..., description="Area ID")
     name: str = Field(..., description="Area name (e.g., 'Vision')")
     description: Optional[str] = Field(None, description="Area description")
 
-    # Timestamps
     created_at: Optional[datetime] = Field(None, description="Area creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
 
@@ -60,7 +58,6 @@ class Method(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Core method identification
     id: str = Field(..., description="Method ID")
     name: str = Field(..., description="Method short name (e.g., 'ResNet', 'BERT')")
     slug: Optional[str] = Field(
@@ -72,10 +69,8 @@ class Method(BaseModel):
         None, description="Comma-separated keywords for matching papers to this method"
     )
 
-    # Area assignment (methods belong to one area, like tasks)
     area_id: Optional[str] = Field(None, description="ID of the research area")
 
-    # Method metadata
     introduced_year: Optional[int] = Field(
         None, description="Year the method was introduced"
     )
@@ -100,7 +95,6 @@ class Method(BaseModel):
         description="Attribution/credit for the method image (e.g., paper URL, source URL)",
     )
 
-    # Collection metadata (for grouped methods)
     collection_name: Optional[str] = Field(
         None, description="Name of the method collection"
     )
@@ -109,7 +103,6 @@ class Method(BaseModel):
     )
     collection_parent: Optional[str] = Field(None, description="Parent collection name")
 
-    # Metadata
     paper_count: Optional[int] = Field(
         None, description="Number of papers using this method"
     )
@@ -136,7 +129,6 @@ class Method(BaseModel):
         ),
     )
 
-    # Timestamps
     created_at: Optional[datetime] = Field(
         None, description="Method creation timestamp"
     )

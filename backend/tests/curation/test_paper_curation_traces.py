@@ -153,8 +153,6 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path, monkeypatc
 def test_finalize_cannot_replace_the_server_recorded_mutation_result(
     tmp_path, monkeypatch
 ):
-    # A resolve-model-paper job: no paper_id on the row, so the thumbnail
-    # queue targets the paper the server recorded when it applied the result.
     applied = {"status": "resolved", "paper_id": 7}
 
     class Database:
@@ -162,8 +160,6 @@ def test_finalize_cannot_replace_the_server_recorded_mutation_result(
             pass
 
         def refresh(self, row, *, with_for_update):
-            # Apply committed while the trace was uploading; the locked re-read
-            # must surface it even though the request loaded the row earlier.
             assert with_for_update
             row.mutation_result = dict(applied)
 
@@ -212,7 +208,6 @@ def test_finalize_cannot_replace_the_server_recorded_mutation_result(
     )
 
     assert row.mutation_result == applied
-    # The worker's claim is still preserved as trace evidence.
     assert json.loads(uploaded["result.json"]) == {
         "status": "resolved",
         "paper_id": 999,

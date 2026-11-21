@@ -24,7 +24,7 @@ from fastapi.encoders import jsonable_encoder
 from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -65,12 +65,8 @@ JobKind = Literal[
 ]
 BENCHMARK_GAP_KINDS = frozenset({"review-benchmark-gaps", "add-benchmark"})
 BENCHMARK_GAP_TRIGGER = "benchmark-gap-cron"
-# Release-radar resolutions share the scheduled pause, capacity, and the
-# trending-model resolution lane.
 RADAR_TRIGGER = "model-release-radar"
 RADAR_POLICY_VERSION = "model-release-radar-v1"
-# Benchmark-gap work shares the scheduled pause and capacity, but gets its own
-# small lane so a constant daily backlog cannot starve it.
 SCHEDULED_TRIGGERS = frozenset(
     {"hf-daily-cron", "hf-trending-cron", BENCHMARK_GAP_TRIGGER, RADAR_TRIGGER}
 )
@@ -88,17 +84,11 @@ def operator_retryable(row: PaperCurationJob) -> bool:
     )
 
 
-# Health breakers that count only daily/trending paper stages. The daily
-# benchmark-gap overseer is unrelated to them, so they must not hold it back.
 SCHEDULED_HEALTH_PAUSES = frozenset(
     {"apply_or_verification_failures", "terminal_failure_rate"}
 )
-# New external papers run in the admin lane, capped so a backfill cannot take
-# every worker from interactive admin and scheduled daily work.
 EXTERNAL_PAPER_POLICY_VERSION = "external-paper-v1"
 EXTERNAL_PAPER_MAX_ACTIVE = 2
-# Re-checks queued when a new leaderboard appears share the admin lane under
-# the same kind of cap (policy versions `new-benchmark-<dataset id>`).
 NEW_BENCHMARK_POLICY_PREFIX = "new-benchmark-"
 NEW_BENCHMARK_MAX_ACTIVE = 2
 JobStatus = Literal[
@@ -112,16 +102,10 @@ JobStatus = Literal[
 ]
 ACTIVE_STATUSES = {"dispatching", "running"}
 TERMINAL_STATUSES = {"completed", "failed", "canceled"}
-# Admin paper jobs that ran before any paper text existed wait here, outside the
-# dispatch queue, until hourly reconciliation finds the paper's Markdown.
 ADMIN_MARKDOWN_KINDS = frozenset({"add-evals", "enrich-paper"})
-# Admin pages poll job status every few seconds; reconcile lists every remote
-# Job in the namespace, so read paths share one call per process per interval.
 READ_RECONCILE_INTERVAL_SECONDS = 30.0
 CURATOR_COMMAND = "exec python3 /runner/run_paper_curation.py"
 PI_CURATOR_COMMAND = "exec python3 /runner/run_pi_curation.py"
-# Pi shadow jobs mirror a sampled daily stage on the Pi harness. Their own
-# trigger keeps them out of every scheduled lane, breaker, and token guardrail.
 PI_SHADOW_TRIGGER = "pi-shadow"
 PI_SHADOW_KINDS = frozenset({"enrich-paper", "add-evals"})
 CURATION_DISPATCH_LOCK_ID = 0x50574344
@@ -229,6 +213,14 @@ class CodexPaperJobsResponse(BaseModel):
     scheduler: dict = Field(default_factory=dict)
 
 
+class PaperCurationHistoryResponse(BaseModel):
+    """Every curation job that touched one paper, newest first, for admins."""
+
+    paper_id: int
+    jobs: list[CodexPaperJob]
+    scheduler_pause: dict | None = None
+
+
 def _now() -> datetime:
     return datetime.now(UTC)
 
@@ -237,13 +229,6 @@ def _is_callback_validation_rejection(row: PaperCurationJob) -> bool:
     return (getattr(row, "validation_summary", None) or {}).get("status") == "rejected"
 
 
-# The runner's generic failure for one of its own callbacks to the site
-# (bootstrap, context, complete), which says nothing about the curation itself.
-# An apply runs inside Codex, whose rejections never surface under these names.
-# HTTPError and JSONDecodeError are almost always the edge answering for us (a
-# Cloudflare 5xx or an empty or HTML body). A systemic rejection, such as a
-# release that cannot serve its bootstrap bundle, still trips the transport
-# breaker below.
 _TRANSPORT_FAILURE = re.compile(
     r"^Remote runner failed \((URLError|RemoteDisconnected|TimeoutError|"
     r"ConnectionResetError|IncompleteRead|HTTPError|JSONDecodeError)\)\.$"
@@ -513,7 +498,6 @@ class CodexPaperJobService:
             pair_diff=getattr(row, "pair_diff", None),
         )
 
-    # Compatibility name for callers and tests that predate the public serializer.
     _serialize = serialize
 
     def enqueue(
@@ -860,8 +844,6 @@ class CodexPaperJobService:
             if row is None and self._benchmark_review_allowed(
                 settings, scheduler_state, usage_allowed
             ):
-                # The one daily overseer takes any free slot, ahead of the
-                # benchmark-gap lane cap and the daily-paper health breakers.
                 row = self._next_benchmark_gap_row(db, kind="review-benchmark-gaps")
             if (
                 row is None
@@ -1066,8 +1048,6 @@ class CodexPaperJobService:
         db: Session, state: PaperCurationSchedulerState | None
     ) -> dict:
         now = _now()
-        # Only the three summed columns: a full-row load pulled ~1,300 completed
-        # jobs with their bootstrap bundles into memory on every dispatch.
         rows = (
             db.query(
                 PaperCurationJob.finished_at,
@@ -1131,7 +1111,6 @@ class CodexPaperJobService:
             db.commit()
             logger.info("paper curation daily token pause expired after UTC rollover")
         if threshold is not None and usage["current_day_tokens"] > threshold:
-            # A usage observation must never replace an operator/security pause.
             if state.pause_condition not in {None, "daily_token_guardrail"}:
                 return False
             state.paused_at = now
@@ -1279,8 +1258,6 @@ class CodexPaperJobService:
             CodexCurationCallbackService,
         )
 
-        # Context building reads the catalog and the Markdown bucket; none of
-        # that may fail the already launched Codex job or the dispatch loop.
         try:
             context = CodexCurationCallbackService(db, job_service=self).context(
                 codex_row, settings
@@ -1475,6 +1452,7 @@ class CodexPaperJobService:
                 secrets=secrets_env,
                 flavor="cpu-basic",
                 timeout=f"{2100 if row.kind == 'add-evals' else 1500}s",
+                name=f"pwc-{row.kind}-{row.id}",
                 labels={
                     "product": "paperswithcode",
                     "workflow": "paper-curation",
@@ -1706,6 +1684,58 @@ class CodexPaperJobService:
             },
         )
 
+    def paper_history(
+        self, db: Session, settings: Settings, paper_id: int, *, limit: int = 50
+    ) -> PaperCurationHistoryResponse:
+        """Return one paper's curation jobs, including its workflows' stages."""
+        self.reconcile_if_due(db, settings)
+        workflow_ids = select(PaperCurationWorkflow.id).where(
+            PaperCurationWorkflow.paper_id == paper_id
+        )
+        rows = (
+            db.query(PaperCurationJob)
+            .filter(
+                or_(
+                    PaperCurationJob.paper_id == paper_id,
+                    PaperCurationJob.parent_workflow_id.in_(workflow_ids),
+                )
+            )
+            .order_by(PaperCurationJob.created_at.desc(), PaperCurationJob.id.desc())
+            .limit(limit)
+            .all()
+        )
+        held_job_ids = [
+            row.id
+            for row in rows
+            if row.status == "queued" and row.trigger in SCHEDULED_TRIGGERS
+        ]
+        scheduler_pause = None
+        state = db.get(PaperCurationSchedulerState, 1) if held_job_ids else None
+        enabled = settings.codex_curation_scheduler_enabled
+        if held_job_ids and (
+            not enabled
+            or state is None
+            or state.paused_at is not None
+            or not state.dispatch_enabled
+        ):
+            reason = state.pause_reason if state else None
+            if not enabled:
+                reason = reason or "scheduler disabled in settings"
+            scheduler_pause = {
+                "dispatch_enabled": bool(enabled and state and state.dispatch_enabled),
+                "paused_at": state.paused_at.isoformat()
+                if state and state.paused_at
+                else None,
+                "pause_reason": reason,
+                "pause_condition": state.pause_condition if state else None,
+                "job_ids": [str(job_id) for job_id in held_job_ids],
+            }
+        return PaperCurationHistoryResponse(
+            paper_id=paper_id,
+            jobs=[self.serialize(row, settings) for row in rows],
+            scheduler_pause=scheduler_pause,
+        )
+
     def retry(
         self,
         db: Session,
@@ -1722,7 +1752,6 @@ class CodexPaperJobService:
                 workflow.status = "running"
                 workflow.error = None
                 workflow.finished_at = None
-                # Check workflow ownership before enqueue can commit a new job.
                 db.flush()
         if row.kind in BENCHMARK_GAP_KINDS:
             retried = self.enqueue_benchmark_job(
@@ -1812,8 +1841,6 @@ class CodexPaperJobService:
             or not settings.codex_jobs_token
         ):
             return
-        # Never hold a pooled connection idle in transaction across the slow
-        # namespace-wide Hub call; that starved public requests on 2026-10-13.
         db.commit()
         remote_stages = {
             str(job.id): str(getattr(getattr(job, "status", None), "stage", ""))
@@ -1827,7 +1854,6 @@ class CodexPaperJobService:
             for hf_job_id in active.values()
         ):
             return
-        # Re-read: a callback may have finished a Job during the Hub call.
         changed_rows = [
             row
             for row in db.query(PaperCurationJob)
@@ -1909,8 +1935,6 @@ class CodexPaperJobService:
         error: str | None,
         settings: Settings,
     ) -> CodexPaperJob:
-        # Authentication may have loaded this row before another callback finished.
-        # Serialize the complete transition, not just the terminal-state write.
         db.refresh(row, with_for_update=True)
         if row.status in TERMINAL_STATUSES:
             return self.serialize(row, settings)
@@ -1934,8 +1958,6 @@ class CodexPaperJobService:
         if completion_error is None and not accepted_apply:
             completion_error = "Remote job completed without an accepted apply."
         thumbnail_status = getattr(row, "thumbnail_status", None)
-        # Scheduled runners are told not to wait for the thumbnail the VPS
-        # queued at enqueue time, so its state says nothing about the stage.
         thumbnail_blocks_completion = (
             getattr(row, "kind", None) != "resolve-model-paper"
             and getattr(row, "trigger", "admin") not in SCHEDULED_TRIGGERS
@@ -1958,8 +1980,6 @@ class CodexPaperJobService:
                 getattr(row, "thumbnail_error", None)
                 or "Requested thumbnail generation failed."
             )
-        # A valid mutation is not rolled back or rerun solely because final trace
-        # storage failed. Its trace remains retryable and visible to operators.
         trace_finalize_failed = bool(
             completion_error
             and completion_error.startswith("Trace finalization failed")
@@ -1975,7 +1995,6 @@ class CodexPaperJobService:
         row.finished_at = _now()
         if self._awaits_markdown(row):
             row.status = AWAITING_MARKDOWN
-            # Close the finished attempt's callbacks; release issues a new token.
             row.callback_token_hash = None
         candidate_id = getattr(row, "candidate_id", None)
         if getattr(row, "kind", None) == "resolve-model-paper" and candidate_id:
@@ -1995,8 +2014,6 @@ class CodexPaperJobService:
         db.flush()
         self._record_pair_diff(db, row)
         self._evaluate_scheduled_health(db, row)
-        # Queued jobs are the durable dispatch backlog. A dispatch failure after
-        # this commit cannot strand a terminal job without its successor.
         db.commit()
         self.dispatch_next(db, settings)
         return self.serialize(row, settings)
@@ -2082,9 +2099,6 @@ class CodexPaperJobService:
             and not _is_transport_failure(item.error)
         ]
         if len(recent) == 25 and len(transport_failures) / 25 > 0.50:
-            # Retried transport failures are noise, but a run of them means the
-            # runners cannot reach the site at all, so this pause holds every
-            # scheduled lane and takes precedence over the daily-only breakers.
             condition = "runner_transport_failures"
             reason = (
                 "More than half of the latest 25 scheduled stages lost their callbacks"
@@ -2110,7 +2124,6 @@ class CodexPaperJobService:
         try:
             stats = merge_external_release_duplicate(db, paper_id)
         except SQLAlchemyError:
-            # The merge ran in a savepoint; evaluation must still proceed.
             logger.exception("external release merge failed for paper %s", paper_id)
             return
         if stats is not None:
@@ -2142,9 +2155,6 @@ class CodexPaperJobService:
                 .first()
             )
             if evals_done is not None:
-                # A late or admin re-run of enrich must not leave a workflow
-                # open whose evaluation stage already finished; retry() reopens
-                # it before the re-run starts.
                 workflow.status = "completed"
                 workflow.finished_at = workflow.finished_at or _now()
                 return
@@ -2179,12 +2189,9 @@ class CodexPaperJobService:
                 workflow.status = "completed"
                 workflow.finished_at = _now()
         elif row.status == "completed" and row.kind == "add-evals":
-            # Retry a merge skipped while the launch page was being dispatched;
-            # the scores add-evals skipped as duplicates then move over.
             self._merge_external_release(db, row.paper_id)
             workflow.status = "completed"
             workflow.finished_at = _now()
-            # External-paper workflows are not part of any scheduled canary.
             if workflow.policy_version != EXTERNAL_PAPER_POLICY_VERSION:
                 self._release_canary_backlog(db, workflow.policy_version, settings)
         elif row.status == "failed":
@@ -2199,7 +2206,6 @@ class CodexPaperJobService:
                 and not _is_callback_validation_rejection(row)
                 and "validation" not in (row.error or "").lower()
             ):
-                # Preserve every remote attempt as its own immutable job row.
                 self.enqueue(
                     db,
                     kind=row.kind,
@@ -2230,8 +2236,6 @@ class CodexPaperJobService:
     def _release_canary_backlog(
         self, db: Session, policy_version: str, settings: Settings
     ) -> None:
-        # Production sessions disable autoflush. Eligibility queries must see
-        # the workflow transition that triggered this release.
         db.flush()
         state = db.get(PaperCurationSchedulerState, 1)
         if state is None or state.canary_released:
@@ -2313,6 +2317,5 @@ class CodexPaperJobService:
 
 
 codex_paper_job_service = CodexPaperJobService()
-# Compatibility exports while callers migrate to the single service.
 codex_add_evals_service = codex_paper_job_service
 codex_enrich_paper_service = codex_paper_job_service

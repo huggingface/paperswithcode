@@ -300,7 +300,6 @@ def test_unreviewed_models_are_auto_matched_or_handed_to_the_radar(monkeypatch):
     identities.pop("Model 19")
     monkeypatch.setattr(fc, "MODEL_PAPER_IDENTITIES", identities)
     session = _session()
-    # Paper 1018 announces "Model 18"; nothing announces "Model 19".
     session.get(Paper, 1019).title = "Benchmarking Model 19 on Long Tasks"
     add_release_evidence(session, 1018)
     session.commit()
@@ -337,7 +336,7 @@ def test_lab_is_unknown_when_its_color_is_shared():
 
 
 def test_parser_accepts_reviewed_swe_2_release(monkeypatch):
-    monkeypatch.undo()  # Exercise the real reviewed identities, not test models.
+    monkeypatch.undo()
     revision = _payload()["v1_1"]
     models = list(dict.fromkeys([*fc.MODEL_PAPER_IDENTITIES, "SWE-2"]))
     for field in ("harness", "efforts", "data"):

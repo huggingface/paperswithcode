@@ -22,7 +22,6 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--no-dispatch", action="store_true")
     parser.add_argument("--status", action="store_true")
-    # Two days, so one missed daily run loses no boards.
     parser.add_argument("--new-benchmark-days", type=float, default=2)
     args = parser.parse_args()
     session = get_database_session()

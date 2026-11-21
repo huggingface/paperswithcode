@@ -74,9 +74,9 @@ def test_find_page_artwork_urls_skips_site_logos_and_journal_covers():
 @pytest.mark.parametrize(
     "content",
     [
-        _png((153, 230)),  # Springer proceedings cover thumbnail
-        _png((1200, 300)),  # banner wider than the card can show
-        _png((300, 1200)),  # very tall strip
+        _png((153, 230)),
+        _png((1200, 300)),
+        _png((300, 1200)),
         b"<html>not an image</html>",
     ],
 )

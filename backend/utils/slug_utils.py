@@ -30,21 +30,15 @@ def slugify(text: str) -> str:
     if not text:
         return ""
 
-    # Normalize unicode characters
     text = unicodedata.normalize("NFKD", text)
     text = text.encode("ascii", "ignore").decode("ascii")
 
-    # Convert to lowercase
     text = text.lower()
 
-    # Replace spaces and special characters with hyphens
-    # Keep alphanumeric characters and hyphens
     text = re.sub(r"[^a-z0-9]+", "-", text)
 
-    # Remove consecutive hyphens
     text = re.sub(r"-+", "-", text)
 
-    # Strip leading/trailing hyphens
     text = text.strip("-")
 
     return text

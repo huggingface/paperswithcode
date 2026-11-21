@@ -66,6 +66,24 @@ export interface CodexPaperJob {
   output_tokens: number | null;
   duration_ms: number | null;
   audit_status: string;
+  runner?: string;
+}
+
+/** Scheduler state shown when one of a paper's jobs waits on a paused queue. */
+export interface CodexSchedulerPause {
+  dispatch_enabled: boolean;
+  paused_at: string | null;
+  pause_reason: string | null;
+  pause_condition: string | null;
+  /** Queued scheduled jobs held back by the pause; admin jobs still dispatch. */
+  job_ids: string[];
+}
+
+/** Every curation job that touched one paper, newest first. */
+export interface PaperCurationHistory {
+  paper_id: number;
+  jobs: CodexPaperJob[];
+  scheduler_pause: CodexSchedulerPause | null;
 }
 
 export interface CodexPaperWorkflow {

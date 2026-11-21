@@ -59,8 +59,6 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# The MODELS/UPDATED/PASS/ECI constants of
-# https://frontier-cs.org/assets/js/fcs2-data.js on 2026-10-27.
 SOURCE = (Path(__file__).parent / "fixtures" / "frontiercs_2_data.js").read_text()
 TASK_ID = 15
 DATASET_ID = 3096
@@ -153,7 +151,6 @@ def test_parse_and_fetch_the_leaderboard_constants():
 
 
 def test_parser_reads_minified_fractions_without_a_leading_zero():
-    # Since 2026-11-02 the minified data writes 0.2 as ".2" (step's FCI low).
     current = (
         Path(__file__).parent / "fixtures" / "frontiercs_2_data_2026-11-06.js"
     ).read_text()
@@ -187,7 +184,6 @@ def test_parser_fails_loudly_on_layout_changes(old, new, message):
 
 @pytest.mark.parametrize("published", ["6.2", "6.3"])
 def test_pass_rate_accepts_either_rounding_of_a_half_tenth(published):
-    # 1/16 = 6.25%: banker's rounding gives 6.2, half-up gives 6.3.
     source = SOURCE.replace("step:[8.3,4,48]", f"step:[{published},1,16]", 1)
     entries = {e.upstream_id: e for e in parse_frontiercs_2(source).entries}
     assert entries["step"].pass_rate == float(published)
@@ -226,7 +222,6 @@ def test_first_run_creates_every_entry_and_second_run_is_a_no_op():
         "(Claude Code): 58.3% pass rate (28/48 runs beat the human reference), "
         "FCI 54.0 (90% interval 45.3 to 65.2)"
     )
-    # One model, two harnesses: two rows on the same paper.
     assert rows["Gemini 4 Argon (Antigravity)"].best_rank == 2
     assert rows["Gemini 4 Argon (Pi)"].metrics == {PASS_RATE: 39.6, FCI: 39}
     assert rows["DeepSeek-V4.1-Flash-1017 (DeepSeek Harness)"].is_open
@@ -255,7 +250,6 @@ def test_score_updates_revise_the_row_and_unknown_models_are_reported():
     assert stats.auto_matched == []
     assert stats.unreviewed == ["Step 6 (Step Code)"]
     assert stats.missing_upstream == ["Step-5-Preview (Step Code)"]
-    # The unmatched model is handed to the release radar, once per name.
     signal = session.query(ModelReleaseSignal).one()
     assert (signal.signal_key, signal.lab, signal.model_name) == (
         "stepfun/step6",
@@ -275,7 +269,6 @@ def test_score_updates_revise_the_row_and_unknown_models_are_reported():
         PASS_RATE: 60.4,
         FCI: 55.1,
     }
-    # Dropped rows are reported, never deleted.
     assert "Step-5-Preview (Step Code)" in rows
 
 
@@ -316,7 +309,6 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
                 version="v1",
                 is_latest_version=True,
             ),
-            # Same family, other version: never a match for "Kimi K3.2".
             Paper(
                 id=2002,
                 title="Kimi K3.2 Pro: Advancing Open Intelligence",
@@ -336,8 +328,6 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
             ModelRelease(
                 id=1,
                 paper_id=2003,
-                # A resolution's canonical spelling differs; the leaderboard
-                # spelling is an alias.
                 canonical_name="gpt-6.2-terra-2026-10",
                 publisher="OpenAI",
                 aliases=["GPT 6.2 Terra"],
@@ -392,7 +382,6 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
     assert (muse.paper_id, muse.is_open) == (2004, True)
     assert muse.metrics == {PASS_RATE: 12.5, FCI: 22}
     assert 2001 in {row.paper_id for row in session.query(PaperTask).all()}
-    # The release match is remembered as a provider alias.
     assert {alias.alias for alias in session.query(ModelProviderAlias).all()} == {
         "GPT-6.2 Terra",
         "Muse Spark 2",
@@ -401,8 +390,6 @@ def test_new_models_match_an_announcing_title_or_a_model_release():
 
 def test_titles_without_evaluations_or_a_release_are_not_matched():
     session = _session()
-    # Title-only papers ("KNN and ANN-based Recognition of ...") name a model
-    # without introducing it.
     session.add(
         Paper(
             id=2001,
@@ -452,7 +439,6 @@ def test_ambiguous_titles_are_not_matched(monkeypatch):
     assert stats.unreviewed == ["Kimi K3.2 (Kimi Code)"]
     assert session.query(ModelReleaseSignal).one().model_name == "Kimi K3.2"
 
-    # A candidate window that fills up cannot rule out another announcement.
     session.get(Paper, 2002).is_latest_version = False
     session.add(
         Paper(
@@ -553,7 +539,6 @@ def test_effort_settings_match_their_base_model():
         ]
     )
 
-    # Settings share the base name, so the board keeps the best one.
     assert {name: (m.paper_id, m.model_name) for name, m in matched.items()} == {
         "GPT-6 Sol (max)": (2101, "GPT-6 Sol"),
         "GPT-6 Sol (high)": (2101, "GPT-6 Sol"),
@@ -574,7 +559,6 @@ def test_effort_settings_of_one_model_keep_its_best_row():
     )
     add_release_evidence(session, 2102)
     session.commit()
-    # Two Codex CLI rows become two settings of one new model.
     source = _new_model(SOURCE, "astra", "Effort Model (max)")
     source = _new_model(source, "sol", "Effort Model (high)")
     parsed = parse_frontiercs_2(source)

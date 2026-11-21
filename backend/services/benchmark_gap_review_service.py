@@ -58,7 +58,6 @@ TRIGGER = "benchmark-gap-cron"
 POLICY_VERSION = "benchmark-gap-v1"
 MIN_DISTINCT_PAPERS = 3
 ELIGIBLE_CONFIDENCE = ("high", "medium")
-# The remote runner gives Codex 20 minutes; this bounds the overseer's reading.
 REVIEW_BATCH_LIMIT = 150
 DAILY_CREATION_CAP = 40
 DEFER_DAYS = 14
@@ -137,8 +136,6 @@ class BenchmarkGapReviewService:
         self.db = db
         self.settings = settings
         self.job_service = job_service
-
-    # Eligibility and scheduling
 
     def eligible_query(self, now: datetime | None = None):
         """Candidates the overseer may decide on, strongest evidence first."""
@@ -291,8 +288,6 @@ class BenchmarkGapReviewService:
             "daily_creation_cap": DAILY_CREATION_CAP,
         }
 
-    # Context for the remote jobs
-
     def _evidence_by_candidate(self, candidate_ids: list[uuid.UUID]) -> dict:
         grouped: dict[uuid.UUID, list[BenchmarkCurationEvidence]] = {}
         if not candidate_ids:
@@ -437,7 +432,6 @@ class BenchmarkGapReviewService:
             "last_seen_at": candidate.last_seen_at.isoformat()
             if candidate.last_seen_at
             else None,
-            # Distinct reporting papers per proposed task and per metric.
             "reported_tasks": [
                 {**tasks[task_id], "papers": count}
                 for task_id, count in task_votes.most_common(6)
@@ -522,7 +516,6 @@ class BenchmarkGapReviewService:
         """Serve the job's frozen batch, recording it on first read."""
         now = _now()
         if row.review_scope is None:
-            # Lock the job so overlapping first reads record a single batch.
             self.db.refresh(row, with_for_update=True)
             if row.review_scope is None:
                 row.review_scope = self._batch_ids(now)
@@ -595,7 +588,6 @@ class BenchmarkGapReviewService:
         return {
             "candidate": summary,
             "overseer_reason": candidate.review_reason,
-            # What apply_add_benchmark accepts without a *_choice_reason.
             "evidence_consensus": {
                 "task_ids": sorted(leading_tasks),
                 "primary_metrics": [
@@ -683,8 +675,6 @@ class BenchmarkGapReviewService:
             ],
         }
 
-    # Overseer decisions
-
     def apply_review(
         self,
         mutation: ReviewBenchmarkGapsMutation,
@@ -739,7 +729,6 @@ class BenchmarkGapReviewService:
                 continue
             candidate = self.db.get(BenchmarkCurationCandidate, decision.candidate_id)
             candidate.review_reason = decision.reason
-            # Database time, like the created_at of jobs queued in this transaction.
             candidate.reviewed_at = func.now()
             if decision.decision == "approve":
                 candidate.status = "approved"
@@ -770,7 +759,6 @@ class BenchmarkGapReviewService:
                     )
                 self._merge(candidate, target)
                 if target.status == "promoted":
-                    # The leaderboard exists already; score the new papers.
                     self.db.flush()
                     BenchmarkGapService(self.db).enqueue_evidence_rechecks(
                         target,
@@ -813,7 +801,6 @@ class BenchmarkGapReviewService:
             templates.setdefault(template, []).append(decision)
         repeated = [group for group in templates.values() if len(group) > 1]
         if repeated:
-            # Name every clashing group so one correction can fix them all.
             groups = "; ".join(
                 ", ".join(str(item.candidate_id) for item in group)
                 for group in repeated
@@ -867,8 +854,6 @@ class BenchmarkGapReviewService:
             or 0
         )
 
-    # Benchmark creation
-
     def apply_add_benchmark(
         self, row: PaperCurationJob, mutation: AddBenchmarkMutation
     ) -> dict:
@@ -881,7 +866,6 @@ class BenchmarkGapReviewService:
             )
         now = _now()
         candidate.review_reason = mutation.reason
-        # Database time, like the created_at of jobs queued in this transaction.
         candidate.reviewed_at = func.now()
         if mutation.decision == "reject":
             candidate.status = "rejected"
@@ -1013,7 +997,6 @@ class BenchmarkGapReviewService:
                 names = {primary.new_metric.name, primary.new_metric.full_name}
             else:
                 metric = self.db.get(Metric, primary.existing_metric_id)
-                # A missing metric fails in _resolve_metric with its own error.
                 names = {metric.name, metric.full_name} if metric else set()
             if names and not {_name_key(name) for name in names} & _leading(
                 metric_votes
@@ -1073,8 +1056,6 @@ class BenchmarkGapReviewService:
             Metric.id, Metric.name, Metric.full_name
         ):
             if key in {_name_key(name), _name_key(full_name)}:
-                # A new metric that only respells an existing one reuses it,
-                # unless the proposal ranks it the other way round.
                 metric = self.db.get(Metric, metric_id)
                 if metric.direction != proposal.direction:
                     raise ValueError(
@@ -1182,8 +1163,6 @@ class BenchmarkGapReviewService:
         self.db.flush()
         return dataset
 
-    # Job lifecycle
-
     def handle_terminal_job(self, row: PaperCurationJob) -> None:
         """Back off an approved candidate whose creation job did not apply."""
         if row.kind != "add-benchmark" or row.status not in {"failed", "canceled"}:
@@ -1203,9 +1182,6 @@ class BenchmarkGapReviewService:
                 PaperCurationJob.benchmark_candidate_id == candidate.id,
                 PaperCurationJob.kind == "add-benchmark",
                 PaperCurationJob.status.in_({"failed", "canceled"}),
-                # Count only the current approval; reviewed_at moves on each
-                # overseer approval and creation-job decision. Compare in SQL so
-                # both timestamps come from the database clock.
                 or_(
                     reviewed_at.is_(None),
                     PaperCurationJob.created_at >= reviewed_at,
@@ -1217,7 +1193,6 @@ class BenchmarkGapReviewService:
         now = _now()
         reason = f"Creation job {row.id} {row.status}: {row.error or 'no error'}"
         if failures >= MAX_CREATION_FAILURES:
-            # Send it back through the overseer instead of retrying forever.
             candidate.status = "candidate"
             candidate.deferred_until = now + timedelta(days=DEFER_DAYS)
         else:

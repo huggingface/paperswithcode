@@ -739,7 +739,7 @@ def test_slug_rename_retires_only_owned_duplicate_with_same_binding(
 
 def test_sync_tags_paper_once_when_reviewed_slugs_share_it(monkeypatch):
     session = _session()
-    session.autoflush = False  # Matches the production session factory.
+    session.autoflush = False
     session.add(
         Paper(
             id=7,
@@ -829,7 +829,6 @@ def test_fetch_counts_listed_unscored_models_and_withdrawn_index(monkeypatch):
             for index in aa.INDEXES
         ),
     )
-    # Agentic scores are gone for everyone; half the models lost every score.
     listed = [
         _api_row(f"reviewed-{index}", agentic=None)
         if index < 4
@@ -996,7 +995,6 @@ def test_discovery_binds_base_slugs_to_launch_pages(monkeypatch):
     _paper(session, "Twin Model", source="arxiv")
     fable = _paper(session, "Introducing Claude Fable 5.2 and Claude Mythos 5.2")
     sol_luna = _paper(session, "Introducing GPT-6 Sol and Luna")
-    # A title alone is not enough: the paper must report results or a release.
     _paper(session, "Introducing Ghost Model", evidence=False)
     session.commit()
     monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", {})
@@ -1027,8 +1025,6 @@ def test_discovery_binds_base_slugs_to_launch_pages(monkeypatch):
         )
     )
 
-    # Joint launch pages bind every model they announce; settings variants,
-    # ambiguous titles and pages without results stay unbound.
     expected = {
         "claude-opus-5-5": opus.id,
         "gemini-4-argon": argon.id,
@@ -1046,7 +1042,6 @@ def test_discovery_binds_base_slugs_to_launch_pages(monkeypatch):
     release = session.get(ModelRelease, aliases["claude-opus-5-5"])
     assert (release.paper_id, release.canonical_name) == (opus.id, "Claude Opus 5.5")
 
-    # A second run reuses the persisted aliases.
     again = asyncio.run(
         aa.ArtificialAnalysisPaperDiscoveryService(session).discover(
             leaderboard=leaderboard

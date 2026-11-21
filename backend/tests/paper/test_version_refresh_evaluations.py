@@ -80,11 +80,9 @@ def test_version_refresh_moves_evaluations_to_the_new_version(tmp_path) -> None:
                 Metric(id=1, name="MAE", direction="lower_is_better"),
             ]
         )
-        # Dataset 2 already shows the model from v2, spelled differently.
         db.add_all(
             [
                 _evaluation(7, 1, 1, best_rank=1),
-                # A second copy on the old version collapses into row 7.
                 _evaluation(11, 1, 1, model_name="trgv2", best_rank=1),
                 _evaluation(8, 1, 2, best_rank=1),
                 _evaluation(9, 2, 2, model_name="TRG v2", best_rank=1),
@@ -98,8 +96,6 @@ def test_version_refresh_moves_evaluations_to_the_new_version(tmp_path) -> None:
         )._copy_curated_links(1, 2)
         db.flush()
 
-        # Leaderboards list every version, so a copy would show the model twice;
-        # the board that lost a row is re-ranked.
         rows = db.query(Evaluation.id, Evaluation.paper_id, Evaluation.best_rank)
         assert rows.order_by(Evaluation.id).all() == [
             (7, 2, 1),
