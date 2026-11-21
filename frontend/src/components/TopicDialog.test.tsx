@@ -45,7 +45,7 @@ describe("TopicDialog afterSavePath", () => {
     renderWithProviders(<TopicDialog open afterSavePath="/following" onOpenChange={() => {}} />);
     await userEvent.type(await screen.findByLabelText("Research topic"), "robot learning");
     await userEvent.click(screen.getByRole("button", { name: "Follow" }));
-    expect(await screen.findByText("Following feed")).toBeInTheDocument();
+    expect(await screen.findByText("Following feed", { selector: "div" })).toBeInTheDocument();
     expect(addTopic).toHaveBeenCalledWith("robot learning");
   });
 
@@ -77,7 +77,7 @@ describe("TopicDialog afterSavePath", () => {
     await userEvent.click(await screen.findByRole("tab", { name: /Tasks, methods/ }));
     await userEvent.click(await screen.findByRole("button", { name: /Robotics/ }));
     await userEvent.click(screen.getByRole("button", { name: "Follow" }));
-    expect(await screen.findByText("Following feed")).toBeInTheDocument();
+    expect(await screen.findByText("Following feed", { selector: "div" })).toBeInTheDocument();
     expect(firstSeen[0]).toBe(1);
   });
 
@@ -141,18 +141,18 @@ describe("TopicDialog feed management", () => {
   it("links to the following feed and closes on the way there", async () => {
     const close = vi.fn();
     renderWithProviders(<TopicDialog open onOpenChange={close} />);
-    const link = await screen.findByRole("link", { name: "Open your following feed" });
+    const link = await screen.findByRole("link", { name: "Following feed" });
     expect(link).toHaveAttribute("href", "/following");
     await userEvent.click(link);
     expect(close).toHaveBeenCalledWith(false);
-    expect(await screen.findByText("Following feed")).toBeInTheDocument();
+    expect(await screen.findByText("Following feed", { selector: "div" })).toBeInTheDocument();
   });
 
   it("offers no feed link to guests", async () => {
     auth.value = { user: null, isLoading: false };
     renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
     await screen.findByRole("heading", { name: /research feed/ });
-    expect(screen.queryByRole("link", { name: "Open your following feed" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Following feed" })).not.toBeInTheDocument();
   });
 
   it("names the creator of a followed topic someone else made, not your own", async () => {
