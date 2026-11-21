@@ -721,7 +721,8 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
             {pendingTopicFollows.isError && (
               <Alert variant="destructive" className="mb-4">
                 <AlertDescription>
-                  Could not follow the popular topics you picked. <button type="button" onClick={() => followPendingTopics(readPendingTopicFollows())}>Try again</button>
+                  {isConflict(pendingTopicFollows.error) ? <>Could not follow the popular topics you picked: {pendingTopicFollows.error.message}.</>
+                    : <>Could not follow the popular topics you picked. <button type="button" onClick={() => followPendingTopics(readPendingTopicFollows())}>Try again</button></>}
                 </AlertDescription>
               </Alert>
             )}
