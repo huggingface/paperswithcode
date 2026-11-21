@@ -159,3 +159,20 @@ def test_paper_markdown_jobs_returns_remote_snapshot(client):
     assert response.json()["logical_shards"][0]["run_id"] == "run-1"
     assert response.json()["selected_profiles"]["live"]["profile_id"] == "live-v1"
     assert response.json()["retry_dispositions"]["retryable_due"] == 15
+
+
+def test_cron_status_days_is_deprecated_but_still_accepted(client):
+    parameters = client.get("/openapi.json").json()["paths"]["/api/v1/cron/status"][
+        "get"
+    ]["parameters"]
+    days = next(parameter for parameter in parameters if parameter["name"] == "days")
+    assert days["deprecated"] is True
+
+    with patch("backend.routers.cron.CronDashboardSnapshotService") as service:
+        service.return_value.get_status.side_effect = RuntimeError("stop")
+        with pytest.raises(RuntimeError):
+            client.get(
+                "/api/v1/cron/status?days=7",
+                headers={"X-Admin-Token": "test-admin-token"},
+            )
+        service.return_value.get_status.assert_called_once_with(force_refresh=False)

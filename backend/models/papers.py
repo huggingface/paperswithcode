@@ -695,6 +695,14 @@ class Repository(BaseModel):
         return str(v)
 
 
+class RepositoryWithPaperCount(Repository):
+    """Repository listing entry with its number of linked papers."""
+
+    paper_count: Optional[int] = Field(
+        None, description="Number of papers linked to this repository"
+    )
+
+
 class RepositoryTrendingTask(BaseModel):
     """Task projection embedded in a repository-trending paper."""
 
@@ -857,7 +865,7 @@ class Repositories(BaseModel):
     previous_page: Optional[int] = Field(
         None, description="Number of the previous page"
     )
-    results: List[Repository] = Field(
+    results: List[RepositoryWithPaperCount] = Field(
         ..., description="List of repositories on this page"
     )
 
@@ -1211,6 +1219,7 @@ __all__ = [
     "RepositoryStarHistoryList",
     "PaperRepository",
     "Repositories",
+    "RepositoryWithPaperCount",
     "ProjectPage",
     "PaperProjectPage",
     "ProjectPageWithPapers",

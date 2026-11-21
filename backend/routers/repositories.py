@@ -21,6 +21,7 @@ from backend.models.papers import (
     ProjectPageCreateRequest,
     ProjectPageUpdateRequest,
     RepositoryStarHistoryList,
+    RepositoryWithPaperCount,
     GithubRepositoryPreview,
 )
 from backend.config import get_settings
@@ -106,23 +107,23 @@ def get_repositories(
 
 
 @router.get(
-    "/repositories/{repository_id}",
+    "/repositories/{repository_id:int}",
     response_model=Repository,
     summary="Get repository by ID",
 )
 def get_repository_by_id(
-    repository_id: str = Path(..., description="Repository ID"),
+    repository_id: int = Path(..., description="Repository ID"),
     db: Session = Depends(get_database_session),
 ):
     """
     Get a specific repository by its database ID.
     """
-    return RepositoryService(db).get_repository_by_id(repository_id)
+    return RepositoryService(db).get_repository_by_id(str(repository_id))
 
 
 @router.get(
     "/repositories/{owner}",
-    response_model=List[Repository],
+    response_model=List[RepositoryWithPaperCount],
     summary="Get repositories by owner",
 )
 def get_repositories_by_owner(
@@ -134,15 +135,7 @@ def get_repositories_by_owner(
     """
     Get all repositories by a specific owner.
     """
-    return (
-        RepositoryService(db)
-        .get_repositories(
-            page=1,
-            page_size=1000,
-            owner=owner,
-        )
-        .results
-    )
+    return RepositoryService(db).get_repositories_by_owner(owner)
 
 
 @router.get(

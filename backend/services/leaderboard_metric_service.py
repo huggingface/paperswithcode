@@ -64,7 +64,7 @@ class LeaderboardMetricService:
 
         Returns:
             Set of metric names (e.g., {'AP', 'AP50', 'AP75'})
-            Empty set if no restrictions configured (allows all metrics)
+            Empty set if the leaderboard has no linked metrics
 
         Raises:
             CatalogPersistenceError: If database query fails
@@ -117,7 +117,11 @@ class LeaderboardMetricService:
             )
 
             if not allowed_metrics:
-                return True, None
+                return False, (
+                    f"No metrics are defined for this leaderboard (task {task_id}, "
+                    f"dataset {dataset_id}). Define its metrics before adding or "
+                    "editing evaluation metrics."
+                )
 
             invalid_metrics = [m for m in metric_keys if m not in allowed_metrics]
 

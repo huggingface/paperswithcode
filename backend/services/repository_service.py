@@ -27,6 +27,7 @@ from backend.models.papers import (
     PaperRepository,
     RepositoryStarHistory,
     RepositoryStarHistoryList,
+    RepositoryWithPaperCount,
 )
 
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
@@ -162,10 +163,9 @@ class RepositoryService:
             for result in results:
                 if include_paper_count or order_by == "paper_count":
                     repo, paper_count = result
-                    api_repo = self._db_repository_to_api(repo)
-                    api_repositories.append(api_repo)
+                    api_repositories.append(self._with_paper_count(repo, paper_count))
                 else:
-                    api_repositories.append(self._db_repository_to_api(result))
+                    api_repositories.append(self._with_paper_count(result, None))
 
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
@@ -211,6 +211,27 @@ class RepositoryService:
             raise PaperNotFoundError(f"Invalid repository ID: {repository_id}")
         except SQLAlchemyError as e:
             raise DatabaseError(f"Failed to fetch repository: {str(e)}") from e
+
+    def get_repositories_by_owner(self, owner: str) -> List[RepositoryWithPaperCount]:
+        """Return every repository whose owner matches, case-insensitively."""
+        try:
+            rows = (
+                self.db.query(
+                    DBRepository,
+                    func.count(DBPaperRepository.paper_id).label("paper_count"),
+                )
+                .outerjoin(DBPaperRepository)
+                .filter(func.lower(DBRepository.owner) == owner.lower())
+                .group_by(DBRepository.id)
+                .order_by(desc(DBRepository.num_stars).nullslast(), DBRepository.id)
+                .all()
+            )
+        except SQLAlchemyError as error:
+            raise DatabaseError(f"Failed to fetch repositories: {error}") from error
+        return [
+            self._with_paper_count(repository, paper_count)
+            for repository, paper_count in rows
+        ]
 
     def get_repositories_by_owner_and_name(
         self, owner: str, name: str
@@ -472,6 +493,14 @@ class RepositoryService:
             )
         self.db.flush()
         return repository
+
+    def _with_paper_count(
+        self, db_repository: DBRepository, paper_count: Optional[int]
+    ) -> RepositoryWithPaperCount:
+        return RepositoryWithPaperCount(
+            **self._db_repository_to_api(db_repository).model_dump(),
+            paper_count=paper_count,
+        )
 
     def _db_repository_to_api(self, db_repository: DBRepository) -> Repository:
         """
