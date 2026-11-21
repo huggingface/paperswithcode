@@ -409,7 +409,7 @@ export default function ApiDocsView() {
       <div className="api-content">
         <section id="getting-started" className="api-hero">
           <span className="api-beta">Experimental beta</span>
-          <h1>Papers With Code API</h1>
+          <h1>Papers with Code API</h1>
           <p className="api-lead">
             Find papers, explore benchmarks, and bring research results into
             your scripts and applications.
@@ -448,10 +448,7 @@ export default function ApiDocsView() {
           <h2>Your first request</h2>
           <div className="api-terminal">
             <div className="api-terminal-bar" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-              <span>Terminal</span>
+              Shell
             </div>
             <Code
               value={

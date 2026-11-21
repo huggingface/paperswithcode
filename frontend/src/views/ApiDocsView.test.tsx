@@ -69,7 +69,7 @@ describe("public API documentation", () => {
   it("renders schema fields, limits, beta policy, and generated examples", () => {
     show();
     expect(
-      screen.getByRole("heading", { name: "Papers With Code API" }),
+      screen.getByRole("heading", { name: "Papers with Code API" }),
     ).toBeTruthy();
     expect(screen.getByText("Matching papers")).toBeTruthy();
     expect(screen.getByText(/14 days/)).toBeTruthy();
