@@ -53,6 +53,7 @@ from backend.services.paper_service import (
     MAX_AUTHOR_FILTERS,
     PaperService,
 )
+from backend.services.method_service import MethodService
 from backend.services.paper_reference_service import PaperReferenceService
 from backend.services.x_trending_service import XTrendingService
 from backend.models.x_trending import XTrendingDayInput, XTrendingDayResult
@@ -1193,8 +1194,6 @@ def get_paper_methods(
     - `/api/v1/papers/1234/methods/` - Get methods for paper ID 1234
     - `/api/v1/papers/1706.03762/methods/` - Get methods for ArXiv paper 1706.03762 (Attention is All You Need)
     """
-    from backend.services.method_service import MethodService
-
     paper_service = PaperService(db)
 
     paper = paper_service.get_paper_by_id_or_arxiv(paper_id)

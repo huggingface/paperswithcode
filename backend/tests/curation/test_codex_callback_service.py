@@ -1551,3 +1551,77 @@ def test_context_expects_page_markdown_for_external_enrich_and_add_evals(
 
     assert result["paper"]["markdown_expected"] is expected
     assert checked == ([131370] if source == "external" else [])
+
+
+class _EnrichmentDatabase:
+    def __init__(self):
+        self.commits = 0
+
+    def refresh(self, _row, *, with_for_update):
+        return None
+
+    def flush(self):
+        return None
+
+    def commit(self):
+        self.commits += 1
+
+
+def _apply_enrichment_with_projections(monkeypatch, mutation, before, after):
+    projections = iter([before, after])
+    service = CodexCurationCallbackService(
+        _EnrichmentDatabase(),
+        evaluation_service=SimpleNamespace(),
+        association_service=SimpleNamespace(),
+    )
+    monkeypatch.setattr(service, "_validate_mutation", lambda *_args: None)
+    monkeypatch.setattr(service, "_validate_scheduled_policy", lambda *_args: {})
+    monkeypatch.setattr(service, "_verify_after_state", lambda *_args: None)
+    monkeypatch.setattr(service, "_apply_enrichment", lambda *_args: None)
+    monkeypatch.setattr(
+        service, "_mutation_projection", lambda *_args: next(projections)
+    )
+    row = SimpleNamespace(
+        kind="enrich-paper",
+        status="running",
+        submitted_at=None,
+        applied_at=None,
+        paper_id=42,
+    )
+    result = service.apply(row, ApplyMutationRequest(enrich=mutation))
+    return row, result
+
+
+def test_no_op_enrichment_is_not_recorded_as_applied(monkeypatch):
+    state = {"paper_id": 42, "thumbnail_url": "https://img.example/a.png"}
+
+    row, result = _apply_enrichment_with_projections(
+        monkeypatch, EnrichPaperMutation(urls_extracted=True), state, dict(state)
+    )
+
+    assert result["status"] == "no_changes"
+    assert row.submitted_at is not None
+    assert row.applied_at is None
+
+
+def test_enrichment_that_queues_a_thumbnail_is_applied(monkeypatch):
+    state = {"paper_id": 42}
+
+    row, result = _apply_enrichment_with_projections(
+        monkeypatch, EnrichPaperMutation(regenerate_thumbnail=True), state, dict(state)
+    )
+
+    assert result["status"] == "applied"
+    assert row.applied_at == row.submitted_at
+
+
+def test_enrichment_thumbnail_url_change_is_applied(monkeypatch):
+    row, result = _apply_enrichment_with_projections(
+        monkeypatch,
+        EnrichPaperMutation(thumbnail_url="https://img.example/b.png"),
+        {"paper_id": 42, "thumbnail_url": "https://img.example/a.png"},
+        {"paper_id": 42, "thumbnail_url": "https://img.example/b.png"},
+    )
+
+    assert result["status"] == "applied"
+    assert row.applied_at == row.submitted_at

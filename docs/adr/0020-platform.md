@@ -99,3 +99,11 @@ Code: `backend/genai_steps/extract_external_resource_metadata.py::extract_extern
 The test-suite database guard replaces `psycopg2.connect` rather than wrapping a specific engine. SQLAlchemy's psycopg2 dialect resolves `psycopg2.connect` at connect time, so the guard also covers engines created later from `db_manager`, preventing tests from reaching a production database.
 
 Code: `backend/tests/conftest.py::pytest_configure`
+
+## Autonomous CRON source repair writes only job-owned files
+
+A CRON source repair may edit only the failing job's own entry script, the services listed for it in `_OWNED_SERVICE_PATHS`, and tests. The shared CRON dashboard and launcher files also carry chat-monitor behavior, so they are never writable by a non-chat CRON repair; changes to them go through a human pull request. There is deliberately no shared-source allowlist.
+
+Source repair is further limited to `_SAFE_SOURCE_REPAIRS` (the trending-score jobs). Every other job runs as the application database role, which can create tasks, methods, and other taxonomy rows, so letting an agent rewrite and rerun it would breach the hard boundary that autonomous code never creates taxonomy. Widening the set requires a PostgreSQL role for repaired jobs that has no INSERT, UPDATE, or DELETE privilege on taxonomy tables (tracked in issue #1113).
+
+Code: `backend/services/autonomous_cron_operator.py::build_cron_repair_contracts`

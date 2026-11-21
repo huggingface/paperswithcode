@@ -22,9 +22,6 @@ from backend.services.autonomous_operations_repository import (
 )
 
 
-_SHARED_CRON_REPAIR_SOURCES: frozenset[str] = frozenset()
-
-
 class CandidatePolicyError(PermissionError):
     pass
 
@@ -81,7 +78,6 @@ class RepairTarget:
                     not value.startswith("url_extraction_agent/")
                     or not value.endswith(".py")
                 )
-                and value not in _SHARED_CRON_REPAIR_SOURCES
                 for value in self.source_paths
             )
             or any(not value.startswith("backend/tests/") for value in self.test_paths)

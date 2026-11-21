@@ -282,10 +282,10 @@ def test_discovery_indexes_only_single_tag_with_exact_ownership():
             ingestion_service=FakeIngestionService(),
         ).discover(
             [
+                "org/ARK-ASR-0.6B",
                 "sophea/asr-k1 (preview)",
                 "org/ARK-ASR-3B",
                 "org/Audio8-ASR-0.1B",
-                "org/ARK-ASR-0.6B",
             ]
         )
     )
@@ -300,6 +300,11 @@ def test_discovery_indexes_only_single_tag_with_exact_ownership():
     assert result.rejected_papers == [
         "org/ARK-ASR-3B:2605.28139",
         "org/Audio8-ASR-0.1B:2605.28139",
+    ]
+    session.flush()
+    session.expire_all()
+    assert session.get(Paper, 3).hf_models == [
+        "https://huggingface.co/org/ARK-ASR-0.6B"
     ]
 
 
