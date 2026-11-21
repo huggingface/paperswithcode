@@ -169,18 +169,8 @@
 .topic-dialog { max-width: 640px; max-height: calc(100vh - 32px); overflow-y: auto; }
 .topic-dialog-form { display: flex; flex-direction: column; gap: 18px; }
 .topic-dialog-title { font-family: var(--serif); font-size: 24px; font-weight: 500; color: var(--ink); }
-.topic-dialog-feed-link {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 4px;
-  margin-top: -10px;
-  color: var(--accent-text);
-  font-size: 13px;
-  text-decoration: none;
-}
+.topic-dialog-feed-link { color: var(--accent-text); font-weight: 600; text-decoration: none; }
 .topic-dialog-feed-link:hover { text-decoration: underline; }
-.topic-dialog-feed-link svg { width: 13px; height: 13px; }
 .topic-dialog-group { display: flex; flex-direction: column; gap: 8px; }
 .topic-dialog-group h3 {
   margin: 0;
