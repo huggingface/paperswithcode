@@ -85,6 +85,10 @@ class ChatModelSettings(BaseModel):
     chat_sponsored_deepseek_route: str = Field(
         default="deepseek-ai/DeepSeek-V4.1-Flash-1017:novita"
     )
+    # When direct OpenAI fails before a Luna turn shows any output, replay the
+    # turn once on the sponsored DeepSeek route. Independent of discovery: the
+    # route can stay hidden from the model picker.
+    chat_provider_failover_enabled: bool = Field(default=False)
     # A default-off server-funded route enabled only by reviewed environment config.
     # Production discovery and the default model remain unchanged.
     chat_alternative_model_enabled: bool = Field(default=False)

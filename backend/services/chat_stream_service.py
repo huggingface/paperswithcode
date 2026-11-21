@@ -27,6 +27,7 @@ from claude_agent_sdk._internal.session_store import project_key_for_directory
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
+from backend.chat_configuration.registry import SPONSORED_DEEPSEEK_ID
 from backend.config import Settings
 from backend.database.connection import db_manager
 from backend.models.database import (
@@ -1593,6 +1594,7 @@ class ChatStreamOrchestrator:
         self.principal_hash = hashlib.sha256(owner.hf_user_id.encode()).hexdigest()[:12]
         self.started = time.perf_counter()
         self.projection = ChatTurnProjection()
+        self.provider_failed_over = False
         self.store = PostgresSDKSessionStore()
         self.research_task: asyncio.Task | None = None
         self.title_task: asyncio.Task | None = None
@@ -2411,7 +2413,27 @@ class ChatStreamOrchestrator:
             event_extra(event, "recovery_attempts"),
             event_extra(event, "recovery_outcome"),
         )
+        if event_extra(event, "provider_failover") is True:
+            self._record_provider_failover()
         return _HandledTurnEvent()
+
+    def _record_provider_failover(self) -> None:
+        # The worker can only replay on a route this turn's runner offered.
+        route = getattr(self.runner, "provider_fallback_route", None)
+        if route is None or self.provider_failed_over:
+            return
+        self.provider_failed_over = True
+        # The session keeps Luna selected; only this turn's answer records the
+        # model that produced it.
+        self.admission = replace(
+            self.admission, selected_model=SPONSORED_DEEPSEEK_ID, model_route=route
+        )
+        logger.warning(
+            "chat provider failover request_id=%s turn_id=%s route=%s",
+            self.request_id,
+            self.admission.turn_id,
+            route,
+        )
 
     async def _handle_mcp_readiness_event(
         self, event: McpReadinessEvent
@@ -2584,6 +2606,14 @@ class ChatStreamOrchestrator:
             provider_code = ChatCapabilityService(error_db).provider_error_for_turn(
                 self.admission.session_id, self.admission.turn_id
             )
+            if (
+                self.provider_failed_over
+                and provider_code
+                and not provider_code.startswith("openai_")
+            ):
+                # The user chose Luna; errors of the hidden fallback route
+                # (such as an exhausted sponsorship) are not actionable for them.
+                provider_code = None
             if provider_code:
                 payload["code"] = provider_code
                 if provider_code == "hf_inference_billing_exhausted":

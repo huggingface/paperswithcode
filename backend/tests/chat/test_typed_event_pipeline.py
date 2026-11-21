@@ -356,3 +356,74 @@ def test_cancellation_dispatch_does_not_require_legacy_reparse(monkeypatch, type
     assert normalize.call_count == (0 if typed else 1)
     finalize.assert_awaited_once_with(cancel_runner=False)
     assert frames[0].payload == {"finish_reason": "stopped"}
+
+
+def _telemetry(**extras):
+    return from_legacy_event({"type": "_execution_telemetry", **extras})
+
+
+def test_provider_failover_records_the_answering_model_only_when_offered():
+    from types import SimpleNamespace
+
+    from backend.chat_configuration.registry import SPONSORED_DEEPSEEK_ID
+
+    stream = orchestrator()
+    asyncio.run(stream._handle_telemetry_event(_telemetry(provider_failover=True)))
+    # No runner offered a fallback: a worker claim alone changes nothing.
+    assert stream.admission.model_route == "route"
+    assert stream.provider_failed_over is False
+
+    route = "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita"
+    stream.runner = SimpleNamespace(provider_fallback_route=route)
+    asyncio.run(stream._handle_telemetry_event(_telemetry(recovery_outcome="none")))
+    assert stream.provider_failed_over is False
+    asyncio.run(stream._handle_telemetry_event(_telemetry(provider_failover=True)))
+    assert stream.provider_failed_over is True
+    assert stream.admission.model_route == route
+    assert stream.admission.selected_model == SPONSORED_DEEPSEEK_ID
+
+
+@pytest.mark.parametrize(
+    ("recorded", "expected"),
+    [
+        ("hf_sponsored_unavailable", "provider_error"),
+        ("openai_budget_exhausted", "openai_budget_exhausted"),
+    ],
+)
+def test_failed_over_turn_hides_fallback_route_error_codes(
+    monkeypatch, recorded, expected
+):
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    stream = orchestrator()
+    stream.runner = SimpleNamespace(
+        provider_fallback_route="deepseek-ai/DeepSeek-V4.1-Flash-1017:novita"
+    )
+    asyncio.run(stream._handle_telemetry_event(_telemetry(provider_failover=True)))
+
+    @contextmanager
+    def session():
+        yield object()
+
+    monkeypatch.setattr(streams.db_manager, "_session_local", session)
+    monkeypatch.setattr(
+        streams.ChatCapabilityService,
+        "provider_error_for_turn",
+        lambda *_: recorded,
+    )
+
+    async def run():
+        queue = asyncio.Queue()
+        await queue.put(
+            from_legacy_event(
+                {"type": "error", "code": "provider_error", "message": "x"}
+            )
+        )
+        await queue.put(ResearchFinishedEvent())
+        return [frame async for frame in stream._consume(queue)]
+
+    frames = asyncio.run(run())
+    assert stream.lifecycle.failure_code == expected
+    assert frames[0].payload["code"] == expected
+    assert "DeepSeek" not in frames[0].payload["message"]

@@ -137,3 +137,62 @@ def test_external_run_frame_preserves_exact_durable_turn_fence_as_strings():
         "workerGeneration": str(runner.admission.durable_claim.worker_generation),
         "leaseGeneration": str(runner.admission.durable_claim.lease_generation),
     }
+
+
+def test_external_run_frame_carries_the_provider_fallback_and_revokes_it(monkeypatch):
+    from contextlib import contextmanager
+
+    from backend.services import chat_external_pi_turn_runner as runner_module
+    from backend.services.chat_external_pi_turn_runner import (
+        ExternalProviderFallback,
+    )
+
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    assert "provider_fallback" not in runner._run_frame()
+
+    capability_id = uuid.uuid4()
+    route = runner.settings.chat_sponsored_deepseek_route
+    runner.provider_fallback = ExternalProviderFallback(
+        route=route,
+        model=route,
+        protocol="anthropic-messages",
+        capability=IssuedCapability(
+            token="fallback-capability",
+            capability_id=capability_id,
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        ),
+    )
+    runner.provider_fallback_capability_id = capability_id
+    assert runner._run_frame()["provider_fallback"] == {
+        "model": route,
+        "provider_protocol": "anthropic-messages",
+        "capability": "fallback-capability",
+    }
+
+    revoked: list[uuid.UUID] = []
+    commits: list[bool] = []
+
+    class DB:
+        def commit(self):
+            commits.append(True)
+
+    @contextmanager
+    def session_factory():
+        yield DB()
+
+    class Capabilities:
+        def __init__(self, _db):
+            pass
+
+        def revoke(self, value):
+            revoked.append(value)
+            return True
+
+    monkeypatch.setattr(runner_module, "ChatCapabilityService", Capabilities)
+    runner.session_factory = session_factory
+    runner._revoke()
+    runner._revoke()
+
+    assert revoked == [capability_id]
+    assert commits == [True]
+    assert runner.provider_fallback_capability_id is None

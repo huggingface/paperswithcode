@@ -84,3 +84,44 @@ test("durable event acknowledgements validate sequence and fence claim", async (
   assert.throws(() => parseAcknowledgeEvents({ ...frame, extra: true }, turnClaim));
   assert.throws(() => parseAcknowledgeEvents(frame, { ...turnClaim, leaseGeneration: 3 }));
 });
+
+test("accepts a provider fallback only on external runs and validates its shape", () => {
+  const turnId = "20000000-0000-4000-8000-000000000001";
+  const frame = {
+    v: 1,
+    type: "run_turn",
+    request_id: "request-1",
+    chat_session_id: "10000000-0000-4000-8000-000000000001",
+    turn_id: turnId,
+    turnClaim: { turnId, workerId: "worker-1", workerGeneration: 1, leaseGeneration: 1 },
+    prompt: "Reply with READY.",
+    model: "gpt-6-luna",
+    provider_protocol: "openai-responses",
+    resume: null,
+    web_search_enabled: false,
+    excalidraw_enabled: false,
+    reasoning_effort: "medium",
+    fetchable_urls: [],
+    hf_username: "qualification",
+    agent_harness: "pi",
+    capability: "primary-capability",
+    gateway_url: "https://gateway.example.test/api/internal/chat-gateway",
+    provider_fallback: {
+      model: "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita",
+      provider_protocol: "anthropic-messages",
+      capability: "fallback-capability",
+    },
+  };
+  assert.deepEqual(parseRunTurn(frame, true).provider_fallback, frame.provider_fallback);
+  for (const provider_fallback of [
+    null,
+    { ...frame.provider_fallback, capability: "" },
+    { ...frame.provider_fallback, provider_protocol: "other" },
+    { ...frame.provider_fallback, extra: true },
+  ]) {
+    assert.throws(() => parseRunTurn({ ...frame, provider_fallback }, true));
+  }
+  const { turn_id: _turn, turnClaim: _claim, capability: _capability, gateway_url: _url,
+    excalidraw_enabled: _excalidraw, ...local } = frame;
+  assert.throws(() => parseRunTurn(local));
+});

@@ -33,12 +33,30 @@ import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
 import { createOrBind, restoreFile, TranscriptMirror } from "./transcript.js";
 import { shouldResetSession } from "./session.js";
 
+// A second, server-funded route the worker may switch to once per turn when
+// the primary provider fails before the user saw any output. Its capability
+// authorizes only model calls on that route.
+export interface ProviderFallback {
+  model: string;
+  provider_protocol: ProviderProtocol;
+  capability: string;
+}
+
+// Events that do not show the user anything: a failed attempt that emitted
+// only these can be replaced without the browser noticing.
+const INVISIBLE_EVENTS = new Set(["usage", "reasoning_start", "reasoning_end", "compaction_status"]);
+
+function isVisibleEvent(event: PwCEvent): boolean {
+  return !event.type.startsWith("_") && !INVISIBLE_EVENTS.has(event.type);
+}
+
 export interface RunTurn {
   request_id: string;
   chat_session_id: string;
   prompt: string;
   model: string;
   provider_protocol?: ProviderProtocol;
+  provider_fallback?: ProviderFallback;
   resume: string | null;
   agent_session_id?: string;
   web_search_enabled: boolean;
@@ -115,6 +133,7 @@ export class PiWorker {
   private activeProfile: string | undefined;
   private sessionTaskCatalog: string | undefined;
   private failurePhase: TurnFailurePhase = "initialize";
+  private providerFailedOver = false;
   private readonly policy: PolicyController;
   private readonly excalidrawAvailable: boolean;
 
@@ -321,7 +340,7 @@ export class PiWorker {
     return { manager, initialCount: 0, created: true };
   }
 
-  private async open(run: RunTurn): Promise<void> {
+  private async open(run: RunTurn, gateway = this.gateway): Promise<void> {
     await this.initialize();
     const phaseStarted = performance.now();
     this.failurePhase = "session_bind_restore";
@@ -331,7 +350,7 @@ export class PiWorker {
       && !(this.prewarmedModel === run.model
         && this.prewarmedProtocol === protocol
         && this.prewarmedProvider)
-      ? createProvider(run.model, protocol, this.gateway).then(
+      ? createProvider(run.model, protocol, gateway).then(
         (provider) => ({ provider }),
         (error: unknown) => ({ error }),
       )
@@ -410,7 +429,7 @@ export class PiWorker {
       && this.prewarmedProtocol === protocol
       && this.prewarmedProvider
       ? this.prewarmedProvider
-      : coldProvider ?? await createProvider(run.model, protocol, this.gateway);
+      : coldProvider ?? await createProvider(run.model, protocol, gateway);
     const settings = SettingsManager.inMemory({
       compaction: { enabled: true, reserveTokens: compactionReserveTokens(provider.model.contextWindow) },
       retry: { enabled: false },
@@ -532,6 +551,7 @@ export class PiWorker {
     if (this.activeRequest) throw new Error("Pi worker already has an active turn");
     this.activeRequest = run.request_id;
     this.cancelled = false;
+    this.providerFailedOver = false;
     const turnTimeoutSeconds = run.poster_mode
       ? Number(process.env.PWC_CHAT_POSTERLY_TIMEOUT_SECONDS ?? 600)
       : run.paper_artifacts_enabled
@@ -554,87 +574,135 @@ export class PiWorker {
       if (!this.session || !this.manager || !this.mirror || !this.boundAgentSession) {
         throw new Error("Pi worker failed to initialize");
       }
-      if (this.session.model) {
-        run = { ...run, prompt: fitPaperContext(run.prompt, {
-          model: this.session.model,
-          systemPrompt: this.session.systemPrompt,
-          tools: this.session.agent.state.tools,
-        }) };
-        this.compaction.setProtectedRequest(run.prompt);
-      }
-      const adapter = new PiEventAdapter(
-        reasoningIsVisible(process.env.PWC_CHAT_SHOW_REASONING),
-        (kind) => {
-          if (kind === "answer") this.policy.observeAnswer();
-        },
-      );
-      let subscribeFailed = false;
-      let pendingAdapterError: PwCEvent | undefined;
-      const unsubscribe = this.session.subscribe((event) => {
-        if (subscribeFailed || this.cancelled) return;
-        try {
-          if (event.type === "message_end" && event.message.role === "assistant") {
-            if (event.message.stopReason === "length") this.policy.observeIncomplete();
-          }
-          for (const adapted of adapter.feed(event)) {
-            // A terminal event must be the final semantic frame before
-            // worker_done. Hold provider/adapter failures until transcript
-            // finalization has selected the single authoritative terminal.
-            if (adapted.type === "error") {
-              if (!pendingAdapterError || pendingAdapterError.code === "context_too_large") pendingAdapterError = adapted;
-            } else this.emit(run.request_id, adapted);
-          }
-        } catch {
-          subscribeFailed = true;
-          pendingAdapterError = {
-            type: "error",
-            code: "provider_error",
-            message: "The research run failed.",
-          };
-        }
-      });
       this.emit(run.request_id, { type: "_sdk_session", session_id: this.boundAgentSession });
       this.emit(run.request_id, { type: "workspace_ready" });
-      this.failurePhase = "model_prompt";
+      const requestedPrompt = run.prompt;
+      // The transcript position before this turn's prompt: a provider
+      // failover branches back here so the failed attempt leaves no context.
+      const leafBeforePrompt = this.manager.getLeafId();
+      let adapter!: PiEventAdapter;
+      let subscribeFailed = false;
+      let pendingAdapterError: PwCEvent | undefined;
       let mirrorFailed = false;
-      let reasoningLowered = false;
       let recovery: RecoverySummary = {
         reason: null,
         attempts: 0,
         outcome: "not_needed",
       };
-      try {
-        await this.session.prompt(run.prompt, { expandPromptTemplates: false, source: "interactive" });
-        recovery = await recoverIncompleteResponse(this.policy, {
-          prompt: async (value) => {
-            this.compaction.startRecovery();
-            // The provider guard and SDK compact only when context is actually
-            // crowded. A length-limited answer may have no safe summary boundary.
-            await this.session!.prompt(value, {
-              expandPromptTemplates: false,
-              source: "extension",
-            });
-          },
-          disableTools: () => this.session!.setActiveToolsByName([]),
-          lowerReasoning: () => {
-            if (run.reasoning_effort !== "max") return;
-            reasoningLowered = true;
-            this.session!.setThinkingLevel("high");
-          },
-          canContinue: () => !adapter.failed && !this.compaction.failed && !this.cancelled && !subscribeFailed,
-        });
-      } finally {
-        // The session is reused by later turns on this worker; do not leak the downgrade.
-        if (reasoningLowered) this.session?.setThinkingLevel(thinkingLevel(run.reasoning_effort));
-        this.compaction.finish();
-        unsubscribe();
-        this.failurePhase = "transcript_finalize";
-        try {
-          this.mirrorNativeEntries();
-          await this.mirror.flush();
-        } catch {
-          mirrorFailed = true;
+      for (;;) {
+        const session = this.session!;
+        if (session.model) {
+          run = { ...run, prompt: fitPaperContext(requestedPrompt, {
+            model: session.model,
+            systemPrompt: session.systemPrompt,
+            tools: session.agent.state.tools,
+          }) };
+          this.compaction.setProtectedRequest(run.prompt);
         }
+        const attemptAdapter = new PiEventAdapter(
+          reasoningIsVisible(process.env.PWC_CHAT_SHOW_REASONING),
+          (kind) => {
+            if (kind === "answer") this.policy.observeAnswer();
+          },
+        );
+        adapter = attemptAdapter;
+        subscribeFailed = false;
+        pendingAdapterError = undefined;
+        let visibleOutput = false;
+        const unsubscribe = session.subscribe((event) => {
+          if (subscribeFailed || this.cancelled) return;
+          try {
+            if (event.type === "message_end" && event.message.role === "assistant") {
+              if (event.message.stopReason === "length") this.policy.observeIncomplete();
+            }
+            for (const adapted of attemptAdapter.feed(event)) {
+              // A terminal event must be the final semantic frame before
+              // worker_done. Hold provider/adapter failures until transcript
+              // finalization has selected the single authoritative terminal.
+              if (adapted.type === "error") {
+                if (!pendingAdapterError || pendingAdapterError.code === "context_too_large") pendingAdapterError = adapted;
+              } else {
+                if (isVisibleEvent(adapted)) visibleOutput = true;
+                this.emit(run.request_id, adapted);
+              }
+            }
+          } catch {
+            subscribeFailed = true;
+            pendingAdapterError = {
+              type: "error",
+              code: "provider_error",
+              message: "The research run failed.",
+            };
+          }
+        });
+        this.failurePhase = "model_prompt";
+        let reasoningLowered = false;
+        recovery = {
+          reason: null,
+          attempts: 0,
+          outcome: "not_needed",
+        };
+        try {
+          await session.prompt(run.prompt, { expandPromptTemplates: false, source: "interactive" });
+          recovery = await recoverIncompleteResponse(this.policy, {
+            prompt: async (value) => {
+              this.compaction.startRecovery();
+              // The provider guard and SDK compact only when context is actually
+              // crowded. A length-limited answer may have no safe summary boundary.
+              await session.prompt(value, {
+                expandPromptTemplates: false,
+                source: "extension",
+              });
+            },
+            disableTools: () => session.setActiveToolsByName([]),
+            lowerReasoning: () => {
+              if (run.reasoning_effort !== "max") return;
+              reasoningLowered = true;
+              session.setThinkingLevel("high");
+            },
+            canContinue: () => !attemptAdapter.failed && !this.compaction.failed && !this.cancelled && !subscribeFailed,
+          });
+        } finally {
+          // The session is reused by later turns on this worker; do not leak the downgrade.
+          if (reasoningLowered) session.setThinkingLevel(thinkingLevel(run.reasoning_effort));
+          this.compaction.finish();
+          unsubscribe();
+          this.failurePhase = "transcript_finalize";
+          try {
+            this.mirrorNativeEntries();
+            await this.mirror!.flush();
+          } catch {
+            mirrorFailed = true;
+          }
+        }
+        const fallback = run.provider_fallback;
+        if (
+          !fallback || !this.gateway || visibleOutput || !attemptAdapter.failed
+          || (pendingAdapterError as PwCEvent | undefined)?.code !== "provider_error"
+          || subscribeFailed || mirrorFailed
+          || this.cancelled || this.compaction.attempted || this.compaction.failed
+        ) break;
+        // The primary provider failed before the user saw anything. Replay the
+        // same prompt once on the fallback route from the pre-prompt position.
+        process.stderr.write("External Pi provider failover\n");
+        this.providerFailedOver = true;
+        await this.disposeSession();
+        if (leafBeforePrompt) this.manager!.branch(leafBeforePrompt);
+        else this.manager!.resetLeaf();
+        const { agent_session_id: _prebound, provider_fallback: _fallback, ...primary } = run;
+        run = {
+          ...primary,
+          model: fallback.model,
+          provider_protocol: fallback.provider_protocol,
+          prompt: requestedPrompt,
+          // Keep the bound transcript: a null resume would reset it.
+          resume: this.boundAgentSession!,
+          // Uploaded files resolve only through the primary route.
+          user_files_enabled: false,
+        };
+        this.failurePhase = "agent_session";
+        await this.open(run, { ...this.gateway, capability: fallback.capability });
+        if (this.cancelled) break;
       }
       if (this.cancelled) {
         this.emit(run.request_id, { type: "worker_done", status: "stopped" });
@@ -721,6 +789,7 @@ export class PiWorker {
       recovery_reason: recovery.reason,
       recovery_attempts: recovery.attempts,
       recovery_outcome: recovery.outcome,
+      ...(this.providerFailedOver ? { provider_failover: true } : {}),
     };
   }
 }
