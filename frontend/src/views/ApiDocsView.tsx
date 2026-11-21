@@ -374,9 +374,10 @@ function openHashTarget() {
 function useHeaderBand(ref: RefObject<HTMLDivElement>) {
   useLayoutEffect(() => {
     const docs = ref.current;
-    const nav = document.querySelector<HTMLElement>(".app-header-inner .nav");
-    const search = document.querySelector<HTMLElement>(".app-header-inner .search-trigger");
-    if (!docs || !nav || !search) return;
+    const header = document.querySelector<HTMLElement>(".app-header-inner");
+    const nav = header?.querySelector<HTMLElement>(".nav");
+    const search = header?.querySelector<HTMLElement>(".search-trigger");
+    if (!docs || !header || !nav || !search) return;
     const align = () => {
       const left = nav.getBoundingClientRect().left;
       const searchBox = search.getBoundingClientRect();
@@ -388,12 +389,20 @@ function useHeaderBand(ref: RefObject<HTMLDivElement>) {
       docs.style.setProperty("--api-band-left", `${left}px`);
       docs.style.setProperty("--api-band-right", `${right}px`);
     };
-    align();
-    const observer = new ResizeObserver(align);
-    observer.observe(document.documentElement);
-    observer.observe(nav);
-    observer.observe(search);
-    return () => observer.disconnect();
+    const resizes = new ResizeObserver(align);
+    const observeHeader = () => {
+      resizes.disconnect();
+      resizes.observe(document.documentElement);
+      for (const child of header.children) resizes.observe(child);
+      align();
+    };
+    observeHeader();
+    const mutations = new MutationObserver(observeHeader);
+    mutations.observe(header, { childList: true });
+    return () => {
+      resizes.disconnect();
+      mutations.disconnect();
+    };
   }, [ref]);
 }
 
