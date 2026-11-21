@@ -84,7 +84,6 @@ class ChatModelSettings(BaseModel):
     chat_openai_luna_route: str = Field(default="gpt-5.6-luna@openai")
     chat_openai_model: str = Field(default="gpt-6-luna", pattern=r"^gpt-6-luna$")
     chat_openai_service_tier: Literal["default"] = Field(default="default")
-    chat_terra_route: str = Field(default="openai/gpt-5.6-terra")
 
 
 class ChatOpenAIBudgetSettings(BaseModel):
@@ -141,12 +140,6 @@ class ChatOpenRouterSettings(BaseModel):
     )
     chat_openrouter_user_rate_limit_calls: int = Field(default=30, ge=1, le=1000)
     chat_openrouter_global_rate_limit_calls: int = Field(default=80, ge=1, le=10000)
-    chat_openrouter_monthly_budget_usd: Decimal = Field(
-        default=Decimal("200.00"), gt=0, le=10000
-    )
-    chat_openrouter_budget_reserve_usd: Decimal = Field(
-        default=Decimal("0.50"), ge=0, le=100
-    )
     chat_openrouter_monthly_usage_retention_months: int = Field(
         default=13, ge=13, le=60
     )

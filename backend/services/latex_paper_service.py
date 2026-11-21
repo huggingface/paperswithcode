@@ -71,6 +71,16 @@ _FIGURE_TYPES = {
 _SAFE_FIGURE_PATH = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,299}")
 
 
+def _log_storage_cleanup_failure(stage: str, prefix: str, error: Exception) -> None:
+    logger.warning(
+        "latex_compiler_event event=storage_cleanup_failed "
+        "stage=%s storage_prefix=%s failure_class=%s",
+        stage,
+        prefix,
+        type(error).__name__,
+    )
+
+
 @dataclass(frozen=True)
 class LatexPaperRepairOutcome:
     descriptor: LatexPaperArtifactDescriptor
@@ -1368,8 +1378,13 @@ class LatexPaperService:
                 }
             else:
                 self._store_compile_result(version, compiler.result(job_id))
-        except (httpx.HTTPError, EnvelopeError, RuntimeError, ValueError):
-            pass
+        except (httpx.HTTPError, EnvelopeError, RuntimeError, ValueError) as error:
+            logger.warning(
+                "latex_compiler_event event=refresh_poll_failed "
+                "version_id=%s failure_class=%s",
+                version.id,
+                type(error).__name__,
+            )
         self.db.flush()
         return _paper_descriptor(artifact).model_copy(
             update={"editing_enabled": self._editing_enabled()}
@@ -1716,7 +1731,10 @@ class LatexPaperService:
         for cleanup in pending:
             try:
                 self.storage.delete_prefix(cleanup.storage_prefix)
-            except Exception:
+            except Exception as error:
+                _log_storage_cleanup_failure(
+                    "reconcile_delete", cleanup.storage_prefix, error
+                )
                 continue
             self.db.delete(cleanup)
             reclaimed += 1
@@ -1967,7 +1985,8 @@ class LatexPaperService:
             for stored_prefix in prefixes:
                 try:
                     self.storage.delete_prefix(stored_prefix)
-                except Exception:
+                except Exception as error:
+                    _log_storage_cleanup_failure("storage_delete", stored_prefix, error)
                     continue
                 try:
                     with Session(bind=session.bind) as cleanup_db:
@@ -1978,8 +1997,8 @@ class LatexPaperService:
                             )
                         )
                         cleanup_db.commit()
-                except Exception:
-                    continue
+                except Exception as error:
+                    _log_storage_cleanup_failure("queue_ack", stored_prefix, error)
 
         def discard_after_rollback(session: Session) -> None:
             session.info.pop("latex_paper_cleanup_prefixes", None)

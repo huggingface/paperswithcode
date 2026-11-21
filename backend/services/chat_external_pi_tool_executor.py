@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import timedelta
 from typing import Any, Literal
@@ -55,6 +56,23 @@ SHARED_EXECUTOR_FAILURES = frozenset(
         "workspace_generation_mismatch",
     }
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+def _log_cleanup_failure(
+    stage: str, workspace: ExternalExecutorWorkspace, error: Exception
+) -> None:
+    logger.warning(
+        "chat external Pi workspace cleanup failed "
+        "stage=%s turn_id=%s chat_session_id=%s failure_class=%s",
+        stage,
+        workspace.turn_id,
+        workspace.session_id,
+        type(error).__name__,
+        exc_info=error,
+    )
 
 
 def _executor_deadline_unix_ms(capability: IssuedCapability) -> int:
@@ -504,7 +522,8 @@ class ExternalPiToolWorkspaceExecutor:
                 if not primary_exception_active:
                     raise
                 return
-            except Exception:
+            except Exception as error:
+                _log_cleanup_failure("release_workspace", workspace, error)
                 binding.settlement = "invalidate"
         close = getattr(binding.channel, "aclose", None)
         if close is not None:
@@ -516,7 +535,8 @@ class ExternalPiToolWorkspaceExecutor:
                 if not primary_exception_active:
                     raise
                 return
-            except Exception:
+            except Exception as error:
+                _log_cleanup_failure("channel_close", workspace, error)
                 binding.settlement = "invalidate"
         if binding.settlement == "release":
             try:
@@ -532,8 +552,8 @@ class ExternalPiToolWorkspaceExecutor:
                 if not primary_exception_active:
                     raise
                 return
-            except Exception:
-                pass
+            except Exception as error:
+                _log_cleanup_failure("release", workspace, error)
         await self._invalidate(
             workspace,
             primary_exception_active=primary_exception_active,
@@ -573,8 +593,8 @@ class ExternalPiToolWorkspaceExecutor:
         except asyncio.CancelledError:
             if not primary_exception_active:
                 raise
-        except Exception:
-            return
+        except Exception as error:
+            _log_cleanup_failure("invalidate", workspace, error)
 
     def _workspace_manager(self) -> ChatExternalExecutorWorkspaceManager:
         manager = self.workspace_manager

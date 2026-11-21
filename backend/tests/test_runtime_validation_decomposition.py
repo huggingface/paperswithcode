@@ -1459,20 +1459,6 @@ def test_durable_external_profile_requires_tier_consistent_openai_budgets(
     )
 
 
-def test_capacity_tier_openai_allowances_match_the_host_env_helper():
-    from deploy import configure_host_env
-
-    assert {
-        environment: {tier: str(calls) for tier, calls in allowances.items()}
-        for environment, allowances in (
-            runtime_validation._EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS.items()
-        )
-    } == configure_host_env._CHAT_CAPACITY_TIER_RATE_LIMIT_CALLS
-    assert set(runtime_validation._EXTERNAL_PI_CAPACITY_POLICIES) == set(
-        configure_host_env.CHAT_CAPACITY_TIERS
-    )
-
-
 @pytest.mark.parametrize("flow", ["startup", "standalone"])
 def test_runtime_profile_and_canonical_contract_are_resolved_once(
     settings_factory, monkeypatch, flow

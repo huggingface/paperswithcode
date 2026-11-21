@@ -337,8 +337,11 @@ def test_snapshot_termination_finishes_the_exact_lease_and_spend_interval():
 
 @pytest.mark.parametrize("failure_stage", ["save", "record"])
 def test_snapshot_failure_is_recoverable_and_does_not_block_termination(
-    failure_stage,
+    failure_stage, caplog
 ):
+    caplog.set_level(
+        "WARNING", logger="backend.services.chat_sandbox_lease_eviction_coordinator"
+    )
     harness = _Harness(_settings(chat_workspace_snapshots_enabled=True))
     if failure_stage == "save":
         harness.snapshots.error = RuntimeError("snapshot unavailable")
@@ -359,6 +362,12 @@ def test_snapshot_failure_is_recoverable_and_does_not_block_termination(
     assert lease.state == "terminated"
     assert lease.workspace_snapshot_id is None
     assert lease.workspace_dirty is True
+    assert any(
+        "eviction snapshot failed" in record.getMessage()
+        and f"chat_session_id={session_id}" in record.getMessage()
+        and "failure_class=RuntimeError" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_snapshot_io_cannot_overwrite_or_terminate_a_successor_generation():

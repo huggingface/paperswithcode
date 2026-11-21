@@ -7,6 +7,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
+from backend.chat_configuration.capacity_tiers import (
+    CHAT_CAPACITY_TIER_OPENAI_RATE_LIMIT_CALLS,
+    CHAT_CAPACITY_TIERS,
+)
 from backend.config import Settings
 from backend.chat_sandbox_worker.executor_protocol import PROTOCOL as EXECUTOR_CONTRACT
 from backend.services.chat_runtime_contract import (
@@ -34,17 +38,14 @@ _EXTERNAL_PI_CAPACITY_POLICIES = {
         blank_pool_min=1,
         blank_pool_max=1,
     )
-    for tier in (32, 64)
+    for tier in CHAT_CAPACITY_TIERS
 }
 
 
 _EXTERNAL_PI_CAPACITY_POLICY = _EXTERNAL_PI_CAPACITY_POLICIES[32]
 
 
-_EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS = {
-    "production": {32: 512, 64: 4096},
-    "staging": {32: 300, 64: 4096},
-}
+_EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS = CHAT_CAPACITY_TIER_OPENAI_RATE_LIMIT_CALLS
 
 
 def _external_pi_capacity_tier(settings: Settings) -> int | None:

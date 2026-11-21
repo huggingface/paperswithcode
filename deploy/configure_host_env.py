@@ -24,6 +24,10 @@ except ModuleNotFoundError:
     # Run from a checkout as `python deploy/configure_host_env.py`.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from backend.operator_profile import OPERATOR
+from backend.chat_configuration.capacity_tiers import (
+    CHAT_CAPACITY_TIER_OPENAI_RATE_LIMIT_CALLS,
+    CHAT_CAPACITY_TIERS,
+)
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -1160,24 +1164,12 @@ _PRODUCTION_DURABLE_EXTERNAL_ENABLED = {
 }
 
 
-# Reviewed chat capacity tiers for the durable external profile. OpenAI
-# concurrency equals admitted turns; the ten-minute call allowance grows faster
-# because an MCP research turn spends 10-13 model calls and a full tier of turns
-# cycles several times per window. The 32-turn allowance keeps each
-# environment's established value.
-CHAT_CAPACITY_TIERS = (32, 64)
-_CHAT_CAPACITY_TIER_RATE_LIMIT_CALLS = {
-    "production": {32: "512", 64: "4096"},
-    "staging": {32: "300", 64: "4096"},
-}
-
-
 def chat_capacity_tier_values(
     current: dict[str, str], *, environment: str, tier: int
 ) -> dict[str, str]:
     """Move one environment between reviewed chat capacity tiers atomically."""
 
-    if environment not in _CHAT_CAPACITY_TIER_RATE_LIMIT_CALLS:
+    if environment not in CHAT_CAPACITY_TIER_OPENAI_RATE_LIMIT_CALLS:
         raise ValueError("chat capacity tiers apply to staging or production")
     if tier not in CHAT_CAPACITY_TIERS:
         raise ValueError("chat capacity tier must be 32 or 64")
@@ -1187,8 +1179,8 @@ def chat_capacity_tier_values(
         "PWC_CHAT_MAX_CONCURRENCY": str(tier),
         "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": str(tier),
         "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": str(tier),
-        "PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS": (
-            _CHAT_CAPACITY_TIER_RATE_LIMIT_CALLS[environment][tier]
+        "PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS": str(
+            CHAT_CAPACITY_TIER_OPENAI_RATE_LIMIT_CALLS[environment][tier]
         ),
     }
 

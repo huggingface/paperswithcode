@@ -62,6 +62,12 @@ Besides /api/v1/chat/stream, the reconnect endpoint /api/v1/chat/sessions/{id}/s
 
 Code: `backend/services/deployment_lifecycle.py::DeploymentLifecycle.request`
 
+## Cleanup failures after a fixed outcome are logged, not raised
+
+Workspace release, invalidation and eviction snapshots, and LaTeX storage cleanup run after the primary outcome is fixed: a tool call already succeeded, a turn already failed with a typed error, or a database commit already happened. Raising a cleanup error there would turn a successful tool call into a duplicate-prone retry, skip sandbox termination after a failed snapshot, or fail a request whose commit already landed. These boundaries therefore keep catching every exception, but each one logs a warning with the turn or session id, the failure class and the traceback. The busy fence, the dirty-workspace flag and the durable cleanup queue keep the system correct until reconciliation. A transient LaTeX compiler poll failure keeps the job queued and logs a `latex_compiler_event` instead of recording a compile failure; the caught set is the compiler transport's own error surface (`httpx.HTTPError`, `EnvelopeError`, `RuntimeError`, `ValueError`).
+
+Code: `backend/services/chat_external_executor_workspace.py::ChatExternalExecutorWorkspaceManager._invalidate_preserving_primary`, `backend/services/chat_external_pi_tool_executor.py::ExternalPiToolWorkspaceExecutor._settle`, `backend/services/chat_external_pi_tool_executor.py::ExternalPiToolWorkspaceExecutor._invalidate`, `backend/services/chat_sandbox_lease_eviction_coordinator.py::ChatSandboxLeaseEvictionCoordinator._save_snapshot`, `backend/services/latex_paper_service.py::LatexPaperService.refresh_compile`, `backend/services/latex_paper_service.py::LatexPaperService._schedule_storage_prefix_cleanup`
+
 ## Cold batch admissions are durable before any sample starts
 
 Each batch of cold samples is admitted to the journal (durably written) before any member starts its latency clock. This keeps the record of simultaneous admission trustworthy and lets an interrupted run reconcile every admitted sample.
@@ -310,7 +316,9 @@ Code: `backend/services/chat_sandbox_executor_channel.py::PersistentSandboxExecu
 
 OpenAI concurrency equals the external Pi tier, but the ten-minute call allowance grows faster because an MCP research turn spends 10-13 model calls and a full tier of turns cycles several times per window. The 32-turn tier keeps each environment's established allowance (production 512, staging 300); 64 turns get 4096.
 
-Code: `backend/services/runtime_policies/chat_runtime_profile.py::_EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS`
+The tier table is defined once in `backend/chat_configuration/capacity_tiers.py` and imported by both the runtime profile and `deploy/configure_host_env.py`, so the deploy tooling and runtime validation cannot drift.
+
+Code: `backend/chat_configuration/capacity_tiers.py::CHAT_CAPACITY_TIER_OPENAI_RATE_LIMIT_CALLS`, `backend/services/runtime_policies/chat_runtime_profile.py::_EXTERNAL_PI_CAPACITY_POLICIES`, `deploy/configure_host_env.py::chat_capacity_tier_values`
 
 ## Paper-enabled turns get process headroom for the LaTeX extension
 
