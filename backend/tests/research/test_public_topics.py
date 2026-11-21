@@ -216,7 +216,6 @@ def test_bubbles_rank_eligible_public_topics_by_followers(db, now, monkeypatch):
     assert public.bubbles(db, now)[0].creator.username == "alice"
     public.set_show_as_follower(db, "bob", False)
     verdict(db, popular, paper(db, now, "8", "Last month", days=20), score=0.99)
-    # Two versions of one arXiv paper count once, under the latest version's title.
     best = paper(db, now, "7", "Best v1", days=2)
     best.is_latest_version = False
     newer = paper(db, now, "70", "Best", days=2)

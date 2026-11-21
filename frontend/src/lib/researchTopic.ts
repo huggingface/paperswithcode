@@ -137,7 +137,7 @@ export function useFollowTopics() {
 }
 
 /** How many of the most followed topics the homepage shows as cards above the feed. */
-export const FEATURED_TOPIC_COUNT = 3;
+export const FEATURED_TOPIC_COUNT = 10;
 
 /** Follows one popular topic from the homepage and opens Following filtered to it.
  * Guests sign in first; Following saves the stashed pick after sign-in. */

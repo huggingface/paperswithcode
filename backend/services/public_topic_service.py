@@ -34,7 +34,6 @@ from backend.services.research_topic_service import THRESHOLD
 BUBBLE_LIMIT = 20
 BUBBLE_MIN_RECENT_PAPERS = 5
 RECENT_DAYS = 30
-# Popular topics show as cards with this week's papers, on the homepage and in the feed editor.
 FEATURED_DAYS = 7
 FEATURED_AVATARS = 3
 INDEX_MIN_FOLLOWERS = 3
@@ -69,7 +68,6 @@ ORDER BY followers DESC, recent DESC, id
 LIMIT :limit
 """
 
-# Weekly stats and faces for the popular topic cards.
 FEATURED_SQL = """
 SELECT t.id, count(w.id) week_papers,
  (array_agg(w.id ORDER BY w.score DESC, w.date_published DESC, w.id DESC))[1] top_paper_id,
@@ -98,7 +96,6 @@ def person(username: str | None) -> TopicPerson | None:
         return None
     return TopicPerson(
         username=username,
-        # Served from our origin: some browsers get 503 for huggingface.co images.
         avatar_url=f"/api/v1/research/avatars/{username}",
     )
 

@@ -3,7 +3,11 @@
 ``huggingface.co/api/users/<name>/avatar?redirect=true`` works as an ``<img>``
 source on most pages, but some browsers get HTTP 503 for every huggingface.co
 image from other origins (seen on staging). The cards therefore load the few
-featured followers' avatars from our own origin.
+featured followers' avatars from our own origin. Hugging Face default avatars
+are SVG, so the route serves them with a sandboxing Content-Security-Policy.
+
+Successful URL lookups are cached for a day; image misses are remembered for an
+hour, so a topic page's follower grid does not refetch them.
 """
 
 from __future__ import annotations
@@ -23,9 +27,7 @@ MAX_IMAGE_BYTES = 512 * 1024
 MAX_CACHED_IMAGES = 500
 IMAGE_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml")
 
-# username -> (expires at, image URL); only successful lookups are kept.
 _cache: dict[str, tuple[float, str]] = {}
-# username -> (expires at, (content type, bytes)); None remembers a miss.
 _images: dict[str, tuple[float, tuple[str, bytes] | None]] = {}
 
 

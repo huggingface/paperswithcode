@@ -660,8 +660,11 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
           )}
 
           <div className="feed-content">
-            {!following && canBuildFeed && !auth?.isLoading && (!user || topics.isSuccess) && (
-              <HomePopularTopics followedIds={followedTopicIds} onBuild={() => setEditingTopic(null)} />
+            {!following && canBuildFeed && (
+              <HomePopularTopics
+                followedIds={!auth?.isLoading && (!user || topics.isSuccess) ? followedTopicIds : null}
+                onBuild={() => setEditingTopic(null)}
+              />
             )}
             <div className="sort-bar home-feed-sort-bar">
               <div className="paper-feed-toolbar-controls">
