@@ -1053,7 +1053,7 @@ class ThumbnailService:
                 if file_age > max_age_seconds:
                     thumbnail_file.unlink()
                     deleted_count += 1
-            except Exception:
+            except FileNotFoundError:
                 continue
 
         return deleted_count

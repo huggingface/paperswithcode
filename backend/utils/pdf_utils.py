@@ -2,6 +2,7 @@ from typing import List, Callable, Any, TypeVar
 from contextlib import asynccontextmanager
 import asyncio
 import aiohttp
+import logging
 import tempfile
 import os
 import re
@@ -10,8 +11,11 @@ import fitz
 from PyPDF2 import PdfReader
 from pdf2image import convert_from_path
 import pdfplumber
+from pdfminer.psexceptions import PSException
+from pdfplumber.utils.exceptions import MalformedPDFException, PdfminerException
 
 T = TypeVar("T")
+logger = logging.getLogger(__name__)
 
 PROJECT_PAGE_URL_PATTERN = r"\bhttps?://[a-zA-Z0-9.-]+\.github\.io[^\s]*"
 
@@ -73,8 +77,8 @@ def extract_hyperlinks_from_pdf(pdf_path):
                                 text = crop.extract_text() or ""
 
                             links.append({"text": text.strip(), "url": link["uri"]})
-    except Exception as e:
-        print(f"Error extracting hyperlinks from PDF: {e}")
+    except (PdfminerException, MalformedPDFException, PSException):
+        logger.exception("Could not read hyperlinks from PDF %s", pdf_path)
         return []
 
     return links
@@ -92,9 +96,6 @@ async def safe_extract_hyperlinks_async(pdf_path: str, timeout_seconds: int = 10
         return links
     except asyncio.TimeoutError:
         print(f"Hyperlink extraction timed out after {timeout_seconds} seconds")
-        return []
-    except Exception as e:
-        print(f"Error during hyperlink extraction: {e}")
         return []
 
 
@@ -236,7 +237,8 @@ async def async_retry_with_backoff(
     Raises:
         The last exception if all retries are exhausted
     """
-    last_exception = None
+    if max_retries < 1:
+        raise ValueError("max_retries must be at least 1")
 
     for attempt in range(max_retries):
         try:
@@ -249,8 +251,6 @@ async def async_retry_with_backoff(
             return result
 
         except retry_exceptions as e:
-            last_exception = e
-
             if attempt == max_retries - 1:
                 print(f"All {max_retries} attempts failed for {operation_name}")
                 raise e
@@ -260,10 +260,6 @@ async def async_retry_with_backoff(
                 f"{operation_name} failed with {type(e).__name__}: {str(e)}, retrying in {delay:.1f} seconds..."
             )
             await asyncio.sleep(delay)
-
-    if last_exception:
-        raise last_exception
-    raise RuntimeError(f"Unexpected error in retry logic for {operation_name}")
 
 
 class PDFDownloadError(Exception):

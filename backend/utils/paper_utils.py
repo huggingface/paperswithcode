@@ -277,7 +277,7 @@ async def get_comments(arxiv_id: str) -> str:
             else:
                 comments_string += "\n\nNo comments were found in API response."
 
-        except Exception:
+        except (aiohttp.ClientError, TimeoutError):
             comments_string += "\n\nNo comments were found (due to error)."
 
     return comments_string
@@ -335,7 +335,7 @@ async def get_authors(arxiv_id: str) -> str:
             else:
                 authors_string += "\n\nNo authors were found in API response."
 
-        except Exception:
+        except (aiohttp.ClientError, TimeoutError):
             authors_string += "\n\nNo authors were found (due to error)."
 
     return authors_string

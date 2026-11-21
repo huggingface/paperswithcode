@@ -14,6 +14,7 @@ from backend.services.github_issue_body_service import (
     GithubIssueDraft,
     ISSUE_TITLE,
     normalize_repository_url,
+    parse_github_repository,
 )
 from backend.services.github_issue_publish_service import (
     GithubApiError,
@@ -413,6 +414,12 @@ def test_normalization_rejects_non_github_and_strips_git():
     )
     with pytest.raises(ValueError):
         normalize_repository_url("https://example.com/owner/repo")
+
+
+def test_parse_github_repository_returns_none_for_other_hosts_and_bare_owners():
+    assert parse_github_repository("https://gitlab.com/owner/repo") is None
+    assert parse_github_repository("https://github.com/owner") is None
+    assert parse_github_repository("https://www.github.com/a/b.git") == "a/b"
 
 
 def test_rate_limit_cooldown_skips_even_identity_request(state):
