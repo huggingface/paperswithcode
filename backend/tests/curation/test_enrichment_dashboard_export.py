@@ -111,6 +111,30 @@ def test_snapshot_groups_jobs_and_deduplicates_gap_paper_pairs(tmp_path):
     assert snapshot["trending_model_decisions"] == []
 
 
+def test_snapshot_keeps_a_day_bucket_for_evaluations_without_jobs():
+    job_time = datetime(2026, 8, 25, 23, 59, tzinfo=timezone.utc)
+    evaluation_time = datetime(2026, 8, 26, 0, 1, tzinfo=timezone.utc)
+    jobs = [
+        {
+            "id": "job-1",
+            "paper_id": 1,
+            "paper_title": "Paper",
+            "kind": "add-evals",
+            "status": "completed",
+            "created_at": job_time,
+            "mutation_result": {"evaluations_created": 1},
+            "error": None,
+        }
+    ]
+    evaluations = [{"id": 4, "paper_id": 1, "created_at": evaluation_time}]
+    snapshot = build_snapshot(
+        FakeDB(jobs, evaluations, []), date(2026, 8, 25), date(2026, 8, 26)
+    )
+    assert [row["day"] for row in snapshot["daily"]] == ["2026-08-25", "2026-08-26"]
+    assert snapshot["daily"][1]["evaluations_created"] == 0
+    assert snapshot["daily"][1]["evaluation_jobs"] == 0
+
+
 def test_write_snapshot_creates_json(tmp_path):
     path = tmp_path / "snapshot.json"
     write_snapshot({"schema_version": 1, "generated_at": "now"}, path)

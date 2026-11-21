@@ -201,9 +201,7 @@ def build_snapshot(
                 }
             )
 
-    for row in evaluations:
-        day = _day(row["created_at"])
-        daily[day]["evaluations_created"] += 0
+    evaluation_days = {_day(row["created_at"]) for row in evaluations}
 
     unique_gaps: dict[tuple[str, str], dict[str, Any]] = {}
     for row in gaps:
@@ -224,7 +222,9 @@ def build_snapshot(
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
-        "daily": [{"day": day, **daily[day]} for day in sorted(daily)],
+        "daily": [
+            {"day": day, **daily[day]} for day in sorted(daily.keys() | evaluation_days)
+        ],
         "papers": papers,
         "evaluations": clean(evaluations),
         "benchmark_gaps": clean(list(unique_gaps.values())),

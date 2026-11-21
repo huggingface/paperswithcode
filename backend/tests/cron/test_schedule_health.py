@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 
 from backend.services.cron_health import (
+    _execution_health,
     evaluate_job_health,
 )
 from backend.services.cron_registry import get_cron_job
@@ -225,3 +227,45 @@ def test_stale_successful_workflow_cannot_mask_fresh_database_writes():
 
     assert evaluated["status"] in {"degraded", "broken"}
     assert evaluated["execution_health"]["status"] in {"degraded", "broken"}
+
+
+def test_workflow_execution_requires_an_explicit_scheduled_run():
+    job = replace(
+        _job("update_citations"),
+        scheduler="github_actions",
+        workflow_file="cron-citations.yml",
+        systemd_timer=None,
+        systemd_service=None,
+    )
+    now = datetime(2026, 8, 14, 13, 1, tzinfo=timezone.utc)
+    common = {
+        "running": False,
+        "log_status": {},
+        "systemd_status": None,
+        "schedule_enabled": True,
+        "now": now,
+    }
+    missing = _execution_health(
+        job,
+        workflow_status={
+            "available": True,
+            "status": "unknown",
+            "error": "no workflow runs found",
+        },
+        **common,
+    )
+    explicit = _execution_health(
+        job,
+        workflow_status={
+            "available": True,
+            "scheduled_run": {
+                "status": "completed",
+                "conclusion": "success",
+                "createdAt": now.isoformat(),
+                "updatedAt": now.isoformat(),
+            },
+        },
+        **common,
+    )
+    assert missing["reason"] == "no scheduled workflow run was found"
+    assert explicit["status"] == "healthy"

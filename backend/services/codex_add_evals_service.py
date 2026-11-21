@@ -498,8 +498,6 @@ class CodexPaperJobService:
             pair_diff=getattr(row, "pair_diff", None),
         )
 
-    _serialize = serialize
-
     def enqueue(
         self,
         db: Session,
@@ -2317,5 +2315,3 @@ class CodexPaperJobService:
 
 
 codex_paper_job_service = CodexPaperJobService()
-codex_add_evals_service = codex_paper_job_service
-codex_enrich_paper_service = codex_paper_job_service

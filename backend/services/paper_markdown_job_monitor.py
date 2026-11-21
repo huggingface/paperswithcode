@@ -21,7 +21,10 @@ from backend.services.paper_markdown_budget_service import (
     PAPER_MARKDOWN_GPU_HOURLY_RATE_USD,
     paper_markdown_budget_snapshot,
 )
-from backend.services.paper_markdown_job_profile import paper_markdown_job_profile
+from backend.services.paper_markdown_job_profile import (
+    PAPER_MARKDOWN_BACKFILL_JOB_PROFILE,
+    paper_markdown_job_profile,
+)
 
 _RUN_ID = re.compile(r"^(?:backfill|live|live-fresh)-\d{8}T\d{6}-[0-9a-f]{8}$")
 _SHARD_ID = re.compile(r"^\d{5}$")
@@ -663,8 +666,7 @@ def _fetch(settings: Settings) -> dict[str, Any]:
             ceiling_usd=settings.paper_markdown_backfill_budget_usd,
             planned_jobs=max(
                 0,
-                getattr(settings, "paper_markdown_backfill_concurrency", 4)
-                - active_backfill,
+                PAPER_MARKDOWN_BACKFILL_JOB_PROFILE.concurrency - active_backfill,
             ),
             now=snapshot_now,
             cost_policy=getattr(settings, "paper_markdown_cost_policy", "metered"),
