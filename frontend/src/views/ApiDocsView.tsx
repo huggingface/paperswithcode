@@ -1,4 +1,11 @@
-import { useEffect, useState, type ComponentType } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentType,
+  type RefObject,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -64,6 +71,8 @@ function resource(tag: string) {
     }
   );
 }
+
+const MIN_BAND_WIDTH = 900;
 
 const LEADERBOARD_STEPS = [
   { title: "Find a dataset", path: "/api/v1/datasets/", query: "?q=ImageNet" },
@@ -362,7 +371,35 @@ function openHashTarget() {
   target.scrollIntoView();
 }
 
+function useHeaderBand(ref: RefObject<HTMLDivElement>) {
+  useLayoutEffect(() => {
+    const docs = ref.current;
+    const nav = document.querySelector<HTMLElement>(".app-header-inner .nav");
+    const search = document.querySelector<HTMLElement>(".app-header-inner .search-trigger");
+    if (!docs || !nav || !search) return;
+    const align = () => {
+      const left = nav.getBoundingClientRect().left;
+      const searchBox = search.getBoundingClientRect();
+      const right = document.documentElement.clientWidth - searchBox.left;
+      const banded =
+        searchBox.width > 0 &&
+        searchBox.left - left >= MIN_BAND_WIDTH;
+      docs.classList.toggle("api-docs-banded", banded);
+      docs.style.setProperty("--api-band-left", `${left}px`);
+      docs.style.setProperty("--api-band-right", `${right}px`);
+    };
+    align();
+    const observer = new ResizeObserver(align);
+    observer.observe(document.documentElement);
+    observer.observe(nav);
+    observer.observe(search);
+    return () => observer.disconnect();
+  }, [ref]);
+}
+
 export default function ApiDocsView() {
+  const docsRef = useRef<HTMLDivElement>(null);
+  useHeaderBand(docsRef);
   const { data, isPending, isError, refetch } = useQuery(publicSpecQuery);
   useDocumentTitle("API documentation — Papers With Code", { restorePrevious: true });
   useEffect(() => {
@@ -377,7 +414,7 @@ export default function ApiDocsView() {
   const groups = data ? groupByTag(data.paths) : [];
   const endpointCount = data ? Object.keys(data.paths).length : null;
   return (
-    <div className="api-docs">
+    <div className="api-docs" ref={docsRef}>
       <nav className="api-sidebar" aria-label="API documentation">
         <strong>API documentation</strong>
         <div className="api-sidebar-group">
