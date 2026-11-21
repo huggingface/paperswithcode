@@ -84,7 +84,10 @@ from backend.services.paper_version_refresh_service import (
     ArxivPaperRefreshResult,
     PaperVersionRefreshService,
 )
-from backend.services.semantic_scholar_service import SemanticScholarService
+from backend.services.semantic_scholar_service import (
+    SemanticScholarService,
+    SemanticScholarUnavailableError,
+)
 from backend.services.trending_ranking_service import (
     correlated_paper_score_expressions,
 )
@@ -1798,47 +1801,44 @@ class PaperService:
         Returns:
             List of paper summaries with enhanced citation-based ranking
         """
+        local_results = self.search_papers(query, limit)
+
+        if len(local_results) >= limit:
+            return local_results
+
+        semantic_scholar_service = SemanticScholarService(self.db)
         try:
-            local_results = self.search_papers(query, limit)
-
-            if len(local_results) >= limit:
-                return local_results
-
-            semantic_scholar_service = SemanticScholarService(self.db)
             highly_cited = await semantic_scholar_service.get_highly_cited_papers(
                 query, limit
             )
+        except SemanticScholarUnavailableError:
+            return local_results
 
-            local_titles = {result.title.lower() for result in local_results}
-            supplemental_papers = []
+        local_titles = {result.title.lower() for result in local_results}
+        supplemental_papers = []
 
-            for title, citation_count in highly_cited:
-                if (
-                    title.lower() not in local_titles
-                    and len(local_results) + len(supplemental_papers) < limit
-                ):
-                    db_paper = (
-                        self.db.query(DBPaper)
-                        .filter(DBPaper.title.ilike(f"%{title}%"))
-                        .filter(DBPaper.is_latest_version)
-                        .first()
-                    )
+        for title, citation_count in highly_cited:
+            if (
+                title.lower() not in local_titles
+                and len(local_results) + len(supplemental_papers) < limit
+            ):
+                db_paper = (
+                    self.db.query(DBPaper)
+                    .filter(DBPaper.title.ilike(f"%{title}%"))
+                    .filter(DBPaper.is_latest_version)
+                    .first()
+                )
 
-                    if db_paper:
-                        if citation_count > db_paper.citation_count:
-                            db_paper.citation_count = citation_count
-                            self.db.commit()
+                if db_paper:
+                    if citation_count > db_paper.citation_count:
+                        db_paper.citation_count = citation_count
+                        self.db.commit()
 
-                        supplemental_papers.append(db_paper)
+                    supplemental_papers.append(db_paper)
 
-            supplemental_results = self._convert_db_papers_to_summaries(
-                supplemental_papers
-            )
-            all_results = local_results + supplemental_results
-            return all_results[:limit]
-
-        except Exception:
-            return self.search_papers(query, limit)
+        supplemental_results = self._convert_db_papers_to_summaries(supplemental_papers)
+        all_results = local_results + supplemental_results
+        return all_results[:limit]
 
     def add_paper(
         self, paper_data: Dict[str, Any], *, commit: bool = True

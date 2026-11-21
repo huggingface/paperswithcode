@@ -91,14 +91,22 @@ class GithubIssueDraft:
         return asdict(self)
 
 
-def normalize_repository_url(url: str) -> str:
+def parse_github_repository(url: str) -> str | None:
+    """Return ``owner/name`` for a GitHub repository URL, else None."""
     parsed = urlparse(url)
     if parsed.hostname not in {"github.com", "www.github.com"}:
-        raise ValueError(f"Invalid GitHub repository URL: {url}")
+        return None
     parts = [part for part in parsed.path.split("/") if part]
     if len(parts) < 2:
-        raise ValueError(f"Invalid GitHub repository URL: {url}")
+        return None
     return "/".join(parts[:2]).removesuffix(".git")
+
+
+def normalize_repository_url(url: str) -> str:
+    repository = parse_github_repository(url)
+    if repository is None:
+        raise ValueError(f"Invalid GitHub repository URL: {url}")
+    return repository
 
 
 def compute_placement(
@@ -486,12 +494,11 @@ def generate_github_issue_draft(
         )
         .order_by(Repository.num_stars.desc(), Repository.url)
     ).scalars()
-    github_repositories = []
-    for url in repository_rows:
-        try:
-            github_repositories.append(normalize_repository_url(url))
-        except ValueError:
-            continue
+    github_repositories = [
+        repository
+        for repository in map(parse_github_repository, repository_rows)
+        if repository is not None
+    ]
     repositories = tuple(dict.fromkeys(github_repositories))
 
     body = render_issue_body(

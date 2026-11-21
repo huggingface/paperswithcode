@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import OperationalError
 
 from backend.config import get_settings
 from backend.models.curation import ApplyMutationRequest, EnrichPaperMutation
@@ -236,11 +237,18 @@ def test_full_pi_pool_skips_the_pair_instead_of_queueing(monkeypatch):
     assert db.added == []
 
 
-def test_pairing_failure_never_reaches_the_codex_dispatch(monkeypatch):
+@pytest.mark.parametrize(
+    "error",
+    [
+        callback_module.CodexCurationPaperNotFoundError("Paper not found"),
+        OperationalError("SELECT", {}, Exception("catalog unavailable")),
+    ],
+)
+def test_pairing_failure_never_reaches_the_codex_dispatch(monkeypatch, error):
     service = CodexPaperJobService()
 
     def broken_context(_self, _row, _settings):
-        raise RuntimeError("catalog unavailable")
+        raise error
 
     monkeypatch.setattr(CodexCurationCallbackService, "context", broken_context)
     db = _PairingDatabase()
@@ -249,6 +257,18 @@ def test_pairing_failure_never_reaches_the_codex_dispatch(monkeypatch):
 
     assert db.added == []
     assert db.rollbacks == 1
+
+
+def test_pairing_programming_errors_surface(monkeypatch):
+    service = CodexPaperJobService()
+
+    def broken_context(_self, _row, _settings):
+        raise KeyError("paper")
+
+    monkeypatch.setattr(CodexCurationCallbackService, "context", broken_context)
+
+    with pytest.raises(KeyError):
+        service._pair_pi_shadow(_PairingDatabase(), _pi_settings(), _codex_row())
 
 
 def test_pi_job_launches_its_own_image_command_and_inference_token(monkeypatch):

@@ -26,7 +26,7 @@ from huggingface_hub.errors import HfHubHTTPError
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
@@ -108,6 +108,7 @@ CURATOR_COMMAND = "exec python3 /runner/run_paper_curation.py"
 PI_CURATOR_COMMAND = "exec python3 /runner/run_pi_curation.py"
 PI_SHADOW_TRIGGER = "pi-shadow"
 PI_SHADOW_KINDS = frozenset({"enrich-paper", "add-evals"})
+RELEASE_MERGE_ERROR_PREFIX = "External release merge failed: "
 CURATION_DISPATCH_LOCK_ID = 0x50574344
 CURATOR_BOOTSTRAP_PATHS = (
     ".agents/skills/add-evals/SKILL.md",
@@ -1256,6 +1257,7 @@ class CodexPaperJobService:
             return
         from backend.services.codex_curation_callback_service import (  # noqa: PLC0415
             CodexCurationCallbackService,
+            CodexCurationPaperNotFoundError,
         )
 
         try:
@@ -1287,7 +1289,7 @@ class CodexPaperJobService:
             )
             db.add(row)
             db.commit()
-        except Exception:
+        except (CodexCurationPaperNotFoundError, SQLAlchemyError):
             db.rollback()
             logger.exception("Pi shadow pairing failed for job %s", codex_row.id)
             return
@@ -2113,19 +2115,26 @@ class CodexPaperJobService:
             logger.error("paper curation dispatch paused condition=%s", condition)
 
     @staticmethod
-    def _merge_external_release(db: Session, paper_id: int | None) -> None:
+    def _merge_external_release(
+        db: Session, workflow: PaperCurationWorkflow, paper_id: int | None
+    ) -> None:
         """Move an earlier launch page's evals onto its ArXiv report first.
 
         Otherwise add-evals sees the report's scores as duplicates of the
-        launch page and leaves the ArXiv paper without results.
+        launch page and leaves the ArXiv paper without results. A merge that
+        conflicts with existing rows is rolled back to its savepoint and
+        recorded on the workflow, so evaluation proceeds and operators see it.
         """
         if paper_id is None:
             return
         try:
             stats = merge_external_release_duplicate(db, paper_id)
-        except SQLAlchemyError:
+        except IntegrityError as error:
             logger.exception("external release merge failed for paper %s", paper_id)
+            workflow.error = f"{RELEASE_MERGE_ERROR_PREFIX}{error.orig}"[:2000]
             return
+        if (workflow.error or "").startswith(RELEASE_MERGE_ERROR_PREFIX):
+            workflow.error = None
         if stats is not None:
             logger.info("merged external release into paper %s: %s", paper_id, stats)
 
@@ -2168,7 +2177,7 @@ class CodexPaperJobService:
                 .first()
             )
             if exists is None and workflow.evals_satisfied_by_job_id is None:
-                self._merge_external_release(db, row.paper_id)
+                self._merge_external_release(db, workflow, row.paper_id)
                 self.enqueue(
                     db,
                     kind="add-evals",
@@ -2189,7 +2198,7 @@ class CodexPaperJobService:
                 workflow.status = "completed"
                 workflow.finished_at = _now()
         elif row.status == "completed" and row.kind == "add-evals":
-            self._merge_external_release(db, row.paper_id)
+            self._merge_external_release(db, workflow, row.paper_id)
             workflow.status = "completed"
             workflow.finished_at = _now()
             if workflow.policy_version != EXTERNAL_PAPER_POLICY_VERSION:

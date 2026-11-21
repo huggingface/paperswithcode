@@ -267,9 +267,9 @@ class BatchURLExtractor:
 
             db.commit()
 
-        except Exception as e:
-            logger.error(f"❌ Error saving results for paper {paper_id}: {e}")
+        except Exception:
             db.rollback()
+            raise
 
     async def process_paper(self, paper: Dict[str, Any], db: Session) -> Dict[str, Any]:
         """Process a single paper using the unified get_project_github_urls function."""

@@ -182,15 +182,6 @@ class GoogleGenerator(RateLimitingMixin, Generator):
             except Exception as e:
                 print(f"An error occurred with model {model_name}: {str(e)}")
                 last_exception = e
-                if self._is_rate_limit_error(e):
-                    print("Adding delay before trying next model...")
-                    await asyncio.sleep(5)
-                elif self._is_service_unavailable_error(e):
-                    print(
-                        "Service unavailable - adding delay before trying next model..."
-                    )
-                    await asyncio.sleep(3)
-                continue
         if last_exception:
             raise last_exception
         return "", "No model succeeded"

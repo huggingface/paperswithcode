@@ -147,29 +147,23 @@ async def generate_thumbnail(
                 }
 
             async def generate_external_in_background():
-                try:
-                    await thumbnail_service.generate_external_thumbnail(
-                        paper.id,
-                        paper.source_url,
-                        title=paper.title,
-                        pdf_url=paper.conference_url_pdf,
-                    )
-                    filename = thumbnail_service.get_external_filename(paper.id)
-                    thumbnail_url = build_custom_thumbnail_url(filename)
+                await thumbnail_service.generate_external_thumbnail(
+                    paper.id,
+                    paper.source_url,
+                    title=paper.title,
+                    pdf_url=paper.conference_url_pdf,
+                )
+                filename = thumbnail_service.get_external_filename(paper.id)
+                thumbnail_url = build_custom_thumbnail_url(filename)
 
-                    session = db_manager.session_local()
-                    try:
-                        db_paper = session.get(DBPaper, paper.id)
-                        if db_paper is not None:
-                            db_paper.thumbnail_url = thumbnail_url
-                            session.commit()
-                    finally:
-                        session.close()
-                except Exception as e:
-                    print(
-                        f"Background external thumbnail generation failed for "
-                        f"paper {paper.id}: {e}"
-                    )
+                session = db_manager.session_local()
+                try:
+                    db_paper = session.get(DBPaper, paper.id)
+                    if db_paper is not None:
+                        db_paper.thumbnail_url = thumbnail_url
+                        session.commit()
+                finally:
+                    session.close()
 
             background_tasks.add_task(generate_external_in_background)
 
@@ -196,14 +190,7 @@ async def generate_thumbnail(
             }
 
         async def generate_in_background():
-            try:
-                await thumbnail_service.generate_thumbnail(
-                    paper.arxiv_id, paper.version
-                )
-            except Exception as e:
-                print(
-                    f"Background thumbnail generation failed for {paper.arxiv_id}: {e}"
-                )
+            await thumbnail_service.generate_thumbnail(paper.arxiv_id, paper.version)
 
         background_tasks.add_task(generate_in_background)
 

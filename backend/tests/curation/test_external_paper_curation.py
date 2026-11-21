@@ -425,7 +425,45 @@ def test_enrich_completion_merges_external_release_before_add_evals(db, monkeypa
     assert db.query(PaperCurationJob).filter_by(kind="add-evals").count() == 1
 
 
-def test_failed_release_merge_still_queues_add_evals(db, monkeypatch):
+def test_conflicting_release_merge_is_recorded_and_still_queues_add_evals(
+    db, monkeypatch
+):
+    from sqlalchemy.exc import IntegrityError
+
+    paper = _paper(db)
+    service = CodexPaperJobService()
+    enqueue_external_paper_curation(db, paper, settings=SETTINGS, jobs=service)
+    db.commit()
+    enrich = db.query(PaperCurationJob).one()
+    enrich.status = "completed"
+
+    def fail(*_args):
+        raise IntegrityError("INSERT", {}, Exception("duplicate key"))
+
+    monkeypatch.setattr(
+        "backend.services.codex_add_evals_service.merge_external_release_duplicate",
+        fail,
+    )
+
+    service._advance_workflow(db, enrich, SETTINGS)
+
+    assert db.query(PaperCurationJob).filter_by(kind="add-evals").count() == 1
+    workflow = db.get(PaperCurationWorkflow, enrich.parent_workflow_id)
+    assert workflow.error == "External release merge failed: duplicate key"
+
+    monkeypatch.setattr(
+        "backend.services.codex_add_evals_service.merge_external_release_duplicate",
+        lambda _db, _paper_id: None,
+    )
+    add_evals = db.query(PaperCurationJob).filter_by(kind="add-evals").one()
+    add_evals.status = "completed"
+    service._advance_workflow(db, add_evals, SETTINGS)
+
+    assert workflow.status == "completed"
+    assert workflow.error is None
+
+
+def test_unexpected_release_merge_database_errors_propagate(db, monkeypatch):
     from sqlalchemy.exc import OperationalError
 
     paper = _paper(db)
@@ -443,9 +481,8 @@ def test_failed_release_merge_still_queues_add_evals(db, monkeypatch):
         fail,
     )
 
-    service._advance_workflow(db, enrich, SETTINGS)
-
-    assert db.query(PaperCurationJob).filter_by(kind="add-evals").count() == 1
+    with pytest.raises(OperationalError):
+        service._advance_workflow(db, enrich, SETTINGS)
 
 
 def test_add_evals_completion_retries_skipped_release_merge(db, monkeypatch):

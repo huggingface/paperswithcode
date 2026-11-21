@@ -77,6 +77,10 @@ json.dump(response, sys.stdout)
 """
 
 
+class BucketBridgeError(RuntimeError):
+    """The isolated bucket I/O subprocess failed."""
+
+
 def bucket_bridge(request: dict[str, object]) -> dict[str, object]:
     """Run bucket I/O in an SDK environment isolated from vLLM's SDK pin."""
     completed = subprocess.run(
@@ -96,7 +100,9 @@ def bucket_bridge(request: dict[str, object]) -> dict[str, object]:
         check=False,
     )
     if completed.returncode != 0:
-        raise RuntimeError(f"bucket bridge failed: {completed.stderr.strip()[-2000:]}")
+        raise BucketBridgeError(
+            f"bucket bridge failed: {completed.stderr.strip()[-2000:]}"
+        )
     return json.loads(completed.stdout)
 
 
@@ -313,7 +319,9 @@ def main() -> None:
     parser.add_argument("--source-bucket", required=True)
     parser.add_argument("--manifest-key", required=True)
     args = parser.parse_args()
+    from pypdfium2 import PdfiumError
 
+    paper_failures = (httpx.HTTPError, ValueError, BucketBridgeError, PdfiumError)
     run_id = Path(args.manifest_key).stem
     with tempfile.TemporaryDirectory(prefix="pwc-layout-manifest-") as directory:
         manifest_path = Path(directory) / "manifest.json"
@@ -353,7 +361,7 @@ def main() -> None:
                     source_bucket=args.source_bucket,
                     run_id=run_id,
                 )
-            except Exception as error:
+            except paper_failures as error:
                 result = {
                     "paper_key": entry["paper_key"],
                     "ok": False,

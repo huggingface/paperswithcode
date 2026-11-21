@@ -1,4 +1,8 @@
+import json
+
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from backend.services.cron_failure_alerts import (
     dashboard_status,
@@ -103,5 +107,10 @@ def test_state_round_trip_and_dashboard_status(tmp_path):
         "since": NOW.isoformat(),
         "notified_at": NOW.isoformat(),
     }
+
+
+def test_corrupt_state_surfaces_instead_of_resetting_open_alerts(tmp_path):
+    path = tmp_path / "alerts.json"
     path.write_text("not json")
-    assert load_state(path) == {}
+    with pytest.raises(json.JSONDecodeError):
+        load_state(path)

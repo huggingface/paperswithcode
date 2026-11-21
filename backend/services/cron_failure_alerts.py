@@ -37,7 +37,7 @@ class FailureAlert:
 def load_state(path: Path) -> dict[str, dict[str, Any]]:
     try:
         payload = json.loads(path.read_text())
-    except (OSError, ValueError):
+    except FileNotFoundError:
         return {}
     alerts = payload.get("alerts") if isinstance(payload, dict) else None
     return alerts if isinstance(alerts, dict) else {}
