@@ -83,6 +83,7 @@ class PublicTopicView(BaseModel):
     id: int
     text: str
     label: str | None = None
+    summary: str | None = None
     status: Literal["pending", "running", "done", "failed"]
     creator: TopicPerson | None
     is_public: bool

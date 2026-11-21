@@ -152,6 +152,7 @@ def topic_view(db: Session, topic_id: int, viewer: str | None) -> PublicTopicVie
         id=topic.id,
         text=topic.text,
         label=topic.label,
+        summary=topic.summary,
         status=topic.backfill_status,
         creator=person(creator),
         is_public=topic.is_public,

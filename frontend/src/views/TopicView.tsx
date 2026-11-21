@@ -81,6 +81,7 @@ export default function TopicView() {
       <div>
         <span className="topic-kicker">Topic</span>
         <h1 className="feed-title">{title}</h1>
+        {data.summary && <p className="topic-summary">{data.summary}</p>}
         {data.text.toLowerCase() !== title.toLowerCase() && <p className="topic-description">{data.text}</p>}
       </div>
     </div>
