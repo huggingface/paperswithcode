@@ -5,12 +5,14 @@ import asyncio
 from bs4 import BeautifulSoup
 
 from huggingface_hub import paper_info
+from huggingface_hub.errors import HfHubHTTPError
 from huggingface_hub.utils import build_hf_headers
 
 from backend.utils.hf_utils import get_user_organizations
 
 
 GITHUB_URL_PATTERN = r"\bhttps?:\/\/github\.com[^\s]*\b"
+HF_HUB_TIMEOUT_SECONDS = 10
 
 
 async def get_github_and_project_page_urls_from_daily_papers(
@@ -53,6 +55,8 @@ async def find_github_url(arxiv_id: str, abstract: Optional[str] = None) -> str:
     """
     if abstract is None:
         abstract = await get_abstract(arxiv_id=arxiv_id)
+    if abstract is None:
+        return ""
     match = re.search(GITHUB_URL_PATTERN, abstract)
     return match.group(0) if match else ""
 
@@ -78,20 +82,19 @@ async def _fetch_arxiv_page(arxiv_id: str) -> BeautifulSoup | None:
 
     async def _do_fetch():
         async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(url, timeout=10) as response:
+            async with session.get(
+                url, timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
                 response.raise_for_status()
                 return await response.text()
 
     try:
-        html_content = await asyncio.shield(_do_fetch())
+        html_content = await _do_fetch()
     except aiohttp.ClientError as e:
         print(f"Error fetching ArXiv page {url}: {e}")
         return None
     except asyncio.TimeoutError:
         print(f"Timeout error fetching ArXiv page {url}")
-        return None
-    except asyncio.CancelledError:
-        print(f"Request cancelled while fetching ArXiv page {url}")
         return None
 
     return BeautifulSoup(html_content, "html.parser")
@@ -121,72 +124,49 @@ async def get_abstract_arxiv(arxiv_id: str) -> str | None:
         else:
             return full_text
 
-    meta_tags_to_check = [
-        {"name": "citation_abstract"},
-        {"property": "og:description"},
-        {"name": "description"},
-    ]
-
-    for tag_attrs in meta_tags_to_check:
+    for tag_attrs in ({"name": "citation_abstract"}, {"property": "og:description"}):
         meta_tag = soup.find("meta", attrs=tag_attrs)
         if meta_tag and meta_tag.get("content"):
-            content = meta_tag.get("content").strip()
-            if (
-                tag_attrs.get("name") == "description"
-                and "Abstract page for arXiv paper" in content
-            ):
-                parts = content.split(":", 1)
-                if len(parts) > 1:
-                    abstract_candidate = parts[1].strip()
-                    if len(abstract_candidate) > 100:
-                        return abstract_candidate
-            else:
-                return content
+            return meta_tag.get("content").strip()
 
     print(f"Abstract not found in expected locations for ArXiv ID: {arxiv_id}")
     return None
 
 
-async def get_abstract_hf_hub(arxiv_id: str) -> str:
+async def _paper_info_hf_hub(arxiv_id: str):
+    """Fetch HF Hub paper metadata, or None when the Hub has no answer in time."""
+    try:
+        async with asyncio.timeout(HF_HUB_TIMEOUT_SECONDS):
+            return await asyncio.to_thread(paper_info, id=arxiv_id)
+    except (HfHubHTTPError, TimeoutError) as e:
+        print(f"Error fetching HF Hub paper info for {arxiv_id}: {e}")
+        return None
+
+
+async def get_abstract_hf_hub(arxiv_id: str) -> str | None:
     """
     Get the abstract of a paper using the Hugging Face Hub API.
     """
-    try:
-        paper_details = await asyncio.shield(asyncio.to_thread(paper_info, id=arxiv_id))
-        abstract = paper_details.summary
-        return abstract
-    except asyncio.CancelledError:
-        print(f"Request cancelled while fetching HF Hub abstract for {arxiv_id}")
-        return "No abstract was found."
+    paper_details = await _paper_info_hf_hub(arxiv_id)
+    return paper_details.summary if paper_details else None
 
 
-async def get_abstract(arxiv_id: str) -> str:
+async def get_abstract(arxiv_id: str) -> str | None:
     """
-    Get the abstract of a paper using the HF REST API and ArXiv API.
+    Get the abstract of a paper from the HF Hub API, falling back to arXiv.
     """
-
-    try:
-        abstract = await get_abstract_hf_hub(arxiv_id=arxiv_id)
-        if abstract is None:
-            abstract = await get_abstract_arxiv(arxiv_id=arxiv_id)
-    except Exception as e:
-        print(f"Error getting abstract: {e}")
-        abstract = "No abstract was found."
-
+    abstract = await get_abstract_hf_hub(arxiv_id=arxiv_id)
+    if abstract is None:
+        abstract = await get_abstract_arxiv(arxiv_id=arxiv_id)
     return abstract
 
 
-async def get_title_hf_hub(arxiv_id: str) -> str:
+async def get_title_hf_hub(arxiv_id: str) -> str | None:
     """
     Get the title of a paper using the Hugging Face Hub API.
     """
-    try:
-        paper_details = await asyncio.shield(asyncio.to_thread(paper_info, id=arxiv_id))
-        title = paper_details.title
-        return title
-    except asyncio.CancelledError:
-        print(f"Request cancelled while fetching HF Hub info for {arxiv_id}")
-        return "No title was found."
+    paper_details = await _paper_info_hf_hub(arxiv_id)
+    return paper_details.title if paper_details else None
 
 
 async def get_title_arxiv(arxiv_id: str) -> str | None:
@@ -241,19 +221,13 @@ async def get_title_arxiv(arxiv_id: str) -> str | None:
     return None
 
 
-async def get_title(arxiv_id: str) -> str:
+async def get_title(arxiv_id: str) -> str | None:
     """
-    Get the title of a paper using the HF REST API.
+    Get the title of a paper from arXiv, falling back to the HF Hub API.
     """
-
-    try:
-        title = await get_title_arxiv(arxiv_id=arxiv_id)
-        if title is None:
-            title = await get_title_hf_hub(arxiv_id=arxiv_id)
-    except Exception as e:
-        print(f"Error getting title from HF Hub: {e}")
-        title = "No title was found."
-
+    title = await get_title_arxiv(arxiv_id=arxiv_id)
+    if title is None:
+        title = await get_title_hf_hub(arxiv_id=arxiv_id)
     return title
 
 
@@ -328,7 +302,7 @@ async def get_authors(arxiv_id: str) -> str:
                     return await response.json()
 
         try:
-            data = await asyncio.shield(_fetch_authors())
+            data = await _fetch_authors()
 
             authors = data.get("authors", [])
             if authors:
@@ -361,9 +335,6 @@ async def get_authors(arxiv_id: str) -> str:
             else:
                 authors_string += "\n\nNo authors were found in API response."
 
-        except asyncio.CancelledError:
-            print(f"Request cancelled while fetching authors for {arxiv_id}")
-            authors_string += "\n\nNo authors were found (request cancelled)."
         except Exception:
             authors_string += "\n\nNo authors were found (due to error)."
 

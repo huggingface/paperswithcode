@@ -16,9 +16,9 @@ Processing Logic:
 - After successful processing, marks paper with urls_extracted = TRUE
 
 Error Handling:
-- Critical errors (rate limits, PDF download failures, reCAPTCHA) do NOT mark paper as processed
-- Papers with critical errors can be retried in future runs (urls_extracted stays FALSE)
-- Non-critical errors mark paper as processed with no URLs found
+- Any extraction failure (PDF download, provider, parsing) leaves urls_extracted FALSE
+  so the paper is retried in a future run
+- A paper whose arXiv PDF does not exist is marked processed with the URLs found so far
 
 Logs can be saved at backend/database/logs.
 
@@ -277,134 +277,46 @@ class BatchURLExtractor:
         paper_id = paper["id"]
         abstract = paper["abstract"]
 
-        try:
-            try:
-                logger.info(
-                    f"🤖 Starting AI extraction for {arxiv_id}: {paper.get('title', 'N/A')[:80]}..."
-                )
+        logger.info(
+            f"🤖 Starting AI extraction for {arxiv_id}: {paper.get('title', 'N/A')[:80]}..."
+        )
 
-                reasoning, response = await get_project_github_urls(
-                    arxiv_id=arxiv_id,
-                    session_id=None,
-                    use_reasoning=False,
-                    abstract=abstract,
-                    generator=self.generator,
-                )
+        reasoning, response = await get_project_github_urls(
+            arxiv_id=arxiv_id,
+            session_id=None,
+            use_reasoning=False,
+            abstract=abstract,
+            generator=self.generator,
+        )
 
-                github_url = response.get("github_url", "") if response else ""
-                project_page_url = (
-                    response.get("project_page_url", "") if response else ""
-                )
+        github_url = response.get("github_url", "") if response else ""
+        project_page_url = response.get("project_page_url", "") if response else ""
 
-                github_status = f"✅ {github_url}" if github_url else "❌ None"
-                project_status = (
-                    f"✅ {project_page_url}" if project_page_url else "❌ None"
-                )
-                logger.info(
-                    f"🔗 {arxiv_id}: GitHub={github_status}, Project={project_status}"
-                )
+        github_status = f"✅ {github_url}" if github_url else "❌ None"
+        project_status = f"✅ {project_page_url}" if project_page_url else "❌ None"
+        logger.info(f"🔗 {arxiv_id}: GitHub={github_status}, Project={project_status}")
 
-            except Exception as e:
-                error_str = str(e).lower()
+        self.save_results_to_db(
+            db,
+            paper_id,
+            github_url,
+            project_page_url,
+            "ai_extraction",
+        )
 
-                is_rate_limit = "rate limit" in error_str or "429" in str(e)
-                is_quota_exceeded = (
-                    "quota exceeded" in error_str or "daily quota" in error_str
-                )
-                is_pdf_download_fail = "failed to download pdf" in error_str
-                is_recaptcha = "recaptcha" in error_str or "captcha" in error_str
+        self.stats["papers_processed"] += 1
+        if github_url and project_page_url:
+            self.stats["papers_with_both"] += 1
+        if not github_url and not project_page_url:
+            self.stats["papers_with_neither"] += 1
 
-                auth_markers = [
-                    "api key",
-                    "invalid_api_key",
-                    "api_key_invalid",
-                    "expired",
-                    "unauthorized",
-                    "forbidden",
-                    "permission",
-                    "not authenticated",
-                    "unauthenticated",
-                    "invalid authentication",
-                    "key not active",
-                    "insufficient authentication",
-                ]
-                is_api_key_invalid = any(marker in error_str for marker in auth_markers)
-
-                if (
-                    is_rate_limit
-                    or is_quota_exceeded
-                    or is_pdf_download_fail
-                    or is_recaptcha
-                    or is_api_key_invalid
-                ):
-                    error_type = (
-                        "API authentication"
-                        if is_api_key_invalid
-                        else "rate limit/quota/PDF"
-                    )
-                    logger.error(
-                        f"❌ Critical error ({error_type}) for {arxiv_id} (will not mark as processed): {e}"
-                    )
-                    self.stats["api_errors"] += 1
-                    self.stats["papers_skipped_critical_errors"] += 1
-                    return {
-                        "paper_id": paper_id,
-                        "arxiv_id": arxiv_id,
-                        "github_url": "",
-                        "project_page_url": "",
-                        "error": str(e),
-                        "success": False,
-                        "should_retry": True,
-                    }
-                else:
-                    logger.warning(
-                        f"⚠️  Non-critical error for {arxiv_id} (will mark as processed): {e}"
-                    )
-                    self.stats["api_errors"] += 1
-                    github_url = ""
-                    project_page_url = ""
-
-            source = "ai_extraction"
-
-            self.save_results_to_db(
-                db,
-                paper_id,
-                github_url,
-                project_page_url,
-                source,
-            )
-
-            self.stats["papers_processed"] += 1
-            if github_url and project_page_url:
-                self.stats["papers_with_both"] += 1
-            if not github_url and not project_page_url:
-                self.stats["papers_with_neither"] += 1
-
-            github_final = "✅ Saved" if github_url else "❌ None"
-            project_final = "✅ Saved" if project_page_url else "❌ None"
-            logger.info(
-                f"✅ {arxiv_id}: GitHub={github_final}, Project={project_final}"
-            )
-
-            return {
-                "paper_id": paper_id,
-                "arxiv_id": arxiv_id,
-                "github_url": github_url,
-                "project_page_url": project_page_url,
-                "success": True,
-            }
-
-        except Exception as e:
-            logger.error(f"❌ Error processing paper {arxiv_id}: {e}")
-            self.stats["api_errors"] += 1
-            return {
-                "paper_id": paper_id,
-                "arxiv_id": arxiv_id,
-                "github_url": "",
-                "project_page_url": "",
-                "error": str(e),
-                "success": False,
-            }
+        return {
+            "paper_id": paper_id,
+            "arxiv_id": arxiv_id,
+            "github_url": github_url,
+            "project_page_url": project_page_url,
+            "success": True,
+        }
 
     async def process_batch(
         self, papers: List[Dict[str, Any]], db: Session
@@ -426,9 +338,11 @@ class BatchURLExtractor:
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 logger.error(
-                    f"❌ Exception processing paper {papers[i]['arxiv_id']}: {result}"
+                    f"❌ Extraction failed for {papers[i]['arxiv_id']} "
+                    f"(will retry in a later run): {type(result).__name__}: {result}"
                 )
                 self.stats["api_errors"] += 1
+                self.stats["papers_skipped_critical_errors"] += 1
             else:
                 processed_results.append(result)
 
@@ -536,9 +450,6 @@ class BatchURLExtractor:
 
                 if batch_num % 3 == 0 or batch_num == total_batches:
                     self.print_stats()
-
-                if batch_num < total_batches:
-                    await asyncio.sleep(2)
 
             self.print_stats()
 

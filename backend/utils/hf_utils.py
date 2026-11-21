@@ -4,11 +4,13 @@ import time
 from typing import Literal, Optional
 from urllib.parse import urlparse, urlunparse
 
-import aiohttp
+from huggingface_hub import HfApi
+from huggingface_hub.errors import HfHubHTTPError
 from huggingface_hub.utils import build_hf_headers
 
 
 HfArtifactKind = Literal["model", "dataset", "space"]
+USER_OVERVIEW_TIMEOUT_SECONDS = 10
 
 
 class HfArtifactDiscoveryError(RuntimeError):
@@ -361,114 +363,24 @@ def fetch_hf_artifacts_for_arxiv(
 
 async def get_user_organizations(username: str) -> list[str]:
     """
-    Get all organizations that a Hugging Face user belongs to by parsing their HF profile page.
+    Get the names of the organizations a Hugging Face user belongs to.
 
-    Args:
-        username (str): The Hugging Face username
-
-    Returns:
-        list[str]: List of organization names the user belongs to
+    Returns an empty list when the user does not exist or the Hub does not
+    answer in time.
 
     Example:
         >>> orgs = await get_user_organizations("phython96")
         >>> print(orgs)  # ["CraftJarvis"]
     """
-    url = f"https://huggingface.co/{username}"
-
-    async def _fetch_profile():
-        headers = build_hf_headers(token=False, user_agent={"is_ci": "true"})
-        async with aiohttp.ClientSession(headers=headers) as session:
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                response.raise_for_status()
-                return await response.text()
-
     try:
-        html_content = await asyncio.shield(_fetch_profile())
-
-        organizations = []
-
-        orgs_section_pattern = r"(?i)organizations.*?(?=<h[1-6]|$)"
-        orgs_section_match = re.search(orgs_section_pattern, html_content, re.DOTALL)
-
-        if orgs_section_match:
-            orgs_section = orgs_section_match.group(0)
-            org_links_pattern = r'href="/([^/\s"]+)"'
-            org_matches = re.findall(org_links_pattern, orgs_section)
-
-            for org in org_matches:
-                if (
-                    org != username
-                    and org
-                    not in [
-                        "models",
-                        "datasets",
-                        "spaces",
-                        "papers",
-                        "docs",
-                        "settings",
-                        "join",
-                        "pricing",
-                        "enterprise",
-                        "community",
-                        "login",
-                        "signup",
-                    ]
-                    and not org.startswith("http")
-                    and len(org) > 1
-                ):
-                    organizations.append(org)
-
-        if not organizations:
-            all_links_pattern = r'href="/([a-zA-Z0-9][a-zA-Z0-9_-]*)"'
-            all_matches = re.findall(all_links_pattern, html_content)
-
-            link_counts = {}
-            for link in all_matches:
-                if (
-                    link != username
-                    and link
-                    not in [
-                        "models",
-                        "datasets",
-                        "spaces",
-                        "papers",
-                        "docs",
-                        "settings",
-                        "join",
-                        "spaces",
-                        "new",
-                        "pricing",
-                        "enterprise",
-                        "community",
-                        "login",
-                        "signup",
-                    ]
-                    and not link.startswith("http")
-                    and len(link) > 1
-                ):
-                    link_counts[link] = link_counts.get(link, 0) + 1
-
-            for link, count in link_counts.items():
-                if count >= 2:
-                    organizations.append(link)
-
-        seen = set()
-        unique_orgs = []
-        for org in organizations:
-            if org not in seen:
-                seen.add(org)
-                unique_orgs.append(org)
-
-        return unique_orgs
-
-    except asyncio.CancelledError:
-        print(f"Request cancelled while fetching organizations for user {username}")
-        return []
-    except Exception as e:
+        async with asyncio.timeout(USER_OVERVIEW_TIMEOUT_SECONDS):
+            user = await asyncio.to_thread(
+                HfApi().get_user_overview, username, token=False
+            )
+    except (HfHubHTTPError, TimeoutError) as e:
         print(f"Error fetching organizations for user {username}: {e}")
         return []
+    return [org.name for org in user.orgs]
 
 
 if __name__ == "__main__":

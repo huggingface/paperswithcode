@@ -26,6 +26,7 @@ from backend.utils.verify_url import verify_url
 from backend.utils.pdf_utils import (
     extract_text_from_pdf,
     safe_extract_hyperlinks_async,
+    PDFNotFoundError,
     temp_pdf_download,
     find_project_page_url,
     safe_pdf_to_images_async,
@@ -40,6 +41,7 @@ from backend.utils.paper_utils import (
 )
 
 from backend.models.generators import Message
+from backend.generators.google_generator import GoogleGenerator
 from backend.generators.openrouter_generator import OpenRouterGenerator
 from backend.models.generators import Generator
 from backend.operator_profile import OPERATOR
@@ -223,6 +225,8 @@ async def create_user_message(
     """
     if abstract is None:
         abstract = await get_abstract(arxiv_id=arxiv_id)
+    if abstract is None:
+        abstract = "No abstract was found."
 
     paper_page_comments = await get_comments(arxiv_id=arxiv_id)
 
@@ -273,13 +277,12 @@ async def get_project_github_urls(
         Tuple of (reasoning, response_dict)
 
     Raises:
-        Exception: If rate limiting, quota exceeded, or PDF download fails
+        PDFDownloadError: If the arXiv PDF could not be downloaded
+        Exception: Any failure of the LLM extraction, so callers can retry
     """
     reasoning = ""
-    github_url = ""
-    project_page_url = ""
 
-    print("Step 1: Trying simple methods...")
+    logger.info("Step 1: Trying simple methods for %s", arxiv_id)
     (
         github_url,
         project_page_url,
@@ -288,89 +291,39 @@ async def get_project_github_urls(
     if not github_url:
         github_url = await find_github_url(arxiv_id=arxiv_id, abstract=abstract)
 
-    print(f"Step 1: Github URL: {github_url}, Project page URL: {project_page_url}")
+    logger.info(
+        "Step 1: Github URL: %s, Project page URL: %s", github_url, project_page_url
+    )
 
-    if not github_url or not project_page_url:
-        print(
-            "Not all URLs found with simple methods, downloading PDF and trying LLM..."
-        )
+    if github_url and project_page_url:
+        return reasoning, {
+            "github_url": github_url,
+            "project_page_url": project_page_url,
+        }
 
-        try:
-            await _rate_limit_arxiv()
+    logger.info("Not all URLs found with simple methods, downloading PDF for LLM")
+    await _rate_limit_arxiv()
 
-            async with temp_pdf_download(arxiv_id=arxiv_id) as (
-                pdf_path,
-                error_message,
-            ):
-                if pdf_path is None or error_message is not None:
-                    error_msg = error_message or "Unknown error"
+    try:
+        async with temp_pdf_download(arxiv_id=arxiv_id) as pdf_path:
+            pdf_path_processed = await extract_first_two_pages_pymupdf(pdf_path)
 
-                    error_str = error_msg.lower()
-                    is_critical = (
-                        "recaptcha" in error_str
-                        or "captcha" in error_str
-                        or "rate limit" in error_str
-                        or "429" in error_str
-                    )
+            if not project_page_url:
+                project_page_url = await find_project_page_url(
+                    pdf_path=pdf_path_processed
+                )
 
-                    if is_critical:
-                        raise Exception(
-                            f"Failed to download PDF for {arxiv_id}: {error_msg}"
-                        )
-                    else:
-                        print(f"Failed to download PDF for {arxiv_id}: {error_msg}")
-                        return reasoning, {
-                            "github_url": github_url,
-                            "project_page_url": project_page_url,
-                        }
+            if not github_url or not project_page_url:
+                reasoning, llm_response = await _extract_urls_with_llm(
+                    arxiv_id, pdf_path_processed, abstract, use_reasoning, generator
+                )
 
-                pdf_path_processed = await extract_first_two_pages_pymupdf(pdf_path)
-
-                if not project_page_url:
-                    project_page_url = await find_project_page_url(
-                        pdf_path=pdf_path_processed
-                    )
-
-                if not github_url or not project_page_url:
-                    reasoning, llm_response = await _extract_urls_with_llm(
-                        arxiv_id, pdf_path_processed, abstract, use_reasoning, generator
-                    )
-
-                    if not github_url and llm_response.get("github_url"):
-                        github_url = llm_response["github_url"]
-                    if not project_page_url and llm_response.get("project_page_url"):
-                        project_page_url = llm_response["project_page_url"]
-
-        except Exception as e:
-            error_str = str(e).lower()
-            auth_markers = [
-                "api key",
-                "invalid_api_key",
-                "api_key_invalid",
-                "expired",
-                "unauthorized",
-                "forbidden",
-                "permission",
-                "not authenticated",
-                "unauthenticated",
-                "invalid authentication",
-                "key not active",
-                "insufficient authentication",
-            ]
-            is_critical = (
-                "rate limit" in error_str
-                or "429" in str(e)
-                or "quota" in error_str
-                or "failed to download pdf" in error_str
-                or "recaptcha" in error_str
-                or "captcha" in error_str
-                or any(marker in error_str for marker in auth_markers)
-            )
-
-            if is_critical:
-                raise
-
-            print(f"Non-critical error during PDF processing: {e}")
+                if not github_url and llm_response.get("github_url"):
+                    github_url = llm_response["github_url"]
+                if not project_page_url and llm_response.get("project_page_url"):
+                    project_page_url = llm_response["project_page_url"]
+    except PDFNotFoundError as e:
+        logger.warning("No arXiv PDF for %s: %s", arxiv_id, e)
 
     response = {
         "github_url": github_url,
@@ -415,8 +368,6 @@ async def _extract_urls_with_llm(
         query_image_paths = query_message.image_paths
 
     try:
-        from backend.generators.google_generator import GoogleGenerator
-
         if isinstance(generator, GoogleGenerator):
             response_str, _ = await generator.generate(
                 messages=messages, schema=Response
@@ -425,57 +376,30 @@ async def _extract_urls_with_llm(
             response_str, _ = await generator.generate(
                 messages=messages, schema=Response, use_reasoning=use_reasoning
             )
-
-        if isinstance(response_str, dict):
-            reasoning = response_str.get("reasoning", "")
-            project_page_url = response_str.get("project_page_url", "")
-            github_url = response_str.get("github_url", "")
-        else:
-            reasoning = response_str.reasoning
-            project_page_url = response_str.project_page_url
-            github_url = response_str.github_url
-
-        if isinstance(project_page_url, str) and project_page_url:
-            is_valid_url = await verify_url(project_page_url)
-            project_page_url = project_page_url if is_valid_url else ""
-
-        response = {
-            "github_url": github_url,
-            "project_page_url": project_page_url,
-        }
-
-        return reasoning, response
-
-    except Exception as e:
-        logger.error(f"LLM extraction failed for {arxiv_id}: {e}")
-        error_str = str(e).lower()
-        auth_markers = [
-            "api key",
-            "invalid_api_key",
-            "api_key_invalid",
-            "expired",
-            "unauthorized",
-            "forbidden",
-            "permission",
-            "not authenticated",
-            "unauthenticated",
-            "invalid authentication",
-            "key not active",
-            "insufficient authentication",
-        ]
-        is_critical = (
-            "rate limit" in error_str
-            or "429" in str(e)
-            or "quota exceeded" in error_str
-            or any(marker in error_str for marker in auth_markers)
-        )
-        if is_critical:
-            raise Exception(f"Critical error: {e}") from e
-        return "", {"github_url": "", "project_page_url": ""}
     finally:
         if query_image_paths:
-            print(f"Cleaning up {len(query_image_paths)} query image files...")
+            logger.info("Cleaning up %d query image files", len(query_image_paths))
             cleanup_image_files(query_image_paths)
+
+    if isinstance(response_str, dict):
+        reasoning = response_str.get("reasoning", "")
+        project_page_url = response_str.get("project_page_url", "")
+        github_url = response_str.get("github_url", "")
+    else:
+        reasoning = response_str.reasoning
+        project_page_url = response_str.project_page_url
+        github_url = response_str.github_url
+
+    if isinstance(project_page_url, str) and project_page_url:
+        is_valid_url = await verify_url(project_page_url)
+        project_page_url = project_page_url if is_valid_url else ""
+
+    response = {
+        "github_url": github_url,
+        "project_page_url": project_page_url,
+    }
+
+    return reasoning, response
 
 
 async def warm_pdf_cache():
