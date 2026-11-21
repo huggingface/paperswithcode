@@ -59,8 +59,7 @@ export interface CronJobStatus {
     after_consecutive_failures: number;
     consecutive_failures: number;
     alerting: boolean;
-    since: string | null;
-    notified_at: string | null;
+    last_failure_at: string | null;
   } | null;
   diagnostics?: string | null;
   diagnostic_groups?: Record<string, string[]>;
