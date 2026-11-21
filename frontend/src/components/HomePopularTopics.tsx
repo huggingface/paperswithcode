@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, Users } from 'lucide-react';
 import TopicCard from '@/components/TopicCard';
 import { researchQueries } from '@/lib/api/queries';
+import { TOPIC_LIMIT } from '@/lib/api/research';
 import { FEATURED_TOPIC_COUNT, topicTitle, useFollowFeaturedTopic } from '@/lib/researchTopic';
 
 /** The most followed public topics as a horizontally scrolling row of cards above the trending feed, so visitors
@@ -16,6 +17,7 @@ export default function HomePopularTopics({ followedIds, onBuild }: {
   const featured = useQuery(researchQueries.featuredTopics());
   const { follow, finishing, failed } = useFollowFeaturedTopic();
   const topics = (featured.data ?? []).slice(0, FEATURED_TOPIC_COUNT);
+  const atLimit = (followedIds?.size ?? 0) >= TOPIC_LIMIT;
   const list = useRef<HTMLUListElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
   useEffect(() => {
@@ -65,7 +67,8 @@ export default function HomePopularTopics({ followedIds, onBuild }: {
         : <button
           type="button"
           className="home-topic-follow"
-          disabled={finishing}
+          disabled={finishing || atLimit}
+          title={atLimit ? `You follow ${TOPIC_LIMIT} topics, the most allowed. Remove one to add another.` : undefined}
           onClick={() => follow(topic.id)}
           aria-label={`Follow ${topicTitle(topic)}`}
         >

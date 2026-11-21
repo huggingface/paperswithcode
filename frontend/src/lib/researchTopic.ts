@@ -125,10 +125,14 @@ export function useFollowTopics() {
   return useMutation({
     mutationFn: async (ids: number[]) => {
       const results = await Promise.allSettled(ids.map(id => researchApi.followTopic(id)));
-      const failed = ids.filter((_, i) => results[i].status === 'rejected');
+      const reasons = results.map(result => result.status === 'rejected' ? result.reason as unknown : null);
+      const failed = ids.filter((_, i) => reasons[i] !== null);
       if (failed.length) {
-        stashPendingTopicFollows(failed);
-        throw (results.find(result => result.status === 'rejected') as PromiseRejectedResult).reason;
+        // A refused follow (409, such as the topic limit) would only be refused again on a retry.
+        const retryable = failed.filter(id => !isConflict(reasons[ids.indexOf(id)]));
+        if (retryable.length) stashPendingTopicFollows(retryable);
+        else clearPendingTopicFollows();
+        throw reasons.find(reason => reason !== null);
       }
       clearPendingTopicFollows();
     },
