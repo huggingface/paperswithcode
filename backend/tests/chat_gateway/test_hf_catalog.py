@@ -444,7 +444,6 @@ def test_prompt_and_tool_policy_treat_hf_content_as_untrusted(tmp_path):
     pwc_guide.write_text("pwc")
     hf_guide.write_text("hf")
     budget = ToolBudget(12, 4, 1024, 4096)
-    # The skill is inlined in the prompt, so rereading it wastes a tool round.
     decision = budget.authorize(
         "hf-skill",
         "Read",

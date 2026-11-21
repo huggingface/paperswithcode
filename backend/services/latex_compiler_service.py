@@ -351,8 +351,6 @@ class HuggingFaceSandboxLatexCompilerTransport:
             token=self.token,
         )
         try:
-            # The preflight itself starts an unprivileged user/network namespace
-            # and refuses any default route before manuscript bytes are submitted.
             sandbox.run(["python3", "-m", "latex_compiler_space.preflight"], timeout=15)
             sandbox.run(
                 [

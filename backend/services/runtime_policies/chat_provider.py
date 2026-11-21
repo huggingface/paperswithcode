@@ -122,7 +122,6 @@ def validate_chat_provider_policy(
             "provider": "openai",
         }
         if settings.environment == "production":
-            # GLM-5.3-Flash is hidden while direct Luna serves production.
             expected_discovery = (direct_choice,)
     if settings.chat_sponsored_deepseek_enabled:
         if settings.environment != "production":
@@ -132,7 +131,6 @@ def validate_chat_provider_policy(
             raise RuntimeError(
                 "sponsored DeepSeek V4.1 Flash must use the reviewed Novita route"
             )
-        # The organization pays through the dedicated title credential.
         if (
             not settings.chat_title_hf_token
             or settings.chat_title_bill_to != "huggingface"
@@ -273,8 +271,6 @@ def _validate_chat_openrouter_policy(settings: Settings) -> None:
         and not settings.chat_openrouter_server_funded_enabled
     ):
         raise RuntimeError("staging OpenRouter funded/BYOK paths must remain enabled")
-    # Production's OpenAI and HF routes do not use the shared OpenRouter key.
-    # Keep durable accounting validation for existing sessions and BYOK below.
     if (
         settings.chat_openrouter_server_funded_enabled
         and not settings.chat_openrouter_api_key
@@ -302,9 +298,6 @@ def _validate_chat_openrouter_policy(settings: Settings) -> None:
         safe_maximum_microusd,
     )
 
-    # Pricing freshness depends on the wall clock, so it is enforced per
-    # request (chat on the affected routes fails closed) rather than here,
-    # where a stale date would stop every worker and take down the whole site.
     try:
         credential_keyring(settings)
         maximum = max(

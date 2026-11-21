@@ -763,7 +763,6 @@ def test_cleanup_counts_only_transient_workers_and_exact_scope(tmp_path):
         SystemDurableQualificationControlPlane,
     )
 
-    # The configured baseline worker remains active outside this scoped state.
     control = SystemDurableQualificationControlPlane(
         release_id="0123456789ab-staging",
         settings=_safe_settings(),

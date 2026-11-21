@@ -97,8 +97,6 @@ def _public_blocks(
         if value["kind"] == "tool" and value["status"] == "running":
             value["status"] = "error"
         if value["kind"] == "app":
-            # A share is a browser-local fork.  Do not hand out an owner
-            # checkpoint or an App/session correlation capability.
             value["instance_id"] = str(uuid.uuid4())
             value["public_fork"] = True
             value["result"] = {
@@ -164,7 +162,6 @@ def _public_projection(
                 content=row.content,
                 paper_mentions=getattr(row, "paper_mentions", None) or [],
                 paper_selection=getattr(row, "paper_selection", None),
-                # Name and size only: shares never expose file contents.
                 attached_files=[
                     PublicChatFile(
                         filename=file.filename,
@@ -208,9 +205,6 @@ class ChatShareService:
             getattr(getattr(self.db, "bind", None), "dialect", None) is not None
             and self.db.bind.dialect.name == "postgresql"
         ):
-            # Match paper creation's advisory key. A share that starts first
-            # is a pre-paper immutable snapshot; a share that starts after a
-            # paper insert sees the artifact and fails closed.
             self.db.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:session))"),
                 {"session": f"chat-latex-paper:{session.id}"},
@@ -242,9 +236,6 @@ class ChatShareService:
             .limit(1)
         )
         if has_private_paper is not None or _has_private_paper_block(messages):
-            # Model output in a paper turn can legitimately quote a failed
-            # source or diagnostic. Never try to sanitize it for a public
-            # snapshot: a paper chat is owner-only for its whole lifecycle.
             raise ChatServiceError(
                 "paper_share_disabled",
                 409,
@@ -342,8 +333,6 @@ class ChatShareService:
         for previous in list(getattr(share, "shared_artifacts", ())):
             self.stale_storage_prefixes.add(previous.storage_key)
             self.db.delete(previous)
-        # Let the database remove old unique (share, identifier) rows before
-        # inserting the replacement snapshot. A later failure rolls this back.
         self.db.flush()
         new_rows: dict[str, ChatSharedArtifact] = {}
         for identifier, (_, version_id) in referenced.items():
@@ -493,8 +482,6 @@ class ChatShareService:
             ),
             None,
         )
-        # Snapshots created before model attribution was added do not contain
-        # this public-safe field. Keep those existing capability URLs useful.
         if model is None and getattr(share, "chat_session_id", None) is not None:
             model = self.db.scalar(
                 select(ChatSession.selected_model).where(

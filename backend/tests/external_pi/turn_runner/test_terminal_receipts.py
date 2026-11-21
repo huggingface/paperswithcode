@@ -55,12 +55,11 @@ def test_durable_worker_ack_requires_persistence_receipt(monkeypatch, persist):
         assert [json.loads(frame)["type"] for frame in socket.sent] == (
             ["run_turn", "ack_events", "ack_terminal"] if persist else ["run_turn"]
         )
-        # Delayed persistence after socket closure is harmless.
         await event.after_persist()
         assert [json.loads(frame)["type"] for frame in control.sent] == (
             [] if persist else ["ack_terminal"]
         )
-        await event.after_persist()  # duplicate receipts do not open another socket
+        await event.after_persist()
 
     asyncio.run(scenario())
 

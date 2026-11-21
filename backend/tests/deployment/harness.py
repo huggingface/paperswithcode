@@ -208,7 +208,6 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
             {"1": base64.urlsafe_b64encode(b"k" * 32).rstrip(b"=").decode()}
         ),
         chat_openrouter_user_tracking_secret="test-only-tracking-secret",
-        # Pricing freshness is wall-clock bound; keep these tests date-independent.
         chat_openrouter_pricing_verified_at=date.today().isoformat(),
         catalog_mutations_enabled=environment == "production",
         thumbnail_mutations_enabled=False,

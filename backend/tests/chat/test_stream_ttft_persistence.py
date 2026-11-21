@@ -368,7 +368,6 @@ def test_session_acquisition_outcome_names_created_or_resumed_agent_sessions():
     orchestrator.admission = replace(orchestrator.admission, is_first_turn=True)
     assert orchestrator._session_acquisition_outcome() == "created"
 
-    # Sandbox-backed turns already report their pool outcome; never override it.
     orchestrator._buffer_latency_phase(
         "pool_lookup_completed", 20, acquisition_outcome="pool_hit"
     )

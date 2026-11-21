@@ -470,7 +470,6 @@ def test_telemetry_cleanup_leaves_durable_expiry_to_admission(db, lease_seconds)
     assert message.status == ("interrupted" if lease_seconds < 0 else "generating")
 
     if lease_seconds < 0:
-        # Both projections roll back together if the admitting transaction fails.
         db.rollback()
         assert db.get(ChatTurnJob, row.turn_id).state == "running"
         assert db.get(ChatMessageRecord, message.id).status == "generating"
@@ -654,10 +653,6 @@ def test_qualification_metadata_migration_is_environment_scoped_and_least_privil
 
 
 def test_external_pi_turns_are_not_billed_for_an_unused_sandbox(db):
-    # Routing to the external fleet is resolved after admission, so the row
-    # starts out carrying the Modal sandbox shape. Left uncorrected, finalize
-    # bills the requested CPU and memory for the whole turn even though no
-    # sandbox was ever created, and that figure feeds the Modal spend circuits.
     session_id = _session(db)
     request_id = uuid.uuid4()
     row = _admit(db, session_id=session_id, request_id=request_id)
@@ -683,7 +678,6 @@ def test_marking_external_pi_is_idempotent_and_leaves_modal_turns_billed(db):
     service = ChatLatencyService(db)
 
     assert service.mark_external_pi(str(request_id))
-    # A second call must not re-mark a row that is already external.
     assert not service.mark_external_pi(str(request_id))
 
     other_request = uuid.uuid4()
@@ -713,9 +707,6 @@ def test_external_pi_backend_migration_is_environment_scoped():
     ).read_text()
 
     assert "current_schema() NOT IN ('staging', 'public')" in migration
-    # The deployed constraint is the auto-named inline CHECK from
-    # add_chat_turn_latency.sql, not the ORM's explicit name. Dropping only the
-    # ORM name is a silent no-op that leaves the two-value check enforced.
     assert (
         "DROP CONSTRAINT IF EXISTS chat_turn_latency_execution_backend_check"
         in migration
@@ -772,7 +763,6 @@ def test_finalize_keeps_warm_assignment_diagnostics_and_sanitizes_labels(db):
     )
     db.refresh(row)
 
-    # Earlier warm-assignment diagnostics win; finalize never overwrites them.
     assert row.failure_stage == "dispatch_write"
     assert row.failure_class == "BrokenPipeError"
 

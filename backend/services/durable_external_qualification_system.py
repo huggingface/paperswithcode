@@ -635,8 +635,6 @@ def _host_cpu_percent() -> float:
 def _system_resource_preflight(
     _profile: DurableQualificationProfile,
 ) -> HostResourceSnapshot:
-    # This explicit fixed envelope is for the approved 32-turn profile. It is
-    # not scaled upward from detected host RAM.
     return HostResourceSnapshot(
         mem_available_bytes=_proc_memory_value("MemAvailable"),
         projected_additional_bytes=2 * 1024**3,

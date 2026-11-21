@@ -38,7 +38,6 @@ EXPECTED_PROFILE_COUNTS = {
     "reconnect_real_modal": 32,
 }
 
-# Explicit cold-latency revision approved on 2026-09-15. Other gates are unchanged.
 COLD_FIRST_PWD_P95_MS = 5_000
 COLD_FIRST_PWD_P99_MS = 8_000
 

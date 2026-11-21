@@ -51,8 +51,6 @@ MAX_DEPTH = 10
 MAX_CARD_METADATA_BYTES = 32 * 1024
 MAX_CARD_TEXT_BYTES = 192 * 1024
 MAX_CARD_TOTAL_BYTES = 224 * 1024
-# Only MAX_CARD_TOTAL_BYTES of a card is read; refuse to download far larger
-# files, which would fill the backend's disk before any limit applied.
 MAX_CARD_DOWNLOAD_BYTES = 1024 * 1024
 MAX_LIST_BYTES = 256 * 1024
 MAX_RESPONSE_BYTES = 256 * 1024
@@ -926,8 +924,6 @@ def _split_card(text: str) -> tuple[dict, str]:
         return {}, text
     front = text[4:end]
     try:
-        # Aliases let a small document expand multiplicatively once copied;
-        # model cards have no use for them.
         if any(isinstance(event, yaml.AliasEvent) for event in yaml.parse(front)):
             metadata = {"_malformed_front_matter": True}
         else:

@@ -383,7 +383,6 @@ class ToolDisplayBlock(BaseModel):
     took_ms: int = Field(default=0, ge=0, le=600_000)
     content: list[ToolTextContent] = Field(default_factory=list, max_length=1)
     metadata: ToolResultMetadata = Field(default_factory=ToolResultMetadata)
-    # Legacy v1 search projection. Retained until local_mcp history is retired.
     hits: int | None = Field(default=None, ge=0, le=10_000)
     results: list[ChatPaperHit] | None = Field(default=None, max_length=10)
 
@@ -435,8 +434,6 @@ class McpAppInput(BaseModel):
 class McpAppResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     content: list[ToolTextContent] = Field(default_factory=list, max_length=1)
-    # Checkpoint IDs are retained only for the owner projection.  Public-share
-    # projection removes them before it leaves the authenticated session.
     structuredContent: dict[str, str] = Field(default_factory=dict, max_length=4)
     isError: bool = False
 
@@ -456,9 +453,6 @@ class AppDisplayBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["app"]
     schema_version: Literal[1] = 1
-    # Worker tool call IDs are reused as instance IDs.  OpenAI Responses IDs
-    # take the form ``call_<id>|fc_<id>`` (up to ~90 characters in practice),
-    # so this bound matches ``ToolDisplayBlock.id`` rather than a bare UUID.
     instance_id: str = Field(min_length=1, max_length=200)
     provider: Literal["excalidraw"]
     server: Literal["excalidraw"]
@@ -937,7 +931,6 @@ class ArchiveOldChatsResponse(BaseModel):
 class CreateSessionRequest(BaseModel):
     selected_model: str | None = None
     reasoning_effort: ReasoningEffort = "medium"
-    # Lets the reader create its chat before the first turn, to attach files.
     primary_paper_route_id: (
         Annotated[
             str, StringConstraints(min_length=1, max_length=200, strip_whitespace=True)
@@ -1197,7 +1190,6 @@ class ToolResultEvent(_StrictEvent):
     took_ms: int
     content: list[ToolTextContent] | None = None
     metadata: ToolResultMetadata | None = None
-    # Legacy local_mcp shape.
     hits: int | None = None
     results: list[ChatPaperHit] | None = None
 

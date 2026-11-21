@@ -734,7 +734,6 @@ def test_runtime_alerts_cool_down_while_ongoing_and_recover_once():
             now + timedelta(minutes=minute),
         )
         assert alerts == {"critical": {}, "warning": {}}
-        # The one-off critical line expires silently after the quiet period.
         assert recovered == []
     assert set(active) == {"trackio_export_failure"}
 

@@ -72,7 +72,6 @@ def test_offset_counts_the_tagged_bytes_and_cursor_continues(layout):
     )["structuredContent"]
     assert first["truncated"] is True
     assert len(first["markdown"].encode()) <= CHUNK_BYTES
-    # Chunk boundaries never split a UTF-8 character.
     assert tagged.startswith(first["markdown"].encode(), offset)
 
     pieces = [first["markdown"]]

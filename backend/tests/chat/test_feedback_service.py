@@ -38,8 +38,6 @@ def db():
             ChatFeedback.__table__,
         ],
     )
-    # SQLite ignores the PostgreSQL-only partial-index predicate and would
-    # otherwise apply the user-revision uniqueness rule to assistant rows too.
     with engine.begin() as connection:
         connection.exec_driver_sql("DROP INDEX idx_chat_messages_current_revision")
     with Session(engine) as session:
@@ -171,7 +169,6 @@ def test_feedback_is_stored_even_without_trace_correlation(monkeypatch, db):
     row = db.get(ChatFeedback, assistant.id)
     assert found is True
     assert row.value is True and row.trace_id is None
-    # Langfuse scores need a trace; without one the rating is only stored.
     assert row.exported_to is None and client.scores == []
 
 

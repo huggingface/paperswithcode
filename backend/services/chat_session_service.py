@@ -750,8 +750,6 @@ class ChatSessionService:
                         if isinstance(item, dict) and isinstance(item.get("text"), str):
                             payloads.append(item["text"])
                 elif name == "search_papers":
-                    # The validated legacy catalog projection is an explicitly
-                    # approved source. WebFetch/search_web blocks are excluded.
                     payloads.append(
                         json.dumps(
                             block.get("results") or [],
@@ -884,8 +882,6 @@ class ChatSessionService:
             self.settings.chat_model_routes[model]
         ]
         if agent_harness == "pi" or transport == "openrouter":
-            # Trusted cost extraction and per-call reservation live at the
-            # private gateway. Funded OpenRouter must never use local_mcp.
             execution_backend = "modal_cli"
         elif self.settings.chat_new_chat_modal_percentage == 0:
             execution_backend = self.settings.chat_default_backend
@@ -1399,8 +1395,6 @@ class ChatSessionService:
         ).scalar_one_or_none()
 
     def _has_unresolved_turn(self, session: ChatSession) -> bool:
-        # A continuation preserves earlier failures as history. Only the latest
-        # user turn can require recovery; completed continuations unblock chat.
         latest = self._latest_user_message(session)
         return latest is not None and latest.status in {"interrupted", "error"}
 
@@ -1966,8 +1960,6 @@ class ChatSessionService:
             retry_target = self._validate_saved_progress_retry(
                 session, retry_message_id
             )
-            # Keep the original display request as well as its effective context.
-            # Mode selection, lease duration, and idempotent replays all use it.
             text = retry_target.content
             effective_prompt = (
                 (retry_target.effective_prompt or retry_target.content)
@@ -2040,8 +2032,6 @@ class ChatSessionService:
             self._validate_capacity(capacity)
 
         created_session = session is None
-        # Capacity admission precedes creation so a rejected new-chat request
-        # cannot leave behind a session or any message state.
         if session is None:
             session = self.create_session(
                 owner,

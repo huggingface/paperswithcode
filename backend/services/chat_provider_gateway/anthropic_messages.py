@@ -241,10 +241,6 @@ def payload_contains_tool_use(payload: bytes) -> bool:
     return b'"type":"tool_use"' in payload or b'"type": "tool_use"' in payload
 
 
-# The Anthropic Messages fields a worker may send. Everything else, notably
-# OpenRouter's own extensions (models/route fallbacks, plugins, transforms,
-# provider), would let a turn pick routes or paid features the funded ledger
-# never priced, so it is dropped; the server sets user, provider and reasoning.
 ANTHROPIC_REQUEST_FIELDS = frozenset(
     {
         "model",
@@ -311,7 +307,6 @@ class MessagesUsageStream:
 
     def feed(self, chunk: bytes) -> None:
         self.extractor.feed(chunk)
-        # Messages measures time to first body byte, not first token.
         self.saw_token_delta = True
         if not self.saw_tool_call and payload_contains_tool_use(chunk):
             self.saw_tool_call = True
@@ -377,15 +372,12 @@ class AnthropicMessagesProtocol:
         model = parsed.capability_model
         raw = parsed.raw
         if settings.chat_file_uploads_enabled:
-            # Uploaded files exist only as OpenAI file_ids; never forward a
-            # placeholder to a provider that cannot resolve it.
             refuse_placeholders(payload)
         provider = settings.chat_route_providers.get(row.model)
         provider_mode = row.provider_mode or (
             "openrouter_funded" if provider == "openrouter" else "huggingface"
         )
         if provider == "huggingface" and sponsored_route(row, settings):
-            # Call-level mode only; the capability row keeps "huggingface".
             provider_mode = "hf_org_funded"
         owner_id = owner()
         effort = getattr(row, "reasoning_effort", None) or "high"
@@ -397,8 +389,6 @@ class AnthropicMessagesProtocol:
                     opaque_turn(turn_id),
                     ",".join(dropped),
                 )
-            # Supplemental reconciliation metadata is opaque and cannot identify
-            # the HF subject at OpenRouter.
             payload["user"] = opaque_owner(owner_id, settings)
             prefer_fastest_openrouter_provider(payload, settings)
             if (
@@ -496,7 +486,6 @@ class AnthropicMessagesProtocol:
         elif mode == "huggingface":
             code = huggingface_provider_error_code(status)
         elif mode == "hf_org_funded" and status == 402:
-            # The organization's spending limit, not the user's credits, ran out.
             code = "hf_sponsored_unavailable"
         else:
             code = None

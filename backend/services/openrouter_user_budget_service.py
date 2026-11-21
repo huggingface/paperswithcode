@@ -179,8 +179,6 @@ def safe_maximum_microusd(
 
 
 def minimum_fundable_call_microusd(settings: Settings) -> int:
-    # The agent requests the normal output ceiling. We do not silently reduce
-    # quality settings to fit a small remainder.
     return (
         settings.chat_openrouter_request_fee_microusd
         + MAX_OUTPUT_TOKENS * settings.chat_openrouter_output_microusd_per_token
@@ -256,8 +254,6 @@ class OpenRouterUserBudgetService:
         if self._qualification_bypasses_abuse_circuit(owner_id):
             return
 
-        # Serialize the global check with insertion across users and workers.
-        # The monthly usage row separately serializes each user's reservations.
         self.db.execute(
             select(
                 func.pg_advisory_xact_lock(
@@ -457,8 +453,6 @@ class OpenRouterUserBudgetService:
         self._enforce_abuse_circuit(owner_id, reserved, current)
         usage = self._ensure_usage(owner_id, month_start)
         if usage.limit_microusd != self.limit_microusd_for(owner_id):
-            # A month's limit is an immutable snapshot. Config changes apply
-            # only to newly created buckets.
             logger.info(
                 "openrouter budget limit snapshot retained owner=%s month=%s",
                 opaque_owner(owner_id, self.settings)[:16],
@@ -521,7 +515,6 @@ class OpenRouterUserBudgetService:
             return 0
         encoded = json.dumps(value, separators=(",", ":")).encode()
         estimate = max(1, len(encoded) // 4)
-        # Coarse buckets avoid pretending byte heuristics are tokenizer-exact.
         return min(512_000, int(math.ceil(estimate / 128) * 128))
 
     def _locked_call(self, call_id: uuid.UUID):

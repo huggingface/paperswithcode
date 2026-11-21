@@ -19,7 +19,6 @@ from backend.services import chat_tracing_service as tracing
 
 @pytest.fixture
 def client(monkeypatch):
-    # Exercise queueing/serialization without starting a network worker.
     with monkeypatch.context() as setup:
         setup.setattr(threading.Thread, "start", lambda self: None)
         setup.setattr(trackio.atexit, "register", lambda *args: None)
@@ -50,7 +49,6 @@ def turn(**kwargs):
 
 
 def take(client):
-    # Mirror the worker's dequeue bookkeeping without a network send.
     raw = client.pending.get_nowait()
     client.pending.task_done()
     client._pending_bytes -= len(raw)
@@ -249,10 +247,9 @@ def test_settings_restrict_credentials_to_space_origin():
 @pytest.mark.parametrize(
     ("day", "expected"),
     [
-        (date(2026, 10, 18), "pwc-chat-2026-W42"),  # Sunday ends the ISO week
-        (date(2026, 10, 19), "pwc-chat-2026-W43"),  # Monday starts the next
+        (date(2026, 10, 18), "pwc-chat-2026-W42"),
+        (date(2026, 10, 19), "pwc-chat-2026-W43"),
         (date(2026, 3, 2), "pwc-chat-2026-W10"),
-        # ISO week-numbering years differ from calendar years at the edges.
         (date(2026, 12, 31), "pwc-chat-2026-W53"),
         (date(2027, 1, 3), "pwc-chat-2026-W53"),
         (date(2027, 1, 4), "pwc-chat-2027-W01"),
@@ -295,8 +292,6 @@ def test_durable_lifecycle_exports_without_chat_content(client):
     observer("typed_failure", "execution_lost", 1)
     latency, failure = payload(client), payload(client)
     assert latency["run"].startswith("staging-lifecycle-")
-    # Lifecycle observations are plain metrics, not single-span traces: no
-    # messages, no spans, one bounded metric name per event/code pair.
     assert latency["metrics"] == {"lifecycle/ttft_ms": 123}
     assert failure["metrics"] == {"lifecycle/typed_failure/execution_lost": 1}
     assert "trace" not in json.dumps([latency, failure])
@@ -339,7 +334,6 @@ def test_worker_caps_batch_size_and_payload_bytes(client, monkeypatch):
     client.pending.put_nowait(small)
     client.pending.put_nowait(large)
     assert client._next_batch() == [small]
-    # The overflowing entry keeps its place for the next batch.
     assert client.pending.qsize() == 1
     assert client._next_batch() == [large]
 

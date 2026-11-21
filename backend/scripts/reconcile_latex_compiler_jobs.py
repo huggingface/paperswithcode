@@ -55,7 +55,6 @@ def main() -> int:
         raise
     finally:
         session_generator.close()
-    # Keep machine-readable operator evidence content-free and bounded.
     print(json.dumps({"reconciled": reconciled}, sort_keys=True))
     return 0
 

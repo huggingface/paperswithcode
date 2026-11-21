@@ -31,7 +31,6 @@ class _TransactionalScriptedDB(_ScriptedDB):
         super().flush()
         for value in self._pending:
             if isinstance(value, ChatSession):
-                # These database defaults are materialized by a real flush.
                 value.transcript_status = value.transcript_status or "pending"
                 value.transcript_bytes = value.transcript_bytes or 0
                 value.projection_bytes = value.projection_bytes or 0

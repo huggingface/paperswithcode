@@ -29,8 +29,6 @@ from backend.services.paper_layout_service import (
 logger = logging.getLogger(__name__)
 
 CURSOR_PREFIX = "layout:"
-# The cursor after the last tagged chunk of a page-capped layout; following it
-# reads the untagged stored Markdown through the hosted MCP from the start.
 UNTAGGED_CURSOR_PREFIX = "layout-untagged:"
 CHUNK_BYTES = 64 * 1024
 LAYOUT_MAX_BYTES = 2 * 1024 * 1024
@@ -109,7 +107,6 @@ def read_reader_paper(
             max_bytes=LAYOUT_MAX_BYTES,
         )
     except ValueError as error:
-        # Without the tagged text the canonical Markdown is still worth reading.
         logger.warning(
             "chat reader paper read outcome=layout_unavailable paper_id=%s error=%s",
             context["paper_id"],
@@ -147,7 +144,6 @@ def read_reader_paper(
             token=settings.hf_token or None,
         )
     except (ValueError, KeyError, OSError) as error:
-        # The sidecar only says whether pages are missing; keep the tagged text.
         logger.warning(
             "chat reader paper read outcome=sidecar_unavailable paper_id=%s error=%s",
             context["paper_id"],

@@ -753,17 +753,11 @@ class WorkerTurnExecution:
             "agent_harness": self.request.agent_harness,
         }
         if self.request.reader_mode:
-            # Contract-80 workers reject unknown frame keys. Reader mode was
-            # added in contract 81, so omit its false/default value to keep
-            # non-reader production turns compatible during image rotation.
             run["reader_mode"] = True
         if (
             self.request.agent_harness == "pi"
             and self.request.provider_protocol != "anthropic-messages"
         ):
-            # Contract-90 Pi workers reject unknown frame keys. The default
-            # Anthropic-compatible protocol predates this field, so omit it
-            # while production drains the older immutable worker image.
             run["provider_protocol"] = self.request.provider_protocol
         if self.request.poster_mode:
             run["poster_mode"] = True
@@ -841,10 +835,6 @@ class WorkerTurnExecution:
                     if self.running.cancel_requested:
                         continue
                     if event["type"] == "worker_ready":
-                        # Persistent Pi controls emit readiness for every run so
-                        # dispatch can prove that the harness accepted the
-                        # correlated request. It is transport-only and must
-                        # never reach the browser event schema.
                         yield WorkerTurnMilestone.AGENT_READY
                         continue
                     if event["type"] == "workspace_ready":

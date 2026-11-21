@@ -226,10 +226,6 @@ def test_candidate_requires_authenticated_durable_lifecycle_evidence(
 def test_qualification_budget_covers_the_supervisor_startup_and_heartbeat(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    # A supervisor may use its whole startup timeout to register and then a
-    # further heartbeat interval before the first heartbeat is recorded. The
-    # previous fixed 65s ceiling was below that 70s worst case, so a loaded
-    # host failed qualification with registered=True and heartbeats=0.
     monkeypatch.setattr(
         lifecycle,
         "_protected_environment_values",

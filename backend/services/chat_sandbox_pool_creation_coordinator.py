@@ -361,7 +361,6 @@ class ChatSandboxPoolCreationCoordinator:
     async def _resolve_landing(self, started: StartedBlank) -> LandingResolution:
         try:
             landing = self._commit_landing(started)
-            # Deliver cancellation requested during the synchronous landing commit.
             await asyncio.sleep(0)
         except asyncio.CancelledError as cancellation:
             return self._classify_ambiguous_landing(started, cancellation)

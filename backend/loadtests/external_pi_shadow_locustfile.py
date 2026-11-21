@@ -10,8 +10,6 @@ import warnings
 from gevent.monkey import MonkeyPatchWarning
 
 with warnings.catch_warnings():
-    # Pytest imports the dependency-free core (and therefore ssl/httpx) before
-    # import-smoking this adapter. The real Locust process has already patched.
     warnings.simplefilter("ignore", MonkeyPatchWarning)
     from locust import HttpUser, between, events, task
     from locust.exception import StopUser

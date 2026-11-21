@@ -295,8 +295,6 @@ def test_hot_workflow_runs_on_the_activated_production_schedule():
     workflow = (
         root / ".github" / "workflows" / "cron-update-hot-github-trending.yml"
     ).read_text()
-    # Scheduled execution moved to the host timer; the workflow remains
-    # dispatch-only for manual recovery.
     assert "workflow_dispatch:" in workflow
     assert "schedule:" not in workflow
     timer = (
@@ -579,7 +577,6 @@ def test_host_layout_grants_cron_traversal_and_drops_production_group(monkeypatc
 
 
 def test_launcher_hides_its_environment_from_same_user_jobs(tmp_path: Path):
-    # Run in a child so the test process itself stays dumpable.
     script = tmp_path / "probe.py"
     script.write_text(
         "import ctypes, sys\n"
@@ -587,7 +584,7 @@ def test_launcher_hides_its_environment_from_same_user_jobs(tmp_path: Path):
         "import cron_launcher\n"
         "cron_launcher.hide_launcher_environment()\n"
         "libc = ctypes.CDLL(None)\n"
-        "print(libc.prctl(3, 0, 0, 0, 0))\n",  # PR_GET_DUMPABLE
+        "print(libc.prctl(3, 0, 0, 0, 0))\n",
         encoding="utf-8",
     )
     result = subprocess.run(

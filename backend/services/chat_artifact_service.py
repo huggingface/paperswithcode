@@ -202,7 +202,6 @@ class PosterManifest(BaseModel):
         paths.extend(item.path for item in self.downloads)
         normalized = [_normalize_relative_path(path) for path in paths]
         if len(set(normalized)) != len(normalized):
-            # entrypoint and gate report are intentionally also source files.
             allowed = {self.entrypoint, self.gate_report}
             duplicates = {path for path in normalized if normalized.count(path) > 1}
             if duplicates - allowed:

@@ -325,7 +325,6 @@ class _ToolTimingFallback:
             "tool_call",
             "tool_result",
         }:
-            # Older typed producers can explicitly pass through tool frames.
             event = ToolEvent(
                 event.event_type,
                 event_extra(event, "id", UNSET),
@@ -401,8 +400,6 @@ class ChatTurnProjection:
             if item.get("kind") == "answer":
                 item["done"] = True
             elif item.get("kind") == "tool":
-                # Persist one bounded authoritative/sanitized snapshot, never
-                # the transient raw JSON fragments used for live rendering.
                 item.pop("argument_text", None)
                 item.pop("argument_state", None)
                 if item.get("status") == "running":
@@ -627,8 +624,6 @@ class ChatTurnProjection:
             )
 
     def _start_app(self, event: dict[str, Any]) -> None:
-        # App blocks own diagram input; the generic tool block is intentionally
-        # omitted so a create_view call never produces a duplicate accordion.
         app = {
             "kind": "app",
             "schema_version": 1,
@@ -907,8 +902,6 @@ def _public_poster_tool_event(kind: str, event: dict[str, Any]) -> dict[str, Any
         args, redacted = _safe_poster_tool_args(
             str(event.get("name") or ""), event.get("partial_args")
         )
-        # Raw JSON fragments can contain a secret before they become parseable.
-        # Poster streams therefore publish a replaceable sanitized snapshot.
         return {
             **event,
             "delta": json.dumps(args, ensure_ascii=False, separators=(",", ":")),
@@ -1427,7 +1420,6 @@ async def _prepare_replacement(
                 admission.session_id,
                 old_id,
             )
-        # Cleanup leaks must be recorded without undoing an activated edit.
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "chat edit transcript cleanup session_id=%s source_sdk_id=%s outcome=leaked error=%s",
@@ -2461,8 +2453,6 @@ class ChatStreamOrchestrator:
         return _HandledTurnEvent()
 
     def _project_event(self, event: ChatTurnEvent) -> tuple[str, dict[str, Any]] | None:
-        # This is the public display/persistence boundary. Raw tracing has already
-        # observed the event; sanitize before either projection or public output.
         kind, payload = self._legacy_payload(event)
         if kind == "artifact_ready":
             trusted = _trusted_artifact_ready(payload, self.admission)
@@ -2722,7 +2712,6 @@ class ChatStreamOrchestrator:
             if self._detached_cancel_requested:
                 yield await self._finalize_cancellation(cancel_runner=False)
                 return
-            # Raw trace visibility precedes artifact trust and public sanitization.
             kind, trace_payload = self._legacy_payload(typed_event)
             self.trace.record_event(kind, trace_payload)
 
@@ -2731,8 +2720,6 @@ class ChatStreamOrchestrator:
                 yield replace(handled.frame, after_persist=after_persist)
                 last_write = time.monotonic()
             elif after_persist is not None:
-                # Ordered receipt for internal events; the coordinator first
-                # commits any preceding public frames.
                 yield ChatStreamFrame(event=None, after_persist=after_persist)
 
         if self.research_task:
@@ -2987,7 +2974,6 @@ class ChatStreamOrchestrator:
         try:
             cancelled = await asyncio.to_thread(_durable_turn_cancelled, self.admission)
         except SQLAlchemyError:
-            # Preserve the original failure if cancellation cannot be established.
             return False
         self._detached_cancel_requested = cancelled
         return cancelled
@@ -3019,10 +3005,6 @@ class ChatStreamOrchestrator:
         return await self._finalize_cancellation(cancel_runner=True)
 
     async def _close(self) -> None:
-        # Starlette may close an async response generator with GeneratorExit
-        # instead of delivering CancelledError. Persist the interruption here
-        # as a last resort so a disconnected browser cannot leave the turn
-        # generating until its lease expires.
         if self.lifecycle.terminal is TurnTerminalState.ACTIVE:
             self.interruption_reason = self.interruption_reason or "stream_closed"
             await self._finalize_disconnect(
@@ -3058,8 +3040,6 @@ class ChatStreamOrchestrator:
             self.settings.chat_durable_turn_dispatch_enabled
             and not self.terminal_persistence.completed
         ):
-            # The coordinator still owns durable completion. Closing the live
-            # source must not mark the turn complete or drop its lease.
             await self.release_admission()
             return
         status = {

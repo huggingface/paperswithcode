@@ -85,7 +85,6 @@ class ChatFeedbackService:
             )
             self.db.add(row)
         else:
-            # A user may change their mind; the latest rating is the record.
             row.value = value
             row.comment = normalized_comment
             row.trace_id = trace_id or row.trace_id
@@ -128,7 +127,6 @@ class ChatFeedbackService:
             )
             return "langfuse"
         except Exception as exc:
-            # The row is already stored; the mirror is diagnostics only.
             logger.warning(
                 "chat feedback export failed backend=%s error=%s",
                 type(client).__name__,

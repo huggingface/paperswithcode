@@ -28,8 +28,6 @@ PROVIDER_ERROR_CODES = frozenset(
     }
 )
 
-# These strings are emitted without prompts, answers, capabilities, or credentials.
-# Provider failures are excluded because they use the sustained database signal below.
 RUNTIME_FAILURE_PATTERNS = {
     "pool_replenishment_failure": "chat blank pool replenishment failed",
     "pool_budget_block": "chat blank pool budget blocked",
@@ -77,8 +75,6 @@ RUNTIME_FAILURE_PATTERNS = {
     "paper_curation_dispatch_recovery": "paper curation dispatch resumed",
 }
 RUNTIME_ALERT_NAMES = frozenset({*RUNTIME_FAILURE_PATTERNS, "session_store_forbidden"})
-# Trace export failures lose observability, not chat turns, so they warn
-# instead of paging and never force the paid synthetic probe.
 TELEMETRY_ALERT_NAMES = frozenset(
     {
         "langfuse_initialization_failure",
@@ -93,8 +89,6 @@ TELEMETRY_ALERT_NAMES = frozenset(
         "durable_lifecycle_telemetry_failure",
     }
 )
-# A recurring classification alerts on entry, then at most once per cooldown,
-# and recovers after a quiet period without matching journal lines.
 RUNTIME_ALERT_COOLDOWN = {
     "critical": timedelta(hours=1),
     "warning": timedelta(hours=6),

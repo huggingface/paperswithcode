@@ -30,9 +30,6 @@ from backend.services.runtime_validation import validate_runtime
 from backend.utils.cors import install_cors
 from backend.utils.csrf import cookie_request_passes_csrf
 
-# Requests slower than this (in milliseconds) are logged so production slow
-# pages can be correlated without ad-hoc instrumentation. Tune via the
-# `PWC_SLOW_REQUEST_MS` env var.
 _SLOW_REQUEST_MS = float(os.getenv("PWC_SLOW_REQUEST_MS", "1000"))
 _timing_logger = logging.getLogger("backend.timing")
 
@@ -79,13 +76,6 @@ def _is_mutable_paper_detail_path(path: str) -> bool:
     return bool(suffix) and "/" not in suffix
 
 
-# Read-only public API prefixes that are safe to cache briefly in the browser
-# and any shared CDN. These power list/detail pages on the marketing site
-# (methods, tasks, datasets, ...). Auth/session paths (`/me`, `/auth`,
-# `/cron`) are deliberately excluded so signed-in state stays fresh.
-# Trailing slash makes prefix matches accurate (e.g. `/api/v1/papers` would
-# otherwise also match `/api/v1/papers-archive/...` if that route ever
-# appeared).
 _PUBLIC_CACHEABLE_PREFIXES = (
     "/api/v1/papers/",
     "/api/v1/methods/",
@@ -101,10 +91,6 @@ _PUBLIC_CACHEABLE_PREFIXES = (
     "/api/v1/frameworks/",
 )
 
-# Endpoints that must never be cached even on GET because their response
-# depends on the signed-in user / session cookie. Trailing slash on each
-# prefix prevents false matches like `/api/v1/me` accidentally matching
-# `/api/v1/methods/...`.
 _PRIVATE_GET_PREFIXES = (
     "/api/v1/auth/",
     "/api/v1/me/",
@@ -117,7 +103,6 @@ _PRIVATE_GET_PREFIXES = (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management."""
-    # Startup
     settings = get_settings()
     print("🚀 Starting PapersWithCode API server")
     print(f"📊 Database: {settings.database_log_identifier}")
@@ -399,7 +384,6 @@ async def lifespan(app: FastAPI):
         with contextlib.suppress(asyncio.CancelledError):
             await pool_startup_task
 
-    # Shutdown
     print("🛑 Shutting down PapersWithCode API server")
 
 
@@ -458,12 +442,9 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def log_slow_requests(request, call_next):
-        # Outermost middleware (added last), so the measured duration covers
-        # the whole handler including cache-header logic.
         start = time.perf_counter()
         response = await call_next(request)
         duration_ms = (time.perf_counter() - start) * 1000.0
-        # Expose timing for ad-hoc debugging / curl -D.
         response.headers["X-Process-Time-Ms"] = f"{duration_ms:.1f}"
         if duration_ms >= _SLOW_REQUEST_MS:
             _timing_logger.warning(
@@ -487,14 +468,10 @@ def create_app() -> FastAPI:
 
         path = request.url.path
 
-        # Per-paper detail rows can change (admin edits, new repos linked)
-        # so keep these uncached.
         if _is_mutable_paper_detail_path(path):
             response.headers["Cache-Control"] = "no-store"
             return response
 
-        # User-specific endpoints (bookmarks, session probes, cron dashboard)
-        # must always reflect the current session.
         if (
             any(path.startswith(prefix) for prefix in _PRIVATE_GET_PREFIXES)
             or path.endswith("/curation-state")
@@ -503,8 +480,6 @@ def create_app() -> FastAPI:
             response.headers["Cache-Control"] = "no-store"
             return response
 
-        # Public list/detail GETs benefit from a short freshness window plus
-        # a longer stale-while-revalidate so repeat navigation is instant.
         if (
             response.status_code == 200
             and "cache-control" not in response.headers
@@ -515,7 +490,6 @@ def create_app() -> FastAPI:
             )
         return response
 
-    # Include routers
     from backend.routers import (
         agent_discovery,
         areas,
@@ -579,8 +553,6 @@ def create_app() -> FastAPI:
     app.include_router(papers.router, prefix="/api/v1", tags=["papers"])
     app.include_router(paper_reader.router, prefix="/api/v1", tags=["papers"])
     app.include_router(research_catalog.router, prefix="/api/v1", tags=["research"])
-    # External-resource ingestion endpoints share the `/papers` prefix because
-    # the resulting rows live in the same `papers` table.
     app.include_router(
         external_resources.router, prefix="/api/v1", tags=["external_resources"]
     )
@@ -611,16 +583,12 @@ def create_app() -> FastAPI:
     )
     app.include_router(thumbnails.router, prefix="/api", tags=["thumbnails"])
     app.include_router(paper_assets.router)
-    # Server-rendered paper-page HTML for social previews. Mounted at the
-    # app root because the public URL shape is `/paper/{id}` (not under
-    # `/api/v1/...`).
     app.include_router(search_discovery.router, tags=["search_discovery"])
     app.include_router(sitemaps.router, tags=["sitemaps"])
     app.include_router(paper_pages.router, tags=["paper_pages"])
     if settings.cron_enabled:
         app.include_router(cron.router, prefix="/api/v1", tags=["cron"])
 
-    # Health check endpoint
     @app.get("/health")
     async def health_check():
         """Health check endpoint."""
@@ -707,17 +675,13 @@ def create_app() -> FastAPI:
 
     app.include_router(public_api.router)
 
-    # Must remain last: it owns the public homepage/entity HTML routes and the
-    # narrow top-level organization fallback.
     from backend.routers import discovery_pages
 
     app.include_router(discovery_pages.router, tags=["discovery_pages"])
 
     if settings.is_deployed:
-        # Admit before database dependencies and handler response allocation.
         app.add_middleware(CatalogAdmissionMiddleware)
 
-    # Browser clients must also be able to read admission rejections.
     app.add_middleware(
         public_api.PublicReadCorsMiddleware,
         allowed_origins=settings.cors_allowed_origins,
@@ -726,7 +690,6 @@ def create_app() -> FastAPI:
     return app
 
 
-# Create the app instance
 app = create_app()
 
 

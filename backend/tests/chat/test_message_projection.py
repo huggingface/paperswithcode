@@ -65,8 +65,6 @@ def test_chat_projection_keeps_app_blocks_out_of_tool_accordions():
 
 
 def test_chat_projection_preserves_sse_block_order():
-    # Keep an explicit persisted-shape check in releases following Pi image
-    # changes so the rollback window contains two qualified readers.
     projection = ChatTurnProjection()
     projection.apply("answer_delta", {"text": "Before tool."})
     projection.apply(

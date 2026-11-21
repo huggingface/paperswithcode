@@ -16,8 +16,6 @@ _PAPER_GRAPH_PATH = re.compile(
     r"^paper/[^/]{1,500}/(?:references|citations)$", re.IGNORECASE
 )
 _ALLOWED_QUERY_KEYS = frozenset({"query", "limit", "offset", "year", "fields"})
-# Credentialed keyword searches. The gateway meters every one against the
-# turn's direct-search allowance, so keep this the only place they are listed.
 SEARCH_PATHS = frozenset({"paper/search", "paper/search/match"})
 
 

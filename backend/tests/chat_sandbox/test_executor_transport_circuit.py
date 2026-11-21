@@ -71,7 +71,6 @@ def test_provider_turn_reserve_prices_the_full_selected_model_envelope():
         == 4_000_000
     )
 
-    # The organization's spending limit bounds the sponsored route.
     sponsored = Settings(
         _env_file=None,
         environment="production",

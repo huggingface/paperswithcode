@@ -22,7 +22,6 @@ class _Metadata:
 def _entry(
     pid: int, loop: object, client: object, environment: str, image_id: str
 ) -> _Metadata:
-    # Include the loop and client so locks and credentials cannot cross lifetimes.
     return _Metadata()
 
 
@@ -43,8 +42,6 @@ async def executor_metadata(environment: str, image_id: str) -> tuple[object, ob
                 create_if_missing=False,
             )
             image = modal.Image.from_id(image_id, client=client)
-            # For an existing im-ID this only fetches metadata (ImageFromId).
-            # Hydration prevents Sandbox.create from repeating that lookup.
             await image.build.aio(app)
             entry.resources = app, image
         return entry.resources

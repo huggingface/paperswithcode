@@ -1521,7 +1521,6 @@ def test_worker_receipt_follows_committed_journal(internal_receipt):
         receipts = []
 
         async def receipt():
-            # A separate session sees the committed row before worker pruning.
             with harness.sessions() as db:
                 receipts.append(
                     [

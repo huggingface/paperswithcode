@@ -59,7 +59,6 @@ def test_concurrent_reservation_probe_releases_every_admitted_reservation():
     )
     now = datetime(2026, 10, 12, tzinfo=UTC)
 
-    # SQLite shares one connection, so admit sequentially; production uses 8.
     accepted = qualify_chat_sandbox_spend.qualify_concurrent_reservations(
         session_local, reservation_settings, now, workers=1
     )

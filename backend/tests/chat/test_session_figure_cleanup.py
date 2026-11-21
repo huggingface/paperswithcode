@@ -184,8 +184,6 @@ def test_session_deletion_reclaims_paper_versions_and_orphaned_figure_blobs(
         ChatOwner(hf_user_id="owner-1", hf_username="owner"), session_id
     )
 
-    # The durable cleanup queue is written in the same transaction, while
-    # object-store deletion waits for that transaction to commit.
     assert set(db.scalars(select(ChatLatexPaperStorageCleanup.storage_prefix))) == (
         version_prefixes | {blob_prefix}
     )

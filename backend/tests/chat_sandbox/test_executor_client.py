@@ -1271,7 +1271,6 @@ def test_daemon_tiny_chunks_fit_shared_client_frame_budget_end_to_end(tmp_path):
     provider = _SocketProvider(server.socket_path)
     client = SandboxExecutorClient(provider, request_id_factory=lambda: "request-a")
 
-    # This stress case verifies frame accounting, not a two-second latency SLO.
     result = asyncio.run(
         client.exec(
             _context(),

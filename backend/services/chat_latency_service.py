@@ -402,9 +402,6 @@ class ChatLatencyService:
         now = datetime.now(UTC)
         failure_values: dict[str, Any] = {}
         if failure_stage is not None or failure_class is not None:
-            # Turn-level failure attribution: which stage the turn was in and
-            # the typed terminal code. Both are bounded, content-free labels and
-            # never overwrite warm-assignment diagnostics recorded earlier.
             if status != "error":
                 raise ValueError("Failure attribution requires an error status")
             failure_values = {
@@ -471,9 +468,6 @@ class ChatLatencyService:
                 )
                 .where(
                     ChatTurnLatency.terminal_status == "running",
-                    # Durable lifecycle owns expiry and must update the job and
-                    # conversation atomically using the worker's current lease.
-                    # The session lease can expire while that worker is healthy.
                     ~select(ChatTurnJob.turn_id)
                     .where(
                         ChatTurnJob.turn_id == ChatTurnLatency.turn_id,
@@ -610,8 +604,6 @@ class ChatLatencyService:
             )
             .values(**values)
         )
-        # An authenticated duplicate is still a successful idempotent update;
-        # COALESCE above preserves the first value for each timing class.
         return True
 
     def active_spend_status(self, *, now: datetime | None = None) -> dict[str, Any]:

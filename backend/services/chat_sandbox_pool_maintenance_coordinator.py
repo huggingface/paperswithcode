@@ -127,8 +127,6 @@ class ChatSandboxPoolMaintenanceCoordinator:
                     worker_generation
                 ):
                     return None
-                # Resolving a handle does not run a Modal command or open a
-                # legacy worker control channel. Readiness came from rendezvous.
                 return await self.provider.resolve(sandbox_id)
             control = self.transport.blank_control(sandbox_id)
             if control is not None:
@@ -503,10 +501,6 @@ class ChatSandboxPoolMaintenanceCoordinator:
                 ),
                 stale_draining_before=now
                 - timedelta(seconds=self.policy.termination_claim_timeout_seconds),
-                # A reclaimed row is already a complete termination claim and
-                # remains visible as draining in this transaction. Defer other
-                # drains one cycle so planning cannot rotate its token and
-                # issue duplicate provider termination I/O.
                 termination_limit=(
                     0 if stale_health_claims else self.policy.termination_concurrency
                 ),

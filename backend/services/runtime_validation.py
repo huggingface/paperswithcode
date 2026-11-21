@@ -315,10 +315,6 @@ def validate_external_pi_migration_policy(settings: Settings) -> ChatRuntimeProf
                 current_authorization_key["not_after"]
                 - current_authorization_key["not_before"]
             )
-            # Whether the window covers the current time is enforced where the
-            # key is used (executor_transport/src/admission.rs), not here: an
-            # expiring key must not stop every backend worker at its next
-            # restart. See backend/services/chat_config_expiry.py.
             if (
                 set(current_authorization_key)
                 != {"key_id", "public_key", "not_before", "not_after"}
@@ -365,7 +361,6 @@ def validate_external_pi_migration_policy(settings: Settings) -> ChatRuntimeProf
             raise RuntimeError(
                 "remote executor authorization key configuration is invalid"
             ) from None
-        # sign_admission() enforces the current time against this window.
         if (
             settings.chat_executor_admission_key_not_before_ms <= 0
             or settings.chat_executor_admission_key_not_after_ms

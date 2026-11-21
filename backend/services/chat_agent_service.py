@@ -134,9 +134,6 @@ class SearchCallLimiter:
             self.tooling_closed = True
 
     def register_call(self, tool_id: str) -> None:
-        # Pre-tool hooks run before the streamed assistant-message boundary that
-        # registers the complete batch. Starts without an intervening result are
-        # therefore parallel calls from the same assistant turn.
         if tool_id in self.round_by_tool_id:
             self.active_round_tool_ids.add(tool_id)
             return

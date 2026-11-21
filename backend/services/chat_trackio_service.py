@@ -80,7 +80,6 @@ class TrackioClient:
 
     @staticmethod
     def create_trace_id(*, seed: str) -> str:
-        # Same deterministic ID as Langfuse, including the persisted DB column.
         return hashlib.sha256(seed.encode()).hexdigest()[:32]
 
     def start_observation(
@@ -142,7 +141,6 @@ class TrackioClient:
         with self._lock:
             self.counters["submitted"] += 1
             if len(encoded) > MAX_PAYLOAD_BYTES:
-                # One oversized turn, not a burst: always worth its own line.
                 self.counters["dropped"] += 1
                 logger.warning(
                     "chat Trackio trace dropped: payload exceeds 2 MiB trace_id=%s",
@@ -178,10 +176,6 @@ class TrackioClient:
         }
 
     def _drop_queue_full(self, trace_id: str) -> None:
-        # Called with ``self._lock`` held.  Queue-full drops arrive in bursts,
-        # so log the first one per interval with the count suppressed since,
-        # keeping the prefix the alert monitor matches.  The trace ID is a
-        # hash, not chat content.
         self.counters["dropped"] += 1
         self._unlogged_drops += 1
         now = time.monotonic()
@@ -207,7 +201,6 @@ class TrackioClient:
         )
 
     def _send(self, payload: bytes) -> bool:
-        # No redirect following: credentials must stay on the configured Space.
         last_error = "unknown"
         with httpx.Client(timeout=15, follow_redirects=False) as client:
             for attempt in range(3):
@@ -239,7 +232,6 @@ class TrackioClient:
                         return False
                     last_error = f"HTTP {response.status_code}"
                 except (httpx.HTTPError, ValueError) as exc:
-                    # Never log payloads, response bodies or tokens.
                     last_error = type(exc).__name__
                 if attempt < 2:
                     time.sleep(2**attempt)
@@ -269,10 +261,6 @@ class TrackioClient:
         return batch
 
     def _requeue_front(self, entry: bytes) -> None:
-        # ``queue.Queue`` has no push-front.  Reinsert under its mutex so an
-        # entry that would overflow the current POST keeps its place.  ``get``
-        # never touched ``unfinished_tasks``, so nothing is adjusted here; the
-        # batch that eventually carries the entry calls ``task_done`` for it.
         with self.pending.mutex:
             self.pending.queue.appendleft(entry)
             self.pending.not_empty.notify()
@@ -283,7 +271,6 @@ class TrackioClient:
             try:
                 delivered = self._send(self._batch_payload(batch))
             except Exception:
-                # Keep the exporter alive; telemetry failures must not break chat.
                 logger.warning("chat Trackio exporter failed unexpectedly")
                 delivered = False
             finally:

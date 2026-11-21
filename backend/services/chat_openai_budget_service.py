@@ -27,7 +27,6 @@ from backend.services.durable_external_qualification_contract import (
 from backend.services.chat_openai_usage_extractor import ExtractedOpenAIUsage
 from backend.services.openrouter_user_budget_service import usd_to_microusd, utc_month
 
-# GPT-6 Luna: https://developers.openai.com/api/docs/models/gpt-6-luna
 MAX_REQUEST_BYTES = MAX_PROVIDER_REQUEST_BYTES
 MAX_BILLABLE_INPUT_TOKENS = 1_050_000
 LONG_CONTEXT_INPUT_THRESHOLD = 272_000
@@ -84,8 +83,6 @@ class OpenAIUsageStatus:
 class OpenAIRequestBounds:
     request_bytes: int
     maximum_output_tokens: int
-    # Upload-time estimate for files attached by OpenAI file_id; their bytes
-    # are not in the request body, so request_bytes cannot bound them.
     file_input_tokens: int = 0
 
 
@@ -362,8 +359,6 @@ class ChatOpenAIBudgetService:
         reserved: int,
         now: datetime,
     ) -> None:
-        # One environment-wide transaction lock serializes concurrency, rate,
-        # daily, and monthly admission across gateway processes.
         self.db.execute(
             select(
                 func.pg_advisory_xact_lock(
@@ -647,7 +642,6 @@ class ChatOpenAIBudgetService:
             .where(
                 ChatTurnJob.turn_id == ChatOpenAIProviderCall.turn_id,
                 ChatTurnJob.state.in_(("completed", "failed", "interrupted")),
-                # Allow in-flight provider settlement to finish before recovery.
                 ChatTurnJob.terminal_at < current - timedelta(minutes=1),
             )
             .exists()

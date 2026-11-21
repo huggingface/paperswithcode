@@ -99,8 +99,6 @@ REALISTIC_APP_INSTANCE_ID = (
 
 
 def test_sse_event_accepts_openai_call_ids_as_app_instance_ids():
-    # The Pi worker reuses the provider tool call ID as the App instance ID.
-    # OpenAI Responses IDs are ``call_<id>|fc_<id>`` and exceed 64 characters.
     assert len(REALISTIC_APP_INSTANCE_ID) > 64
     frame = sse_event(
         "app_start",

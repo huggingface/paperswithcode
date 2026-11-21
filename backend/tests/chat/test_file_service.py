@@ -320,7 +320,6 @@ def test_upload_racing_chat_deletion_removes_the_openai_copy(db, settings):
 
     class DeletesRowDuringUpload(FakeOpenAIFiles):
         def upload(self, filename, data, media_type):
-            # A concurrent chat deletion cascades the pending row away.
             db.execute(
                 delete(ChatUploadedFile).execution_options(synchronize_session=False)
             )
@@ -471,7 +470,6 @@ def test_upload_writes_both_copies_concurrently(db, settings):
     import threading
 
     session_id = _session(db)
-    # Each side waits for the other: this only finishes when both run at once.
     barrier = threading.Barrier(2, timeout=5)
 
     class WaitingStorage(LocalChatFileStorage):

@@ -255,8 +255,6 @@ def test_stale_maintenance_plan_cannot_probe_a_promoted_control():
     with harness.sessions() as db, db.begin():
         db.add_all([_session(session_id), row])
 
-    # Simulate a second API process: independent coordinator/repository/provider
-    # state, with only the database shared with maintenance.
     claim_provider = _Provider(harness.probe)
     claim_transport = _Transport(claim_provider, harness.probe)
     claim_repository = ChatSandboxPoolRepository(

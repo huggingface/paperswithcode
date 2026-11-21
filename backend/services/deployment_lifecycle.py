@@ -163,7 +163,6 @@ class DeploymentLifecycle:
     def _publish_locked(self) -> None:
         if self._worker_path is None:
             return
-        # Stays set if the write below fails, so status() retries it.
         self._publish_pending = True
         if not (
             self._active_http_requests
@@ -241,7 +240,6 @@ class DeploymentLifecycle:
 
     @contextmanager
     def request(self, path: str) -> Iterator[None]:
-        # A reconnect SSE (/chat/sessions/{id}/stream) relays a live turn too.
         chat = path == "/api/v1/chat/stream" or (
             path.startswith("/api/v1/chat/sessions/") and path.endswith("/stream")
         )
@@ -257,8 +255,6 @@ class DeploymentLifecycle:
                 self._active_chat_streams += 1
             if gateway:
                 self._active_gateway_streams += 1
-        # Publish inside the try: a failed write (for example ENOSPC) must not
-        # leak the increment, or a drained slot reports busy until it stops.
         try:
             with self._lock:
                 self._publish_locked()
@@ -325,8 +321,6 @@ class DeploymentLifecycle:
     def _status_locked(self) -> DeploymentStatus:
         if self._state_directory is not None:
             if self._publish_pending:
-                # Repair this worker's record after a failed write, so a slot
-                # that receives no more traffic still reports its real counts.
                 with contextlib.suppress(OSError):
                     self._publish_locked()
             http, chat, gateway = self._shared_counters_locked()

@@ -56,7 +56,6 @@ def test_chat_endpoint_stream_contract(monkeypatch):
         yield {"type": "done", "followups": [], "finish_reason": "success"}
 
     async def fake_title(_prompt, _settings, **_kwargs):
-        # Let research finish first: title events must still reach the client.
         assert _kwargs["provider_token"] == "title-test-token"
         assert "bill_to" not in _kwargs
         await asyncio.sleep(0.01)

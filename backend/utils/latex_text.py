@@ -86,7 +86,6 @@ _STANDALONE_RE = re.compile(
 )
 _DISPLAY_MATH_RE = re.compile(r"\$\$([^$]+)\$\$")
 _INLINE_MATH_RE = re.compile(r"\$([^$]+)\$")
-# Greek and common math symbols in arXiv titles (longest names first).
 _LATEX_MATH_SYMBOLS: tuple[tuple[str, str], ...] = (
     ("varphi", "φ"),
     ("varepsilon", "ε"),

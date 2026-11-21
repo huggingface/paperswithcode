@@ -41,8 +41,6 @@ def maximum_provider_turn_microusd(
 ) -> int:
     """Price the full server-funded provider envelope before turn admission."""
     funding_mode = settings.chat_route_funding_modes.get(model_route)
-    # The organization's Inference Providers spending limit bounds sponsored
-    # routes, so they reserve nothing from the application cap.
     if funding_mode in {None, "hf_user_billed", "hf_org_funded"}:
         return 0
     if funding_mode == "openai_funded":
@@ -51,8 +49,6 @@ def maximum_provider_turn_microusd(
             OpenAIRequestBounds(request_bytes=1, maximum_output_tokens=1),
             now=now,
         )
-        # Gateway metering estimates input as JSON bytes / 4; reserve up to
-        # four actual tokens per metered token, including long-context rates.
         rate = max(
             settings.chat_openai_input_microusd_per_million_tokens * 8,
             settings.chat_openai_cache_write_microusd_per_million_tokens * 8,

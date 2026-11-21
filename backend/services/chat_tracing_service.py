@@ -1032,7 +1032,6 @@ def start_provider_request_trace(
         if mcp_provider_states is not None:
             metadata["mcp_provider_states"] = mcp_provider_states
         if user_files:
-            # Metadata only: audits read file contents from our store by id.
             metadata["user_files"] = user_files
         observation = client.start_observation(
             trace_context={"trace_id": trace_id},
