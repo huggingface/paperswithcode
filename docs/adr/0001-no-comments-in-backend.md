@@ -28,6 +28,9 @@ ratchet` workflow. A file may never gain comments and new files allow none.
 ## Consequences
 
 Remaining comments are removed in later passes with the `delete-comment` skill
-(`.agents/skills/delete-comment/SKILL.md`). Comments in
-`backend/chat_sandbox_worker/` stay until a worker contract release, because
-those files are hashed into the worker contract and executor release digests.
+(`.agents/skills/delete-comment/SKILL.md`). Some files are hashed by bytes, so
+deleting their comments forces a release of what they feed:
+`backend/chat_sandbox_worker/` feeds the worker contract and executor release
+digests, and `deploy/external_pi_runtime.py` `PROMPT_INPUTS` (including
+`backend/__init__.py` and `backend/chat_execution_policy.py`) feeds the
+external Pi runtime identity. Their comments stay until such a release.

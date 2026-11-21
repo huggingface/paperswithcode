@@ -200,8 +200,6 @@ class LiveChatStreamRegistry:
         session_id: uuid.UUID,
         stream: LiveChatStream | DurableLiveChatStream,
     ) -> None:
-        # A short grace period covers the race between the terminal SSE frame
-        # and the browser's canonical session reload.
         await asyncio.sleep(30)
         if self._streams.get(session_id) is stream:
             self._streams.pop(session_id, None)

@@ -78,7 +78,6 @@ class _LegacyExecutorChannel:
         await self.executor.ensure_workspace(context)
 
     async def release_workspace(self, _context: ExecutorContext) -> None:
-        # Legacy relays install and revoke around each operation already.
         return None
 
     async def exec_resumable(self, context: ExecutorContext, **kwargs: Any):
@@ -330,8 +329,6 @@ class ExternalPiToolWorkspaceExecutor:
             )
             with executor_stage("acquire", str(self.admission.session_id)):
                 if acquire_for_binding is None:
-                    # Legacy admission also applies when remote transport is disabled.
-                    # Executor startup requires a rendezvous bundle in either case.
                     legacy_acquire = getattr(manager, "acquire_legacy", None)
                     workspace = await (legacy_acquire or manager.acquire)(
                         session_id=self.admission.session_id,
@@ -374,7 +371,6 @@ class ExternalPiToolWorkspaceExecutor:
                 await self._invalidate(workspace, primary_exception_active=True)
                 raise
             except Exception:
-                # A persistent claim is single-use, even when attachment fails.
                 self._binding_failed = persistent
                 await self._invalidate(workspace, primary_exception_active=True)
                 raise
@@ -426,9 +422,6 @@ class ExternalPiToolWorkspaceExecutor:
             session_id=str(self.admission.session_id),
             turn_id=str(self.admission.turn_id),
             execution_id=operation_id,
-            # Provider tool-call IDs are untrusted and can contain characters
-            # outside the executor protocol. The harness-issued operation ID is
-            # already unique, replay-stable, and bound to the provider call.
             tool_call_id=operation_id,
             worker_generation=workspace.worker_generation,
             capability=self.capability.token,
@@ -540,10 +533,6 @@ class ExternalPiToolWorkspaceExecutor:
                     raise
                 return
             except Exception:
-                # Cleanup is best-effort after the operation result is fixed. A
-                # workspace-manager defect must not turn a successful tool call
-                # into a duplicate-prone retry; invalidation below still fences
-                # the workspace from reuse.
                 pass
         await self._invalidate(
             workspace,
@@ -585,9 +574,6 @@ class ExternalPiToolWorkspaceExecutor:
             if not primary_exception_active:
                 raise
         except Exception:
-            # Invalidation is the final cleanup boundary. Preserve the primary
-            # tool/cancellation outcome even when a provider implementation has
-            # an unexpected cleanup defect.
             return
 
     def _workspace_manager(self) -> ChatExternalExecutorWorkspaceManager:

@@ -184,8 +184,6 @@ class ChatTurnAdmissionCoordinator:
                 .with_for_update()
                 .execution_options(populate_existing=True)
             ).scalar_one_or_none()
-            # Older telemetry cleanup could interrupt the conversation without
-            # closing its durable job. Repair only that exact, expired state.
             already_interrupted = (
                 session.active_turn_id is None
                 and session.active_turn_expires_at is None
@@ -224,8 +222,6 @@ class ChatTurnAdmissionCoordinator:
         self, *, affected_owner: str, requesting_owner: str
     ) -> None:
         self.observe("typed_failure", "projection_mismatch", 1)
-        # A foreign expired record must not poison admission for other accounts.
-        # Keep ambiguous state untouched and fail closed for its own account.
         if affected_owner == requesting_owner:
             raise ExpiryProjectionMismatch("Expired durable turn projection mismatches")
 

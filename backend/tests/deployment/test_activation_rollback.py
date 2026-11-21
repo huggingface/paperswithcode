@@ -27,8 +27,6 @@ def test_atomic_symlink_replaces_pointer(tmp_path: Path):
 def test_rollback_without_an_active_slot_is_retired(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    # The fixed-port rollback re-synced the shared runtime as root; both
-    # environments run blue/green slots, so that path is refused instead.
     environment_root = tmp_path / "environments"
     root = environment_root / "staging"
     current = tmp_path / "current"

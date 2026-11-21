@@ -45,7 +45,6 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
     assert [choice["id"] for choice in production_direct.chat_model_choices] == [
         "gpt-5.6-luna@openai",
     ]
-    # Hidden GLM sessions continue on Luna; issued GLM capabilities resolve.
     assert (
         registry.canonical_model_id(production_direct, "zai-org/GLM-5.3-Flash")
         == "gpt-5.6-luna@openai"
@@ -217,7 +216,6 @@ def test_sponsored_deepseek_is_offered_next_to_luna_in_production_only():
             "funding_mode": "hf_org_funded",
         },
     )
-    # Luna stays the default and the prewarmed model.
     assert sponsored.chat_effective_pi_prewarm_model == "gpt-5.6-luna@openai"
     assert (
         registry.canonical_model_id(sponsored, registry.SPONSORED_DEEPSEEK_ID)
@@ -240,7 +238,6 @@ def test_switched_off_sponsored_sessions_continue_on_luna():
         registry.canonical_model_id(switched_off, registry.SPONSORED_DEEPSEEK_ID)
         == "gpt-5.6-luna@openai"
     )
-    # Already-issued capabilities still bill the organization, never the user.
     route = switched_off.chat_sponsored_deepseek_route
     assert switched_off.chat_route_providers[route] == "huggingface"
     assert switched_off.chat_route_protocols[route] == "anthropic-messages"

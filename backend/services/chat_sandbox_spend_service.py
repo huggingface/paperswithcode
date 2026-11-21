@@ -33,8 +33,6 @@ from backend.services.chat_sandbox_capacity_repository import (
 )
 
 METERING_CLOCK_SKEW_SECONDS = 5
-# Modal enforces at most a 24-hour ``timeout`` on every sandbox, so no
-# provider instance can bill past its creation plus this bound.
 PROVIDER_MAX_SANDBOX_LIFETIME_SECONDS = 86_400
 
 
@@ -239,9 +237,6 @@ class ChatSandboxSpendService:
 
     @staticmethod
     def _interval_rate(interval: ChatSandboxComputeInterval) -> int:
-        # Modal bills the greater of the resource request and actual usage, not
-        # the configured burst limit. Provider reconciliation raises this local
-        # request-based estimate when actual usage is higher.
         return int(
             (
                 Decimal(interval.cpu_request_millicores)
@@ -679,8 +674,6 @@ class ChatSandboxSpendService:
             end = self._metered_end(interval, now)
             start = interval_start
             seconds = max(0, int((end - start).total_seconds()))
-            # Each interval preserves its resource shape so policy changes
-            # cannot rewrite history.
             rate = self._interval_rate(interval)
             interval.accrued_microusd = max(interval.accrued_microusd, seconds * rate)
             interval.updated_at = now
@@ -930,8 +923,6 @@ class ChatSandboxSpendService:
             row.modal_sandbox_id = sandbox_id
             row.provider_created_at = now
             row.updated_at = now
-            # Production sessions disable autoflush; subsequent claim/terminate
-            # lookups must see this provider identity in the same transaction.
             self.db.flush()
 
     def abort_reservation(
@@ -1127,9 +1118,6 @@ class ChatSandboxSpendService:
         state.last_reconciled_at = reported_at
         state.reconciliation_state = "fresh"
         state.updated_at = reported_at
-        # Recompute after persisting the provider coverage boundary so confirmed
-        # orphan estimates from closed billing hours cannot double-count the
-        # provider-authoritative floor.
         state = self.refresh(reported_at)
         if was_degraded:
             self._event(

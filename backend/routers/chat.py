@@ -359,7 +359,6 @@ def _summary(session: ChatSession) -> ChatSessionSummary:
     primary = getattr(session, "primary_paper", None)
     primary_projection = None
     if primary is not None:
-        # External papers have no arXiv id; their reader route is the paper id.
         primary_projection = {
             "id": str(primary.id),
             "route_id": primary.arxiv_id or str(primary.id),
@@ -369,7 +368,6 @@ def _summary(session: ChatSession) -> ChatSessionSummary:
     return ChatSessionSummary(
         id=session.id,
         title=session.title,
-        # Hidden models report the model their next turn will actually use.
         selected_model=registry.canonical_model_id(
             get_settings(), session.selected_model
         ),
@@ -446,8 +444,6 @@ async def excalidraw_app_html(
     del user
     _require_mcp_apps_host(settings)
     _require_same_origin_csrf(request, settings)
-    # The App runs in an iframe beside private diagram content, so every
-    # environment serves only the reviewed HTML digest, never upstream changes.
     expected_sha256 = next(
         provider.app_html_sha256
         for provider in WORKER_MCP_PROVIDERS
@@ -2021,10 +2017,6 @@ async def stream_chat(
         _raise(exc)
 
     async def event_stream():
-        # Some edge POPs buffer small initial HTTP/2 DATA frames even when the
-        # origin and nginx both disable response buffering. An ignored SSE
-        # comment above the common 2 KiB threshold forces those intermediaries
-        # to flush the response before the first model delta arrives.
         yield b": " + (b" " * SSE_PROXY_FLUSH_PADDING_BYTES) + b"\n\n"
         sequence = 0
         async for frame in outcome.frames:
@@ -2112,6 +2104,5 @@ def submit_chat_feedback(
     if not found:
         db.rollback()
         raise HTTPException(status_code=404, detail="Assistant response not found")
-    # The request session only closes on exit; the stored rating must commit.
     db.commit()
     return Response(status_code=204)

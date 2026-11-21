@@ -103,8 +103,6 @@ def _enforce_result_bytes(payload: dict[str, Any]) -> None:
         if _serialized_size(payload) <= MAX_RESULT_BYTES:
             return
 
-    # Essential IDs, titles, source identity, and truncation flags remain. These
-    # optional display fields are the final escape hatch for unusual UTF-8 data.
     for hit in reversed(results):
         for key in ("conference", "published"):
             if _serialized_size(payload) <= MAX_RESULT_BYTES:

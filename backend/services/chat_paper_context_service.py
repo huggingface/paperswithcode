@@ -85,9 +85,6 @@ class PreparedPaper:
     content_truncated: bool
     content_available: bool
     included_bytes: int
-    # "markdown" for canonical OCR Markdown, "layout_markdown" for page-aware
-    # Markdown whose block tags reader answers cite, "pdf_text" for the interim
-    # plain text extracted while canonical Markdown is still being produced.
     content_origin: str | None = None
 
     @property
@@ -145,9 +142,6 @@ class _PreparedPaperCache:
     def prepare(
         self, route_id: str, loader: Any, *, pdf_fallback: bool = False
     ) -> PreparedPaper:
-        # Reader loads (which may download the PDF) and metadata-only loads
-        # coalesce separately, so neither waits on or inherits the other's
-        # result; a reader follower still reloads if the leader found nothing.
         flight = (route_id, pdf_fallback)
         while True:
             with self._lock:
@@ -394,8 +388,6 @@ class ChatPaperContextService:
             except PaperLayoutNotFoundError:
                 pass
             except Exception as exc:
-                # Layout only adds citations; any storage failure falls back
-                # to canonical Markdown rather than failing the reader turn.
                 logger.warning(
                     "chat paper layout outcome=unavailable paper_id=%s error=%s",
                     paper.id,

@@ -601,9 +601,6 @@ class ChatExecutorRegistry:
         )
         if cell is None:
             raise ExecutorAuthorizationRejected("Executor cell is unavailable")
-        # A concurrent request may have committed while this transaction waited
-        # for the cell fence. Re-read after acquiring the lock before advancing
-        # the epoch.
         existing = db.scalar(
             select(ChatExecutorKeyRevocation).where(
                 ChatExecutorKeyRevocation.request_id == request_id
@@ -856,7 +853,6 @@ class ChatExecutorRegistry:
             or cell.circuit_state == "security_hold"
         ):
             raise ExecutorRollbackRejected("Executor creation manifest is unavailable")
-        # Reconcile a retry that waited behind the original request's cell lock.
         existing = db.get(ChatExecutorRollbackAudit, request_id)
         if existing is not None:
             return self._matching_rollback(

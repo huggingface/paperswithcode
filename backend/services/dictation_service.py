@@ -40,14 +40,10 @@ VOXTRAL = "voxtral"
 OPENAI = "openai"
 TICKET_TTL = timedelta(seconds=30)
 RETENTION = timedelta(days=30)
-# A connected session that never reported back stops counting as live after
-# its maximum length plus a grace period for the final transcript.
 LIVE_GRACE_SECONDS = 15
 OPENAI_REALTIME_URL = "https://api.openai.com/v1/realtime?intent=transcription"
 SAMPLE_RATES = {VOXTRAL: 16_000, OPENAI: 24_000}
 
-# Bias the OpenAI fallback towards the catalog's vocabulary. Voxtral's realtime
-# API has no prompt field.
 VOCABULARY = (
     "Papers with Code, arXiv, Hugging Face, LoRA, QLoRA, RLHF, DPO, GRPO, PPO, "
     "SFT, MoE, Mixture of Experts, KV cache, FlashAttention, RoPE, LayerNorm, "
@@ -168,8 +164,6 @@ class DictationService:
         self._probe = probe or probe_endpoint
         self._now = now
 
-    # -- metering -----------------------------------------------------------
-
     def _charged_seconds(self):
         """Seconds a row counts against an allowance.
 
@@ -228,8 +222,6 @@ class DictationService:
             conditions.append(DictationSession.hf_subject == filters["hf_subject"])
         return int(self.db.scalar(select(func.count()).where(*conditions)))
 
-    # -- provider choice ----------------------------------------------------
-
     def _voxtral_ready(self, *, wake: bool) -> bool:
         url = self.settings.dictation_endpoint_url
         return bool(url) and self._probe(url, self.settings.hf_token, wake=wake)
@@ -248,7 +240,6 @@ class DictationService:
         openai_ok = bool(self.settings.openai_api_key) and (
             openai_left >= self.settings.dictation_session_seconds
         )
-        # Without the OpenAI fallback, waking Voxtral is the only way to serve.
         voxtral_ready = self._voxtral_ready(wake=wake or not openai_ok)
         if (
             voxtral_ready
@@ -265,11 +256,8 @@ class DictationService:
 
         return self._choose(hf_subject, self._now(), wake=False)
 
-    # -- tickets ------------------------------------------------------------
-
     def issue(self, hf_subject: str) -> IssuedTicket:
         now = self._now()
-        # A new ticket replaces any of the user's tickets that never connected.
         self.db.execute(
             update(DictationSession)
             .where(

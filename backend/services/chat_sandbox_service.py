@@ -149,8 +149,6 @@ class WorkspaceSnapshotProvider:
         await sandbox.mount_image.aio("/workspace", image)
 
     async def delete(self, _snapshot_id: str) -> None:
-        # Modal Image currently has no early-delete API. Dropping the durable
-        # reference revokes application access; provider TTL performs deletion.
         return
 
 

@@ -34,7 +34,6 @@ class ExternalPiWorkerEndpointConfig(BaseModel):
 class ChatSessionSettings(BaseModel):
     """Chat sessions, turns, and request limits."""
 
-    # Research chat (disabled until the isolated live qualification passes).
     chat_enabled: bool = Field(default=False)
     chat_paper_mentions_enabled: bool = Field(default=False)
     chat_paper_context_timeout_seconds: float = Field(default=20, gt=0, le=60)
@@ -54,16 +53,10 @@ class ChatSessionSettings(BaseModel):
 class ChatModelSettings(BaseModel):
     """Model routes and the provider choices behind them."""
 
-    # Read-only compatibility inputs for sessions created before the DeepSeek-only
-    # registry. They are never exposed in current model discovery.
     chat_glm_route: str = Field(default="zai-org/GLM-5.2:together")
     chat_gemma_route: str = Field(default="google/gemma-4-31B-it:cerebras")
     chat_glm_5_3_flash_route: str = Field(default="zai-org/GLM-5.3-Flash:fastest")
-    # Staging-only Hugging Face Inference Providers route. Pin a live provider;
-    # `:fastest` hops across backends.
     chat_kimi_route: str = Field(default="moonshotai/Kimi-K3:baseten")
-    # Pin a live provider. `:fastest` hops across backends and previously
-    # included Hugging Face providers whose mapping was in error.
     chat_deepseek_v4_flash_route: str = Field(
         default="deepseek-ai/DeepSeek-V4-Flash-0731:baseten"
     )
@@ -77,35 +70,20 @@ class ChatModelSettings(BaseModel):
             "routes remain registered for rolling switches"
         ),
     )
-    # Free DeepSeek V4.1 Flash for every signed-in user, billed to the Hugging
-    # Face organization behind the title credential. The organization's
-    # Inference Providers spending limit is the only budget. Only Novita serves
-    # this snapshot; pin it like the other reviewed routes.
     chat_sponsored_deepseek_enabled: bool = Field(default=False)
     chat_sponsored_deepseek_route: str = Field(
         default="deepseek-ai/DeepSeek-V4.1-Flash-1017:novita"
     )
-    # When direct OpenAI fails before a Luna turn shows any output, replay the
-    # turn once on the sponsored DeepSeek route. Independent of discovery: the
-    # route can stay hidden from the model picker.
     chat_provider_failover_enabled: bool = Field(default=False)
-    # A default-off server-funded route enabled only by reviewed environment config.
-    # Production discovery and the default model remain unchanged.
     chat_alternative_model_enabled: bool = Field(default=False)
     chat_alternative_model: Literal[
         "openai/gpt-5.6-luna", "google/gemini-3.7-flash"
     ] = Field(default="openai/gpt-5.6-luna")
-    # The historical Luna route is OpenRouter-backed. Keep it immutable so
-    # existing sessions carrying the old public ID never change providers.
     chat_luna_route: str = Field(default="openai/gpt-5.6-luna")
     chat_openai_direct_enabled: bool = Field(default=False)
     chat_openai_luna_route: str = Field(default="gpt-5.6-luna@openai")
-    # The route ID is persisted by sessions and capabilities; only the model
-    # it serves changes.
     chat_openai_model: str = Field(default="gpt-6-luna", pattern=r"^gpt-6-luna$")
     chat_openai_service_tier: Literal["default"] = Field(default="default")
-    # Read-only compatibility input for rolling back releases whose staging
-    # registry still exposed the Terra route.
     chat_terra_route: str = Field(default="openai/gpt-5.6-terra")
 
 
@@ -163,8 +141,6 @@ class ChatOpenRouterSettings(BaseModel):
     )
     chat_openrouter_user_rate_limit_calls: int = Field(default=30, ge=1, le=1000)
     chat_openrouter_global_rate_limit_calls: int = Field(default=80, ge=1, le=10000)
-    # Kept as read-only aliases during the staging rollback window. New code
-    # enforces the per-user and workspace values above.
     chat_openrouter_monthly_budget_usd: Decimal = Field(
         default=Decimal("200.00"), gt=0, le=10000
     )
@@ -220,9 +196,6 @@ class ChatOpenRouterSettings(BaseModel):
 class ChatScopeGuardrailSettings(BaseModel):
     """The server-owned research-scope guardrail."""
 
-    # Server-owned research-scope guardrail. These credentials, limits, and
-    # counters are deliberately separate from user inference credentials and
-    # the main direct-OpenAI chat allowance.
     chat_scope_guardrail_enabled: bool = Field(default=False)
     chat_scope_guardrail_hf_token: str = Field(default="")
     chat_scope_guardrail_hf_bill_to: str = Field(default="", max_length=200)
@@ -284,8 +257,6 @@ class ChatTitleSettings(BaseModel):
 class ChatAdmissionSettings(BaseModel):
     """Admission, rollout percentages, and active-turn capacity."""
 
-    # Protected emergency active-turn limit. Deployed profiles stay at their
-    # qualified 1/2-turn values until a separate load qualification raises it.
     chat_max_concurrency: int = Field(default=1, ge=1, le=100)
     chat_user_max_concurrency: int = Field(default=2, ge=1, le=8)
     chat_public_admission_enabled: bool = Field(default=True)
@@ -295,8 +266,6 @@ class ChatAdmissionSettings(BaseModel):
     )
     chat_new_chat_modal_percentage: int = Field(default=0, ge=0, le=100)
     chat_default_agent_harness: Literal["claude", "pi"] = Field(default="claude")
-    # The migration deliberately supports only the protected stop/full-cutover
-    # states. Pi qualification uses an authenticated per-session override.
     chat_new_session_pi_percentage: int = Field(default=0, ge=0, le=100)
     chat_sandbox_total_live_cap: int = Field(default=2, ge=1, le=16)
 
@@ -331,8 +300,6 @@ class ChatRuntimeSettings(BaseModel):
 class ChatExternalPiSettings(BaseModel):
     """External Pi workers, durable dispatch, and the executor bridge."""
 
-    # External-harness migration controls remain independently fail-closed.
-    # Chat work is staging-only until a separate production authorization.
     chat_external_pi_shadow_enabled: bool = Field(default=False)
     chat_external_pi_admission_enabled: bool = Field(default=False)
     chat_external_pi_supervisor_enabled: bool = Field(default=False)
@@ -353,8 +320,6 @@ class ChatExternalPiSettings(BaseModel):
     chat_external_pi_drain_seconds: int = Field(default=60, ge=5, le=300)
     chat_external_pi_drain_poll_seconds: float = Field(default=1, ge=0.1, le=5)
     chat_remote_workspace_tools_enabled: bool = Field(default=False)
-    # Inert Phase-2 executor bridge. These controls may be qualified on staging
-    # without admitting any external Pi traffic.
     chat_sandbox_executor_enabled: bool = Field(default=False)
     chat_sandbox_executor_contract_version: str = Field(default="", max_length=64)
     chat_remote_bash_enabled: bool = Field(default=False)
@@ -380,30 +345,17 @@ class ChatExternalPiSettings(BaseModel):
 class ChatArtifactSettings(BaseModel):
     """Artifacts, Posterly, LaTeX papers, and MCP Apps."""
 
-    # Protected remote MCP App controls. Both must be enabled before tools
-    # are registered; either is an immediate fail-closed kill switch.
     chat_excalidraw_enabled: bool = Field(default=False)
     chat_mcp_apps_host_enabled: bool = Field(default=False)
-    # Staging-only Posterly artifact controls. Historical safe PNG cards remain
-    # readable when generation flags are disabled.
     chat_artifacts_enabled: bool = Field(default=False)
     chat_posterly_enabled: bool = Field(default=False)
-    # Paper creation is independently disabled until the private storage and
-    # compiler path have completed staging qualification.
     chat_latex_paper_enabled: bool = Field(default=False)
     chat_latex_paper_timeout_seconds: float = Field(default=600, ge=60, le=600)
     chat_latex_paper_max_tool_rounds: int = Field(default=12, ge=3, le=20)
     chat_latex_paper_max_tool_calls: int = Field(default=30, ge=12, le=40)
     chat_latex_paper_max_direct_search_calls: int = Field(default=8, ge=1, le=8)
-    # Private staging-only compiler boundary. The signing private key belongs
-    # only in the PwC backend environment; each disposable Sandbox receives
-    # its matching public key only through its per-job environment.
     chat_latex_compiler_jobs_enabled: bool = Field(default=False)
-    # Qualification may exercise a sealed Sandbox while paper/compiler job
-    # admission remains off. This staging-only flag never enables user work.
     chat_latex_compiler_qualification_mode: bool = Field(default=False)
-    # A per-job HF Sandbox is the only application transport. The image is
-    # deliberately blank by default so staging cannot accidentally create a VM.
     chat_latex_compiler_hf_sandbox_image: str = Field(default="", max_length=1000)
     chat_latex_compiler_hf_sandbox_namespace: str = Field(default="", max_length=128)
     chat_latex_compiler_hf_sandbox_token: str = Field(default="")
@@ -449,8 +401,6 @@ class ChatArtifactSettings(BaseModel):
     chat_artifact_preview_max_pixels: int = Field(
         default=20_000_000, ge=1_000_000, le=20_000_000
     )
-    # User-uploaded chat files (direct Luna only). Our copy lives in a private
-    # bucket for chat-health audits; OpenAI holds the copy the model reads.
     chat_file_uploads_enabled: bool = Field(default=False)
     chat_file_storage_backend: Literal["local", "hf_bucket"] = Field(default="local")
     chat_file_hf_bucket_id: str = Field(default="", max_length=255)
@@ -556,8 +506,6 @@ class ChatSandboxSettings(BaseModel):
 class ChatSandboxSpendSettings(BaseModel):
     """Sandbox spend caps, reconciliation, and alert routing."""
 
-    # Read-only compatibility for old environment files during rolling deploys.
-    # Enforcement intentionally ignores these blank-only floating-point values.
     chat_blank_pool_monthly_budget_usd: float = Field(default=35, gt=0, le=1000)
     chat_blank_pool_reported_month_to_date_usd: float = Field(default=0, ge=0, le=10000)
     chat_sandbox_warning_microusd: int = Field(default=75_000_000, ge=1)

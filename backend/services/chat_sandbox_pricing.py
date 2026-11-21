@@ -4,8 +4,6 @@ from decimal import Decimal
 
 from backend.chat_sandbox_worker.contract import CHAT_SANDBOX_REGION
 
-# https://modal.com/docs/guide/region-selection (verified 2026-09-14).
-# Keep placement changes explicit: an unknown region must not silently use base pricing.
 _REGION_MULTIPLIERS = {"eu-west": Decimal("1.75")}
 REGION_MULTIPLIER = _REGION_MULTIPLIERS[CHAT_SANDBOX_REGION]
 CPU_MICROUSD_PER_CORE_SECOND = Decimal("39.42") * REGION_MULTIPLIER

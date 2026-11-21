@@ -272,9 +272,6 @@ def test_runtime_reregisters_when_a_heartbeat_outage_consumes_the_lease():
     assert result == ExternalPiSupervisorRunResult(
         registrations=2, heartbeats=0, drained=True
     )
-    # Two failed heartbeats consumed the 15 s lease and the third would have
-    # started at the deadline, so the loop gave up on the first claim and took
-    # a new one instead of exiting.
     assert supervisor.heartbeat.await_count == 2
     assert observe.call_args_list == [
         (("registered", claim, 0),),
@@ -408,11 +405,7 @@ def test_runtime_fails_closed_when_reregistration_outlives_the_startup_window():
     with pytest.raises(ExternalPiSupervisorLeaseLost):
         asyncio.run(runtime.run())
 
-    # A slow successful heartbeat still counts against the durable lease: the
-    # second one finished 16 s after the first started, so the claim was lost.
     assert supervisor.heartbeat.await_count == 2
-    # Re-registration then retried for the whole startup window before the
-    # runtime failed closed.
     assert supervisor.register.await_count > 2
     assert clock[0] >= 21 + 30
     supervisor.begin_drain.assert_not_awaited()
@@ -475,7 +468,6 @@ def test_runtime_reregisters_in_process_after_a_stall_outlives_the_lease():
     async def wait_for_stop(seconds):
         waits[0] += 1
         if waits[0] == 1:
-            # A starved host parks the event loop for far longer than the lease.
             clock[0] += 40
             return False
         clock[0] += seconds
@@ -500,8 +492,6 @@ def test_runtime_reregisters_in_process_after_a_stall_outlives_the_lease():
     assert result == ExternalPiSupervisorRunResult(
         registrations=2, heartbeats=0, drained=True
     )
-    # The expired claim is never heartbeated; the runtime goes straight back
-    # through fenced registration and drains under the new claim.
     supervisor.heartbeat.assert_not_awaited()
     assert observe.call_args_list == [
         (("registered", claim, 0),),
@@ -555,10 +545,7 @@ def test_runtime_reregisters_immediately_when_the_registry_fences_its_claim():
 
     assert result.registrations == 2
     assert result.drained is True
-    # One fenced heartbeat is enough; the runtime does not wait out the lease.
     assert supervisor.heartbeat.await_count == 1
-    # A registry that still shows the previous lease as live is retried inside
-    # the startup window rather than treated as fatal.
     assert supervisor.register.await_count == 3
     assert clock[0] == 5 + 5 + 5
 
@@ -579,7 +566,6 @@ def test_runtime_reports_an_undrained_stop_that_interrupts_reregistration():
 
     async def wait_for_stop(seconds):
         clock[0] += seconds
-        # The stop lands while the replacement claim is still being retried.
         return supervisor.register.await_count == 2
 
     observe = Mock()
@@ -598,8 +584,6 @@ def test_runtime_reports_an_undrained_stop_that_interrupts_reregistration():
 
     result = asyncio.run(runtime.run())
 
-    # The caller can tell this apart from a stop before any claim existed:
-    # a claim was taken, nothing drained it, and the last event was the loss.
     assert result == ExternalPiSupervisorRunResult(
         registrations=1, heartbeats=0, drained=False
     )

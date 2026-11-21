@@ -290,9 +290,6 @@ class ExecutorBootstrapStateMachine:
         key = (environment_id, generation)
         with self._lock:
             record = self._registered_environment(key, now)
-            # A heartbeat can be authenticated only after the registration
-            # response was accepted by the bound identity. It closes the
-            # response-loss recovery window before creating reconnect state.
             active = self._active_attempt_by_environment.pop(key, None)
             if active is not None:
                 previous = self._attempts.get(active)

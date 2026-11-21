@@ -20,7 +20,6 @@ from backend.services.chat_external_worker_registry import ExternalWorkerClaim
 from backend.config import ExternalPiWorkerEndpointConfig, Settings
 
 
-# A turn never lasts a day; a bound reservation older than this is an orphan.
 BOUND_RESERVATION_RETENTION_SECONDS = 24 * 60 * 60
 
 
@@ -215,9 +214,6 @@ class ChatExternalWorkerCapacityRepository:
                 )
             return self._reservation(existing, endpoint)
 
-        # Unbound reservations expire on their own; bound ones are normally
-        # deleted when the turn is released, but a crashed or lease-lost turn
-        # leaves its row behind, so age those out too instead of forever.
         db.execute(
             delete(ChatExternalWorkerReservation).where(
                 or_(

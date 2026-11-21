@@ -168,7 +168,6 @@ def test_daily_allowance_charges_reservations_until_finished(db):
     service.finish("a", first.session_id, 42.4)
     assert service.status("a").remaining_seconds == 258
 
-    # Finishing again, or as someone else, changes nothing.
     service.finish("a", first.session_id, 0)
     service.finish("b", first.session_id, 0)
     assert service.status("a").remaining_seconds == 258

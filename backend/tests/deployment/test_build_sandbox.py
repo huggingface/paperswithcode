@@ -25,7 +25,6 @@ def as_root(monkeypatch: pytest.MonkeyPatch):
 
     def pkill(command, check):
         killed.append(command)
-        # pkill exits 1 once no process matched.
         return SimpleNamespace(returncode=0 if len(killed) == 1 else 1)
 
     monkeypatch.setattr(build_sandbox.subprocess, "run", pkill)
@@ -66,7 +65,6 @@ def test_lend_and_reclaim_never_follow_symlinks(tmp_path: Path, as_root):
     assert str(tmp_path / "frontend" / "inside") in owners
 
     build_sandbox.reclaim(tmp_path)
-    # pkill repeats until no build process is left.
     assert killed == [["/usr/bin/pkill", "--signal", "KILL", "-u", "pwc-build"]] * 2
     assert set(owners.values()) == {(0, 0)}
 
@@ -114,7 +112,6 @@ def test_missing_build_user_fails_closed(monkeypatch: pytest.MonkeyPatch):
 
 
 def test_disabled_sandbox_runs_commands_unchanged(tmp_path: Path):
-    # backend/tests/conftest.py disables the drop, as for unprivileged callers.
     assert build_sandbox.command(["npm", "ci"]) == ["npm", "ci"]
     build_sandbox.lend(tmp_path)
     build_sandbox.reclaim(tmp_path)
@@ -162,8 +159,6 @@ def test_runtime_build_runs_uv_and_python_as_build_user(
 def test_reclaim_refuses_launchers_that_hop_through_an_outside_pivot(
     tmp_path: Path,
 ):
-    # The build user could later retarget a pivot it owns outside the tree,
-    # even though it currently resolves to the system interpreter.
     tree = tmp_path / "runtime"
     (tree / "bin").mkdir(parents=True)
     pivot = tmp_path / "pivot"
@@ -175,7 +170,6 @@ def test_reclaim_refuses_launchers_that_hop_through_an_outside_pivot(
 
 
 def test_reclaim_refuses_dot_dot_escapes_through_an_inside_link(tmp_path: Path):
-    # "here" stays inside literally, but "here/../x" resolves above the tree.
     tree = tmp_path / "source"
     tree.mkdir()
     (tree / "here").symlink_to(".")
@@ -188,8 +182,6 @@ def test_reclaim_refuses_dot_dot_escapes_through_an_inside_link(tmp_path: Path):
 def test_lend_lets_the_build_user_write_files_copied_from_the_release(
     tmp_path: Path, as_root
 ):
-    # The Pi build copies package-lock.json from the 0444 release; npm prune
-    # rewrites it, which root could do regardless of mode but pwc-build cannot.
     app = tmp_path / "app"
     app.mkdir()
     lock = app / "package-lock.json"

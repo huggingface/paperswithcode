@@ -369,7 +369,6 @@ def test_provider_failover_records_the_answering_model_only_when_offered():
 
     stream = orchestrator()
     asyncio.run(stream._handle_telemetry_event(_telemetry(provider_failover=True)))
-    # No runner offered a fallback: a worker claim alone changes nothing.
     assert stream.admission.model_route == "route"
     assert stream.provider_failed_over is False
 
@@ -397,8 +396,6 @@ def test_failed_over_turn_reports_only_the_primary_route_error(monkeypatch):
     def session():
         yield object()
 
-    # The fallback capability recorded the newest code; only the primary
-    # route's code may reach a user who chose Luna.
     codes = {
         "route": "openai_unavailable",
         "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita": "hf_sponsored_unavailable",

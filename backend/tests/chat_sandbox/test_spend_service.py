@@ -758,8 +758,6 @@ def test_uncertain_interval_metering_stops_at_configured_maximum_lifetime():
 
 
 def test_late_stale_reservation_confirmation_stops_at_provider_timeout():
-    # Staging 2026-10: blank-pool sandboxes from 2026-09-16 were confirmed gone
-    # only on 2026-10-03; Modal billed nothing for them in October.
     sessions = factory()
     reserved_at = datetime(2026, 9, 16, 9, 18, 59, tzinfo=UTC)
     created_at = reserved_at + timedelta(seconds=84)
@@ -1265,7 +1263,6 @@ def test_provider_identity_is_visible_to_cleanup_without_autoflush():
 
 
 def test_pinned_region_price_is_reserved_before_provider_creation():
-    # (1 CPU * 39.42 + 2 GiB * 6.72) * 1.75 = 92.505, rounded up.
     sessions = factory()
     with sessions() as db, db.begin():
         service = ChatSandboxSpendService(db, settings())

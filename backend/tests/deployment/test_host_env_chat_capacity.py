@@ -75,8 +75,6 @@ def test_staging_chat_pool_toggle_is_narrow_and_bounded():
     }
 
 
-# Production break caught: the durable bridge toggle mutates capacity, worker,
-# executor, workspace, or provider controls along with its single feature flag.
 @pytest.mark.parametrize("enabled", [True, False])
 def test_staging_chat_durable_dispatch_toggle_is_single_key(enabled: bool):
     assert configure_host_env.staging_chat_durable_dispatch_values(enabled=enabled) == {

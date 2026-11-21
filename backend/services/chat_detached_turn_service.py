@@ -508,8 +508,6 @@ class DetachedTurnCoordinator:
                 now=self._clock(),
             )
         )
-        # The transaction has committed. Socket sends and queue admission never
-        # authorize worker replay pruning.
         for event in events:
             if event.after_persist is not None:
                 await event.after_persist()

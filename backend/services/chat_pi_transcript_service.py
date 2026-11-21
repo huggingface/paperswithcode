@@ -88,7 +88,6 @@ def _envelope(entry: dict[str, Any]) -> tuple[str | None, str | None, str]:
     ):
         raise PiTranscriptError("Pi transcript entry type is invalid")
     if entry_type == "session":
-        # Pi's session header has its own session id, not a tree entry id.
         return None, None, entry_type
     return entry_id, parent_id, entry_type
 
@@ -119,10 +118,6 @@ class ChatPiTranscriptService:
             .with_for_update()
         ).scalar_one_or_none()
         if row is not None:
-            # A failed reusable-sandbox assignment may have durably created the
-            # native session before the coordinator retries the same admitted
-            # turn in a replacement sandbox. Return that binding so the new
-            # worker restores it instead of inventing a conflicting transcript.
             return row
         if chat.sdk_session_id not in {None, agent_session_id}:
             raise PiTranscriptError("Chat already has a different agent session")
@@ -177,9 +172,6 @@ class ChatPiTranscriptService:
             raise PiTranscriptError("Pi transcript append batch is outside the limit")
         chat = self._pi_chat(chat_session_id, lock=True)
         row = self.create_or_bind_session(chat_session_id, agent_session_id)
-        # The capability binds the chat; the agent session id comes from the
-        # caller. Only append to the session this chat is actually bound to,
-        # never to another chat's session that happens to share the id.
         if row.agent_session_id != agent_session_id:
             raise PiTranscriptError("Pi transcript ownership mismatch")
         row = self.db.execute(

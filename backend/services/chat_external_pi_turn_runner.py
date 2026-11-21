@@ -196,8 +196,6 @@ class ExternalPiChatTurnRunner:
         try:
             async for event in self._events(boundary):
                 if event.get("type") == "done":
-                    # Completion lets the stream consumer cancel the producer.
-                    # Release the retained workspace before that boundary.
                     await self.tool_executor.settle_turn()
                 yield event
             primary_exception_active = False
@@ -236,9 +234,6 @@ class ExternalPiChatTurnRunner:
                     terminal_sequence is not None
                     and durable_sequence >= last_checkpoint_sequence
                 ):
-                    # The producer may finish before its queued terminal commits.
-                    # The fenced terminal-control channel releases that retained
-                    # run without keeping the producer alive during persistence.
                     async with asyncio.timeout(2):
                         async with self._external_worker_socket(
                             worker_claim
@@ -257,8 +252,6 @@ class ExternalPiChatTurnRunner:
                     }
                     await socket.send(json.dumps(frame, separators=(",", ":")))
             except (OSError, TimeoutError, WebSocketException):
-                # Lost receipts retain replay frames. Later cumulative receipts
-                # retry progress; terminal grace bounds failed terminal cleanup.
                 pass
 
         seen_sequence = 0
@@ -350,9 +343,6 @@ class ExternalPiChatTurnRunner:
                             continue
                         if event.get("type") == "worker_done":
                             terminal_sequence = sequence
-                            # Old workers retain their existing protocol. New
-                            # workers may release only a durably consumed prefix;
-                            # otherwise their bounded terminal grace owns cleanup.
                             if (
                                 supports_durable_ack
                                 and durable_sequence < last_checkpoint_sequence
@@ -367,12 +357,6 @@ class ExternalPiChatTurnRunner:
                             terminal_acknowledged = True
                             return
                         if event.get("type") == "worker_ready":
-                            # Readiness proves that the trusted harness accepted
-                            # the run, but it is not part of the browser SSE
-                            # contract.
-                            # Live streams have no durable event journal. Keep
-                            # their existing terminal acknowledgement behavior;
-                            # only journal-backed consumers can prune progress.
                             supports_durable_ack = (
                                 event.get("durable_event_ack") is True
                                 and self.settings.chat_durable_turn_dispatch_enabled
@@ -651,7 +635,6 @@ class ExternalPiChatTurnRunner:
             "reader_mode": self.admission.reader_mode,
             "poster_mode": self.admission.poster_mode,
             "paper_artifacts_enabled": self.admission.paper_artifacts_enabled,
-            # read_user_file only exists where the gateway can resolve files.
             "user_files_enabled": (
                 self.settings.chat_file_uploads_enabled
                 and self.admission.model_route == self.settings.chat_openai_luna_route

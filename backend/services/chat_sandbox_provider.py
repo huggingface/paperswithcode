@@ -46,7 +46,6 @@ FAILURE_STAGES = frozenset(
         "agent_stream",
         "broker_clear",
         "worker_done_send",
-        # Turn-level stages recorded at finalize for any failed turn.
         "before_dispatch",
         "awaiting_first_event",
         "streaming",
@@ -485,9 +484,6 @@ class ModalSandboxProviderAdapter:
                 ),
             )
         if remote_executor:
-            # Only authenticated durable registration establishes executor
-            # readiness. Modal exec probes are intentionally not part of the
-            # warm path and cannot establish remote identity.
             return sandbox
         if not persistent_enabled and not executor_enabled:
             return sandbox

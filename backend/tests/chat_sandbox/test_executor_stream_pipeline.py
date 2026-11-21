@@ -35,8 +35,6 @@ async def _exercise(tmp_path: Path, mode: str) -> None:
             while True:
                 opened = await _read_frame(reader)
                 assert opened["kind"] == "open"
-                # Deliberately withhold opened until the payload is received:
-                # the former serial implementation cannot pass this exchange.
                 data = await _read_frame(reader)
                 assert data["kind"] == "data"
                 assert data["stream_id"] == opened["stream_id"]
@@ -53,7 +51,6 @@ async def _exercise(tmp_path: Path, mode: str) -> None:
                 if mode == "delayed":
                     await allow_ack.wait()
                 if mode == "lost" and request["type"] == "exec":
-                    # The command may already have executed, but opened was lost.
                     await _write_frame(
                         writer, {"kind": "closed", "stream_id": opened["stream_id"]}
                     )
@@ -101,7 +98,6 @@ async def _exercise(tmp_path: Path, mode: str) -> None:
     task = None
     try:
         await channel.connect()
-        # Attachment authentication is covered by the existing channel suite.
         channel._attachment = object()
         context = _context("same-execution", "one-command")
         if mode in {"disconnect", "timeout", "cancel"}:

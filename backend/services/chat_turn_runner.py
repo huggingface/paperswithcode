@@ -254,8 +254,6 @@ def create_chat_turn_runner(
     with db_manager.session_local() as db:
         provider = settings.chat_route_providers[admission.model_route]
         provider_mode = _provider_mode_for_route(settings, owner, admission.model_route)
-        # Sponsored routes bill the organization at the gateway, so the user's
-        # Hugging Face credential never enters the capability.
         user_billed_huggingface = (
             provider == "huggingface"
             and settings.chat_route_funding_modes.get(admission.model_route)
@@ -280,8 +278,6 @@ def create_chat_turn_runner(
             admission,
             qualification_authorized=qualification_authorized,
         )
-        # WebFetch is intentionally dormant for both harnesses during the
-        # controlled Pi comparison. The trusted gateway route remains intact.
         scopes = {"model", "catalog", "session_store"}
         if admission.web_search_enabled:
             scopes.add("web_search")
@@ -293,9 +289,6 @@ def create_chat_turn_runner(
             scopes.add("paper")
         if uses_external_pi:
             scopes.add("external_turn")
-            # Admission recorded the Modal sandbox shape because routing is only
-            # resolved here. Correct it before the turn is billed for compute it
-            # never uses.
             ChatLatencyService(db).mark_external_pi(request_id)
         lifetime_seconds = round(
             (
@@ -334,8 +327,6 @@ def create_chat_turn_runner(
         provider_fallback = None
         if uses_external_pi and _offers_provider_failover(db, settings, admission):
             route = settings.chat_sponsored_deepseek_route
-            # The sponsored route bills the organization at the gateway; this
-            # capability authorizes only its model calls, without credentials.
             provider_fallback = ExternalProviderFallback(
                 route=route,
                 model=settings.chat_route_provider_models[route],

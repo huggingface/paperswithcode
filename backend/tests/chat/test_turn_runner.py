@@ -209,8 +209,6 @@ def test_reconstructed_admission_uses_persisted_qualification_and_reservation(
 
     assert isinstance(runner, ReconstructedExternalRunner)
     assert issued_scopes == [{"model", "catalog", "session_store", "external_turn"}]
-    # The turn must be recorded against the external fleet so it is not billed
-    # for a Modal sandbox it never allocates.
     assert marked == [runner.kwargs["request_id"]]
 
 

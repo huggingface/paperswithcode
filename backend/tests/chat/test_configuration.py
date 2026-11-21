@@ -42,7 +42,6 @@ def test_every_chat_field_has_exactly_one_focused_owner():
     chat_fields = {name for name in Settings.model_fields if name.startswith("chat_")}
     assert chat_fields == set(owners)
     assert all(len(groups) == 1 for groups in owners.values())
-    # The root model declares only application-wide settings.
     assert not any(name.startswith("chat_") for name in Settings.__annotations__)
 
 

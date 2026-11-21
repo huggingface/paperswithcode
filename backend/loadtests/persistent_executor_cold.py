@@ -32,7 +32,6 @@ from backend.services.durable_external_qualification_contract import (
 from backend.services.chat_sandbox_executor import ExecutorContext
 from backend.services.chat_sandbox_provider import SandboxLaunchMode
 
-# Approved 2026-09-15: preserve the entire earlier allocation, add cold only.
 PRIOR_ALLOCATION_MICROUSD = 16_250_000
 COLD_ALLOCATION_MICROUSD = 25_000_000
 COMBINED_CEILING_MICROUSD = PRIOR_ALLOCATION_MICROUSD + COLD_ALLOCATION_MICROUSD
@@ -55,8 +54,6 @@ async def _blocking_transition(function: Callable[..., T], *args: object) -> T:
     try:
         return await asyncio.shield(task)
     except asyncio.CancelledError:
-        # Cancelling an await does not stop its thread. Do not race provider
-        # cleanup against a still-committing reservation or journal update.
         await asyncio.gather(task, return_exceptions=True)
         raise
 
@@ -214,8 +211,6 @@ def cold_stage_result(observations: list[ColdObservation]) -> dict:
             else float("inf")
             for row in rows
         ]
-        # Errors occupy the percentile tail in the 1,000-sample cohort. The
-        # separate burst requires zero errors; both require complete cleanup.
         passed = complete and all(
             row.completed and row.cleanup_error is None and row.terminal_confirmed
             for row in rows
@@ -240,7 +235,6 @@ def cold_stage_result(observations: list[ColdObservation]) -> dict:
     result["latency_gates_passed"] = all(
         p["passed"] for p in result["profiles"].values()
     )
-    # Timing rows cannot attest host resources, simultaneous admission or identity.
     result["cold_stage_qualified"] = False
     return result
 
@@ -346,8 +340,6 @@ async def collect_cold_observation(
                 raise RuntimeError("cold command did not exit successfully")
             row = replace(row, elapsed_ms=elapsed)
     except Exception as error:
-        # This is a measurement boundary, not an operational fallback. Do not
-        # persist exception messages that might contain authorization material.
         row = replace(row, error=type(error).__name__)
     finally:
         if channel is not None:
@@ -367,7 +359,6 @@ async def collect_cold_observation(
                 row = replace(row, terminal_confirmed=True)
             except Exception as error:
                 row = replace(row, cleanup_error="sandbox:" + type(error).__name__)
-        # Unknown creation results retain their reservation for reconciliation.
         await _blocking_transition(journal.save, row)
     row = replace(row, completed=True)
     await _blocking_transition(journal.save, row)
@@ -399,7 +390,6 @@ async def collect_cold_stage(
                     journal.admit(profile, i) for i in range(offset, offset + width)
                 ]
             )
-            # Admission files are durable before any member starts its clock.
             results = await asyncio.gather(
                 *(
                     collect_cold_observation(
@@ -414,7 +404,6 @@ async def collect_cold_stage(
                 ),
                 return_exceptions=True,
             )
-            # Finish cleanup of every sibling before propagating journal failures.
             errors = [result for result in results if isinstance(result, BaseException)]
             if errors:
                 raise BaseExceptionGroup("cold collection interrupted", errors)

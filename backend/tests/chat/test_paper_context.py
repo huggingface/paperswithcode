@@ -1005,7 +1005,6 @@ def test_reader_and_mention_loads_coalesce_separately():
         )
     )
     reader.start()
-    # The reader leads its own load instead of waiting for the mention.
     assert reader_started.wait(5)
     release_mention.set()
     mention.join(5)

@@ -162,10 +162,6 @@ def test_deployment_status_reports_shadow_unit_and_durable_evidence(
 def test_worker_status_tolerates_the_window_before_the_worker_binds(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    # systemd reports the Type=simple worker unit active as soon as it execs,
-    # while the Node process is still loading the Pi runtime and has not bound
-    # its port. A single attempt turned that into a refused connection that
-    # failed the whole deployment.
     spec = lifecycle.replica_specs("staging", "blue", "x" * 32)[0]
     attempts = {"n": 0}
 

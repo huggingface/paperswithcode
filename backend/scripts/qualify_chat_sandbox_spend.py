@@ -216,14 +216,10 @@ def main() -> int:
     with db_manager.session_local() as db, db.begin():
         service = ChatSandboxSpendService(db, fallback_settings)
         service.reconcile_provider_floor(75_000_000, now)
-        # Deployed repository sessions disable autoflush, so make the synthetic
-        # transition visible to the verification query in this transaction.
         db.flush()
         fallback_event = db.execute(
             fallback_spend_event_statement(fallback_environment)
         ).scalar_one()
-        # Exercise the real fallback destination without sending five deliberate
-        # failures to the primary endpoint first.
         fallback_event.delivery_state = "failed"
         fallback_event.delivery_attempts = 5
         fallback_event_id = fallback_event.id

@@ -252,7 +252,6 @@ def test_same_session_retry_respects_live_durable_lease(monkeypatch, db):
 
     def owned_with_utc(*args, **kwargs):
         result = owned(*args, **kwargs)
-        # SQLite drops timezone information; PostgreSQL retains it.
         result.active_turn_expires_at = result.active_turn_expires_at.replace(
             tzinfo=UTC
         )

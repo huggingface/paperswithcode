@@ -89,8 +89,6 @@ def count_pdf_pages(path: Path) -> int:
 
 
 def _main(path: str) -> None:
-    # Limits are set here, in the child, rather than with ``preexec_fn``,
-    # which can deadlock when the parent (a FastAPI worker) has threads.
     resource.setrlimit(resource.RLIMIT_AS, (PROBE_MEMORY_BYTES, PROBE_MEMORY_BYTES))
     resource.setrlimit(resource.RLIMIT_CPU, (PROBE_CPU_SECONDS, PROBE_CPU_SECONDS))
     import fitz

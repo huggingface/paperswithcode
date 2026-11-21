@@ -118,8 +118,6 @@ def run_case(
             CompilerJobState.FAILED,
             CompilerJobState.CANCELED,
         }:
-            # Read and validate the terminal response so the disposable VM is
-            # released by the transport. Do not expose its content.
             compiler.result(job_id)
             return status.state.value, _elapsed_ms(started)
         time.sleep(POLL_SECONDS)

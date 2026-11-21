@@ -323,7 +323,6 @@ def _authorize_pwc_mcp(
         turn_fence=turn_fence,
     )
     try:
-        # Filtered searches share the CLI/direct search allowance as well.
         operation = (
             "search"
             if body.tool == "search_papers"
@@ -360,8 +359,6 @@ async def catalog_mcp(
         if str(arguments.get("cursor") or "").startswith(UNTAGGED_CURSOR_PREFIX):
             arguments = {k: v for k, v in arguments.items() if k != "cursor"}
         else:
-            # The reader's primary paper reads from the same page-tagged text
-            # its answer cites, rather than the untagged stored Markdown.
             try:
                 page = await asyncio.to_thread(
                     read_reader_paper,
@@ -402,8 +399,6 @@ async def catalog_mcp(
     except PwcMcpError as error:
         raise HTTPException(status_code=502, detail=str(error)) from None
     finally:
-        # A disconnect probe may consume cancellation in its local cancel scope.
-        # Give the polling loop an independent exit condition before joining it.
         finished.set()
         call.cancel()
         disconnect.cancel()
@@ -878,7 +873,7 @@ def paper_command(
                 "repaired": outcome.repaired,
                 "exhausted": outcome.exhausted,
             }
-        else:  # Pydantic limits the operation, but keep this boundary explicit.
+        else:
             raise ArtifactError("artifact_invalid", "Unknown paper operation")
     except ArtifactError as error:
         db.rollback()

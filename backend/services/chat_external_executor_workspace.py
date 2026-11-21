@@ -186,8 +186,6 @@ class ChatExternalExecutorWorkspaceManager:
         provider: SandboxProvider,
         executor: SandboxExecutorClient,
     ) -> ChatExternalExecutorWorkspaceManager:
-        # Local import keeps the compatibility façade out of the domain module's
-        # import graph while reusing its single, validated dependency assembly.
         from backend.services.chat_sandbox_service import SandboxSessionManager
         from backend.services.chat_durable_lifecycle_observer import (
             durable_lifecycle_observer,
@@ -463,7 +461,6 @@ class ChatExternalExecutorWorkspaceManager:
         try:
             await self.invalidate(workspace)
         except Exception:
-            # The exact busy fence remains unreusable until reconciliation.
             return False
         return True
 

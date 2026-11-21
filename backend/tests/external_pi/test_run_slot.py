@@ -53,6 +53,4 @@ def test_lifecycle_is_complete_after_a_drain_or_before_any_claim():
 
 
 def test_a_stop_during_reregistration_is_reported_as_failed():
-    # The worker is still bound to the lost claim and nothing drained it, so
-    # the status file must not look like a never-registered fresh start.
     assert _lifecycle_completed(ExternalPiSupervisorRunResult(1, 7, False)) is False

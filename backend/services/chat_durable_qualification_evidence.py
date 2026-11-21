@@ -399,9 +399,6 @@ class ChatDurableQualificationEvidenceService:
         )
         if scope_id is None:
             return False
-        # Lock order is scope -> reservation -> capability for reconstructed Pi
-        # runners, and scope -> capacity -> sandbox lease for executor acquisition.
-        # The caller transaction retains this row lock through the final mutation.
         try:
             scope = self.require_active_scope(scope_id, settings=settings, lock=True)
         except QualificationEvidenceUnavailable:

@@ -11,18 +11,12 @@ from typing import Any
 import httpx
 
 ENDPOINT = "https://paperswithcode.co/mcp"
-# Each environment talks to its own MCP component (deploy/mcp_release.py ports);
-# staging must exercise the staging release rather than production's.
-# The gateway connects to the loopback listener directly (no nginx hop) so the
-# server accepts X-PwC-MCP-Client and rate-limits each chat session on its own.
 ENDPOINTS = {
     "production": "http://127.0.0.1:8002/mcp",
     "staging": "http://127.0.0.1:8003/mcp",
 }
 CLIENT_IDENTITY_HEADER = "X-PwC-MCP-Client"
 MAX_RESPONSE_BYTES = 1024 * 1024
-# One tool per read-only pwc CLI research command (huggingface/pwc-cli PR #13;
-# get_paper_evaluations since pwc-mcp 0.2.7).
 TOOL_NAMES = frozenset(
     {
         "search_papers",

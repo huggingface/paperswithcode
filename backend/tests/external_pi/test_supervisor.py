@@ -213,9 +213,6 @@ def test_supervisor_reports_an_incomplete_drain_without_marking_offline():
 
 
 def test_supervisor_reclaims_an_idle_drained_worker_after_restart():
-    # A drained worker never returns to "ready" on its own, so refusing to
-    # register one turned a single supervisor restart into a permanent crash
-    # loop that systemd could not escape.
     client = Mock(
         status=AsyncMock(return_value=_status(state="draining", worker_generation=3)),
         bind_claim=AsyncMock(return_value=_status(state="ready", worker_generation=4)),

@@ -198,8 +198,6 @@ class ChatSandboxCapacityRepository:
         if not isinstance(decision, StartEligible):
             return decision
 
-        # Spend reservation deliberately precedes lease mutation. A rejected
-        # reservation may trip the durable circuit but must leave the lease exact.
         interval_id = (
             reserve_interval(worker_generation)
             if reserve_interval is not None
@@ -257,9 +255,6 @@ class ChatSandboxCapacityRepository:
                 expected=self._state_claim(lease),
             )
 
-        # A start owner may still be between the database claim and provider
-        # creation. With no provider ID there is nothing safe to recover yet,
-        # even when that owner's target image has since become incompatible.
         if (
             lease
             and lease.state == "starting"

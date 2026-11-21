@@ -28,12 +28,9 @@ from sqlalchemy.orm import Session
 from backend.models.database import ChatUploadedFile
 
 _HEX = "[0-9a-fA-F]"
-# Canonical UUID shape only, so every match parses with ``uuid.UUID``.
 PLACEHOLDER = re.compile(
     rf'<pwc_user_file id="({_HEX}{{8}}-{_HEX}{{4}}-{_HEX}{{4}}-{_HEX}{{4}}-{_HEX}{{12}})"\s*/>'
 )
-# Pi sends the whole user prompt as one text part, so a placeholder may also
-# stand on its own line inside a longer text; inline mentions are left alone.
 PLACEHOLDER_LINE = re.compile(rf"^[ \t]*({PLACEHOLDER.pattern})[ \t]*$", re.MULTILINE)
 IMAGE_MEDIA_TYPES = {"image/png", "image/jpeg", "image/webp"}
 FILE_NOTICE = (

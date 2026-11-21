@@ -76,7 +76,6 @@ def test_status_retries_a_failed_decrement_publish(tmp_path, monkeypatch):
         with pytest.raises(OSError):
             with lifecycle.request("/api/v1/papers"):
                 _fail_writes(monkeypatch, lifecycle, count=1)
-        # The record still says 2; nothing else will rewrite it on an idle slot.
         assert lifecycle._read_json(lifecycle._worker_path)["active_http_requests"] == 2
         assert lifecycle.status().active_http_requests == 1
 

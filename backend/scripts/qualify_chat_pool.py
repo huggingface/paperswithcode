@@ -174,12 +174,6 @@ def arrival_offsets_ms(
     if profile == "fixed":
         gaps = [interarrival_ms] * max(0, samples - 1)
     elif profile == PRODUCTION_7D_PROFILE:
-        # Seven-day production telemetry (462 eligible arrivals) had 4.6% of
-        # gaps at or below 15 seconds, no more than two arrivals in any
-        # 15-second window, and no more than three in 30 seconds. Long idle
-        # gaps are conservatively clipped to 30 seconds because blank startup
-        # p90 is below that boundary. One 10s/20s pair preserves the observed
-        # three-arrival burst; the remaining short gaps are isolated.
         gaps = []
         for index in range(max(0, samples - 1)):
             if index == 43:

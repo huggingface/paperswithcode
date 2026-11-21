@@ -576,9 +576,6 @@ def test_enforcement_preserves_global_state_scope_order_and_action_counts():
 
     result = asyncio.run(harness.coordinator().enforce())
 
-    # Lease actions retain the legacy "attempted" count even if a durable claim
-    # is already gone. Pool rows count only successful claims; provider rows count
-    # only confirmed and durably-accounted terminations.
     assert result == SpendCapEnforcementResult(
         state="tripped",
         terminated=8,

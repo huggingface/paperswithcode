@@ -1029,9 +1029,6 @@ def test_qualification_schema_readiness_refuses_each_missing_contract_object(
 
 
 def test_chat_schema_probe_lists_every_required_table():
-    # The required-table sets decide what must exist; the VALUES list is what
-    # actually asks PostgreSQL. A table declared in one but not the other is
-    # reported missing forever, so keep them in lockstep.
     import inspect
     import re
 

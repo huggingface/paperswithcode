@@ -24,19 +24,12 @@ from backend.services.chat_external_worker_registry import (
 
 LifecycleEvent = Literal["registered", "heartbeat", "lease_lost", "drained"]
 
-# Conditions worth retrying inside the registration window: the worker endpoint
-# or the database is unreachable, or the durable registry still shows a live
-# lease from a previous claim that has yet to run out.
 _REGISTRATION_RETRY_ERRORS = (
     ExternalPiWorkerUnavailable,
     WorkerLeaseUnavailable,
     OperationalError,
 )
-# A heartbeat that never reached the worker or the database. The claim may
-# still be good, so keep trying until the local lease window runs out.
 _HEARTBEAT_TRANSPORT_ERRORS = (ExternalPiWorkerUnavailable, OperationalError)
-# The registry rejected the claim itself: a newer generation fenced it or the
-# durable lease already expired. It must never be heartbeated again.
 _HEARTBEAT_FENCED_ERRORS = (StaleWorkerClaim, WorkerLeaseUnavailable)
 
 

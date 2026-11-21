@@ -43,8 +43,6 @@ OPENAI_FILES_URL = "https://api.openai.com/v1/files"
 OPENAI_TIMEOUT_SECONDS = 60
 STALE_PENDING_AFTER = timedelta(minutes=15)
 
-# Conservative input-token estimates used to reserve the OpenAI budget for a
-# turn that references a file. Calibrate against real usage on staging.
 PDF_TEXT_TOKENS_PER_PAGE = 800
 PDF_IMAGE_TOKENS_PER_PAGE = {"low": 100, "high": 1_300}
 PDF_HIGH_DETAIL_MAX_PAGES = 20
@@ -120,7 +118,6 @@ class BucketChatFileStorage(ChatFileStorage):
 
 @functools.lru_cache(maxsize=4)
 def _bucket_storage(bucket_id: str, token: str | None) -> BucketChatFileStorage:
-    # One client per process keeps its connections and Xet session warm.
     return BucketChatFileStorage(bucket_id, token)
 
 
@@ -442,8 +439,6 @@ class ChatFileService:
         storage_key = row.storage_key
         openai_file_id = None
         try:
-            # The two copies are independent, so write them at the same time;
-            # leaving the block waits for both before either outcome is used.
             with ThreadPoolExecutor(max_workers=2) as pool:
                 stored = pool.submit(self.storage.write, storage_key, data)
                 uploaded = pool.submit(
@@ -454,14 +449,10 @@ class ChatFileService:
             failure = stored.exception() or uploaded.exception()
             if failure is not None:
                 raise failure
-            # Record the OpenAI id at once: it is the only handle that can
-            # delete that copy. If the chat was deleted meanwhile, this fails.
             row.openai_file_id = openai_file_id
             row.state = "ready"
             self.db.commit()
         except Exception as error:
-            # Either side may have finished while the other failed in any way,
-            # so the copies are always removed before the error moves on.
             self.db.rollback()
             self._discard(
                 FileCleanup(
