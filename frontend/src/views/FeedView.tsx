@@ -1,5 +1,6 @@
 import FollowingIntro from "@/components/FollowingIntro";
 import HomeFollowCard from "@/components/HomeFollowCard";
+import HomePopularTopics from "@/components/HomePopularTopics";
 import TopicDialog from "@/components/TopicDialog";
 import FollowBubbles, { type FeedFilter } from "@/components/FollowBubbles";
 import { isAuthDisabled } from "@/lib/apiUrl";
@@ -492,6 +493,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const noFollows = following && !!user && follows.data?.length === 0 && topics.isSuccess && topics.data.length === 0;
   const showIntro = (following && !auth?.isLoading && !user) || noFollows;
   const canBuildFeed = !!user || !isAuthDisabled();
+  const followedTopicIds = useMemo(() => new Set(topics.data?.map(topic => topic.id)), [topics.data]);
   const showFollowCard = !following && canBuildFeed && !auth?.isLoading
     && (!user || (follows.isSuccess && topics.isSuccess && !hasFeed));
   // The "New" badge on the following tab: papers added since the visit before this one. It stays
@@ -658,6 +660,12 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
           )}
 
           <div className="feed-content">
+            {!following && canBuildFeed && (
+              <HomePopularTopics
+                followedIds={!auth?.isLoading && (!user || topics.isSuccess) ? followedTopicIds : null}
+                onBuild={() => setEditingTopic(null)}
+              />
+            )}
             <div className="sort-bar home-feed-sort-bar">
               <div className="paper-feed-toolbar-controls">
                 <div className="sort-options">

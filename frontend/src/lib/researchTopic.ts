@@ -1,5 +1,8 @@
 import { ApiError } from '@/lib/apiTransport';
+import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
+import { hfLoginUrl } from '@/lib/apiUrl';
 import { researchApi, type FollowKind, type ResearchTopic } from '@/lib/api/research';
 import { paperFeedKeys, researchKeys, researchQueries } from '@/lib/api/queries';
 import { useOptionalAuth } from '@/lib/authContext';
@@ -131,6 +134,38 @@ export function useFollowTopics() {
     },
     onSettled: () => void refreshTopics(client, user?.hf_subject),
   });
+}
+
+/** How many of the most followed topics the homepage shows as cards above the feed. */
+export const FEATURED_TOPIC_COUNT = 10;
+
+/** Follows one popular topic from the homepage and opens Following filtered to it.
+ * Guests sign in first; Following saves the stashed pick after sign-in. */
+export function useFollowFeaturedTopic() {
+  const user = useOptionalAuth()?.user;
+  const navigate = useNavigate();
+  const client = useQueryClient();
+  const followTopics = useFollowTopics();
+  // Set while a follow waits for fresh topics before opening Following.
+  const [finishing, setFinishing] = useState(false);
+  const follow = (id: number) => {
+    if (!user) {
+      // Following saves the stashed pick after sign-in, so it cannot filter to the topic on arrival.
+      stashPendingTopicFollows([id]);
+      window.location.href = hfLoginUrl('/following');
+      return;
+    }
+    setFinishing(true);
+    followTopics.mutateAsync([id])
+      // Let Following see the new topic, or it would drop the filter and greet an "empty" account
+      // with the intro and the Edit feed pop-up.
+      .then(() => Promise.all([
+        client.refetchQueries({ queryKey: researchQueries.topics(user.hf_subject).queryKey }),
+        client.refetchQueries({ queryKey: researchQueries.follows(user.hf_subject).queryKey }),
+      ]))
+      .then(() => navigate(`/following?topic=${id}`), () => setFinishing(false));
+  };
+  return { follow, finishing, failed: followTopics.isError };
 }
 
 // Popular topics a guest picked in the feed pop-up wait here while they sign in.
