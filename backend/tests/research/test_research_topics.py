@@ -207,6 +207,15 @@ def test_fill_summaries_writes_followed_topics_without_one(db, now, monkeypatch)
     assert topics.fill_summaries(db, None) == 0
 
 
+def test_fill_summaries_stops_at_the_first_failed_call(db, now, monkeypatch):
+    topics.follow_topic(db, "alice", "speculative decoding", now)
+    topics.follow_topic(db, "bob", "video world models", now)
+    calls = []
+    monkeypatch.setattr(topics, "describe", lambda value, client: calls.append(value))
+    assert topics.fill_summaries(db, None) == 0
+    assert len(calls) == 1
+
+
 def entry(key, interests, published="2026-10-10"):
     return ResearchEntry(
         paper_key=key,
