@@ -238,6 +238,10 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
     <DialogTitle className="topic-dialog-title">
       {topics.data?.length || follows.data?.length ? 'Edit your research feed' : 'Build your research feed'}
     </DialogTitle>
+    {user && (topics.data?.length || follows.data?.length) ? <Link to="/following" className="topic-dialog-feed-link"
+      onClick={onDone}>
+      Open your following feed<ArrowRight aria-hidden="true" />
+    </Link> : null}
     <Tabs value={tab} onValueChange={setTab} className="topic-dialog-tabs">
       <TabsList className="topic-dialog-tab-list">
         <TabsTrigger value="topics" className="topic-dialog-tab">
