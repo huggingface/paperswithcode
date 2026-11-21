@@ -469,11 +469,19 @@ def summarize(value: str) -> str | None:
     return label[:1].upper() + label[1:] or None
 
 
+class SummaryUnavailable(Exception):
+    """The summary provider could not be reached or refused the call."""
+
+
 def describe(value: str, client: httpx.Client) -> str | None:
-    """A one-sentence summary of what a topic collects, or None when unavailable."""
+    """A one-sentence summary of what a topic collects, or None for an unusable reply.
+
+    Raises ``SummaryUnavailable`` without a token or when the call fails, so a
+    caller can tell an outage from a reply it should not retry.
+    """
     token = get_settings().hf_token
     if not token:
-        return None
+        raise SummaryUnavailable("PWC_HF_TOKEN is not set")
     try:
         response = client.post(
             SUMMARY_URL,
@@ -492,10 +500,14 @@ def describe(value: str, client: httpx.Client) -> str | None:
             },
             timeout=SUMMARY_TIMEOUT,
         )
-        summary = response.raise_for_status().json()["choices"][0]["message"]["content"]
-    except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError):
+        body = response.raise_for_status().json()
+    except (httpx.HTTPError, ValueError) as error:
+        raise SummaryUnavailable(str(error)) from error
+    try:
+        summary = body["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
         return None
-    summary = display_text(summary or "").strip("\"'“”")
+    summary = display_text(summary if isinstance(summary, str) else "").strip("\"'“”")
     if not summary or len(summary) > SUMMARY_MAX_LENGTH:
         return None
     return summary[:1].upper() + summary[1:]
@@ -504,7 +516,9 @@ def describe(value: str, client: httpx.Client) -> str | None:
 def fill_summaries(db: Session, client: httpx.Client) -> int:
     """Summarize followed topics that have no summary yet, a batch at a time.
 
-    Stops at the first failed call, so an unavailable provider costs one timeout.
+    An unusable reply is stored as an empty summary, which pages hide, so that
+    topic is not retried and never blocks the queue. A provider failure ends the
+    run, so an outage costs one timeout.
     """
     topics = db.scalars(
         select(ResearchTopic)
@@ -517,12 +531,13 @@ def fill_summaries(db: Session, client: httpx.Client) -> int:
     ).all()
     filled = 0
     for topic in topics:
-        summary = describe(topic.text, client)
-        if summary is None:
+        try:
+            summary = describe(topic.text, client)
+        except SummaryUnavailable:
             break
-        topic.summary = summary
+        topic.summary = summary or ""
         db.commit()
-        filled += 1
+        filled += summary is not None
     return filled
 
 

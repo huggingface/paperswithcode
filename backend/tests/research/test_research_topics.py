@@ -25,6 +25,7 @@ from backend.models.database.research import (
     ResearchTopicVerdict,
 )
 from backend.models.research import ResearchEntry
+from backend.services import public_topic_service as public
 from backend.services import research_delivery_service as delivery
 from backend.services import research_follow_service as follows
 from backend.routers import research
@@ -177,11 +178,12 @@ def test_describe_asks_deepseek_on_hf_for_one_sentence(monkeypatch):
     assert "speculative decoding" in body["messages"][1]["content"]
 
 
-def test_describe_gives_none_without_a_token_or_a_usable_answer(monkeypatch):
+def test_describe_tells_an_outage_from_an_unusable_reply(monkeypatch):
     monkeypatch.setattr(
         topics, "get_settings", lambda: type("S", (), {"hf_token": ""})()
     )
-    assert topics.describe("x", summary_client([])) is None
+    with pytest.raises(topics.SummaryUnavailable):
+        topics.describe("x", summary_client([]))
     monkeypatch.setattr(
         topics, "get_settings", lambda: type("S", (), {"hf_token": "hf_x"})()
     )
@@ -191,8 +193,8 @@ def test_describe_gives_none_without_a_token_or_a_usable_answer(monkeypatch):
     def down(request):
         raise httpx.ConnectError("down")
 
-    client = httpx.Client(transport=httpx.MockTransport(down))
-    assert topics.describe("x", client) is None
+    with pytest.raises(topics.SummaryUnavailable):
+        topics.describe("x", httpx.Client(transport=httpx.MockTransport(down)))
 
 
 def test_fill_summaries_writes_followed_topics_without_one(db, now, monkeypatch):
@@ -207,13 +209,25 @@ def test_fill_summaries_writes_followed_topics_without_one(db, now, monkeypatch)
     assert topics.fill_summaries(db, None) == 0
 
 
-def test_fill_summaries_stops_at_the_first_failed_call(db, now, monkeypatch):
-    topics.follow_topic(db, "alice", "speculative decoding", now)
-    topics.follow_topic(db, "bob", "video world models", now)
+def test_fill_summaries_skips_unusable_replies_and_stops_on_outages(
+    db, now, monkeypatch
+):
+    old = topics.follow_topic(db, "alice", "speculative decoding", now)
+    new = topics.follow_topic(db, "bob", "video world models", now)
     calls = []
-    monkeypatch.setattr(topics, "describe", lambda value, client: calls.append(value))
+
+    def outage(value, client):
+        calls.append(value)
+        raise topics.SummaryUnavailable("down")
+
+    monkeypatch.setattr(topics, "describe", outage)
     assert topics.fill_summaries(db, None) == 0
-    assert len(calls) == 1
+    assert calls == ["video world models"]
+    monkeypatch.setattr(topics, "describe", lambda value, client: None)
+    assert topics.fill_summaries(db, None) == 0
+    assert db.get(ResearchTopic, new).summary == ""
+    assert db.get(ResearchTopic, old).summary == ""
+    assert public.topic_view(db, new, "bob").summary is None
 
 
 def entry(key, interests, published="2026-10-10"):
