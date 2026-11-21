@@ -231,6 +231,7 @@
 }
 .topic-dialog .topic-dialog-panel { display: flex; flex-direction: column; gap: 18px; margin-top: 16px; }
 .topic-dialog .topic-dialog-panel[hidden] { display: none; }
+.topic-dialog .topic-dialog-panel:focus-visible { box-shadow: none; }
 .topic-dialog .topic-dialog-topic-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 560px) {
   .topic-dialog .topic-dialog-topic-cards { grid-template-columns: minmax(0, 1fr); }
