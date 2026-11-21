@@ -184,8 +184,6 @@ class ReconnectScheduler:
             active_reserved = slot_in_second < self.active_reserved_per_second
             peer = self._next_peer(queues, current, active_reserved)
             if peer is None:
-                # No contender has arrived yet. Advance one virtual slot without
-                # creating an authentication start.
                 index += 1
                 continue
             output.append(

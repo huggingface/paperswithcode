@@ -31,9 +31,6 @@ def _status_update(
     event: LifecycleEvent, claim: ExternalWorkerClaim, heartbeats: int
 ) -> dict:
     """Translate a lifecycle event into the durable status file's vocabulary."""
-    # A lost lease sends the runtime back through registration, so report the
-    # same transitional state as a fresh start until a new claim lands. The
-    # lost generation stays on record: the worker endpoint is still bound to it.
     if event == "lease_lost":
         worker_state = "starting"
     elif event == "drained":

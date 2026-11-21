@@ -37,7 +37,6 @@ def test_deployment_tool_bundle_includes_chat_runtime_contract(tmp_path: Path):
     bundle_runtime_contract(staging, source)
 
     for relative in RUNTIME_CONTRACT_PATHS:
-        # backend/… and config/… keep their layout under the installed tree.
         assert (source / relative).is_file()
     result = subprocess.run(
         [
@@ -258,7 +257,6 @@ def sync_repository(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _git("checkout", "main", cwd=source)
     _git("init", "--bare", str(origin))
     _git("push", str(origin), "main", "staging-line", cwd=source)
-    # Like the host's release repository, a mirror clone of origin.
     repository = tmp_path / "repository.git"
     _git("clone", "--mirror", str(origin), str(repository))
     monkeypatch.setattr(deploy_cli, "REPOSITORY", repository)
@@ -280,7 +278,6 @@ def test_staging_sync_merges_production_into_the_staging_line(sync_repository):
     assert commit
     branch = f"refs/heads/staging-sync/main-{production[:12]}-{staging[:12]}"
     assert _git("--git-dir", str(origin), "rev-parse", branch) == commit
-    # A retry after a failed staging deploy rebuilds and pushes the same commit.
     assert deploy_cli.staging_sync_source(production, staging, push=True) == commit
     parents = _git("--git-dir", str(origin), "rev-list", "--parents", "-n1", commit)
     assert parents.split()[1:] == [production, staging]

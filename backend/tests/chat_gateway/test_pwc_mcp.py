@@ -295,7 +295,6 @@ async def test_completed_call_does_not_wait_for_disconnect_poll_that_swallows_ca
             cancellations += 1
             if cancellations > 1:
                 raise
-            # Starlette's disconnect probe uses a local AnyIO cancellation scope.
             return False
 
     monkeypatch.setattr(gateway, "request_mcp", call)

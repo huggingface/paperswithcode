@@ -550,7 +550,6 @@ class _TransactionDB(_TransactionContext):
         return _TransactionContext()
 
     def scalar(self, *_args):
-        # Staging startup looks up a running turn's qualification profile.
         return None
 
 

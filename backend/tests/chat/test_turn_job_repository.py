@@ -508,7 +508,7 @@ def test_concurrent_same_owner_admission_has_one_typed_winner(tmp_path):
         setup.commit()
 
     ready = Barrier(2)
-    transaction_lock = Lock()  # boundary double for PG transaction advisory locks
+    transaction_lock = Lock()
 
     def attempt(index: int) -> str:
         repository = ChatTurnJobRepository(advisory_locker=lambda *_args: None)
@@ -1098,8 +1098,6 @@ def test_stale_session_cannot_overwrite_a_newer_committed_terminal(tmp_path):
         stale_job = repository.load_by_turn(stale, job.turn_id)
         assert stale_job.state == "leased"
         stale.commit()
-        # SQLite drops timezone information; restore the PostgreSQL-equivalent
-        # loaded value without marking the stale object dirty.
         set_committed_value(stale_job, "lease_expires_at", NOW + timedelta(seconds=15))
         current.execute(
             update(ChatTurnJob)

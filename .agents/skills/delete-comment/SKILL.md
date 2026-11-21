@@ -26,9 +26,11 @@ whatever it leaves stays in the baseline for the next pass.
      `chat`: dictation, external Pi, persistent-executor loadtests, durable
      qualification, OpenRouter user budget, runtime validation, LaTeX papers,
      deployment lifecycle, and `backend/main.py` count too.
-   - Leave `backend/chat_sandbox_worker/` alone unless the pass ships with a
-     worker contract and executor release: `contract.py` and
-     `executor_release_manifest.py` hash those files' bytes.
+   - Leave byte-hashed files alone unless the pass ships with the release they
+     feed: `backend/chat_sandbox_worker/` (hashed by `contract.py` and
+     `executor_release_manifest.py`) and every `PROMPT_INPUTS` path in
+     `deploy/external_pi_runtime.py` (hashed into the external Pi runtime,
+     whose rebuild needs ~2.6 GiB free). Re-check both lists each pass.
 3. Classify every block with the rubric below. For more than ~250 blocks, shard
    by file and give each shard to a subagent with this file as its brief. Each
    subagent writes one JSON line per block (schema below) to its own output

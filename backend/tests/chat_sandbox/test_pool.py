@@ -881,8 +881,6 @@ def test_reused_control_loss_before_sdk_dispatch_is_retryable():
 
     async def terminate_worker(_session_id, _claim, *, failure_code):
         terminations.append(failure_code)
-        # Simulate delayed transport cleanup. Assignment recovery must bypass
-        # the known-bad reusable control rather than selecting it again.
 
     acquisition_calls: list[tuple[uuid.UUID, dict]] = []
 

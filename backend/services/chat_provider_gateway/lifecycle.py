@@ -56,7 +56,6 @@ from backend.services.durable_external_qualification_contract import (
     DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN,
 )
 
-# Operational log lines keep the gateway's logger name.
 logger = logging.getLogger("backend.chat_gateway_app")
 
 MAX_PROVIDER_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
@@ -208,8 +207,6 @@ class ProviderReservationRejected(Exception):
         self.headers = headers
 
     def http_error(self) -> HTTPException:
-        # Some details read accounting state, which is only valid after the
-        # failed reservation has been rolled back.
         detail = self.detail() if callable(self.detail) else self.detail
         return HTTPException(
             status_code=self.status_code, detail=detail, headers=self.headers
@@ -221,7 +218,6 @@ class ProviderError:
     """A provider failure mapped onto the gateway's public error contract."""
 
     code: str
-    # None records the code but relays the upstream response unchanged.
     error: HTTPException | None
     usage: Any = None
     record: bool = True
@@ -380,9 +376,6 @@ class ProviderCallLifecycle:
             raise HTTPException(status_code=403, detail="Capability rejected") from None
         record_gateway_timing(settings, turn_id, received_at=datetime.now(UTC))
         token = self.authenticate()
-        # Authorize (and meter) the token and turn once, before reading or
-        # decoding a body of up to 8 MiB; then bind the parsed model to the
-        # capability, as validate(model=...) would, without metering again.
         try:
             row = self.authorize(token, None)
         except HTTPException:
@@ -398,8 +391,6 @@ class ProviderCallLifecycle:
         call_sequence, trace_id = self._meter(row, turn_id, call)
         ledger = call.ledger
         await self._reserve(call, turn_id, call_sequence)
-        # Persist the ambiguous-dispatch boundary before any network bytes can
-        # reach the provider. A crash after this point retains the full bound.
         ledger.mark_dispatched(self.db)
         self.db.commit()
         inventory = offered_tool_inventory(call.payload)
@@ -414,10 +405,6 @@ class ProviderCallLifecycle:
             offered_tool_names=inventory["offered_tool_names"],
             offered_tool_digest=inventory["offered_tool_digest"],
         )
-        # A FastAPI yield dependency otherwise retains this connection until the
-        # StreamingResponse finishes. At fleet concurrency that exhausts the pool
-        # while the gateway is merely waiting on the provider, blocking sibling
-        # calls. Later accounting uses short-lived sessions.
         self.db.close()
         client = httpx.AsyncClient(timeout=180, follow_redirects=False)
         try:
@@ -582,10 +569,6 @@ class ProviderCallLifecycle:
                 if hasattr(db, "scalar")
                 else None
             )
-            # Capability validation takes a row lock so concurrent SDK model
-            # calls receive distinct request counters. Land that bounded
-            # mutation before any provider network check; otherwise a slow
-            # budget lookup holds the lock and blocks the other model call.
             db.commit()
         except CapabilityError:
             db.rollback()

@@ -185,7 +185,6 @@ def test_replay_mode_uses_persisted_request_and_bound_paper(reader, poster):
     )
     assert admission.reader_mode is reader
     assert admission.poster_mode is poster
-    # Replays share the fresh turn's paper policy, so redaction stays on.
     assert admission.paper_artifacts_enabled is not reader
     assert admission.image_version == "image-7"
     assert admission.pwc_cli_version == "cli-3"

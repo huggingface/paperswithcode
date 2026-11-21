@@ -94,9 +94,6 @@ class ChatExecutorRuntime:
             or registration.expires_at < datetime.now(UTC) + timedelta(seconds=240)
         ):
             return False
-        # The short-lived liveness nonce is deliberately not consumed: only
-        # a real turn may claim the workspace, with a new liveness assertion.
-        # Let uncertain transport failures reach the pool's skip/retry handling.
         await self._claim_liveness(registration, uuid.uuid4())
         return True
 

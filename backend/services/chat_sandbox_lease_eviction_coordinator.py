@@ -190,8 +190,6 @@ class ChatSandboxLeaseEvictionCoordinator:
                     now=self.utcnow(),
                 )
         except Exception:
-            # Workspace continuity is recoverable; the transcript remains
-            # authoritative and the next sandbox safely starts empty.
             pass
 
     def _finalize(

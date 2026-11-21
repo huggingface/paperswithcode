@@ -64,7 +64,6 @@ class ExecutorTransportCircuit:
                     )
                     db.flush()
             except IntegrityError:
-                # Another API worker created the one environment row.
                 if db.get(ChatExecutorTransportCircuit, self.environment) is None:
                     raise
 

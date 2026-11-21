@@ -374,8 +374,6 @@ def test_production_html_endpoint_accepts_reviewed_digest(monkeypatch):
 
 
 def test_staging_html_endpoint_refuses_unreviewed_app_html(monkeypatch):
-    # Staging serves only the reviewed digest too; the fake upstream HTML here
-    # does not match the registry's pinned digest.
     chat_mcp_app_proxy.reset_excalidraw_app_html_cache()
     monkeypatch.setattr(chat_mcp_app_proxy.httpx, "AsyncClient", _FakeHtmlClient)
     with TestClient(_app(_settings(environment="staging"))) as client:

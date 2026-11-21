@@ -355,7 +355,6 @@ def _sponsored_settings() -> Settings:
 
 def test_gateway_bills_sponsored_model_to_the_organization():
     settings = _sponsored_settings()
-    # A connected user credential is never used for the sponsored route.
     row = SimpleNamespace(
         model=settings.chat_sponsored_deepseek_route,
         owner_hash="a" * 64,
@@ -402,7 +401,6 @@ def test_openrouter_extensions_are_dropped_from_caller_payloads():
         "max_tokens": 1024,
         "thinking": {"type": "enabled", "budget_tokens": 512},
         "tools": [],
-        # OpenRouter extensions a funded turn must not choose for itself.
         "models": ["openai/o9-pro"],
         "route": "fallback",
         "plugins": [{"id": "web"}],

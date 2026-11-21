@@ -453,7 +453,6 @@ class ChatSandboxAcquisitionCoordinator:
                     ),
                 )
             except ChatComputeDisabled as error:
-                # Exiting the transaction normally preserves the durable trip.
                 budget_rejection = error
         if budget_rejection is not None:
             raise SandboxError(

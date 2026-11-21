@@ -89,7 +89,6 @@ class _HttpSession(Protocol):
 
 
 def _requests_session() -> _HttpSession:
-    # Locust must get the first opportunity to patch networking in live runs.
     import requests
 
     return requests.Session()
@@ -379,9 +378,6 @@ class HttpSSEDurableChatTransport:
 
     @staticmethod
     def _events(response, parser: _SSEParser) -> Iterator[_SSEEvent]:
-        # Qualification measures the first semantic SSE event, so it must not
-        # wait for a later event merely to fill urllib3's requested read size.
-        # This path carries only the bounded synthetic staging workload.
         for chunk in response.iter_content(chunk_size=1):
             for event in parser.feed(chunk):
                 yield event

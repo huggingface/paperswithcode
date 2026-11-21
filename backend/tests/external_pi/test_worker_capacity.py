@@ -373,7 +373,6 @@ def test_reserve_ages_out_orphaned_bound_reservations(db):
     orphan_turn = uuid.uuid4()
     live_turn = uuid.uuid4()
     day = timedelta(seconds=BOUND_RESERVATION_RETENTION_SECONDS)
-    # A bound reservation whose turn crashed a day ago and was never released.
     db.add(
         ChatExternalWorkerReservation(
             request_id="orphaned",
@@ -389,7 +388,6 @@ def test_reserve_ages_out_orphaned_bound_reservations(db):
             expires_at=NOW - day - timedelta(hours=1),
         )
     )
-    # A bound reservation that expired minutes ago is still the turn's to release.
     db.add(
         ChatExternalWorkerReservation(
             request_id="recent",

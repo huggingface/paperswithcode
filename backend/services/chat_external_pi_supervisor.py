@@ -57,11 +57,6 @@ class ChatExternalPiSupervisor:
 
     async def register(self, db: Session, *, now: datetime) -> ExternalWorkerClaim:
         status = await self.client.status()
-        # A worker stays "draining" for the rest of its process lifetime, and
-        # nothing outside the deploy path recycles it. Refusing to register one
-        # therefore turns a single supervisor restart into a permanent crash
-        # loop. Reclaim it instead when it holds no sessions; bind_claim below
-        # advances the fencing generation and still proves it returned to ready.
         self._validate(status)
         if status.state != "ready" and not (
             status.state == "draining" and status.active_sessions == 0

@@ -337,7 +337,6 @@ def write_health_record(
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
     temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
-    # The parent directory is traversable only by the production service group.
     temporary.chmod(0o644)
     os.replace(temporary, path)
 
@@ -783,7 +782,6 @@ def main() -> int:
     )
     for event in events:
         append_event(state, event)
-    # Persist cursor and pending events before any network side effect.
     write_state(state_path, state)
     delivered = asyncio.run(deliver_pending(state, settings))
     if settings.chat_executor_remote_transport_enabled:

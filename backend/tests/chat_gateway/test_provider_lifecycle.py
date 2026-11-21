@@ -239,8 +239,6 @@ def test_responses_success_meters_reserves_streams_settles_and_traces(harness):
     assert status == 200
     assert body == COMPLETED_STREAM
     names = harness.events.names()
-    # The ambiguous-dispatch boundary is durable before any provider bytes,
-    # and the request session is released before the upstream connection.
     assert names.index("meter") < names.index("reserve")
     assert names.index("reserve") < names.index("mark_dispatched")
     assert names.index("mark_dispatched") < names.index("close")
@@ -431,8 +429,6 @@ def test_responses_unavailable_gateway_rejects_before_reading_the_body(harness):
     assert error.value.status_code == 503
     assert harness.events == []
 
-
-# Anthropic Messages parity across provider modes.
 
 MESSAGES_STREAM = (
     b"event: message_start\n"
@@ -702,7 +698,6 @@ def test_messages_relays_every_provider_mode_through_the_lifecycle(
     finish = _first(state.events, "trace_finish")[1]
     assert finish["error_code"] is None
     assert finish["tool_call_returned"] is stream
-    # Both protocols release the request session before the provider call.
     assert names.index("close") < names.index("client") < names.index("send")
 
 
@@ -795,9 +790,6 @@ def test_messages_funded_budget_outage_rejects_before_reservation(
     assert ("provider_error", "openrouter_unavailable") in messages_harness.events
     assert "reserve" not in names
     assert "client" not in names
-
-
-# One lifecycle contract for both protocols.
 
 
 def _run_protocol(state, protocol: str, *, stream: bool = True):
@@ -1017,5 +1009,4 @@ def test_provider_call_authorizes_once_and_binds_the_parsed_model(monkeypatch):
         asyncio.run(lifecycle.run(Protocol(), Request(), str(uuid.uuid4())))
 
     assert error.value.status_code == 403
-    # One metered authorization per call; the model is checked locally.
     assert calls == [None]

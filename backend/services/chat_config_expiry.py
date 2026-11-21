@@ -34,7 +34,6 @@ def _pricing_expiry(verified_at: str, max_age_days: int) -> datetime | None:
     try:
         verified = date.fromisoformat(verified_at)
     except ValueError:
-        # Startup validation reports malformed dates; there is no expiry to track.
         return None
     first_stale_day = verified + timedelta(days=max_age_days + 1)
     return datetime.combine(first_stale_day, datetime.min.time(), tzinfo=UTC)

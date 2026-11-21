@@ -192,8 +192,6 @@ class _VirtualRelay:
                     error or ConnectionError("Executor stream closed before opening")
                 )
             if not opened.cancelled():
-                # A relay can close before its caller reaches flush. Observe the
-                # exception here; an existing waiter still receives the same error.
                 opened.exception()
         if self._closed.is_set():
             return
@@ -366,9 +364,6 @@ class PersistentSandboxExecutorChannel:
                     opened.result()
                 elif asyncio.get_running_loop().time() >= relay._open_deadline:
                     raise TimeoutError("Executor stream opening timed out")
-            # Open and data retain their wire order. Send before awaiting opened
-            # to avoid an extra RTT; ExecutorClient has already marked payload
-            # delivery attempted, so failures recover by execution ID, not replay.
             if opened is not None and not opened.done():
                 async with asyncio.timeout_at(relay._open_deadline) as opening_timeout:
                     relay._opening_timeout = opening_timeout
@@ -440,8 +435,6 @@ class PersistentSandboxExecutorChannel:
                 else:
                     future.set_result(None)
                     if relay._opening_timeout is not None:
-                        # The deadline bounds acknowledgement, not a payload
-                        # write that is still draining after an on-time ACK.
                         relay._opening_timeout.reschedule(None)
             return
         relay = self._streams.get(stream_id)

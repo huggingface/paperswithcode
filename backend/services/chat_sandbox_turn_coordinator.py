@@ -304,9 +304,6 @@ class ChatSandboxTurnCoordinator:
                 else self.settings.chat_agent_timeout_seconds
             )
             if request.paper_artifacts_enabled:
-                # The worker still starts under normal limits and extends only
-                # after a successful authenticated paper command. The process
-                # needs enough headroom to receive that in-turn extension.
                 turn_timeout = max(
                     turn_timeout, self.settings.chat_latex_paper_timeout_seconds
                 )
@@ -470,9 +467,6 @@ class ChatSandboxTurnCoordinator:
         allow_pool: bool,
         forced_pool_miss: bool,
     ) -> SandboxAcquisitionOutcome:
-        # A retry reaches this path only after the existing control failed before
-        # SDK dispatch. Do not select that same in-memory control again even if
-        # lifecycle cleanup has not removed it from the transport yet.
         if self.persistent_enabled and not forced_pool_miss:
             reusable = self.transport.reusable_sandbox(
                 request.chat_session_id,

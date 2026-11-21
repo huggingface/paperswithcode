@@ -78,9 +78,6 @@ async def stream_title(
     if settings.chat_title_provider == "openrouter":
         base_url = "https://openrouter.ai/api/v1"
         extra_body = {
-            # Titles are a cosmetic, bounded extraction task. DeepSeek's low
-            # reasoning mode can consume the entire 64-token response budget
-            # before emitting title content, so disable reasoning explicitly.
             "reasoning": {"effort": "none"},
             "provider": {"sort": "throughput"},
         }

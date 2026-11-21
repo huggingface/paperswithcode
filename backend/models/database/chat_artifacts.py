@@ -41,9 +41,6 @@ class ChatArtifact(Base):
     latest_version: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="0"
     )
-    # LaTeX-paper heads are independent: a failed source can retain a prior
-    # successful preview without ever associating that PDF with new source.
-    # They stay NULL for all legacy and current Posterly rows.
     source_head_version_id: Mapped[Optional[str]] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )

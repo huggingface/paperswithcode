@@ -305,8 +305,6 @@ def test_deleting_unreferenced_versions_and_project_reclaims_only_orphaned_figur
     )
     assert len(list(Path(settings.chat_artifact_local_dir).glob("**/blobs/*"))) == 1
     service.delete_project("owner-1", initial.artifact_id)
-    # Object deletion is deliberately deferred until the DB reference removal
-    # commits, so a concurrent upload cannot reuse an about-to-be-deleted blob.
     assert len(list(Path(settings.chat_artifact_local_dir).glob("**/blobs/*"))) == 1
     storage.fail_deletes = True
     db.commit()

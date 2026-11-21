@@ -279,7 +279,6 @@ class PersistentTransportPoolCounts(BaseModel):
     terminated: int = Field(ge=0, le=1_000_000)
 
 
-# Frozen end-to-end targets; missing cohorts cannot be treated as passes.
 PERSISTENT_LATENCY_GATES = {
     "cold_first_pwd": (2000, 5000),
     "warm_ack": (500, 1000),
@@ -984,7 +983,6 @@ def aggregate_durable_profile(
         modal_evictions = qualification_evidence.workspace_evictions
         modal_active_ms = qualification_evidence.billed_duration_ms
     elif modal_lifecycle is not None:
-        # Retained solely for isolated, non-live unit harnesses.
         queued_states = sum(item.queued_states for item in observations)
         stale_mutations = sum(item.stale_mutations for item in observations)
         operation_start_count = sum(item.operation_start_count for item in observations)
@@ -1563,7 +1561,6 @@ def evaluate_resource_preflight(snapshot: HostResourceSnapshot) -> ResourcePrefl
     )
 
 
-# The fleet deliberately shares the proven content-free payload and classifier.
 build_external_pi_fleet_request = build_external_pi_baseline_request
 classify_external_pi_fleet_response = classify_external_pi_baseline_response
 

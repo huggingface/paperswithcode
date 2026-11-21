@@ -23,3 +23,6 @@ backend code comments, one file per subsystem.
 - [ADR 0018: Paper catalog, edits and submissions](0018-paper-catalog.md)
 - [ADR 0019: Public API, web shell and auth](0019-public-api-and-web.md)
 - [ADR 0020: Database, runtime, deployment and testing](0020-platform.md)
+- [ADR 0021: Research chat runtime: sandboxes, executors and external Pi](0021-chat-runtime.md)
+- [ADR 0022: Research chat gateway, models and budgets](0022-chat-gateway-and-models.md)
+- [ADR 0023: Research chat product surfaces](0023-chat-product.md)

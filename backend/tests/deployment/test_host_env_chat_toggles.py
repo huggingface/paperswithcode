@@ -524,8 +524,6 @@ def test_staging_chat_pi_prewarm_mode_preserves_other_configuration(
     ) == ("true" if enabled else "false")
 
 
-# Production break caught: a staging durable toggle targets production, changes
-# unrelated feature/capacity lines, uses the wrong ownership, or prints a broad claim.
 @pytest.mark.parametrize("enabled", [True, False])
 def test_staging_chat_durable_dispatch_mode_is_narrow_and_staging_only(
     tmp_path: Path,
@@ -592,7 +590,6 @@ def test_staging_chat_durable_dispatch_mode_is_narrow_and_staging_only(
         "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED=true\n"
         "UNRELATED=preserved\n"
     )
-    # The private temporary file (mkstemp) is handed to root:pwc-staging.
     [(temporary, uid, gid)] = chown_requests
     assert Path(temporary).parent == staging_path.parent
     assert Path(temporary).name.startswith(".staging.env.")
@@ -605,8 +602,6 @@ def test_staging_chat_durable_dispatch_mode_is_narrow_and_staging_only(
     assert production_path.read_bytes() == production_bytes
 
 
-# Production break caught: the protected bridge can be mixed with another mode
-# or can accept a production confirmation, widening its staging-only authority.
 @pytest.mark.parametrize(
     "extra_args",
     [

@@ -51,7 +51,6 @@ def test_direct_openai_pricing_uses_per_million_rates_and_fails_stale():
         cache_write_tokens=100_000,
         output_tokens=1_000_000,
     )
-    # Long context: 2x input (including cache categories), 1.5x output.
     assert actual_usage_microusd(settings, usage) == 937_000
     assert (
         safe_maximum_microusd(

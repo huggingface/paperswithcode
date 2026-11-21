@@ -170,7 +170,6 @@ class OpenAIResponsesLedger:
         )
 
     def record_ttft(self, db: Session, elapsed_ms: int) -> None:
-        # Responses TTFT is settled together with the call.
         del db, elapsed_ms
 
     def settle(
@@ -302,7 +301,6 @@ class OpenRouterFundedLedger:
         provider_request_id: str | None,
         latency_ms: int,
     ) -> None:
-        # Messages relays provider failures, so settlement reads their usage.
         del db, failure, provider_request_id, latency_ms
 
     def record_ttft(self, db: Session, elapsed_ms: int) -> None:

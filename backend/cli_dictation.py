@@ -18,10 +18,7 @@ from backend.config import get_settings
 
 ENDPOINTS_API = "https://api.endpoints.huggingface.cloud/v2/endpoint"
 MODEL = "mistralai/Voxtral-Mini-4B-Realtime-2602"
-# Built from deploy/dictation/Dockerfile by the public, build-only Space
-# nielsr/pwc-voxtral-vllm; Endpoints cannot pull private Space images.
 DEFAULT_IMAGE = "registry.hf.space/nielsr-pwc-voxtral-vllm:latest"
-# 2,304 tokens ≈ 2 minutes of audio at ~17 tokens/s: the server-side session cap.
 SERVER_ARGS = [
     "--max-model-len",
     "2304",

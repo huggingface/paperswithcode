@@ -140,8 +140,6 @@ def test_final_budget_race_restart_idempotency_and_unknown_cost(session_factory)
     accepted = [call_id for call_id in results if call_id is not None]
     assert len(accepted) == 1
 
-    # A new session/worker observes the persisted reservation, and a replay of
-    # the same provider-call identity cannot reserve twice.
     with session_factory.begin() as db:
         service = OpenRouterUserBudgetService(db, _settings())
         usage = db.get(ChatOpenRouterMonthlyUsage, (owner, month))
@@ -165,8 +163,6 @@ def test_final_budget_race_restart_idempotency_and_unknown_cost(session_factory)
     with session_factory.begin() as db:
         service = OpenRouterUserBudgetService(db, _settings())
         status = service.status_percentage(owner, NOW)
-        # The unknown call consumes its conservative reservation, and the
-        # leftover cannot fund a normal call, so the public status is 0%.
         assert status.remaining_percent == 0
         assert len(service.unknown_calls()) == 1
         service.settle_call(accepted[0], 20_000, "generation-1", NOW)

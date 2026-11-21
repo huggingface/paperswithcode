@@ -100,7 +100,6 @@ def test_sixty_four_tier_keeps_eight_replicas_with_eight_sessions_each() -> None
     assert FLEET_SESSION_TIERS == (32, 64) and DEFAULT_FLEET_SESSIONS == 32
     assert replica_maximum_sessions(32) == 4 and replica_maximum_sessions(64) == 8
     assert len(large) == 8 and sum(item.maximum_sessions for item in large) == 64
-    # Same identities, ports, and tokens; only the per-replica share changes.
     assert [item.worker_id for item in large] == [item.worker_id for item in small]
     assert [item.port for item in large] == [item.port for item in small]
     assert [item.token for item in large] == [item.token for item in small]

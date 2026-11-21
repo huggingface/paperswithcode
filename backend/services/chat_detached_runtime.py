@@ -120,8 +120,6 @@ class ChatDetachedRuntime:
                     self._orchestrators.pop(claim.turn_id, None)
                 await self._release_external_reservation(claim.turn_id)
             else:
-                # Keep the orchestrator so a later persistence_error fallback
-                # can still write a durable terminal for this turn.
                 await self._release_external_reservation_after_failure(
                     claim.turn_id, stage="terminal_persistence"
                 )

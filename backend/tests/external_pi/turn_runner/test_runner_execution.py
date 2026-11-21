@@ -119,7 +119,6 @@ def test_external_pi_runner_lazily_creates_executor_for_remote_read(stop_after_d
         async for event in stream:
             events.append(event)
             if event["type"] == "done":
-                # The consumer may close as soon as completion is published.
                 assert len(workspace_manager.released) == 1
                 if stop_after_done:
                     break

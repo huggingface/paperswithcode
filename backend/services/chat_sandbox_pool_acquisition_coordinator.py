@@ -81,8 +81,6 @@ class ChatSandboxPoolAcquisitionCoordinator:
             seconds=self.settings.chat_blank_pool_min_remaining_seconds
         )
         compatibility = self.repository.compatibility()
-        # Release identifies the creator for audit; immutable worker and resource
-        # compatibility determines whether an unassigned blank can be reused.
         with self.session_factory() as db:
             if (
                 self.settings.chat_executor_remote_transport_enabled
@@ -175,7 +173,6 @@ class ChatSandboxPoolAcquisitionCoordinator:
                         availability_assertion=availability_assertion,
                     )
                 except ChatComputeDisabled as error:
-                    # Persist the circuit event emitted by assert_available.
                     db.commit()
                     raise SandboxError(error.code, str(error)) from error
             else:

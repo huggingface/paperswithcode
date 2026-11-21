@@ -24,8 +24,6 @@ DEEPSEEK_V4_FLASH_ID = "deepseek-ai/DeepSeek-V4-Flash-0731"
 GLM_5_3_FLASH_ID = "zai-org/GLM-5.3-Flash"
 SPONSORED_DEEPSEEK_ID = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
 
-# Selected-model IDs persisted by sessions created before the DeepSeek-only
-# registry. They resolve to the canonical route but never appear in discovery.
 LEGACY_SELECTED_MODEL_IDS = (
     "google/gemma-4-31B-it",
     "zai-org/GLM-5.2",
@@ -137,8 +135,6 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
         (glm,) if environment == "production" else (deepseek,)
     )
     if environment == "production" and settings.chat_openai_direct_enabled:
-        # GLM-5.3-Flash is hidden while most of its HF-billed turns fail.
-        # Sessions that selected it continue on Luna via canonical_model_id.
         records = (_direct_luna(settings, "GPT-6 Luna"),)
     if environment == "production" and settings.chat_sponsored_deepseek_enabled:
         records = records + (_sponsored_deepseek(settings),)
@@ -160,9 +156,6 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
             ),
         )
         if settings.chat_openai_direct_enabled:
-            # Staging paper qualification deliberately uses the direct Luna
-            # route as the default.  The remaining choices stay available
-            # for comparative ordinary-chat testing and existing sessions.
             records = (
                 _direct_luna(settings, "GPT-6 Luna (Direct)"),
                 *records,
@@ -173,8 +166,6 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
     if environment != "staging" or not settings.chat_alternative_model_enabled:
         return records
     alternative = settings.chat_alternative_model
-    # The old comparison flag used the misleading historical Luna ID. Luna
-    # now has an explicit OpenRouter choice, while the old ID remains hidden.
     if alternative == "openai/gpt-5.6-luna":
         return records
     if any(record.id == alternative for record in records):
@@ -226,9 +217,6 @@ def model_routes(settings: Settings) -> dict[str, str]:
     routes = {record.id: record.route for record in discoverable_records(settings)}
     routes.setdefault(DEEPSEEK_V4_FLASH_ID, deepseek_route(settings))
     canonical_route = routes[DEEPSEEK_V4_FLASH_ID]
-    # Existing sessions keep their persisted selected-model IDs but move to
-    # the sole qualified route. These aliases are intentionally absent from
-    # discovery and frontend defaults.
     for legacy_model in LEGACY_SELECTED_MODEL_IDS:
         routes.setdefault(legacy_model, canonical_route)
     if settings.environment == "staging":
@@ -297,8 +285,6 @@ def route_funding_modes(settings: Settings) -> dict[str, str]:
     modes.setdefault(
         settings.chat_deepseek_v4_flash_openrouter_route, "openrouter_funded"
     )
-    # Capabilities issued before the sponsored model was switched off keep
-    # billing the organization, never the user.
     modes.setdefault(settings.chat_sponsored_deepseek_route, "hf_org_funded")
     return modes
 
@@ -307,13 +293,8 @@ def route_providers(settings: Settings) -> dict[str, str]:
     providers = {
         record.route: record.provider for record in chat_model_records(settings)
     }
-    # Both routes remain valid across a rolling provider switch. New turns use
-    # chat_deepseek_v4_flash_provider while already-issued capabilities keep
-    # their immutable route.
     providers.setdefault(settings.chat_deepseek_v4_flash_route, "huggingface")
     providers.setdefault(settings.chat_deepseek_v4_flash_openrouter_route, "openrouter")
-    # Persisted capabilities from the retired comparison registry may still
-    # carry these immutable routes even though they are hidden from discovery.
     providers.setdefault(settings.chat_glm_route, "openrouter")
     providers.setdefault(settings.chat_glm_5_3_flash_route, "huggingface")
     providers.setdefault(settings.chat_gemma_route, "openrouter")

@@ -86,7 +86,6 @@ def main() -> int:
     )
     pause_reason = synthetic_mutation_pause_reason()
     if pause_reason is None and not synthetic_credentials_configured():
-        # An unconfigured monitor account is not a chat outage, so do not page.
         pause_reason = "credential_unavailable"
     if pause_reason is not None:
         state = load_state(state_path)

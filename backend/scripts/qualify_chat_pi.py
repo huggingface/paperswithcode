@@ -153,9 +153,6 @@ async def _terminate_session_sandbox(session_id: str) -> bool:
             .limit(1)
         )
     if not sandbox_id:
-        # Snapshot/reclaim between turns is already a sandbox replacement: the
-        # follow-up must acquire a new provider sandbox. Count it when durable
-        # compute history proves the prior sandbox existed.
         return prior_compute_exists is not None
     sandbox = await modal.Sandbox.from_id.aio(sandbox_id)
     await sandbox.terminate.aio(wait=False)

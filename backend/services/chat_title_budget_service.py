@@ -167,9 +167,6 @@ class ChatTitleBudgetService:
             state.circuit_state == "tripped"
             or projected > state.application_cap_microusd
         ):
-            # In-flight reservations can later settle below their conservative
-            # bounds. Make exhaustion sticky only when no outstanding call can
-            # return headroom or actual spend has consumed the full circuit.
             if (
                 state.circuit_state == "tripped"
                 or state.spent_microusd >= state.application_cap_microusd

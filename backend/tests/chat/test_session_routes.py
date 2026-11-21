@@ -658,6 +658,4 @@ def test_feedback_route_commits_the_stored_rating(monkeypatch, found, status, ou
         )
 
     assert response.status_code == status, response.json()
-    # The request session only closes at exit, so the route itself must commit
-    # a stored rating and roll back when nothing was stored.
     assert calls == ["submit", outcome]

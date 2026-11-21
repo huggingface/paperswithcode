@@ -949,7 +949,6 @@ def test_provider_failover_requires_direct_openai_and_the_sponsored_route(
     production.chat_title_hf_token = "org-title-token"
     production.chat_title_bill_to = "huggingface"
 
-    # The fallback route stays out of discovery.
     runtime_validation.validate_chat_provider_policy(production)
 
     production.chat_title_bill_to = "someone-else"

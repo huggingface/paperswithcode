@@ -20,7 +20,6 @@ def _service(db, settings, compiler):
 
 def test_owner_cannot_start_more_compiles_while_two_are_running(db, settings):
     service = _service(db, settings, _Compiler(CompilerJobState.COMPILING))
-    # One paper per chat, so each compile comes from its own chat.
     for title in ("First", "Second"):
         service.create_neutral_scaffold(
             owner_id="owner-1", session_id=_session(db), title=title
@@ -32,7 +31,6 @@ def test_owner_cannot_start_more_compiles_while_two_are_running(db, settings):
         )
     assert error.value.code == "compile_capacity_exceeded"
 
-    # Another owner's budget is independent.
     service.create_neutral_scaffold(
         owner_id="owner-2", session_id=_session(db, owner="owner-2"), title="Own"
     )
@@ -41,7 +39,6 @@ def test_owner_cannot_start_more_compiles_while_two_are_running(db, settings):
 def test_owner_daily_compile_budget_is_enforced(db, settings, monkeypatch):
     monkeypatch.setattr(latex_paper_service, "_MAX_COMPILES_PER_OWNER_PER_DAY", 2)
     service = _service(db, settings, _Compiler())
-    # One paper per chat, so each compile comes from its own chat.
     for title in ("First", "Second"):
         service.create_neutral_scaffold(
             owner_id="owner-1", session_id=_session(db), title=title

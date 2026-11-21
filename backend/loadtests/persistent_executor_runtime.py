@@ -89,8 +89,6 @@ class TurnExecutionRuntime:
     def authorize(self, capability: str, *, absolute_deadline_unix: float) -> None:
         if not capability or absolute_deadline_unix <= self._wall_clock():
             raise TurnRuntimeError("turn authorization is invalid")
-        # Converting once prevents later wall-clock movement from extending the
-        # authorization. Subtracting elapsed conversion time is conservative.
         monotonic_deadline = self._monotonic() + max(
             0.0, absolute_deadline_unix - self._wall_clock()
         )
@@ -155,8 +153,6 @@ class TurnExecutionRuntime:
                 self._terminate(operation)
             output = self._drain(operation, timeout_seconds)
             if operation.cancel.is_set():
-                # Synchronize with a concurrent cancel thread before publishing
-                # the result so containment proof cannot lag terminal state.
                 self._terminate(operation)
                 status = "cancelled"
                 exit_code = None
@@ -234,8 +230,6 @@ class TurnExecutionRuntime:
                 unknown = True
                 reservation_retained = True
         except Exception:
-            # Teardown is an external-failure boundary. Publish fail-closed
-            # evidence so concurrent callers cannot wait forever.
             unknown = True
             reservation_retained = True
         finally:
