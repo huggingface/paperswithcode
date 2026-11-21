@@ -30,6 +30,7 @@ import {
   isNativePdfReaderEnabled,
   shouldUseHashRouter,
 } from "@/lib/apiUrl";
+import { researchQueries } from "@/lib/api/queries";
 import { AuthProvider, useAuth } from "@/lib/authContext";
 
 // HF Static Spaces (a) boot the iframe at `/index.html` and (b) return a
@@ -119,6 +120,11 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// The homepage's popular topic cards sit above the feed: fetch them while the route chunk loads.
+if (typeof window !== "undefined" && window.location.pathname === "/") {
+  void queryClient.prefetchQuery(researchQueries.featuredTopics());
+}
 
 const LegacyPaperRedirect: React.FC = () => {
   const { arxivId } = useParams();
