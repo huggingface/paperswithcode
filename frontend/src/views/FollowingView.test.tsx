@@ -662,6 +662,26 @@ it('invites guests to follow a popular topic after the sixth trending paper', as
   expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
   expect(researchApi.follows).not.toHaveBeenCalled();
 });
+it('disables the row\'s Follow at the topic limit', async () => {
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
+  vi.mocked(researchApi.topics).mockResolvedValue(Array.from({ length: 10 }, (_, i) => ({ ...topic, id: 200 + i, text: `topic ${i}` })));
+  renderFeed('/');
+  const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
+  const follow = await within(row).findByRole('button', { name: 'Follow Speculative decoding' });
+  await waitFor(() => expect(follow).toBeDisabled());
+  expect(follow).toHaveAttribute('title', expect.stringContaining('the most allowed'));
+});
+it('does not keep a refused row follow for a later retry', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
+  const body = JSON.stringify({ detail: 'You can follow up to 10 topics' });
+  vi.spyOn(researchApi, 'followTopic').mockRejectedValue(new ApiError(new Response(body, { status: 409 }), body));
+  renderFeed('/');
+  const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
+  fireEvent.click(await within(row).findByRole('button', { name: 'Follow Speculative decoding' }));
+  expect(await within(row).findByRole('alert')).toHaveTextContent('Could not follow');
+  expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull();
+});
 it('follows a popular topic from the row above the feed and opens it on Following', async () => {
   vi.mocked(researchApi.follows).mockResolvedValue([]);
   vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
