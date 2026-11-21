@@ -451,6 +451,17 @@ def test_conflicting_release_merge_is_recorded_and_still_queues_add_evals(
     workflow = db.get(PaperCurationWorkflow, enrich.parent_workflow_id)
     assert workflow.error == "External release merge failed: duplicate key"
 
+    monkeypatch.setattr(
+        "backend.services.codex_add_evals_service.merge_external_release_duplicate",
+        lambda _db, _paper_id: None,
+    )
+    add_evals = db.query(PaperCurationJob).filter_by(kind="add-evals").one()
+    add_evals.status = "completed"
+    service._advance_workflow(db, add_evals, SETTINGS)
+
+    assert workflow.status == "completed"
+    assert workflow.error is None
+
 
 def test_unexpected_release_merge_database_errors_propagate(db, monkeypatch):
     from sqlalchemy.exc import OperationalError

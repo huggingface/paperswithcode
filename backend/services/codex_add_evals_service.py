@@ -108,6 +108,7 @@ CURATOR_COMMAND = "exec python3 /runner/run_paper_curation.py"
 PI_CURATOR_COMMAND = "exec python3 /runner/run_pi_curation.py"
 PI_SHADOW_TRIGGER = "pi-shadow"
 PI_SHADOW_KINDS = frozenset({"enrich-paper", "add-evals"})
+RELEASE_MERGE_ERROR_PREFIX = "External release merge failed: "
 CURATION_DISPATCH_LOCK_ID = 0x50574344
 CURATOR_BOOTSTRAP_PATHS = (
     ".agents/skills/add-evals/SKILL.md",
@@ -2130,8 +2131,10 @@ class CodexPaperJobService:
             stats = merge_external_release_duplicate(db, paper_id)
         except IntegrityError as error:
             logger.exception("external release merge failed for paper %s", paper_id)
-            workflow.error = f"External release merge failed: {error.orig}"[:2000]
+            workflow.error = f"{RELEASE_MERGE_ERROR_PREFIX}{error.orig}"[:2000]
             return
+        if (workflow.error or "").startswith(RELEASE_MERGE_ERROR_PREFIX):
+            workflow.error = None
         if stats is not None:
             logger.info("merged external release into paper %s: %s", paper_id, stats)
 
