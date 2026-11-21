@@ -224,3 +224,127 @@ test("first reader request is fitted before dispatch and recovery", async () => 
   assert.equal(events.filter(event => event.type === "error").length, 0);
   assert.equal(events.find(event => event.type === "done")?.finish_reason, "success");
 });
+
+const FALLBACK = {
+  model: "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita",
+  provider_protocol: "anthropic-messages" as const,
+  capability: "fallback-capability",
+};
+
+const GATEWAY = {
+  url: "https://gateway.example.test",
+  capability: "primary-capability",
+  sessionId: "chat",
+  turnId: "turn",
+  turnClaim: { turnId: "turn", workerId: "worker", workerGeneration: 1, leaseGeneration: 1 },
+};
+
+type Behaviour = "fail" | "answer" | "partial-then-fail" | "unavailable";
+
+async function failoverHarness(behaviours: Behaviour[], fallback: typeof FALLBACK | null = FALLBACK) {
+  const { PiWorker } = await import("../src/agent.js");
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+  const events: Record<string, unknown>[] = [];
+  const worker = new PiWorker((_id, event) => events.push(event), GATEWAY);
+  const manager = SessionManager.inMemory("/workspace");
+  manager.appendMessage({ role: "user", content: "Earlier question", timestamp: Date.now() });
+  const leafBefore = manager.getLeafId();
+  const prompts: string[] = [];
+  const opened: { run: Record<string, unknown>; gateway: Record<string, unknown> }[] = [];
+  const makeSession = (behaviour: Behaviour) => {
+    let listener = (_event: unknown) => {};
+    return {
+      subscribe(callback: typeof listener) { listener = callback; return () => {}; },
+      async prompt(value: string) {
+        prompts.push(value);
+        manager.appendMessage({ role: "user", content: value, timestamp: Date.now() });
+        if (behaviour !== "fail") {
+          listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Answer" } });
+        }
+        listener({ type: "message_end", message: { role: "assistant", content: [],
+          stopReason: behaviour === "answer" ? "stop" : "error" } });
+      },
+      setActiveToolsByName() {},
+      setThinkingLevel() {},
+      extensionRunner: { async emit() {} },
+      dispose() {},
+    };
+  };
+  let attempt = 0;
+  Reflect.set(worker, "session", makeSession(behaviours[attempt++]!));
+  Reflect.set(worker, "manager", manager);
+  Reflect.set(worker, "mirror", { append() {}, async flush() {} });
+  Reflect.set(worker, "boundAgentSession", "native");
+  Reflect.set(worker, "initialize", async () => {});
+  let initialOpen = true;
+  Reflect.set(worker, "open", async (run: Record<string, unknown>, gateway: Record<string, unknown>) => {
+    if (initialOpen) { initialOpen = false; return; }
+    opened.push({ run, gateway });
+    const next = behaviours[attempt++]!;
+    if (next === "unavailable") throw new Error("fallback provider registration failed");
+    Reflect.set(worker, "session", makeSession(next));
+  });
+  await worker.run({ request_id: "test", chat_session_id: "chat", prompt: "What is new?",
+    model: "gpt-6-luna", provider_protocol: "openai-responses", resume: null,
+    agent_session_id: "30000000-0000-4000-8000-000000000001", user_files_enabled: true,
+    web_search_enabled: false, reader_mode: false, poster_mode: false,
+    paper_artifacts_enabled: false, reasoning_effort: "medium", hf_username: "test",
+    ...(fallback ? { provider_fallback: fallback } : {}) });
+  return { events, manager, leafBefore, prompts, opened };
+}
+
+test("a provider failure before visible output replays once on the fallback route", async () => {
+  const { events, manager, leafBefore, prompts, opened } = await failoverHarness(["fail", "answer"]);
+  assert.deepEqual(prompts, ["What is new?", "What is new?"]);
+  assert.equal(opened.length, 1);
+  const { run, gateway } = opened[0]!;
+  assert.equal(run.model, FALLBACK.model);
+  assert.equal(run.provider_protocol, "anthropic-messages");
+  assert.equal(run.resume, "native");
+  assert.equal(run.user_files_enabled, false);
+  assert.ok(!("agent_session_id" in run));
+  assert.ok(!("provider_fallback" in run));
+  assert.equal(gateway.capability, FALLBACK.capability);
+  // The replay branches from the pre-prompt position, so the failed attempt
+  // is not part of the context the fallback model sees.
+  const replayed = manager.getBranch().filter((entry) => entry.type === "message");
+  assert.equal(replayed.length, 2);
+  assert.equal(replayed[1]!.parentId, leafBefore);
+  assert.equal(events.filter((event) => event.type === "error").length, 0);
+  assert.equal(events.find((event) => event.type === "done")?.finish_reason, "success");
+  assert.equal(events.find((event) => event.type === "_execution_telemetry")?.provider_failover, true);
+});
+
+test("a provider failure after visible output is reported, not replayed", async () => {
+  const { events, prompts, opened } = await failoverHarness(["partial-then-fail"]);
+  assert.equal(prompts.length, 1);
+  assert.equal(opened.length, 0);
+  assert.equal(events.find((event) => event.type === "error")?.code, "provider_error");
+  assert.equal(events.find((event) => event.type === "_execution_telemetry")?.provider_failover, undefined);
+});
+
+test("a failing fallback route is tried once and reports one terminal error", async () => {
+  const { events, prompts, opened } = await failoverHarness(["fail", "fail"]);
+  assert.equal(prompts.length, 2);
+  assert.equal(opened.length, 1);
+  assert.equal(events.filter((event) => event.type === "error").length, 1);
+  assert.equal(events.filter((event) => event.type === "worker_done").length, 1);
+  assert.equal(events.find((event) => event.type === "_execution_telemetry")?.provider_failover, true);
+});
+
+test("a run without a fallback route reports the provider failure", async () => {
+  const { events, opened } = await failoverHarness(["fail"], null);
+  assert.equal(opened.length, 0);
+  assert.equal(events.find((event) => event.type === "error")?.code, "provider_error");
+});
+
+test("a fallback that cannot start reports the primary provider error", async () => {
+  const { events, prompts, opened } = await failoverHarness(["fail", "unavailable"]);
+  assert.equal(prompts.length, 1);
+  assert.equal(opened.length, 1);
+  const errors = events.filter((event) => event.type === "error");
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]?.code, "provider_error");
+  assert.equal(events.filter((event) => event.type === "worker_done").length, 1);
+  assert.equal(events.find((event) => event.type === "_execution_telemetry")?.provider_failover, undefined);
+});

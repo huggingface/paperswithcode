@@ -74,6 +74,7 @@ class ChatModelSettings(BaseModel):
     chat_sponsored_deepseek_route: str = Field(
         default="deepseek-ai/DeepSeek-V4.1-Flash-1017:novita"
     )
+    chat_provider_failover_enabled: bool = Field(default=False)
     chat_alternative_model_enabled: bool = Field(default=False)
     chat_alternative_model: Literal[
         "openai/gpt-5.6-luna", "google/gemini-3.7-flash"

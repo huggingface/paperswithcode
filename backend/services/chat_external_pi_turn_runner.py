@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractContextManager
 from datetime import UTC, datetime
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -18,7 +19,10 @@ from websockets.exceptions import WebSocketException
 
 from backend.config import Settings
 from backend.database.connection import db_manager
-from backend.services.chat_capability_service import IssuedCapability
+from backend.services.chat_capability_service import (
+    ChatCapabilityService,
+    IssuedCapability,
+)
 from backend.services.chat_external_worker_registry import (
     ChatExternalWorkerRepository,
     ExternalWorkerClaim,
@@ -74,6 +78,16 @@ def _worker_websocket_url(base_url: str) -> str:
     )
 
 
+@dataclass(frozen=True)
+class ExternalProviderFallback:
+    """A second route the worker may replay a turn on before any output."""
+
+    route: str
+    model: str
+    protocol: str
+    capability: IssuedCapability
+
+
 class ExternalPiChatTurnRunner:
     """Run Pi on the trusted host and create a Modal executor only on tool use."""
 
@@ -105,6 +119,7 @@ class ExternalPiChatTurnRunner:
         observe: LifecycleObserver | None = None,
         cancel_timeout_seconds: float = 5.0,
         channel_factory: ChannelFactory | None = None,
+        provider_fallback: ExternalProviderFallback | None = None,
     ) -> None:
         require_ordinary_research_mode(
             poster_mode=admission.poster_mode,
@@ -117,6 +132,13 @@ class ExternalPiChatTurnRunner:
         self.resume_id = resume_id
         self.capability = capability
         self.capability_id: uuid.UUID | None = capability.capability_id
+        self.provider_fallback = provider_fallback
+        self.provider_fallback_route = (
+            provider_fallback.route if provider_fallback else None
+        )
+        self.provider_fallback_capability_id: uuid.UUID | None = (
+            provider_fallback.capability.capability_id if provider_fallback else None
+        )
         self.hf_username = hf_username
         self.provider = provider or ModalSandboxProviderAdapter(settings)
         self.executor = executor or SandboxExecutorClient(self.provider)
@@ -628,6 +650,12 @@ class ExternalPiChatTurnRunner:
             frame["paper_descriptor"] = self.admission.paper_descriptor
         if prebound_agent_session_id is not None:
             frame["agent_session_id"] = str(prebound_agent_session_id)
+        if self.provider_fallback is not None:
+            frame["provider_fallback"] = {
+                "model": self.provider_fallback.model,
+                "provider_protocol": self.provider_fallback.protocol,
+                "capability": self.provider_fallback.capability.token,
+            }
         return frame
 
     @staticmethod
@@ -692,6 +720,11 @@ class ExternalPiChatTurnRunner:
         self.lifecycle.capability_id = self.capability_id
         self.lifecycle.revoke()
         self.capability_id = self.lifecycle.capability_id
+        if self.provider_fallback_capability_id is not None:
+            with self.session_factory() as db:
+                ChatCapabilityService(db).revoke(self.provider_fallback_capability_id)
+                db.commit()
+            self.provider_fallback_capability_id = None
 
     async def cancel(self) -> CancelControlResult:
         cancel_frame = {

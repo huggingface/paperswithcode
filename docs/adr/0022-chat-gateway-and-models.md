@@ -322,6 +322,12 @@ The free DeepSeek route is bounded by the Hugging Face organization's Inference 
 
 Code: `backend/chat_configuration/settings.py::ChatModelSettings`, `backend/services/chat_executor_turn_admission.py::maximum_provider_turn_microusd`
 
+## Luna failover replays once on the sponsored route and reports only Luna's errors
+
+When direct OpenAI fails before a Luna turn shows any output, the worker may replay the turn once on the sponsored DeepSeek route, but only on a route this turn's runner offered; a worker's failover claim alone changes nothing. The runner issues a second, credential-free capability for that route because the gateway bills the organization. The session keeps Luna selected and only the turn's assistant row records the model that answered. Errors from the fallback capability, such as an exhausted sponsorship, are not actionable for a user who chose Luna, so the user sees only the primary route's error code. The fallback route stays out of model discovery.
+
+Code: `backend/services/chat_stream_service.py::ChatTurnProjection._record_provider_failover`, `backend/services/chat_turn_runner.py`, `backend/services/runtime_policies/chat_provider.py::validate_chat_provider_policy`
+
 ## Sponsored mode is set per provider call, not on the capability
 
 Sponsored DeepSeek calls are recorded with provider mode hf_org_funded at call level only; the persisted capability row keeps provider_mode "huggingface". Writing the sponsored mode to the capability would change how existing capabilities resolve.
