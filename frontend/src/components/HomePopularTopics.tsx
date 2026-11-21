@@ -35,7 +35,13 @@ export default function HomePopularTopics({ followedIds, onBuild }: {
       window.removeEventListener('resize', update);
     };
   }, [topics.length]);
-  const page = (direction: 1 | -1) => list.current?.scrollBy({ left: direction * list.current.clientWidth * 0.9, behavior: 'smooth' });
+  // One page is the visible cards plus the gap after them, so the next card lands at the start.
+  const page = (direction: 1 | -1) => {
+    const row = list.current;
+    if (!row) return;
+    const gap = parseFloat(getComputedStyle(row).columnGap) || 0;
+    row.scrollBy({ left: direction * (row.clientWidth + gap), behavior: 'smooth' });
+  };
   if (topics.length === 0) return null;
 
   return <section className="home-topics" aria-labelledby="home-topics-title">

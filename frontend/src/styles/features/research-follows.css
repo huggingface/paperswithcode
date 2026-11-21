@@ -725,6 +725,8 @@
 .home-topics-page:disabled { opacity: 0.35; cursor: default; }
 .home-topics-page svg { width: 15px; height: 15px; }
 .home-topics-list.is-scroller {
+  /* Size to the feed column, not to ten cards laid out in a line. */
+  contain: inline-size;
   display: flex;
   overflow-x: auto;
   overscroll-behavior-x: contain;
