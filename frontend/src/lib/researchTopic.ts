@@ -132,7 +132,8 @@ export function useFollowTopics() {
         const retryable = failed.filter(id => !isConflict(reasons[ids.indexOf(id)]));
         if (retryable.length) stashPendingTopicFollows(retryable);
         else clearPendingTopicFollows();
-        throw reasons.find(reason => reason !== null);
+        // Report a retryable failure when there is one, so callers offer a retry only then.
+        throw reasons[ids.indexOf(retryable[0] ?? failed[0])];
       }
       clearPendingTopicFollows();
     },

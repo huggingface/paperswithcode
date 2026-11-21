@@ -592,6 +592,15 @@ it('follows the popular topics a visitor picked before signing in', async () => 
   await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull());
 });
 
+it('explains a refused popular-topic pick after sign-in instead of offering a retry', async () => {
+  sessionStorage.setItem('pwc:following-pending-topic-follows', JSON.stringify([23]));
+  const body = JSON.stringify({ detail: 'You can follow up to 10 topics' });
+  vi.spyOn(researchApi, 'followTopic').mockRejectedValue(new ApiError(new Response(body, { status: 409 }), body));
+  renderFeed();
+  expect(await screen.findByText(/Could not follow the popular topics you picked: You can follow up to 10 topics/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+  expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull();
+});
 it('keeps popular topics a visitor picked when following them fails, and retries', async () => {
   sessionStorage.setItem('pwc:following-pending-topic-follows', JSON.stringify([23, 24]));
   const follow = vi.spyOn(researchApi, 'followTopic')
