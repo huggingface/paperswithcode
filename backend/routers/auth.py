@@ -141,14 +141,8 @@ def _role(payload: dict) -> Optional[Literal["admin", "contributor"]]:
     return role_for_hf_subject(payload.get("sub"), username=payload.get("username"))
 
 
-def _is_admin(user: dict | str) -> bool:
-    if isinstance(user, dict):
-        return _role(user) == "admin"
-    settings = get_settings()
-    return (
-        not settings.admin_hf_subject_set
-        and user.lower() in settings.admin_hf_username_set
-    )
+def _is_admin(user: dict) -> bool:
+    return _role(user) == "admin"
 
 
 def _encode_state(

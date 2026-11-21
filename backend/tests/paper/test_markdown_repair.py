@@ -26,9 +26,6 @@ def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
         "Settings",
         (),
         {
-            "paper_markdown_backfill_concurrency": 4,
-            "paper_markdown_incremental_batch_size": 100,
-            "paper_markdown_backfill_batch_size": 100,
             "paper_markdown_hf_bucket_id": "test/paper-markdown",
             "paper_layout_hf_bucket_id": "test/paper-pages",
             "paper_markdown_hf_namespace": "test-owner",

@@ -1266,17 +1266,6 @@ def _execution_health(
             "reason": "GitHub Actions evidence is unavailable",
         }
     scheduled = evidence.get("scheduled_run")
-    if (
-        scheduled is None
-        and evidence.get("event") in {None, "schedule"}
-        and evidence.get("status")
-    ):
-        scheduled = {
-            "status": evidence.get("status"),
-            "conclusion": evidence.get("conclusion"),
-            "createdAt": evidence.get("created_at"),
-            "updatedAt": evidence.get("updated_at"),
-        }
     active = evidence.get("active_run")
     if active and active.get("event") == "schedule":
         started = _parse_log_timestamp(active.get("createdAt"))

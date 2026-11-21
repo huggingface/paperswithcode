@@ -73,7 +73,6 @@ def test_serializer_exposes_hf_job_url():
     settings = get_settings().model_copy(update={"codex_jobs_namespace": "huggingface"})
     serialized = CodexPaperJobService.serialize(row, settings)
     assert serialized.hf_job_url == "https://huggingface.co/jobs/huggingface/hf-job"
-    assert CodexPaperJobService._serialize(row, settings) == serialized
 
 
 def test_git_revision_can_be_pinned_for_remote_jobs(monkeypatch):

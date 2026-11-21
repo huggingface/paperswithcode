@@ -15,10 +15,6 @@ from backend.chat_configuration.settings import (
     ChatSettings,
     ExternalPiWorkerEndpointConfig,
 )
-from backend.services.paper_markdown_job_profile import (
-    PAPER_MARKDOWN_BACKFILL_JOB_PROFILE,
-    PAPER_MARKDOWN_LIVE_JOB_PROFILE,
-)
 
 __all__ = ["ExternalPiWorkerEndpointConfig", "Settings", "get_settings"]
 
@@ -420,24 +416,7 @@ class Settings(BaseSettings, ChatSettings):
     )
     paper_markdown_runtime_image: str = Field(default="vllm/vllm-openai:v0.17.0")
     paper_markdown_hardware: Literal["l40sx1"] = Field(default="l40sx1")
-    paper_markdown_incremental_batch_size: int = Field(
-        default=PAPER_MARKDOWN_LIVE_JOB_PROFILE.max_papers, ge=1, le=100
-    )
-    paper_markdown_backfill_batch_size: int = Field(
-        default=PAPER_MARKDOWN_BACKFILL_JOB_PROFILE.max_papers, ge=1, le=500
-    )
-    paper_markdown_backfill_concurrency: int = Field(
-        default=PAPER_MARKDOWN_BACKFILL_JOB_PROFILE.concurrency, ge=1, le=16
-    )
     paper_markdown_max_pages: int = Field(default=30, ge=1, le=30)
-    paper_markdown_job_timeout: str = Field(
-        default=PAPER_MARKDOWN_LIVE_JOB_PROFILE.hard_timeout
-    )
-    paper_markdown_soft_deadline_seconds: int = Field(
-        default=PAPER_MARKDOWN_LIVE_JOB_PROFILE.soft_deadline_seconds,
-        ge=0,
-        le=40_500,
-    )
     paper_markdown_incremental_monthly_budget_usd: float = Field(default=100.0, gt=0)
     paper_markdown_backfill_budget_usd: float = Field(default=750.0, gt=0)
     paper_markdown_cost_policy: Literal["metered", "unmetered_hf"] = Field(
