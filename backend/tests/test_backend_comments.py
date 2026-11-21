@@ -45,6 +45,13 @@ def test_directives_and_script_metadata_are_not_comments(repo):
     ]
 
 
+def test_only_closed_script_metadata_blocks_are_exempt(repo):
+    path = repo / "backend" / "module.py"
+    path.write_text("x = 1\n# /// script metadata is read by uv\n# later note\n")
+
+    assert [c["line"] for c in backend_comments.comments(path)] == [2, 3]
+
+
 def test_ratchet_rejects_new_comments_and_never_raises_baseline(repo, capsys):
     assert backend_comments.check() == 1
     assert backend_comments.update(allow_increase=False) == 1

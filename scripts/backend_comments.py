@@ -33,6 +33,9 @@ DIRECTIVE = re.compile(
     r"#\s*(noqa\b|type:\s*ignore|pragma:|fmt:|pyright:|mypy:|ruff:|isort:)"
 )
 ENCODING = re.compile(r"#.*coding[:=]")
+SCRIPT_METADATA = re.compile(
+    r"(?m)^# /// (?P<type>[a-zA-Z0-9-]+)$\s(?P<content>(^#(| .*)$\s)+)^# ///$"
+)
 
 
 def backend_files() -> list[Path]:
@@ -52,22 +55,26 @@ def is_directive(token: tokenize.TokenInfo) -> bool:
     return bool(DIRECTIVE.match(token.string))
 
 
+def script_metadata_lines(source: str) -> set[int]:
+    lines = set()
+    for match in SCRIPT_METADATA.finditer(source):
+        first = source.count("\n", 0, match.start()) + 1
+        last = source.count("\n", 0, match.end()) + 1
+        lines.update(range(first, last + 1))
+    return lines
+
+
 def comments(path: Path) -> list[dict]:
     source = path.read_text()
     lines = source.splitlines()
+    metadata = script_metadata_lines(source)
     found = []
-    in_script_metadata = False
     for token in tokenize.generate_tokens(io.StringIO(source).readline):
-        if token.type != tokenize.COMMENT:
-            continue
-        if token.string.startswith("# /// "):
-            in_script_metadata = True
-        if in_script_metadata:
-            in_script_metadata = token.string.rstrip() != "# ///"
-            continue
-        if is_directive(token):
+        if token.type != tokenize.COMMENT or is_directive(token):
             continue
         line_number = token.start[0]
+        if line_number in metadata:
+            continue
         own_line = lines[line_number - 1].lstrip().startswith("#")
         found.append(
             {
