@@ -315,7 +315,7 @@ def test_failure_enrichment_keeps_typed_terminal_without_reparsing(monkeypatch, 
     monkeypatch.setattr(
         streams.ChatCapabilityService,
         "provider_error_for_turn",
-        lambda *_: "openrouter_unavailable",
+        lambda *_args, **_kwargs: "openrouter_unavailable",
     )
 
     async def run():
@@ -383,16 +383,7 @@ def test_provider_failover_records_the_answering_model_only_when_offered():
     assert stream.admission.selected_model == SPONSORED_DEEPSEEK_ID
 
 
-@pytest.mark.parametrize(
-    ("recorded", "expected"),
-    [
-        ("hf_sponsored_unavailable", "provider_error"),
-        ("openai_budget_exhausted", "openai_budget_exhausted"),
-    ],
-)
-def test_failed_over_turn_hides_fallback_route_error_codes(
-    monkeypatch, recorded, expected
-):
+def test_failed_over_turn_reports_only_the_primary_route_error(monkeypatch):
     from contextlib import contextmanager
     from types import SimpleNamespace
 
@@ -406,11 +397,23 @@ def test_failed_over_turn_hides_fallback_route_error_codes(
     def session():
         yield object()
 
+    # The fallback capability recorded the newest code; only the primary
+    # route's code may reach a user who chose Luna.
+    codes = {
+        "route": "openai_unavailable",
+        "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita": "hf_sponsored_unavailable",
+    }
+    queried: list[str | None] = []
+
+    def provider_error_for_turn(_self, _session_id, _turn_id, model=None):
+        queried.append(model)
+        return codes[model] if model else "hf_sponsored_unavailable"
+
     monkeypatch.setattr(streams.db_manager, "_session_local", session)
     monkeypatch.setattr(
         streams.ChatCapabilityService,
         "provider_error_for_turn",
-        lambda *_: recorded,
+        provider_error_for_turn,
     )
 
     async def run():
@@ -424,6 +427,6 @@ def test_failed_over_turn_hides_fallback_route_error_codes(
         return [frame async for frame in stream._consume(queue)]
 
     frames = asyncio.run(run())
-    assert stream.lifecycle.failure_code == expected
-    assert frames[0].payload["code"] == expected
-    assert "DeepSeek" not in frames[0].payload["message"]
+    assert queried == ["route"]
+    assert stream.lifecycle.failure_code == "openai_unavailable"
+    assert frames[0].payload["code"] == "openai_unavailable"

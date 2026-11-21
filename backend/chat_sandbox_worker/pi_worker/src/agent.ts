@@ -685,12 +685,11 @@ export class PiWorker {
         // The primary provider failed before the user saw anything. Replay the
         // same prompt once on the fallback route from the pre-prompt position.
         process.stderr.write("External Pi provider failover\n");
-        this.providerFailedOver = true;
         await this.disposeSession();
         if (leafBeforePrompt) this.manager!.branch(leafBeforePrompt);
         else this.manager!.resetLeaf();
         const { agent_session_id: _prebound, provider_fallback: _fallback, ...primary } = run;
-        run = {
+        const fallbackRun: RunTurn = {
           ...primary,
           model: fallback.model,
           provider_protocol: fallback.provider_protocol,
@@ -701,7 +700,15 @@ export class PiWorker {
           user_files_enabled: false,
         };
         this.failurePhase = "agent_session";
-        await this.open(run, { ...this.gateway, capability: fallback.capability });
+        try {
+          await this.open(fallbackRun, { ...this.gateway, capability: fallback.capability });
+        } catch (error) {
+          // The fallback could not start: report the primary provider error.
+          process.stderr.write(turnFailureDiagnostic(this.failurePhase, error));
+          break;
+        }
+        run = fallbackRun;
+        this.providerFailedOver = true;
         if (this.cancelled) break;
       }
       if (this.cancelled) {

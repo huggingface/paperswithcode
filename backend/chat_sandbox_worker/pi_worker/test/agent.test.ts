@@ -239,7 +239,7 @@ const GATEWAY = {
   turnClaim: { turnId: "turn", workerId: "worker", workerGeneration: 1, leaseGeneration: 1 },
 };
 
-type Behaviour = "fail" | "answer" | "partial-then-fail";
+type Behaviour = "fail" | "answer" | "partial-then-fail" | "unavailable";
 
 async function failoverHarness(behaviours: Behaviour[], fallback: typeof FALLBACK | null = FALLBACK) {
   const { PiWorker } = await import("../src/agent.js");
@@ -280,7 +280,9 @@ async function failoverHarness(behaviours: Behaviour[], fallback: typeof FALLBAC
   Reflect.set(worker, "open", async (run: Record<string, unknown>, gateway: Record<string, unknown>) => {
     if (initialOpen) { initialOpen = false; return; }
     opened.push({ run, gateway });
-    Reflect.set(worker, "session", makeSession(behaviours[attempt++]!));
+    const next = behaviours[attempt++]!;
+    if (next === "unavailable") throw new Error("fallback provider registration failed");
+    Reflect.set(worker, "session", makeSession(next));
   });
   await worker.run({ request_id: "test", chat_session_id: "chat", prompt: "What is new?",
     model: "gpt-6-luna", provider_protocol: "openai-responses", resume: null,
@@ -334,4 +336,15 @@ test("a run without a fallback route reports the provider failure", async () => 
   const { events, opened } = await failoverHarness(["fail"], null);
   assert.equal(opened.length, 0);
   assert.equal(events.find((event) => event.type === "error")?.code, "provider_error");
+});
+
+test("a fallback that cannot start reports the primary provider error", async () => {
+  const { events, prompts, opened } = await failoverHarness(["fail", "unavailable"]);
+  assert.equal(prompts.length, 1);
+  assert.equal(opened.length, 1);
+  const errors = events.filter((event) => event.type === "error");
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0]?.code, "provider_error");
+  assert.equal(events.filter((event) => event.type === "worker_done").length, 1);
+  assert.equal(events.find((event) => event.type === "_execution_telemetry")?.provider_failover, undefined);
 });

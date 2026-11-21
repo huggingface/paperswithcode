@@ -1595,6 +1595,7 @@ class ChatStreamOrchestrator:
         self.started = time.perf_counter()
         self.projection = ChatTurnProjection()
         self.provider_failed_over = False
+        self.primary_model_route = admission.model_route
         self.store = PostgresSDKSessionStore()
         self.research_task: asyncio.Task | None = None
         self.title_task: asyncio.Task | None = None
@@ -2603,17 +2604,14 @@ class ChatStreamOrchestrator:
                 "The partial response is saved. Please try again later."
             )
         with db_manager.session_local() as error_db:
+            # After a failover the turn has a second capability. Its errors
+            # (such as an exhausted sponsorship) are not actionable for a user
+            # who chose Luna, so report only the primary route's error.
             provider_code = ChatCapabilityService(error_db).provider_error_for_turn(
-                self.admission.session_id, self.admission.turn_id
+                self.admission.session_id,
+                self.admission.turn_id,
+                model=self.primary_model_route if self.provider_failed_over else None,
             )
-            if (
-                self.provider_failed_over
-                and provider_code
-                and not provider_code.startswith("openai_")
-            ):
-                # The user chose Luna; errors of the hidden fallback route
-                # (such as an exhausted sponsorship) are not actionable for them.
-                provider_code = None
             if provider_code:
                 payload["code"] = provider_code
                 if provider_code == "hf_inference_billing_exhausted":
