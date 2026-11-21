@@ -484,6 +484,18 @@
   padding: 10px 14px;
   cursor: pointer;
   line-height: 1.5;
+  list-style: none;
+}
+.api-model summary::-webkit-details-marker {
+  display: none;
+}
+.api-model summary::before {
+  content: "▸";
+  color: var(--ink-faint);
+  transition: transform 0.15s;
+}
+.api-model[open] summary::before {
+  transform: rotate(90deg);
 }
 .api-model summary code {
   font-weight: 600;

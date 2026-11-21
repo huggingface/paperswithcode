@@ -134,10 +134,19 @@ function Method() {
   return <span className="api-method">GET</span>;
 }
 
+function openModel(name: string) {
+  const model = document.getElementById(`model-${name}`);
+  if (model instanceof HTMLDetailsElement) model.open = true;
+}
+
 function SchemaDetails({ schema }: { schema: Schema }) {
   if (schema.$ref) {
     const name = schemaLabel(schema);
-    return <a href={`#model-${name}`}>{name}</a>;
+    return (
+      <a href={`#model-${name}`} onClick={() => openModel(name)}>
+        {name}
+      </a>
+    );
   }
   if (schema.anyOf || schema.allOf)
     return (
