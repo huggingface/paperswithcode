@@ -49,7 +49,7 @@ export default function HomePopularTopics({ followedIds, onBuild }: {
       <h2 id="home-topics-title"><Users aria-hidden="true" />Popular topics to follow</h2>
       <div className="home-topics-actions">
         <button type="button" className="home-topics-own" onClick={onBuild}>
-          Follow your own topic<ArrowRight aria-hidden="true" />
+          Create your own topic<ArrowRight aria-hidden="true" />
         </button>
         {!(edges.start && edges.end) && <>
           <button type="button" className="home-topics-page" aria-label="Previous topics" disabled={edges.start}
