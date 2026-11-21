@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { codexApi, type CodexPaperJob, type CodexSchedulerPause } from "@/lib/api/codex";
 import { adminQueries } from "@/lib/api/queries";
+import { ApiError } from "@/lib/apiTransport";
 
 import { CodexJobReport } from "./CodexPaperJobDialog";
 
@@ -91,9 +92,14 @@ function CurationJob({ job, pause }: { job: CodexPaperJob; pause: CodexScheduler
   );
 }
 
+/** Retry a dropped connection once; an HTTP error response will not change on retry. */
+function retryNetworkFailureOnce(failureCount: number, error: Error): boolean {
+  return failureCount < 1 && !(error instanceof ApiError);
+}
+
 /** Admin-only list of the scheduled and manual curation jobs for one paper. */
 export function PaperCurationHistory({ paperId }: { paperId: number }) {
-  const history = useQuery({ ...adminQueries.paperCurationHistory(paperId), retry: false });
+  const history = useQuery({ ...adminQueries.paperCurationHistory(paperId), retry: retryNetworkFailureOnce });
   const jobs = history.data?.jobs ?? [];
   const pause = history.data?.scheduler_pause ?? null;
   return (
@@ -106,7 +112,7 @@ export function PaperCurationHistory({ paperId }: { paperId: number }) {
         </span>
       </summary>
       <div className="mt-3 space-y-2">
-        {history.error && (
+        {history.isLoadingError && (
           <div className="text-sm text-destructive">{history.error.message}</div>
         )}
         {history.data && jobs.length === 0 && (
