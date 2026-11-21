@@ -15,10 +15,7 @@ from backend.tests.deployment.harness import deployed_settings, make_bundle
 from deploy.release import profile_features
 
 
-IMAGE = (
-    "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-netns-v1-staging@sha256:"
-    + "a" * 64
-)
+IMAGE = "im-StagingLatexCompiler01"
 
 
 @pytest.fixture(autouse=True)
@@ -41,14 +38,8 @@ def _armed_settings(tmp_path: Path):
     settings.chat_artifact_shared_preview_enabled = False
     settings.chat_artifact_storage_backend = "hf_bucket"
     settings.chat_artifact_hf_bucket_id = "nielsr/pwc-chat-artifacts-staging"
-    settings.chat_latex_compiler_hf_sandbox_image = IMAGE
-    settings.chat_latex_compiler_hf_sandbox_namespace = "nielsr"
-    settings.chat_latex_compiler_hf_sandbox_token = "test-only-sandbox-token"
-    settings.chat_latex_compiler_hf_sandbox_flavor = "cpu-upgrade"
-    settings.chat_latex_compiler_hf_sandbox_idle_timeout_seconds = 180
-    settings.chat_latex_compiler_hf_sandbox_egress_policy_attestation = (
-        "sandbox-netns-v1"
-    )
+    settings.chat_latex_compiler_modal_image_id = IMAGE
+    settings.chat_latex_compiler_modal_environment = "pwc-latex-staging"
     settings.chat_latex_compiler_signing_private_key = (
         base64.urlsafe_b64encode(b"k" * 32).rstrip(b"=").decode()
     )
@@ -129,6 +120,21 @@ def test_deployed_staging_paper_runtime_requires_bound_root_evidence(
     assert runtime_validation.validate_runtime(settings) == profile_features("staging")
 
 
+def test_compiler_qualification_disables_user_facing_artifacts(tmp_path: Path) -> None:
+    settings = _armed_settings(tmp_path)
+    settings.chat_latex_paper_enabled = False
+    settings.chat_latex_compiler_jobs_enabled = False
+    settings.chat_latex_compiler_qualification_mode = True
+    settings.chat_artifacts_enabled = False
+    settings.chat_artifact_shared_preview_enabled = False
+
+    runtime_validation.validate_private_paper_runtime(settings)
+
+    settings.chat_artifacts_enabled = True
+    with pytest.raises(RuntimeError, match="user-facing artifacts"):
+        runtime_validation.validate_private_paper_runtime(settings)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
@@ -136,10 +142,11 @@ def test_deployed_staging_paper_runtime_requires_bound_root_evidence(
         ("chat_artifact_shared_preview_enabled", True, "shared previews"),
         ("chat_posterly_enabled", True, "Posterly"),
         ("chat_artifact_hf_bucket_id", "other/private-bucket", "private bucket"),
+        ("chat_latex_compiler_modal_image_id", "latest", "immutable Sandbox image"),
         (
-            "chat_latex_compiler_hf_sandbox_egress_policy_attestation",
-            "unattested",
-            "egress",
+            "chat_latex_compiler_modal_environment",
+            "pwc-chat-staging",
+            "immutable Sandbox image",
         ),
         ("hf_token", "", "staging Hub identity"),
     ],
