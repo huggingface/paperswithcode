@@ -109,7 +109,6 @@ class TopicBubble(BaseModel):
     label: str | None = None
     creator: TopicPerson | None
     followers: int
-    # Set only on the few most followed topics, which the homepage shows as cards.
     week_papers: int | None = None
     follower_avatars: list[TopicPerson] = []
     top_paper: FeaturedTopicPaper | None = None

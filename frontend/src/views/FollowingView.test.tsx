@@ -623,27 +623,39 @@ it('shows the most followed topics above the trending feed with this week\'s pap
   renderFeed('/');
   const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
   const cards = await within(row).findAllByRole('listitem');
-  expect(cards).toHaveLength(3);
+  expect(cards).toHaveLength(4);
   expect(within(cards[0]).getByRole('link', { name: 'Speculative decoding' })).toHaveAttribute('href', '/topics/13-speculative-decoding');
   expect(cards[0]).toHaveTextContent('4 followers');
   expect(cards[0]).toHaveTextContent('7 new papers this week');
   expect(within(cards[0]).getByRole('link', { name: 'Faster drafts' })).toHaveAttribute('href', '/paper/2611.00001');
   expect(await within(cards[1]).findByRole('link', { name: /Following/ })).toHaveAttribute('href', '/following?topic=14');
-  expect(within(row).queryByText(/Ocr releases/)).not.toBeInTheDocument();
   // An avatar that fails to load shows the follower's initial instead.
   fireEvent.error(cards[0].querySelector('img.topic-avatar')!);
   expect(cards[0]).toHaveTextContent('A');
   expect(cards[0].querySelector('img.topic-avatar')).toBeNull();
 });
+it('paints last visit\'s popular topics at once, before follow state or the request return', async () => {
+  localStorage.setItem('pwc:featured-topics', JSON.stringify({ at: Date.now(), topics: featured }));
+  vi.mocked(researchApi.featuredTopics).mockReturnValue(new Promise(() => {}));
+  vi.mocked(researchApi.topics).mockReturnValue(new Promise(() => {}));
+  renderFeed('/');
+  const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
+  expect(within(row).getAllByRole('listitem')).toHaveLength(4);
+  // Until the account's topics load, no card offers Follow or Following.
+  expect(within(row).queryByRole('button', { name: 'Follow Speculative decoding' })).not.toBeInTheDocument();
+  expect(row.querySelectorAll('.home-topic-follow.is-pending')).toHaveLength(4);
+  expect(within(row).queryByRole('link', { name: /Following/ })).not.toBeInTheDocument();
+});
 it('invites guests to follow a popular topic after the sixth trending paper', async () => {
   auth.user = null;
   vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
-  vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
+  // The row above the feed offers the ten most followed topics; the card offers the next ones.
+  const filler = Array.from({ length: 7 }, (_, i) => ({ id: 100 + i, text: `filler ${i}`, label: null, creator: null, followers: 1 }));
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue([...featured.slice(0, 3), ...filler, featured[3]]);
   const { container } = renderFeed('/');
   const card = await screen.findByRole('region', { name: 'Get a feed for your research' });
   const items = [...container.querySelectorAll('.paper-list > *')];
   expect(items.indexOf(card)).toBe(6);
-  // The row above the feed already offers the three most followed topics.
   expect(within(card).queryByRole('button', { name: /speculative decoding/i })).not.toBeInTheDocument();
   fireEvent.click(await within(card).findByRole('button', { name: /ocr releases/i }));
   expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBe('[16]');

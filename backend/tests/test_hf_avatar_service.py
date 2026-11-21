@@ -39,7 +39,6 @@ def test_resolves_uploaded_default_and_missing_avatars_and_caches_hits(monkeypat
                 200, json={"avatarUrl": "https://cdn-avatars.huggingface.co/a.png"}
             )
         if name == "bob":
-            # HF redirects lowercased names to the account's own casing.
             return httpx.Response(307, headers={"location": "/api/users/Bob/avatar"})
         if name == "Bob":
             return httpx.Response(200, json={"avatarUrl": "/avatars/b.svg"})
@@ -53,7 +52,6 @@ def test_resolves_uploaded_default_and_missing_avatars_and_caches_hits(monkeypat
     assert hf_avatar_service.avatar_urls(["alice", "ghost"]) == {
         "alice": "https://cdn-avatars.huggingface.co/a.png"
     }
-    # Hits come from the cache; misses are retried.
     assert sorted(calls) == ["Bob", "alice", "bob", "ghost", "ghost"]
 
 
@@ -92,5 +90,5 @@ def test_serves_avatar_images_and_rejects_non_images(monkeypatch):
     assert hf_avatar_service.avatar_image("alice") == ("image/svg+xml", b"<svg/>")
     assert hf_avatar_service.avatar_image("alice") == ("image/svg+xml", b"<svg/>")
     assert hf_avatar_service.avatar_image("page") is None
-    assert hf_avatar_service.avatar_image("page") is None  # misses are remembered
+    assert hf_avatar_service.avatar_image("page") is None
     assert fetched == ["/alice", "/page"]

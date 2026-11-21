@@ -244,7 +244,6 @@ def follower_avatar(username: str, db: Session = Depends(get_database_session)):
     """An account's HF avatar, served from our origin for topic pages and cards."""
     if not public_topic_service.has_account(db, username):
         raise HTTPException(status_code=404, detail="Avatar not found")
-    # Free the pooled connection before a topic page's many lookups wait on HF.
     db.close()
     image = hf_avatar_service.avatar_image(username)
     if image is None:
@@ -255,7 +254,6 @@ def follower_avatar(username: str, db: Session = Depends(get_database_session)):
         media_type=content_type,
         headers={
             "Cache-Control": "public, max-age=86400",
-            # HF default avatars are SVG: never let one run script on our origin.
             "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
             "X-Content-Type-Options": "nosniff",
         },
