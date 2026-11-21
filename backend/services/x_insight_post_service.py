@@ -26,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
 import httpx
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
@@ -37,7 +37,10 @@ from backend.models.database import (
     Task,
     XInsightPost,
 )
-from backend.services.benchmark_trend_service import _support_weighted_score
+from backend.services.benchmark_trend_service import (
+    _support_weighted_score,
+    reporting_windows,
+)
 from backend.services.method_service import MethodService
 from backend.services.task_service import TaskService
 from backend.services.x_insight_cards import Bar, render_bar_card, render_list_card
@@ -336,19 +339,20 @@ def benchmark_growth(recent: int, baseline: int) -> str:
 
 def trending_benchmark(db: Session, *, now: datetime) -> Insight | None:
     """The benchmark whose reporting rate grew the most, site-wide."""
-    today = now.date()
-    recent_start = today - timedelta(days=BENCHMARK_RECENT_DAYS)
-    baseline_start = recent_start - timedelta(days=BENCHMARK_BASELINE_DAYS)
-    published = Paper.date_published
-    recent = func.count(func.distinct(case((published > recent_start, Paper.id))))
-    baseline = func.count(func.distinct(case((published <= recent_start, Paper.id))))
+    windows = reporting_windows(
+        now.date(),
+        recent_days=BENCHMARK_RECENT_DAYS,
+        baseline_days=BENCHMARK_BASELINE_DAYS,
+    )
     rows = db.execute(
-        select(Dataset, recent.label("recent"), baseline.label("baseline"))
+        select(
+            Dataset, windows.recent.label("recent"), windows.baseline.label("baseline")
+        )
         .join(Evaluation, Evaluation.dataset_id == Dataset.id)
         .join(Paper, and_(Paper.id == Evaluation.paper_id, Paper.is_latest_version))
-        .where(published > baseline_start, published <= today)
+        .where(windows.both)
         .group_by(Dataset.id)
-        .having(recent >= BENCHMARK_MIN_RECENT_PAPERS)
+        .having(windows.recent >= BENCHMARK_MIN_RECENT_PAPERS)
     ).all()
     scored = sorted(
         rows,

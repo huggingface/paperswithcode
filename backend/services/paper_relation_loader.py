@@ -53,6 +53,7 @@ from backend.models.database import (
     Task as DBTask,
 )
 from backend.services.abstract_link_service import abstract_sha, catalog_previews
+from backend.services.repository_ordering import primary_repository_order
 from backend.utils.organization_logos import organization_logo_path
 from backend.utils.urls import get_method_source_url, get_paper_route_identifier
 
@@ -341,11 +342,7 @@ class PaperRelationLoader:
                 DBPaperRepository.repository_id == DBRepository.id,
             )
             .filter(requested.id.in_(unique_ids))
-            .order_by(
-                requested.id,
-                desc(DBPaperRepository.is_official),
-                desc(DBRepository.num_stars).nullslast(),
-            )
+            .order_by(requested.id, *primary_repository_order())
             .all()
         )
         seen_repositories: dict[int, set[int]] = {}

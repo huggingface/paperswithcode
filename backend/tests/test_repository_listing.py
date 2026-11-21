@@ -1,13 +1,14 @@
 """Repository listings return every owner match and expose paper_count."""
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from backend.database.connection import get_database_session
 from backend.main import create_app
 from backend.models.database import Base, PaperRepository, Repository
+from backend.services.repository_ordering import primary_repository_order
 from backend.services.repository_service import RepositoryService
 
 
@@ -97,3 +98,27 @@ def test_repository_list_without_counts_leaves_paper_count_empty():
         ("b", None),
         ("c", None),
     ]
+
+
+def test_primary_repository_order_prefers_official_then_stars_then_url():
+    session = _session()
+    session.add_all(
+        [
+            Repository(id=4, url="https://github.com/z/top", num_stars=50),
+            Repository(id=5, url="https://github.com/a/tie", num_stars=9),
+            PaperRepository(paper_id=12, repository_id=1, is_official=True),
+            PaperRepository(paper_id=12, repository_id=2),
+            PaperRepository(paper_id=12, repository_id=4),
+            PaperRepository(paper_id=12, repository_id=5),
+        ]
+    )
+    session.commit()
+
+    ids = session.scalars(
+        select(Repository.id)
+        .join(PaperRepository, PaperRepository.repository_id == Repository.id)
+        .where(PaperRepository.paper_id == 12)
+        .order_by(*primary_repository_order())
+    ).all()
+
+    assert ids == [1, 4, 5, 2]

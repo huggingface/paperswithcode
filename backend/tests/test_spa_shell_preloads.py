@@ -77,6 +77,34 @@ def test_every_mapped_view_is_a_lazy_route_in_app():
         assert (REPO / "frontend" / source).exists(), source
 
 
+def test_mapped_routes_render_the_same_view_as_app_routes():
+    app = (REPO / "frontend" / "src" / "App.tsx").read_text()
+    lazy = dict(
+        re.findall(
+            r'const (\w+) = React\.lazy\(\(\) => import\("@/(views/\w+)"\)\)', app
+        )
+    )
+    routes = re.findall(r'<Route\s+path="([^"]+)"\s+element=\{[^<]*<(\w+)', app)
+    assert routes
+    covered = set()
+    for path, component in routes:
+        sample = re.sub(r":\w+", "sample", path)
+        source = next(
+            (
+                src
+                for pattern, src in spa_shell_service._ROUTE_VIEWS
+                if pattern.match(sample)
+            ),
+            None,
+        )
+        if source is None:
+            continue
+        assert f"src/{lazy.get(component)}.tsx" == source, (path, component, source)
+        covered.add(source)
+    mapped = {source for _pattern, source in spa_shell_service._ROUTE_VIEWS}
+    assert mapped == covered, mapped - covered
+
+
 def test_nested_discovery_pages_preload_the_requested_view(shell_dir):
     page = DiscoveryPage(
         kind="Conference",
