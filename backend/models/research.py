@@ -93,6 +93,14 @@ class PublicTopicView(BaseModel):
     is_creator: bool = False
 
 
+class FeaturedTopicPaper(BaseModel):
+    """This week's best match for a featured topic."""
+
+    id: int
+    arxiv_id: str | None = None
+    title: str
+
+
 class TopicBubble(BaseModel):
     """A popular public topic offered on the homepage."""
 
@@ -101,6 +109,9 @@ class TopicBubble(BaseModel):
     label: str | None = None
     creator: TopicPerson | None
     followers: int
+    week_papers: int | None = None
+    follower_avatars: list[TopicPerson] = []
+    top_paper: FeaturedTopicPaper | None = None
 
 
 class FollowerVisibilityUpdate(BaseModel):
