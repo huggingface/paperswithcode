@@ -39,6 +39,7 @@ from backend.services.leaderboard_ranking_service import (
 )
 from backend.services.conference_service import ConferenceService
 from backend.services.dataset_service import DatasetService
+from backend.services.evaluation_service import best_rank_order
 from backend.services.sitemap_service import eligible_paper_filter
 from backend.utils.urls import get_paper_route_identifier
 from backend.utils.task_slugs import canonical_task_slug, task_slug_candidates
@@ -583,11 +584,7 @@ class DiscoveryPageService:
                 Evaluation.best_rank,
             )
             .filter(Evaluation.dataset_id == entity.id)
-            .order_by(
-                Evaluation.best_rank.asc().nullslast(),
-                Evaluation.best_metric.asc().nullslast(),
-                Evaluation.id.asc(),
-            )
+            .order_by(*best_rank_order())
             .all()
         ]
         if requested is not None:

@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 HOME_PAGES = 3
 HOME_PAGE_SIZE = 30
+HOME_WINDOW_DAYS = 6
 ENTITY_PAGE_SIZE = 20
+ENTITY_WINDOW_DAYS = 29
 
 
 def visible_paper_ids(db: Session, today: date) -> list[int]:
@@ -41,7 +43,7 @@ def visible_paper_ids(db: Session, today: date) -> list[int]:
             page=page,
             page_size=HOME_PAGE_SIZE,
             order_by="trending",
-            start_date=today - timedelta(days=6),
+            start_date=today - timedelta(days=HOME_WINDOW_DAYS),
             end_date=today,
         )
         ordered.update((int(paper.id), None) for paper in feed.results)
@@ -50,7 +52,11 @@ def visible_paper_ids(db: Session, today: date) -> list[int]:
     feeds = {"task": tasks.get_task_papers, "method": methods.get_method_papers}
     for kind, entity_id in _entities_by_paper_count(db):
         feed = feeds[kind](
-            str(entity_id), page_size=ENTITY_PAGE_SIZE, order_by="trending"
+            str(entity_id),
+            page_size=ENTITY_PAGE_SIZE,
+            order_by="trending",
+            start_date=today - timedelta(days=ENTITY_WINDOW_DAYS),
+            end_date=today,
         )
         ordered.update((int(paper.id), None) for paper in feed.results)
     return list(ordered)

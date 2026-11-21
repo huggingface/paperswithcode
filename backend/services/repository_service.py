@@ -32,6 +32,7 @@ from backend.models.papers import (
 
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
 from backend.utils.github_utils import normalize_github_url, parse_github_url
+from backend.services.repository_ordering import primary_repository_order
 from backend.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -270,11 +271,7 @@ class RepositoryService:
             self.db.query(DBPaperRepository.is_official, DBRepository)
             .join(DBRepository, DBPaperRepository.repository_id == DBRepository.id)
             .filter(DBPaperRepository.paper_id == db_paper_id)
-            .order_by(
-                desc(DBPaperRepository.is_official),
-                desc(DBRepository.num_stars).nullslast(),
-                DBRepository.id,
-            )
+            .order_by(*primary_repository_order())
             .all()
         )
         return [

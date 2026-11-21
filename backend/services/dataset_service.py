@@ -66,6 +66,7 @@ from backend.services.entity_search import (
     prepare_entity_search,
 )
 from backend.services.metric_value_service import parse_metric_value
+from backend.services.repository_ordering import primary_repository_order
 from backend.utils.slug_utils import slugify
 from backend.utils.task_hierarchy import collect_descendant_task_ids
 from backend.utils.task_slugs import task_slug_candidates
@@ -378,11 +379,7 @@ class DatasetService:
                     DBRepository.id == DBPaperRepository.repository_id,
                 )
                 .filter(DBPaperRepository.paper_id.in_(paper_ids))
-                .order_by(
-                    desc(DBPaperRepository.is_official),
-                    desc(DBRepository.num_stars),
-                    asc(DBRepository.url),
-                )
+                .order_by(*primary_repository_order())
                 .all()
             )
             code_urls: dict = {}

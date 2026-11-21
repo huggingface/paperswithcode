@@ -1,9 +1,10 @@
 """Task-scoped benchmark trends derived from evaluation-reporting papers."""
 
 import math
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import and_, case, func
+from sqlalchemy import ColumnElement, and_, case, func
 from sqlalchemy.orm import Session
 
 from backend.models.taxonomy import (
@@ -38,6 +39,31 @@ def _support_weighted_score(
         baseline_equivalent + _SUPPORT_PRIOR_PAPERS
     )
     return math.log1p(recent) * smoothed_lift
+
+
+@dataclass(frozen=True)
+class ReportingWindows:
+    """Distinct-paper counts for a recent window and the baseline before it."""
+
+    recent: ColumnElement
+    baseline: ColumnElement
+    both: ColumnElement
+
+
+def reporting_windows(
+    today: date, *, recent_days: int, baseline_days: int
+) -> ReportingWindows:
+    """Windows with exclusive starts: ``(start, today]`` and ``(start, recent start]``."""
+    recent_start = today - timedelta(days=recent_days)
+    baseline_start = recent_start - timedelta(days=baseline_days)
+    published = DBPaper.date_published
+    in_recent = and_(published > recent_start, published <= today)
+    in_baseline = and_(published > baseline_start, published <= recent_start)
+    return ReportingWindows(
+        recent=func.count(func.distinct(case((in_recent, DBPaper.id), else_=None))),
+        baseline=func.count(func.distinct(case((in_baseline, DBPaper.id), else_=None))),
+        both=and_(published > baseline_start, published <= today),
+    )
 
 
 class BenchmarkTrendService:
@@ -84,27 +110,15 @@ class BenchmarkTrendService:
         """
         task = self._resolve_task(task_id)
         generated_on = today or datetime.now(UTC).date()
-        recent_start = generated_on - timedelta(days=recent_days)
-        baseline_start = recent_start - timedelta(days=baseline_days)
+        windows = reporting_windows(
+            generated_on, recent_days=recent_days, baseline_days=baseline_days
+        )
+        recent_count = windows.recent
+        baseline_count = windows.baseline
         scoped_task_ids = (
             collect_descendant_task_ids(self.db, task.id)
             if include_descendants
             else [task.id]
-        )
-
-        in_recent = and_(
-            DBPaper.date_published > recent_start,
-            DBPaper.date_published <= generated_on,
-        )
-        in_baseline = and_(
-            DBPaper.date_published > baseline_start,
-            DBPaper.date_published <= recent_start,
-        )
-        recent_count = func.count(
-            func.distinct(case((in_recent, DBPaper.id), else_=None))
-        )
-        baseline_count = func.count(
-            func.distinct(case((in_baseline, DBPaper.id), else_=None))
         )
 
         rows = (

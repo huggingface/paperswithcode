@@ -1,9 +1,13 @@
+import re
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
 
 from backend.services import paper_suggested_questions_warm_service as warm
+
+FRONTEND = Path(__file__).resolve().parents[2] / "frontend" / "src"
 
 
 def _feed(*ids):
@@ -26,7 +30,12 @@ def test_visible_paper_ids_follow_home_then_busiest_entity_pages(monkeypatch):
             pass
 
         def get_task_papers(self, task_id, **kwargs):
-            assert kwargs == {"page_size": 20, "order_by": "trending"}
+            assert kwargs == {
+                "page_size": 20,
+                "order_by": "trending",
+                "start_date": date(2026, 9, 16),
+                "end_date": date(2026, 10, 15),
+            }
             return _feed(2, 10) if task_id == "7" else _feed(11)
 
     class Methods:
@@ -104,3 +113,26 @@ def test_warm_generates_missing_papers_in_order_up_to_limit(monkeypatch):
         "generated": 1,
         "failed": 1,
     }
+
+
+def test_feed_defaults_match_the_frontend():
+    feed_view = (FRONTEND / "views" / "FeedView.tsx").read_text()
+    assert f"const FEED_PAGE_SIZE = {warm.HOME_PAGE_SIZE};" in feed_view
+    assert 'mode === "trending" ? "week" : "month"' in feed_view
+
+    date_range = (FRONTEND / "lib" / "paperDateRange.ts").read_text()
+    assert (
+        f'preset === "week" ? {warm.HOME_WINDOW_DAYS} : {warm.ENTITY_WINDOW_DAYS}'
+        in date_range
+    )
+
+    feed_params = (FRONTEND / "hooks" / "usePaperFeedParams.ts").read_text()
+    assert 'readHomepagePaperDateRange(searchParams, undefined, "month")' in feed_params
+    assert ': "trending";' in feed_params
+
+    for view in ("TagBrowseView.tsx", "MethodDetailView.tsx"):
+        source = (FRONTEND / "views" / view).read_text()
+        assert "usePaperFeedParams({ defaultToLastMonth: true })" in source, view
+        assert re.search(
+            rf"\.\.\.feed\.filters, page, page_size: {warm.ENTITY_PAGE_SIZE}\b", source
+        ), view

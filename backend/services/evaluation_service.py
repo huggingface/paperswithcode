@@ -40,6 +40,7 @@ from backend.services.evaluation_entry_identity import (
 )
 from backend.services.leaderboard_metric_service import LeaderboardMetricService
 from backend.services.metric_value_service import parse_metric_value
+from backend.services.repository_ordering import primary_repository_order
 from backend.services.catalog_errors import (
     CatalogConflictError,
     CatalogNotFoundError,
@@ -47,6 +48,17 @@ from backend.services.catalog_errors import (
 )
 
 RankScopes = set[tuple[int, int, str]]
+
+
+def best_rank_order(descending: bool = False) -> tuple:
+    """The leaderboard order behind ``ordering=best_rank`` on evaluation lists."""
+    rank = desc(DBEvaluation.best_rank) if descending else asc(DBEvaluation.best_rank)
+    return (
+        rank.nulls_last(),
+        asc(DBEvaluation.best_metric).nulls_last(),
+        asc(DBEvaluation.id),
+    )
+
 
 _PAPER_REF = re.compile(r"^paper:(\d+)$", re.IGNORECASE)
 _HF_PAPER_URL = re.compile(
@@ -434,11 +446,7 @@ class EvaluationService:
             self.db.query(DBPaperRepository.paper_id, DBRepository.url)
             .join(DBRepository, DBRepository.id == DBPaperRepository.repository_id)
             .filter(DBPaperRepository.paper_id.in_(paper_ids))
-            .order_by(
-                desc(DBPaperRepository.is_official),
-                desc(DBRepository.num_stars),
-                asc(DBRepository.url),
-            )
+            .order_by(*primary_repository_order())
         ):
             code_urls.setdefault(paper_id, url)
         related_keys = _related_source_keys_by_paper(
@@ -797,15 +805,8 @@ class EvaluationService:
                     order_field = DBEvaluation.created_at
 
                 if order_by == "best_rank":
-                    primary = (
-                        desc(order_field).nulls_last()
-                        if order_dir == "desc"
-                        else asc(order_field).nulls_last()
-                    )
                     query = query.order_by(
-                        primary,
-                        asc(DBEvaluation.best_metric).nulls_last(),
-                        asc(DBEvaluation.id),
+                        *best_rank_order(descending=order_dir == "desc")
                     )
                 elif order_dir == "desc":
                     query = query.order_by(desc(order_field))
