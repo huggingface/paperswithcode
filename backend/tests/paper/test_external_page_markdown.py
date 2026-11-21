@@ -306,7 +306,6 @@ def test_failed_rescrape_after_a_source_change_leaves_no_old_copy(monkeypatch):
     status = json.loads(bucket.files[service.status_key("123294")])
     assert status["page_url"] == URL
     assert status["status"] == "failed"
-    # The new page now owns the record: nothing is stale, and it backs off.
     assert not service.markdown_stale(status, URL)
     assert not service.retry_due(status)
 
@@ -315,7 +314,6 @@ def test_rescrape_keeps_a_copy_another_worker_just_published(monkeypatch):
     stale = {"status": "succeeded", "page_url": "https://huggingface.co/acme/model"}
     published = {"status": "succeeded", "page_url": URL, "markdown_sha256": "new"}
     bucket = FakeBucket({"external/123294.md": b"new page copy"}).install(monkeypatch)
-    # The first read predates the other worker's publish; the second follows it.
     reads = iter([stale, published])
     monkeypatch.setattr(service, "read_status", lambda *_a, **_kw: next(reads))
     monkeypatch.setattr(service, "scrape_page", pytest.fail)
@@ -752,7 +750,6 @@ def test_hourly_backfill_prepares_a_bounded_batch_of_due_pages(monkeypatch):
             "retryable": False,
             "attempt_count": 1,
         },
-        # Scraped before the paper's source URL changed.
         service.status_key("5"): {
             "status": "succeeded",
             "page_url": "https://huggingface.co/acme/model",
@@ -815,7 +812,6 @@ def test_anonymous_miss_does_not_spend_firecrawl_credits(monkeypatch, reader_cli
             False,
         ),
         ("https://openai.com/index/introducing-gpt-6-1-terra#models", False, {}, False),
-        # A copy or failure recorded for the paper's previous source URL.
         (
             "https://openai.com/index/introducing-gpt-6-1-terra",
             True,
@@ -996,7 +992,6 @@ def test_framing_record_keeps_scrape_status_and_survives_a_scrape(monkeypatch):
     status = json.loads(bucket.files[service.status_key("123294")])
     assert service.page_frameable(status, URL)
     assert not service.page_frameable(status, "https://example.com/other")
-    # A framing-only record is not a scrape attempt.
     assert service.retry_due(status)
 
     monkeypatch.setattr(

@@ -90,7 +90,7 @@ def test_submit_tasks_noop_rejects(db_session, paper_fixture):
             paper_id=1,
             hf_username="alice",
             edit_type="tasks",
-            proposed_payload={"task_ids": [2, 1]},  # same set, different order
+            proposed_payload={"task_ids": [2, 1]},
         )
     _no_rows_created(db_session)
 
@@ -416,7 +416,6 @@ def test_submit_source_url_noop_rejects(db_session, paper_fixture):
             paper_id=1,
             hf_username="alice",
             edit_type="source_url",
-            # Same URL with surrounding whitespace — should still be a no-op.
             proposed_payload={"source_url": "  https://example.com/paper  "},
         )
     _no_rows_created(db_session)
@@ -1200,7 +1199,6 @@ def test_malformed_evaluation_batch_rejected_without_partial_acceptance(
             edit_type="evaluations",
             proposed_payload={"operations": [valid]},
         )
-        # Simulate a stored proposal accepted before canonical validation.
         row.proposed_payload = payload
         db_session.commit()
         with pytest.raises(PendingEditError, match=r"operations\[1\]"):

@@ -80,11 +80,6 @@ def _callback_job(
             db, job_id, token
         )
         if token_owner is not None:
-            # The worker holding this token may be compromised: stop its job
-            # (which also invalidates the token) rather than pausing every
-            # scheduled job, which one worker must not be able to do.
-            # Revoke the token first and commit, so it is dead even if the
-            # remote cancel or the next dispatch below fails.
             token_owner.callback_token_hash = None
             token_owner.error = "Callback token was presented for another job"
             db.commit()
@@ -111,7 +106,6 @@ def _service(db: Session) -> CodexCurationCallbackService:
 
 def _autonomous_callback_context(db: Session, row: PaperCurationJob) -> RunContext:
     context = ensure_curation_run(db, row)
-    # Monitoring remains durable while a later policy check may reject writes.
     db.commit()
     return context
 
@@ -121,9 +115,6 @@ def _leaderboard_inventory(db: Session, query: str) -> list[dict]:
     return _service(db).leaderboard_inventory(query)
 
 
-# Frontier LLM model cards list 40+ benchmarks, and the skill asks for each
-# name plus common variants, so leaderboard lookups need a larger budget than
-# taxonomy searches. Paper 131976 (Ripple-65B) ran out at 30 and got no evals.
 QUERY_LIMITS = {"taxonomy_query_count": 30, "leaderboard_query_count": 150}
 QUERY_LABELS = {
     "taxonomy_query_count": "taxonomy and catalog searches",
@@ -136,7 +127,6 @@ def _consume_query(db: Session, row: PaperCurationJob, field: str) -> None:
     value = getattr(row, field)
     if value >= QUERY_LIMITS[field]:
         db.rollback()
-        # Agents read a bare 429 as a rate limit and sleep; say it is final.
         raise HTTPException(
             status_code=429,
             detail=(
@@ -245,7 +235,6 @@ def retry_job(
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if getattr(row, "runner", "codex") == "pi":
-        # Pairs are best effort: a failed Pi run is itself a comparison result.
         raise HTTPException(status_code=409, detail="Pi shadow jobs are not retried")
     return codex_paper_job_service.retry(db, row, settings)
 
@@ -411,7 +400,6 @@ def apply_mutation(
     row = _callback_job(job_id, authorization, db)
     try:
         service = _service(db)
-        # Pi shadow jobs never write, so they need no autonomous run context.
         pi_shadow = getattr(row, "runner", "codex") == "pi"
         context = (
             _autonomous_callback_context(db, row)

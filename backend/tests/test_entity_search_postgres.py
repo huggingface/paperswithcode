@@ -363,7 +363,6 @@ def test_zero_result_only_fuzzy_recovery_and_ambiguity(session_factory):
             "swe-bench-multilingual"
         ]
         assert _slugs(service.search_datasets("verifed")) == ["swe-bench-verified"]
-        # A successful deterministic family query never mixes in typo candidates.
         assert "swe-bench" in _slugs(service.search_datasets("swe ben"))
 
 
@@ -373,8 +372,6 @@ def test_entity_native_trends_break_textual_ties(session_factory):
             "trend-set-beta",
             "trend-set-alpha",
         ]
-        # Hyphenated compounds and repeated words must not outrank trends for
-        # a single-term query.
         assert _slugs(DatasetService(session).search_datasets("human"))[:2] == [
             "humaneval",
             "bedlam-human-scene",
@@ -638,7 +635,6 @@ def test_cleanup_preconditions_rollback_idempotency_and_drop_gate(
         )
         assert tuple(_safety_snapshot(connection)) == safety_before
 
-    # Validate the production-gated drop only on this disposable database.
     with entity_search_engine.begin() as connection:
         connection.exec_driver_sql(
             "ALTER TABLE tasks ADD COLUMN is_visible boolean NOT NULL DEFAULT true"

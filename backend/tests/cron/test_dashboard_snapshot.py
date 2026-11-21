@@ -254,7 +254,7 @@ def test_workflow_collection_batches_recent_runs(monkeypatch):
     assert set(statuses) == {job.id for job in jobs}
     assert all(status["scheduled_run"] for status in statuses.values())
     assert sum(args[:1] == ["api"] for args, _timeout in calls) == 1
-    assert len(calls) == 2  # one batch plus the one multi-job workflow detail
+    assert len(calls) == 2
 
 
 def test_workflow_collection_pages_until_all_workflows_are_represented(monkeypatch):

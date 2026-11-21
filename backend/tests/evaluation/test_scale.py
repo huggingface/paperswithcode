@@ -101,7 +101,7 @@ def test_board_rejects_fraction_declared_as_percent(target, source, suggested):
 
 
 def test_one_genuine_sub_one_row_does_not_disable_the_board_check():
-    board = [0.44, *range(15, 100)]  # AIME-like: a lone weak model below 1
+    board = [0.44, *range(15, 100)]
     with pytest.raises(ValueError, match="at least 18"):
         validate_board_scale("0-100", evidence(0.714, "0-100"), lambda: board)
 
@@ -109,16 +109,13 @@ def test_one_genuine_sub_one_row_does_not_disable_the_board_check():
 @pytest.mark.parametrize(
     "target,source,units,board",
     [
-        # Converted fractions and ordinary percentages are not ambiguous.
         ("0-100", 0.923, "0-1", PERCENT_BOARD),
         ("0-100", 92.3, "0-100", PERCENT_BOARD),
         ("0-100", 0, "0-100", PERCENT_BOARD),
-        # Too few rows, or a board whose low tail genuinely scores near zero.
         ("0-100", 0.9, "0-100", [92.1, 88.4]),
         ("0-100", 0.9, "0-100", [0.5, 1.2, 2.4, 3.1]),
         ("0-100", 0.9, "0-100", [37.1, 95.0, 0.9, 54.4]),
         ("0-100", 0.9, "0-100", [1.06, 2.5, 3.0, *range(20, 67)]),
-        # Only 0-100 leaderboards are checked.
         ("0-1", 0.923, "0-100", PERCENT_BOARD),
         ("seconds", 0.9, "native", PERCENT_BOARD),
     ],

@@ -97,7 +97,7 @@ def get_cron_status(
     ),
 ):
     """Return the shared registry-backed CRON health snapshot."""
-    _ = days  # reserved for future history windows
+    _ = days
     service = CronDashboardSnapshotService()
     try:
         payload, schedule_refresh = service.get_status(force_refresh=force_refresh)

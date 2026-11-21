@@ -121,8 +121,6 @@ def test_iter_visible_passes_trending_top_to_trending_iterator():
 def test_collect_candidates_visible_caps_to_limit_after_dedup():
     from scripts.daily.preload_thumbnails import Candidate
 
-    # missing_only=False so we don't go through the local-cache validity filter
-    # for this test, which only checks the limit/dedup contract.
     job = _make_job(limit=2, missing_only=False)
 
     job._iter_citation_top = lambda session: iter(
@@ -156,13 +154,13 @@ def test_missing_only_filter_keeps_invalid_local_thumbnails(tmp_path: Path):
     valid_filename = build_thumbnail_filename("9999.0001", "v1")
     invalid_filename = build_thumbnail_filename("9999.0002", "v1")
     _save_jpeg(tmp_path / valid_filename, 400)
-    _save_jpeg(tmp_path / invalid_filename, 200)  # wrong width
+    _save_jpeg(tmp_path / invalid_filename, 200)
 
     job._iter_citation_top = lambda session: iter(
         [
             Candidate(10, "9999.0001", "v1"),
             Candidate(11, "9999.0002", "v1"),
-            Candidate(12, "9999.0003", "v1"),  # missing entirely
+            Candidate(12, "9999.0003", "v1"),
         ]
     )
     job._iter_trending = lambda session, limit_override=None: iter([])
@@ -189,7 +187,7 @@ def test_process_paper_regenerates_when_local_thumbnail_invalid(tmp_path: Path):
 
     filename = build_thumbnail_filename("8888.0001", "v1")
     invalid_path = tmp_path / filename
-    _save_jpeg(invalid_path, 100)  # wrong width
+    _save_jpeg(invalid_path, 100)
 
     thumbnail_service = MagicMock()
     thumbnail_service.get_filename.return_value = filename

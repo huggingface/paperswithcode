@@ -64,7 +64,6 @@ def test_short_due_selection_is_topped_up_with_early_refreshes():
     asyncio.run(job.process_papers_in_streaming_chunks(3))
 
     job.get_early_refresh_chunk.assert_called_once_with(2)
-    # The selection transaction ends before any Semantic Scholar call.
     job.db_session.close.assert_called_once_with()
     assert job.stats["papers_selected"] == 3
     assert job.stats["papers_refreshed_early"] == 2
@@ -81,7 +80,6 @@ def test_steady_share_covers_the_cycle_with_headroom():
     job.paper_service = Mock()
     job.paper_service.get_citation_refreshable_count.return_value = 115_283
 
-    # 115,283 * 1.2 / 168 hours, rounded up.
     assert job.steady_papers_per_run() == 824
 
 

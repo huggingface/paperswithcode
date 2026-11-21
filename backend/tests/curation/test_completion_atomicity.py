@@ -185,7 +185,6 @@ def test_dispatch_failure_leaves_recoverable_successor(
     with pytest.raises(RuntimeError, match="dispatch unavailable"):
         service.complete(db, job, report="done", error=None, settings=settings)
     db.rollback()
-    # Replaying completion does not rerun health accounting or create successors.
     service.complete(db, job, report="duplicate", error="late error", settings=settings)
     assert job.report == "done"
     assert db.query(PaperCurationJob).count() == 2
@@ -199,7 +198,6 @@ def test_dispatch_failure_leaves_recoverable_successor(
         db.commit()
 
     monkeypatch.setattr(service, "_dispatch_row", dispatch_row)
-    # The ordinary scheduler, in a later session/process, finds the durable queue.
     monkeypatch.setattr(service, "_scheduled_usage_allowed", lambda *_args: True)
     state = db.get(PaperCurationSchedulerState, 1)
     state.dispatch_enabled = True
@@ -355,7 +353,6 @@ def test_runner_exception_names_outside_transport_still_count(completion):
 
 
 def test_runner_callback_blips_and_awaiting_markdown_do_not_pause(completion):
-    # The rows that paused production dispatch on 2026-11-03 at 04:31 UTC.
     db, service, settings, job = completion
     job.parent_workflow_id = None
     state = db.get(PaperCurationSchedulerState, 1)

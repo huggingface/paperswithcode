@@ -290,7 +290,6 @@ def test_public_update_cannot_override_patch_presence_with_internal_flags(
     payload = {"source_url": None, "source_url_set": False, "num_parameters_set": True}
     with TestClient(_evaluation_app(monkeypatch, Service())) as client:
         if batch:
-            # The batch route checks the actor's role before adapting operations.
             from backend.utils.auth import evaluation_mutation_context
 
             client.app.dependency_overrides[evaluation_mutation_context] = lambda: {

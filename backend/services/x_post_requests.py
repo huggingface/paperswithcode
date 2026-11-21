@@ -41,7 +41,7 @@ class AlreadyPostedError(ValueError):
 
 @dataclass
 class RequestStatus:
-    state: str  # "none", "requested", "posted"
+    state: str
     position: int | None = None
     requested_at: datetime | None = None
     post_url: str | None = None
@@ -130,7 +130,7 @@ def requested_candidates(db: Session) -> list[dict[str, Any]]:
     posted = posted_paper_ids(db)
     requests = []
     for request in open_requests(db):
-        if request.paper_id in posted:  # e.g. a SOTA post went out meanwhile
+        if request.paper_id in posted:
             request.resolved_at, request.resolution = datetime.now(UTC), "posted"
         else:
             requests.append(request)

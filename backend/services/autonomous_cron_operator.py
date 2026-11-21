@@ -70,8 +70,6 @@ _SAFE_RETRIES = frozenset(
     }
 )
 
-# Jobs that can write editorial/catalog entities remain diagnosis-and-alert only
-# until they run with a database role that cannot create taxonomy resources.
 _SAFE_SOURCE_REPAIRS = frozenset(
     {
         "calculate_paper_trending_scores",
@@ -79,8 +77,6 @@ _SAFE_SOURCE_REPAIRS = frozenset(
     }
 )
 
-# Shared dashboard/launcher files also own chat-monitor behavior, so autonomous
-# non-chat repairs may not modify them before the qualified chat baseline lands.
 _SHARED_CRON_SOURCE: tuple[str, ...] = ()
 
 _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {

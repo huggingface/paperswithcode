@@ -307,8 +307,6 @@ def decide_submission(args: argparse.Namespace) -> int:
                 )
             else:
                 operations.assert_run_context(db, context)
-            # Run summaries are monitoring/audit data and remain durable even
-            # when manual mode blocks the subsequent mutation.
             db.commit()
             service = PendingEditService(db)
             reviewer_subject = f"codex-review:{args.review_run_id}"
@@ -334,7 +332,5 @@ def decide_submission(args: argparse.Namespace) -> int:
             _emit({"database": identity, "submission": _serialize(row)}, args.json)
             return 0
 
-        # A defer/needs-human result deliberately leaves the human queue row
-        # untouched. The autonomous run ledger records execution separately.
         _emit({"database": identity, "submission": _serialize(row)}, args.json)
     return 0

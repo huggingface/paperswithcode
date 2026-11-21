@@ -234,8 +234,6 @@ class HFTrendingModelCurationService:
             summary = self._reconcile_once(
                 dispatch=False, dry_run=True, max_queued=max_queued
             )
-            # The discovery transaction was rolled back. Persist only the
-            # rollout marker so this exact dry cycle cannot publish anything.
             state = self._rollout_state()
             state.discovery_dry_run_completed = True
             self.db.commit()
@@ -295,9 +293,6 @@ class HFTrendingModelCurationService:
         dry_run: bool,
         max_queued: int,
     ) -> dict:
-        # A paper may have had an active daily workflow when its model was first
-        # resolved. Revisit these idempotently so it is released as soon as that
-        # workflow finishes.
         if not dry_run:
             for resolved in (
                 self.db.query(TrendingModelCandidate)
@@ -337,9 +332,6 @@ class HFTrendingModelCurationService:
             "errors": [],
             "queued_candidate_ids": [],
         }
-        # A sibling release can establish the canonical family paper after the
-        # original model has fallen out of the live trending page. Reconsider
-        # those bounded rejections independently of today's discovery feed.
         rejected_candidates = (
             self.db.query(TrendingModelCandidate)
             .filter(TrendingModelCandidate.status == "rejected")
@@ -489,8 +481,6 @@ class HFTrendingModelCurationService:
                     .first()
                 )
             if active is not None:
-                # Do not move the pinned card revision underneath an active job.
-                # The next hourly pass will observe and queue the new revision.
                 candidate.last_seen_at = now
                 candidate.trending_score = model.trending_score
                 continue

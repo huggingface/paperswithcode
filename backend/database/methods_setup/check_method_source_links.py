@@ -86,7 +86,6 @@ def parse_trusted_source_url(source_url: str | None) -> SourcePaperRef | None:
     return _split_version(match.group(1))
 
 
-# Backwards-compatible alias for older focused tests/imports.
 parse_local_source_url = parse_trusted_source_url
 
 

@@ -93,7 +93,6 @@ def curation_primary_authorization(
             ),
         )
     if row.kind == "review-benchmark-gaps":
-        # The overseer's per-candidate decisions are checked again at apply.
         return (
             Capability.CREATE_BENCHMARK_FROM_GAP,
             ResourceRef(ResourceKind.BENCHMARK_CANDIDATE, "review-queue", True),

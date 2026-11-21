@@ -92,14 +92,12 @@ def list_datasets(
     - `/api/v1/datasets/?name=COCO` - Filter datasets by name containing "COCO"
     - `/api/v1/datasets/?ordering=-name` - Order by name descending
     """
-    # Parse ordering
     order_dir = "asc"
     order_by = ordering
     if ordering and ordering.startswith("-"):
         order_dir = "desc"
         order_by = ordering[1:]
 
-    # Validate order_by field
     valid_fields = ["name", "full_name", "created_at", "paper_count"]
     if order_by not in valid_fields:
         order_by = "name"
@@ -108,7 +106,6 @@ def list_datasets(
 
     task_id = service.resolve_task_id(task, case_sensitive_slug=True) if task else None
 
-    # Search still respects task / descendant / min_eval_count filters.
     if q:
         return service.search_datasets(
             query=q,
@@ -228,7 +225,6 @@ def get_dataset_evaluations(
     dataset_service = DatasetService(db)
     dataset_id_int = dataset_service.require_numeric_dataset_id(dataset_id)
 
-    # Parse ordering
     order_dir = "asc"
     order_by = "created_at"
     if ordering:
@@ -335,9 +331,6 @@ def update_dataset(
     - 500 on server error
     """
     return DatasetService(db).update_dataset_by_identifier(dataset_id, request)
-
-
-# Leaderboard-Metric Management Endpoints (New: task-dataset-metric triples)
 
 
 @router.get("/{dataset_id}/tasks/{task_id}/metrics", response_model=LeaderboardMetrics)

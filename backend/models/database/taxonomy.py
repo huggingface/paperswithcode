@@ -37,7 +37,6 @@ class Area(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -45,7 +44,6 @@ class Area(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     tasks: Mapped[List["Task"]] = relationship("Task", back_populates="area")
 
     def __repr__(self) -> str:
@@ -69,7 +67,6 @@ class Task(Base):
     slug: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True)
     keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Hierarchical structure
     parent_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("tasks.id"), nullable=True
     )
@@ -78,20 +75,14 @@ class Task(Base):
     )
     level: Mapped[int] = mapped_column(Integer, default=0)
 
-    # Metadata columns
     image_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     image_credit: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
-    # DB-backed hero image. `image_data` holds the raw bytes and is deferred so
-    # list queries never load the (potentially large) blob; `image_mime_type`
-    # is small, always loaded, and doubles as the "has a DB image" flag the API
-    # layer checks to build the `/api/v1/tasks/{slug}/image` URL.
     image_data: Mapped[Optional[bytes]] = mapped_column(
         LargeBinary, nullable=True, deferred=True
     )
     image_mime_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     useful_leaderboards: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -99,7 +90,6 @@ class Task(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     parent: Mapped[Optional["Task"]] = relationship(
         "Task", remote_side=[id], back_populates="children"
     )
@@ -117,7 +107,6 @@ class Task(Base):
         "Evaluation", back_populates="task"
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_tasks_parent_id", "parent_id"),
         Index("idx_tasks_area_id", "area_id"),
@@ -147,14 +136,11 @@ class Method(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
-    # Area assignment (methods belong to one area)
     area_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("areas.id"), nullable=True
     )
 
     introduced_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    # Optional first month of the usage trend (and of the reference backfill),
-    # for a method whose source or introduced year starts later than its field.
     trend_start_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     source_paper_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("papers.id", ondelete="SET NULL"), nullable=True
@@ -164,7 +150,6 @@ class Method(Base):
     code_snippet_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     image_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     image_credit: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
-    # DB-backed figure (see Task.image_data for the deferred/flag rationale).
     image_data: Mapped[Optional[bytes]] = mapped_column(
         LargeBinary, nullable=True, deferred=True
     )
@@ -173,7 +158,6 @@ class Method(Base):
     collection_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     collection_parent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -181,7 +165,6 @@ class Method(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     area: Mapped[Optional[Area]] = relationship("Area")
     source_paper: Mapped[Optional["Paper"]] = relationship("Paper")
     papers: Mapped[List["Paper"]] = relationship(

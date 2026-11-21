@@ -49,7 +49,6 @@ BUDGET_EXHAUSTED_FOLLOWUP = (
     "If you found no verified upcoming deadlines, set requires_update: false."
 )
 
-# (max_turns, max_budget_usd) per stage; override with e.g. RETRIEVAL_MAX_TURNS.
 STAGE_LIMIT_DEFAULTS = {"retrieval": (12, 1.50), "aggregation": (8, 1.00)}
 MAX_RETRIES = 3
 MAX_CONSECUTIVE_AGGREGATION_FAILURES = 2
@@ -298,9 +297,6 @@ Use these labels. Do not re-classify years yourself.
 """
 
 
-# --- Deterministic helpers (unit-tested; no SDK) ------------------------------
-
-
 class ToolBudgetState:
     """Count search-tool uses and decide the last-turn nudge / deny."""
 
@@ -435,8 +431,6 @@ def retrieval_short_circuit(results: list[dict], total_cost: float) -> dict:
             error="retrieval agent wall-clock timeout",
         )
     if not valid:
-        # Research never produced an answer (SDK errors or silent exits): this
-        # is a failure, not evidence that nothing changed.
         errors = sorted({str(r["error"]) for r in results if r.get("error")})
         return pipeline_result(
             status="error",
@@ -501,9 +495,6 @@ def _verbose_date(today: str) -> str:
         else {1: "st", 2: "nd", 3: "rd"}.get(day.day % 10, "th")
     )
     return f"{day.strftime('%A')}, the {day.day}{suffix} of {day.strftime('%B')}, {day.year}"
-
-
-# --- Claude Agent SDK runner ----------------------------------------------------
 
 
 def _log(label: str, text: str) -> None:
@@ -590,15 +581,10 @@ async def _consume(label: str, query_iter, state: dict) -> None:
             if message.structured_output:
                 state["result"] = message.structured_output
             elif message.subtype == "error_max_turns":
-                # Turn limit: the no-tools follow-up answers from what was seen.
                 state["hit_max_turns"] = True
             elif message.subtype.startswith("error_max"):
-                # Budget / structured-output-retry limits are terminal: retrying
-                # or following up would spend past the cap.
                 state["result"] = {"status": "limit", "error": message.subtype}
             elif message.is_error:
-                # API/runtime failure, e.g. "API Error: 400 ... does not
-                # support this model": retried by run_agent.
                 detail = message.result or message.subtype or "agent run failed"
                 state["result"] = {"status": "error", "error": str(detail)[:500]}
 
@@ -639,7 +625,7 @@ async def _run_agent_once(
     async def inner() -> None:
         try:
             await _consume(label, query(prompt=user_prompt, options=options), state)
-        except Exception as exc:  # The SDK surfaces CLI failures as exceptions.
+        except Exception as exc:
             _log(label, f"error: {type(exc).__name__}: {exc}")
             state["result"] = {
                 **state["result"],
@@ -647,7 +633,6 @@ async def _run_agent_once(
                 "error": f"{type(exc).__name__}: {exc}",
             }
         if state["hit_max_turns"] and not has_structured_output(state["result"]):
-            # One no-tools follow-up: answer from what was already seen.
             _log(label, "error_max_turns without structured output; no-tools follow-up")
             followup = ClaudeAgentOptions(
                 system_prompt=system_prompt,
@@ -784,9 +769,6 @@ async def research_series(manifest: dict, *, num_retrieval_agents: int) -> dict:
             error=aggregated.get("error", "aggregation timeout"),
         )
     if not has_structured_output(aggregated):
-        # No unverified fallback to a retrieval result: a misconfigured
-        # aggregation model must fail loudly instead of applying data that no
-        # majority vote checked.
         return pipeline_result(
             status="error",
             reasoning="aggregation produced no structured output",
@@ -822,9 +804,7 @@ async def main_async() -> int:
         started = time.monotonic()
         try:
             result = await research_series(manifest, num_retrieval_agents=num_agents)
-        except Exception as exc:  # One broken conference must not end the sweep.
-            # Unknown stage: count it against aggregation so it neither
-            # resets the failure streak nor makes the sweep look verified.
+        except Exception as exc:
             result = pipeline_result(
                 status="error",
                 error=f"{type(exc).__name__}: {exc}",
@@ -843,8 +823,6 @@ async def main_async() -> int:
         elif aggregation_succeeded(result):
             consecutive_aggregation_failures = 0
         if consecutive_aggregation_failures >= MAX_CONSECUTIVE_AGGREGATION_FAILURES:
-            # Systemic (model/CLI/credential) failure: stop paying for retrieval.
-            # No DONE marker, so the VPS records the sweep as failed.
             print("aborting sweep: aggregation keeps failing", flush=True)
             return 1
     print(f"{DONE_MARKER} {len(series_list)}", flush=True)

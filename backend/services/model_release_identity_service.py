@@ -18,16 +18,11 @@ from backend.models.database import (
     TrendingModelCandidate,
 )
 
-# Provider labels end in a settings suffix: "Claude Opus 5.5 (Max, Default Fallback)".
 _SETTINGS_SUFFIX = re.compile(r"\s*\([^()]*\)\s*$")
-# Release pages are titled "<name>", "Introducing <name> and <name>" or
-# "<name>: <subtitle>".
 _LEAD_VERB = re.compile(r"^(?:(?:introducing|announcing|meet) )?(?:the )?")
-# Only a launch headline announces the later members of "<name> and <name>".
 _LAUNCH_VERB = re.compile(r"(?:introducing|announcing|meet) ")
 _HEADLINE_END = re.compile(r"\s*[:;(|]|\s+[-–—]\s")
 _CONJUNCTION = re.compile(r"\s*,\s*(?:and\s+)?|\s*&\s*|\s+and\s+")
-# Announcing papers fetched per name before ambiguity can no longer be ruled out.
 TITLE_CANDIDATE_LIMIT = 50
 
 
@@ -53,15 +48,11 @@ def _announced_names(title: str) -> set[str]:
         return set()
     first, *others = parts
     if not launch:
-        # "Comparing GPT-6 Sol and Claude Opus 5.5" announces neither model.
         return {first}
     prefix = first.split()
     later = set()
     for other in others:
-        # A later member may drop the shared family prefix ("Sol and Luna").
         later.update(" ".join([*prefix[:size], other]) for size in range(len(prefix)))
-    # Later members name versioned models ("Claude Mythos 5.2"), not products
-    # launched alongside them ("Claude 3.7 Sonnet and Claude Code").
     return {first} | {name for name in later if re.search(r"\d", name)}
 
 
@@ -86,8 +77,6 @@ def announcing_paper_id(db: Session, model_name: str) -> int | None:
         .filter(
             Paper.is_latest_version,
             Paper.title.ilike(f"%{'%'.join(tokens)}%"),
-            # A model's own paper reports results or records its release;
-            # "KNN and ANN-based ..." or "GPT-4o: ... in piglets" do not.
             or_(
                 exists().where(Evaluation.paper_id == Paper.id),
                 exists().where(ModelRelease.paper_id == Paper.id),
@@ -97,7 +86,6 @@ def announcing_paper_id(db: Session, model_name: str) -> int | None:
         .limit(TITLE_CANDIDATE_LIMIT + 1)
         .all()
     )
-    # Too many candidates to rule out a second announcement.
     if len(candidates) > TITLE_CANDIDATE_LIMIT:
         return None
     paper_ids = {
@@ -165,7 +153,6 @@ class ModelReleaseIdentityService:
             pending = [item for item in batch if item[0] not in resolved]
             if not pending:
                 continue
-            # Compare normalized keys, so "gemini-4-carbon" finds "Gemini 4 Carbon".
             name_keys = {
                 _identity_key(value)
                 for alias, name in pending

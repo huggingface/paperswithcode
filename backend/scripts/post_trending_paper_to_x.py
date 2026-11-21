@@ -94,7 +94,6 @@ def main() -> int:
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     for error in summary["errors"]:
         logger.warning("x_trending_post_error %s", json.dumps(error))
-    # Candidates existed but none could be rendered.
     return 1 if summary["errors"] and summary["paper_id"] is None else 0
 
 

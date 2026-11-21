@@ -43,7 +43,6 @@ def service():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    # SQLite cannot create tables whose checks call PostgreSQL JSONB functions.
     Base.metadata.create_all(
         bind=engine,
         tables=[
@@ -120,5 +119,4 @@ def test_renaming_onto_another_entry_is_rejected(service):
 
     with pytest.raises(CatalogConflictError):
         service.update_evaluation(other.id, model_name="chandra")
-    # Edits that keep the row's identity stay allowed.
     assert service.update_evaluation(other.id, metrics={"Accuracy": "85.9"})

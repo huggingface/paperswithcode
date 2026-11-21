@@ -98,8 +98,6 @@ class PaperCitationRefreshService:
             threshold_date = datetime.now() - timedelta(  # noqa: DTZ005
                 days=threshold_days
             )
-            # Recent papers gain citations fastest and feed trending, so when
-            # Semantic Scholar throttling limits a run they refresh first.
             recent_cutoff = (
                 datetime.now() - timedelta(days=RECENT_PAPER_DAYS)  # noqa: DTZ005
             ).date()

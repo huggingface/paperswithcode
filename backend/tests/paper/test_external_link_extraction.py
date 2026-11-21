@@ -68,7 +68,6 @@ def test_hf_extraction_skips_bare_owner_pages():
         "https://huggingface.co/organizations/LiquidAI/share",
         "https://huggingface.co/collections/LiquidAI/lfm",
     )
-    # Raw text URLs too, not only anchors.
     html += " see https://huggingface.co/datasets/allenai for more"
 
     assert extract_hf_repo_urls(html) == []

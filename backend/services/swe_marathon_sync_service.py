@@ -37,13 +37,9 @@ METRIC_NAME = "Resolution Rate"
 VERSION = "v1.1"
 MIN_EXPECTED_ENTRIES = 10
 MAX_EXPECTED_ENTRIES = 300
-# Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 15
-# The site treats a config without a reasoning effort as max.
 DEFAULT_EFFORT = "max"
-# Tie-break between efforts of one model with the same pass rate.
 _EFFORT_ORDER = ("max", "xhigh", "high", "medium", "low", "minimal", "none")
-# Labs for the canonical model prefixes whose model names name no family.
 _PREFIX_LABS = {"meta": "Meta"}
 
 _BUNDLE = re.compile(r'<script[^>]+src="(/assets/index-[\w-]+\.js)"')
@@ -56,11 +52,6 @@ _GPT_5_6 = "https://openai.com/index/gpt-5-6/"
 _GPT_6 = "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
 _MUSE_WONDER = "https://research.meta.ai/blog/muse-wonder"
 
-# Exact SWE-Marathon model names are the trust boundary between a leaderboard
-# config and its introducing paper; catalog names follow the 26 rows imported
-# from Abundant AI's data on 2026-10-14. Other names are matched automatically
-# when the catalog names them unambiguously, and otherwise handed to the
-# release radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Gemini 4 Carbon": ModelIdentity(
         "Gemini 4 Carbon",
@@ -235,7 +226,6 @@ def parse_swe_marathon_bundle(bundle: str) -> list[LeaderboardEntry]:
                     f"SWE-Marathon rewards are not binary: {agent} {model}"
                 )
             passes = sum(1 for reward in rewards if reward == 1)
-            # The trial list and the published "k / n" must agree.
             if (int(binary[1]), int(binary[2])) != (passes, len(trials)):
                 raise ValueError(
                     f"SWE-Marathon pass count disagrees: {agent} {model} {task_name}"
@@ -253,7 +243,6 @@ def parse_swe_marathon_bundle(bundle: str) -> list[LeaderboardEntry]:
                 if started and (run.latest is None or started > run.latest):
                     run.latest = started
 
-    # A complete run covers every task with the board's trial count per task.
     per_task = Counter(
         count for run in runs.values() for count in run.trial_counts
     ).most_common(1)[0][0]
@@ -322,7 +311,6 @@ BOARD = LiveLeaderboard(
     metric=METRIC_NAME,
     identities=MODEL_IDENTITIES,
     min_selected=MIN_SELECTED_ENTRIES,
-    # Self-reported vendor rows (Kimi K3.1 Pro) stay beside Abundant AI's runs.
     adopt_unmanaged=False,
     protocol=(
         f"SWE-Marathon {VERSION}: 20 ultra-long-horizon software projects, eight "

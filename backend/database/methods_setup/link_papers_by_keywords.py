@@ -104,13 +104,11 @@ def link_papers_by_keywords():
         print(f"   - {len(case_sensitive_patterns)} unique case-sensitive keywords")
         print(f"   - {len(case_insensitive_patterns)} unique case-insensitive keywords")
 
-        # Check current state of paper_methods
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT COUNT(*) as count FROM paper_methods")
         initial_count = cur.fetchone()["count"]
         print(f"\n3. Current paper_methods relationships: {initial_count:,}")
 
-        # Process papers in batches
         print("\n4. Processing papers...")
         print("   (Streaming through papers and matching keywords...)")
 
@@ -127,7 +125,6 @@ def link_papers_by_keywords():
         batch = []
         batch_size = 1000
 
-        # Track some statistics
         method_match_counts = defaultdict(int)
 
         for paper in cur:
@@ -140,7 +137,6 @@ def link_papers_by_keywords():
                     f"found {new_relationships:,} new relationships..."
                 )
 
-            # Combine title and abstract for matching
             text = ""
             if paper["title"]:
                 text = paper["title"]
@@ -150,7 +146,6 @@ def link_papers_by_keywords():
             if not text.strip():
                 continue
 
-            # Find matching methods (longest-match to prevent GPT and GPT-4 both matching)
             matching_method_ids = find_matching_items_longest_match(
                 text, case_sensitive_patterns, case_insensitive_patterns
             )
@@ -163,7 +158,6 @@ def link_papers_by_keywords():
                     new_relationships += 1
                     method_match_counts[method_id] += 1
 
-            # Insert batch
             if len(batch) >= batch_size:
                 cur2 = conn.cursor()
                 execute_batch(
@@ -175,7 +169,6 @@ def link_papers_by_keywords():
                 cur2.close()
                 batch = []
 
-        # Insert remaining batch
         if batch:
             cur2 = conn.cursor()
             execute_batch(
@@ -188,7 +181,6 @@ def link_papers_by_keywords():
 
         cur.close()
 
-        # Final statistics
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT COUNT(*) as count FROM paper_methods")
         final_count = cur.fetchone()["count"]
@@ -205,17 +197,14 @@ def link_papers_by_keywords():
         print(f"Final paper_methods count:     {final_count:>10,}")
         print(f"Relationships actually added:  {final_count - initial_count:>10,}")
 
-        # Show top methods by new matches
         print("\n" + "=" * 80)
         print("Top 20 Methods by New Keyword Matches")
         print("=" * 80)
 
-        # Get method names for the matched IDs
         method_id_to_name = {}
         for method in methods:
             method_id_to_name[method["id"]] = method["name"]
 
-        # Sort by match count
         sorted_methods = sorted(
             method_match_counts.items(), key=lambda x: x[1], reverse=True
         )[:20]
@@ -224,7 +213,6 @@ def link_papers_by_keywords():
             method_name = method_id_to_name.get(method_id, f"Unknown (ID {method_id})")
             print(f"{method_name:30} {count:>8,} matches")
 
-        # Show overall top methods in database
         print("\n" + "=" * 80)
         print("Top 20 Methods by Total Paper Count (after keyword linking)")
         print("=" * 80)

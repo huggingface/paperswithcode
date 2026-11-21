@@ -126,7 +126,6 @@ def main() -> int:
     print(json.dumps(summary, sort_keys=True))
     for error in summary["errors"]:
         logger.warning("x_thread_discovery_error %s", json.dumps(error))
-    # Every search failing means the job is blind (bad token or quota).
     failed = len(summary["errors"])
     return 1 if failed and failed == summary["papers_scanned"] else 0
 

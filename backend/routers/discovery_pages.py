@@ -109,7 +109,6 @@ ORGANIZATION_SLUG_ALIASES = {
     "googledeepmind": "google",
     "microsoftresearch": "microsoft",
 }
-# Methods that were removed in favour of a task of the same topic.
 METHOD_SLUGS_MOVED_TO_TASKS = {"continual-learning": "continual-learning"}
 
 
@@ -128,9 +127,6 @@ def _spa_document() -> HTMLResponse:
     shell = load_index_html()
     if shell is None:
         return HTMLResponse("Frontend bundle is not available.", status_code=500)
-    # The shell is the same static document for every visitor. no-cache still
-    # revalidates on each load, so a deploy is picked up at once, but unlike
-    # no-store it lets the browser restore the page from its back/forward cache.
     headers = {"Cache-Control": "no-cache"}
     if get_settings().environment.lower() == "staging":
         headers["X-Robots-Tag"] = "noindex, nofollow"
@@ -241,8 +237,6 @@ def benchmark_page(
     task_slug = request.query_params.get("task")
     page = service.benchmark(slug, task_slug)
     if page is None and task_slug:
-        # The task is not on this benchmark (e.g. the board moved to another
-        # task): send old links to the board's current task instead of a 404.
         exists, default_task = service.benchmark_default_task_slug(slug)
         if exists:
             params = [

@@ -15,7 +15,6 @@ from backend.models.papers import OrganizationSummary, Paper
     ("stored", "expected"),
     [
         (None, None),
-        # Legacy imports stored a JSON object for a few BARS datasets.
         ({"split": "random 8:1:1", "metrics": {"auc": "higher_is_better"}}, None),
         ("COCO test-dev", None),
         (["COCO test-dev", None, "COCO val2017"], ["COCO test-dev", "COCO val2017"]),

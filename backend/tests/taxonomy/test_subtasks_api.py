@@ -257,7 +257,6 @@ def _seed_benchmark_trends(db, today):
     add_reports(500, [2, 8, 15, 22, 120])
     add_reports(501, [3, 45, 120, 145, 170, 200, 230])
 
-    # A second metric row from the same paper must not inflate reporting count.
     evaluations.append(
         DBEvaluation(
             id=evaluation_id,
@@ -439,8 +438,8 @@ def test_create_evaluation_on_child_task_validates_against_child_leaderboard(
     service = EvaluationService(db_session)
     created = service.create_evaluation(
         paper_id=1,
-        task_id=2,  # World Knowledge child task
-        dataset_id=2,  # GPQA Diamond
+        task_id=2,
+        dataset_id=2,
         metrics={"Accuracy": "70.0"},
         best_metric="Accuracy",
         model_name="ModelZ",
@@ -488,7 +487,7 @@ def test_create_evaluation_on_parent_task_without_triple_fails(db_session):
     with pytest.raises(ValueError, match="No leaderboard defined"):
         service.create_evaluation(
             paper_id=1,
-            task_id=1,  # parent Language Modeling
+            task_id=1,
             dataset_id=1,
             metrics={"Accuracy": "70.0"},
             best_metric="Accuracy",
@@ -670,8 +669,6 @@ def test_dataset_evaluations_default_to_best_rank_order(client):
     db.query(DBEvaluation).filter(DBEvaluation.id == 11).update({"best_rank": 1})
     db.query(DBEvaluation).filter(DBEvaluation.id == 10).update({"best_rank": 2})
 
-    # Make insertion/id order adversarial: rank 3 has the largest id and would
-    # sort first under the old default `-created_at`/newest-first behavior.
     db.add(
         DBPaper(
             id=20,
@@ -800,10 +797,8 @@ def test_recalculate_ranks_is_scoped_to_child_task(db_session):
         .all()
     )
     by_id = {row.id: row.best_rank for row in rows}
-    # Higher Accuracy wins; eval 11 = 90.0 -> rank 1, eval 10 = 85.0 -> rank 2.
     assert by_id == {11: 1, 10: 2}
 
-    # The other subtask leaderboard is untouched until we recalc it.
     other_eval = db_session.query(DBEvaluation).filter(DBEvaluation.id == 13).first()
     assert other_eval.best_rank is None
 
@@ -850,8 +845,6 @@ def _seed_paper_with_three_benchmarks(db):
     )
     db.add(DBMetric(id=10, name="Accuracy", direction="higher_is_better"))
 
-    # One TaskDataset entry per (task, dataset) so the dataset listing endpoint
-    # surfaces all three benchmarks under task 10.
     db.add_all(
         [
             TaskDataset(task_id=10, dataset_id=100),
@@ -876,8 +869,6 @@ def _seed_paper_with_three_benchmarks(db):
     ]
     db.add_all(papers)
 
-    # Focal paper rows in least-popular-first order so created_at sort
-    # would otherwise place Niche first.
     db.add_all(
         [
             DBEvaluation(
@@ -910,8 +901,6 @@ def _seed_paper_with_three_benchmarks(db):
         ]
     )
 
-    # Extra rows from other papers so MCP-Atlas accumulates 5 evaluations
-    # and BrowseComp accumulates 2 evaluations.
     db.add_all(
         [
             DBEvaluation(
@@ -955,7 +944,6 @@ def test_paper_evaluations_sorted_by_benchmark_popularity(client):
     assert response.status_code == 200
     payload = response.json()
 
-    # Focal paper has exactly three evaluations.
     assert payload["count"] == 3
     dataset_slugs = [row["dataset_slug"] for row in payload["results"]]
     assert dataset_slugs == ["mcp-atlas", "browsecomp", "niche"]
@@ -1008,8 +996,6 @@ def _seed_paper_with_multiple_rows_per_benchmark(db):
     ]
     db.add_all(papers)
 
-    # Focal paper rows on BenchPop, inserted with ascending ids but adversarial
-    # ranks so id-only tie-breaking would mis-order them.
     db.add_all(
         [
             DBEvaluation(
@@ -1055,8 +1041,6 @@ def _seed_paper_with_multiple_rows_per_benchmark(db):
         ]
     )
 
-    # Extra rows from other papers so BenchPop accumulates 7 total evaluations
-    # (the focal paper's 3 + these 4) and BenchTail stays at 1.
     db.add_all(
         [
             DBEvaluation(
@@ -1095,11 +1079,9 @@ def test_paper_evaluations_within_benchmark_sorted_by_best_rank(client):
     assert payload["count"] == 4
     rows = payload["results"]
 
-    # Across benchmarks: BenchPop (popularity 7) before BenchTail (popularity 1).
     dataset_slugs = [row["dataset_slug"] for row in rows]
     assert dataset_slugs == ["benchpop", "benchpop", "benchpop", "benchtail"]
 
-    # Within BenchPop: rank 1, then rank 3, then unranked (nulls last).
     benchpop_ranks = [
         row["best_rank"] for row in rows if row["dataset_slug"] == "benchpop"
     ]

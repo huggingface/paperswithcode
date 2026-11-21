@@ -109,8 +109,8 @@ def test_empty_task_benchmark_renders_when_associated(client):
         _query(one=SimpleNamespace(id=2590, name="MMAE", description="Audio edits")),
         _query(one=SimpleNamespace(id=775, slug="audio-editing")),
         _query(rows=[(775, "audio-editing", "Audio editing")]),
-        _query(),  # evaluations
-        _query(),  # configured leaderboard metrics
+        _query(),
+        _query(),
     ]
     client.app.dependency_overrides[get_database_session] = lambda: db
 
@@ -141,9 +141,9 @@ def test_benchmark_with_moved_task_redirects_to_its_board(
         _query(one=SimpleNamespace(id=2778, name="VSI-Bench", description="")),
         _query(one=SimpleNamespace(id=9, slug="video-understanding")),
         _query(rows=[(912, "spatial-understanding", "Spatial Understanding")]),
-        _query(),  # evaluations
-        _query(scalar=2778),  # benchmark exists
-        _query(scalar=default_task),  # task with the most evaluations
+        _query(),
+        _query(scalar=2778),
+        _query(scalar=default_task),
     ]
     client.app.dependency_overrides[get_database_session] = lambda: db
 
@@ -276,9 +276,9 @@ def test_task_page_renders_markdown_trends_and_benchmark_links(monkeypatch):
                 research_trends=["**Trend.** See [DETR](/paper/2005.12872)."],
             )
         ),
-        _query(rows=[]),  # related tasks
+        _query(rows=[]),
         _query(rows=[(1, "coco", "COCO", 120), (2, "lvis", "LVIS", 0)]),
-        _query(rows=[]),  # tagged papers
+        _query(rows=[]),
     ]
 
     page = DiscoveryPageService(db).task("object-detection")
@@ -312,10 +312,10 @@ def _top_model_task_db(benchmarks, open_rows=()):
                 research_trends=[],
             )
         ),
-        _query(rows=[]),  # related tasks
+        _query(rows=[]),
         _query(rows=benchmarks),
-        _query(rows=[]),  # tagged papers
-        _query(rows=list(open_rows)),  # open evaluations, best rank first
+        _query(rows=[]),
+        _query(rows=list(open_rows)),
     ]
     return db
 
@@ -341,7 +341,6 @@ def test_task_page_summarizes_best_models(monkeypatch):
             (4, "unscored", "Unscored", 0),
         ],
         open_rows=[
-            # Leads a different metric leaderboard, so it is not the open leader.
             (1, "Tables", "Table Model"),
             (1, "Overall", "olmOCR <2>"),
             (1, "Overall", "Runner-up"),

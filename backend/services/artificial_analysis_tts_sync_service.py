@@ -39,9 +39,6 @@ MIN_EXPECTED_MODELS = 80
 MAX_EXPECTED_MODELS = 200
 
 
-# Only model-to-paper links reviewed against the Artificial Analysis catalog are
-# published. Newly listed models remain absent until their canonical paper has
-# been identified and added here.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "fish-audio-s2-pro": PaperIdentity(arxiv_id="2603.08823", is_open=True),
     "luna-tts": PaperIdentity(arxiv_id="2608.11593"),
@@ -59,12 +56,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
 }
 
 
-# Reviewed retirements: each upstream model page returns 404 and is absent from
-# the complete catalog, so its managed row is deleted.
-# - st260629 (2026-09-09): the original step-audio-2.5-tts model remains live;
-#   it is a separate version, so its result must not inherit the retired row.
-# - vibe-voice-7b (2026-11-19): VibeVoice 7B left the catalog; VibeVoice 1.5B
-#   (vibe-voice-1-5b) remains and keeps its own row.
 RETIRED_MODEL_SLUGS = frozenset({"st260629", "vibe-voice-7b"})
 
 

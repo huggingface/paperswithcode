@@ -95,12 +95,9 @@ IMAGE_FILENAME_ONLY = re.compile(
     r"\s*(?:!\[[^\]]*\]\()?[^\s()<>]+\.(?:png|jpe?g|webp)(?:\))?\s*",
     re.IGNORECASE,
 )
-# arXiv HTML pages that failed to convert are scraped with a figure file as their
-# <title> and only a caption as their body.
 SCRAPED_IMAGE_TITLE = re.compile(
     r"\.(?:svg|png|jpe?g|gif|webp|bmp|tiff?|eps|pdf)\s*$", re.IGNORECASE
 )
-# arXiv HTML footer that a failed conversion returns in place of the paper.
 ARXIV_HTML_FEEDBACK = re.compile(
     r"^Instructions for reporting errors\r?\n-{3,}\r?\n.*",
     re.MULTILINE | re.DOTALL,
@@ -271,7 +268,6 @@ class BucketContentStore:
         }
         preserved_outputs = existing.intersection(current_outputs) - self.repairs.keys()
         for key in preserved_outputs:
-            # process() only needs existence to preserve a canonical object.
             atomic_write(self.content_root / key, b"")
         self.download_many(sorted(existing - preserved_outputs))
         for key, entry in self.repairs.items():
@@ -437,9 +433,6 @@ def normalize_external_pdf_url(value: str) -> str:
             raise ValueError("invalid_external_pdf_url")
     parts = parsed.path.split("/")
     if hostname == "github.com" and len(parts) >= 6 and parts[3] == "blob":
-        # github.com/<owner>/<repo>/raw/... redirects to the file itself, also
-        # for Git LFS files, where raw.githubusercontent.com serves only the
-        # LFS pointer.
         path = "/".join(["", parts[1], parts[2], "raw", *parts[4:]])
         return urlunsplit(("https", "github.com", path, parsed.query, ""))
     if hostname == "huggingface.co" and "/blob/" in parsed.path:
@@ -523,7 +516,6 @@ def download_external_pdf(
         event_hooks={"request": [validate_request]},
     ) as client:
         result = read(client, url)
-        # alphaXiv serves /pdf/<id> as an HTML viewer that links the PDF file.
         if (
             not result.startswith(b"%PDF-")
             and urlsplit(url).hostname in ALPHAXIV_HOSTS
@@ -761,7 +753,6 @@ def write_layout(
         f"{stem}.blocks.json": json.dumps(
             {**meta, "blocks": blocks}, ensure_ascii=False
         ),
-        # Its presence marks the paper's layout as complete, so it goes last.
         f"{stem}.md": markdown,
     }
     for key, text in objects.items():
@@ -1033,8 +1024,6 @@ def process(
     atomic_write(pdf_path, pdf_data)
     body, assets, layout_pages = run_chandra(pdf_path, processed_pages)
     if layout_only:
-        # The canonical object stays as it is; the title check still guards
-        # against storing the layout of the wrong PDF.
         validate_markdown_semantics(str(entry["title"]), body)
         result = {
             "paper_key": paper_key,
@@ -1476,8 +1465,6 @@ def main() -> None:
             pdf_key = entry.get("pdf_key")
             if pdf_key and (content_root / str(pdf_key)).is_file():
                 published_keys.append(str(pdf_key))
-            # Layout goes before the canonical checkpoint: once canonical
-            # Markdown exists, a retried shard skips the paper's OCR.
             if result.get("layout_keys"):
                 run_bucket_bridge(
                     token,

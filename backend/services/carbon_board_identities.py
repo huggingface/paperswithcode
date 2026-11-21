@@ -76,7 +76,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             source_url="https://www.minimax.io/blog/minimax-m31f",
             is_open=True,
         ),
-        # The open-weight checkpoint, three weeks of RL past the API preview.
         "Mistral Large 4 OSS": ModelIdentity(
             "Mistral Large 4",
             source_url="https://huggingface.co/mistralai/Mistral-Large-4-1T-A52B/blob/main/assets/technical_report.pdf",
@@ -385,7 +384,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         "Qwen 3.5 Plus": ModelIdentity(
             "Qwen3.5-Plus", source_url="https://qwen.ai/blog?id=qwen3.5"
         ),
-        # Qwen3.6-Max only shipped as the preview release.
         "Qwen 3.6 Max": ModelIdentity(
             "Qwen3.6-Max-Preview",
             source_url="https://qwen.ai/blog?id=qwen3.6-max-preview",
@@ -647,8 +645,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             "MAI-Thinking-1",
             source_url="https://microsoft.ai/wp-content/uploads/2026/06/main_20260602_2.pdf",
         ),
-        # Re-run on the v1.1 answer keys (2026-11-02); identities follow the
-        # reviewed Vals Index rows for the same models.
         "Gemini 4 Carbon": ModelIdentity(
             "Gemini 4 Carbon",
             source_url="https://deepmind.google/blog/gemini-4-carbon-our-next-frontier-model/",
@@ -766,8 +762,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
     },
     "cybergym": {
-        # Upstream DeepSeek rows link the 0813 / 0731 checkpoints of the
-        # DeepSeek-V4 report; the catalog names them by checkpoint and mode.
         "DeepSeek-V4-Pro": ModelIdentity(
             "DeepSeek-V4-Pro-0813 (Max)",
             arxiv_id="2606.19348",
@@ -856,8 +850,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         "Gemini 2.5 Flash Preview": ModelIdentity(
             "Gemini 2.5 Flash Preview", arxiv_id="2507.06261"
         ),
-        # The May 2026 safety report evaluates the original API model, not
-        # the October open-weight Muse Spark Open release.
         "Muse Spark": ModelIdentity("Muse Spark", arxiv_id="2606.12429"),
         "Muse Spark 1.1 (helpful-only)": ModelIdentity(
             "Muse Spark 1.1 (helpful-only)",
@@ -897,8 +889,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             "GPT-5.5-Cyber",
             source_url="https://openai.com/index/daybreak-securing-the-world/",
         ),
-        # Released only to Project Glasswing partners; a model of its own,
-        # not a preview checkpoint of Claude Mythos 5.
         "Claude Mythos Preview": ModelIdentity(
             "Claude Mythos Preview",
             source_url="https://www.anthropic.com/claude-mythos-preview-system-card",
@@ -956,7 +946,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
     },
     "critpt": {
-        # A later checkpoint of Ling-3.1-flash, like DeepSeek V4.1 Flash 1017.
         "Ling 3.1 Flash 1019": ModelIdentity(
             "Ling-3.1-Flash-1019",
             source_url="https://developer.ant-ling.com/en/docs/models/ling#ling-31-flash",
@@ -980,7 +969,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         "GLM-5.3 (max)": ModelIdentity(
             "GLM-5.3 (max)", source_url="https://z.ai/blog/glm-5.3", is_open=True
         ),
-        # GPT-5.5 Pro launched in the GPT-5.5 announcement.
         "GPT-5.5 Pro (xhigh)": ModelIdentity(
             "GPT-5.5 Pro (xhigh)",
             source_url="https://openai.com/index/introducing-gpt-5-5/",
@@ -1058,12 +1046,10 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         "Muse Ember (max)": ModelIdentity(
             "Muse Ember (max)", source_url="https://research.meta.ai/blog/muse-ember"
         ),
-        # A later checkpoint of Ling-3.1-flash, like DeepSeek V4.1 Flash 1017.
         "Ling 3.1 Flash 1019": ModelIdentity(
             "Ling-3.1-Flash-1019",
             source_url="https://developer.ant-ling.com/en/docs/models/ling#ling-31-flash",
         ),
-        # The full Hy4 release (2026-11-04), not the August Hy4 Preview.
         "Tencent Hy4": ModelIdentity(
             "Hy4",
             source_url="https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-leading-open-source-ai-models/",
@@ -1124,7 +1110,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             source_url="https://thinkingmachines.ai/news/introducing-inkling/",
             is_open=True,
         ),
-        # The K2-Horizon tech report introduces the 375B-A23B model.
         "K2 Horizon 375B A23B": ModelIdentity(
             "K2 Horizon 375B A23B", arxiv_id="2611.21003", is_open=True
         ),
@@ -1158,7 +1143,6 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
             "Muse Wonder Full (max)",
             source_url="https://research.meta.ai/blog/muse-wonder",
         ),
-        # The Nemotron 3.5 Super tech report introduces the 120B-A12B VL model.
         "Nemotron 3.5 Super VL": ModelIdentity(
             "Nemotron 3.5 Super VL", arxiv_id="2610.38095", is_open=True
         ),
@@ -1173,5 +1157,4 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
     },
 }
 
-# Artificial Analysis charts the same models on its Terminal-Bench-Science page.
 IDENTITIES["terminal-bench-science-0-1"] = IDENTITIES["critpt-v2"]

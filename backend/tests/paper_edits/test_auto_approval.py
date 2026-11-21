@@ -267,10 +267,10 @@ def test_taking_back_own_addition_is_not_a_removal(
     db_session.add(PaperTask(paper_id=2, task_id=1))
     db_session.add(PaperTask(paper_id=2, task_id=2))
     db_session.commit()
-    submit(db_session, "tasks", {"task_ids": [1]}, paper_id=2)  # removal, 1 paper
-    submit(db_session, "tasks", {"task_ids": [1, 2, 3]})  # adds task 3 on paper 1
+    submit(db_session, "tasks", {"task_ids": [1]}, paper_id=2)
+    submit(db_session, "tasks", {"task_ids": [1, 2, 3]})
 
-    undo = submit(db_session, "tasks", {"task_ids": [1, 2]})  # removes own task 3
+    undo = submit(db_session, "tasks", {"task_ids": [1, 2]})
 
     assert undo.status == "approved"
     assert task_ids(db_session) == {1, 2}
@@ -294,7 +294,7 @@ def test_daily_paper_budget_queues_the_overflow(db_session, paper_fixture, monke
     other_paper = submit(db_session, "tasks", {"task_ids": [3]}, paper_id=2)
 
     assert first.status == "approved"
-    assert again.status == "approved"  # same paper does not use more budget
+    assert again.status == "approved"
     assert other_paper.status == "pending"
     assert "auto-applied papers today" in other_paper.admin_note
 

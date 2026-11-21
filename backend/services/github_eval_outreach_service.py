@@ -105,8 +105,6 @@ def blocked_by_open_issue(authored, release) -> bool:
     )
 
 
-# GitHub allows 30 authenticated search requests per minute; pacing every
-# search call at this interval keeps a repository pass under that cap.
 SEARCH_PACE_SECONDS = 2
 
 
@@ -297,7 +295,6 @@ class OutreachRunner:
         ]
         if not uncovered or record.get("next_check", 0) > self.now():
             return
-        # Wait for all linked evaluated papers to settle before composing a shared issue.
         if not all(paper.ready for paper in uncovered):
             record.update(checked_at=self.now(), next_check=self.now() + 3600)
             self.state.put(key, record)
@@ -321,8 +318,6 @@ class OutreachRunner:
         ):
             self.record("ineligible", repository)
             return
-        # A Hugging Face release request from this account takes priority: the
-        # evaluation message joins that thread instead of opening a second issue.
         authored = list(issues(self.api, repository, creator=self.login))
         releases = [issue for issue in authored if is_release_issue(issue)]
         release = release_target(releases)
@@ -351,8 +346,6 @@ class OutreachRunner:
         if not uncovered:
             self.record("already_contacted", repository)
             return
-        # Re-read committed catalog state just before rendering/posting. New work waits
-        # for another pass; removed official links or evaluations cannot use stale drafts.
         fresh, _ = self.groups(self.catalog())
         current = fresh.get(key, {})
         if set(current) != set(papers) or not all(
@@ -377,7 +370,6 @@ class OutreachRunner:
                 **({"issue_url": release["html_url"]} if release else {}),
             )
             return
-        # Recheck the author gate immediately before the write, after potentially slow drafts.
         if blocked_by_open_issue(
             issues(self.api, repository, state="open", creator=self.login), release
         ):
@@ -392,9 +384,7 @@ class OutreachRunner:
         if release:
             pending["comment_on"] = release["number"]
         record["pending"] = pending
-        self.state.put(
-            key, record
-        )  # commit before POST, including before any process death
+        self.state.put(key, record)
         self.counts["attempted"] += 1
         if release:
             request = [
@@ -420,15 +410,13 @@ class OutreachRunner:
             if error.status == 422 or (
                 error.status == 403 and not error.is_rate_limited
             ):
-                record.pop(
-                    "pending"
-                )  # definitive validation/permission rejection, no issue created
+                record.pop("pending")
                 record["next_check"] = self.now() + 30 * DAY
                 record["rejection"] = str(error)
                 self.state.put(key, record)
                 self.record("rejected", repository, reason=str(error))
                 return
-            raise  # uncertain outcomes retain the pre-POST checkpoint; no blind retries
+            raise
         finally:
             self.sleep(10)
         if release:
@@ -463,8 +451,6 @@ class OutreachRunner:
         self.counts["catalog_repositories"] = len(cohort)
         if self.resolve_aliases(cohort):
             groups, names = self.groups(cohort)
-            # Prefer newly settled evaluations over routine rechecks of old repos.
-            # Reserve the first check for the oldest eligible repo to prevent starvation.
             eligible = []
             for key, papers in groups.items():
                 record = self.state.get(key)
@@ -510,7 +496,6 @@ class OutreachRunner:
                 except GithubApiError as error:
                     if not error.repository_unavailable:
                         raise
-                    # This repository can be inaccessible without blocking other work.
                     self.record("unavailable", names[key], reason=str(error))
             self.counts["repositories_checked"] = checked
         result = {

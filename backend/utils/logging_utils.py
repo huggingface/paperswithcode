@@ -15,12 +15,10 @@ async def async_export_txt(
                  If None, writes to backend/outputs/ (for backwards compatibility)
     """
     if arxiv_id:
-        # Write to arxiv-specific cache directory
         output_dir = (
             Path(__file__).parent.parent / "outputs" / "evaluation_results" / arxiv_id
         )
     else:
-        # Write to general outputs directory (backwards compatibility)
         output_dir = Path(__file__).parent.parent / "outputs"
 
     output_dir.mkdir(parents=True, exist_ok=True)

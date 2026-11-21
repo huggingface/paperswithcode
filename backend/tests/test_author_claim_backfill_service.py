@@ -73,7 +73,6 @@ def _session() -> Session:
     )
     session.add_all(
         [
-            # Legacy row: every "Hao Li" paper landed on the hao-li account.
             Author(id=10, name="Hao Li", hf_username="hao-li", hf_id="hf-hao"),
             Author(id=11, name="Ann Coauthor"),
             Author(id=12, name="Bob Stranger"),
@@ -113,7 +112,6 @@ def _authors_of(session, paper_id):
 
 
 def _add_second_hao_account(session):
-    # A second HF account publishing as "Hao Li" proves namesakes exist.
     session.add(Author(id=30, name="Hao Li", hf_username="hao-li-2", hf_id="hf-2"))
     session.commit()
 
@@ -143,7 +141,6 @@ def test_replayed_claims_mark_links_and_hand_other_claims_to_their_account(
     assert _authors_of(session, 1) == {(10, True), (11, False)}
     other = session.query(Author).filter_by(hf_username="other-hao").one()
     assert _authors_of(session, 4) == {(other.id, True), (13, False)}
-    # An unconfirmed HF guess is not a claim.
     assert (10, False) in _authors_of(session, 5)
     assert cleanup.stats.counts["claims_not_on_hf"] == 1
     assert [e["arxiv_id"] for e in entries] == ["2601.00001", "2601.00004"]
@@ -157,7 +154,6 @@ def test_split_keeps_coauthor_backed_papers_and_moves_the_rest(tmp_path):
 
     cleanup.split_namesakes()
 
-    # Paper 2 shares coauthor Ann with claimed paper 1, so it stays.
     assert _authors_of(session, 2) == {(10, False), (11, False)}
     namesake = session.query(Author).filter_by(name="Hao Li", hf_username=None).one()
     for paper_id in (3, 4, 5):
@@ -178,8 +174,6 @@ def test_split_uses_the_byline_name_of_a_row_renamed_by_its_claim(tmp_path):
     session = _session()
     _add_second_hao_account(session)
     cleanup, entries = _cleanup(session)
-    # HF matched hao-li to a "Hao Li" byline; the account is really Zed Jia,
-    # who claims paper 1 as "Zed Jia" and so renames the row.
     zed = {**HAO, "fullname": "Zed Jia"}
     cleanup.replay_claims(
         _cache(
@@ -197,9 +191,7 @@ def test_split_uses_the_byline_name_of_a_row_renamed_by_its_claim(tmp_path):
 
     namesake = session.query(Author).filter_by(name="Hao Li", hf_username=None).one()
     assert (namesake.id, False) in _authors_of(session, 3)
-    # Paper 4's byline lists neither name: the link stays and is reported.
     assert (10, False) in _authors_of(session, 4)
-    # Paper 5 has no cached byline, and the row was renamed: unsure, stays.
     assert (10, False) in _authors_of(session, 5)
     assert cleanup.stats.counts["split_skipped_name_not_on_byline"] == 2
 
@@ -243,7 +235,6 @@ def test_doubles_keep_the_claimed_link_else_the_name_only_one():
         [
             PaperAuthor(paper_id=1, author_id=20, author_order=1),
             PaperAuthor(paper_id=2, author_id=20, author_order=1),
-            # Two coauthors named Hao Li: both stay.
             PaperAuthor(paper_id=3, author_id=20, author_order=3),
         ]
     )
@@ -343,7 +334,6 @@ def test_merge_moves_a_name_only_paper_sharing_an_official_repo_with_a_curated_r
     session = _session()
     session.add_all(
         [
-            # A curator set the HF username by hand: no HF id, no claims.
             Author(id=40, name="Vik Paruchuri", hf_username="vikp"),
             Author(id=41, name="Vik Paruchuri"),
             Repository(id=1, url="https://github.com/datalab-to/surya"),
@@ -380,7 +370,6 @@ def _account_with_namesake(session):
             Author(id=52, name="Mia Account"),
         ]
     )
-    # Paper 3 is Mia's claimed anchor, written with Zed (claimed), Bob and Ann.
     _link(session, 3, 51, claimed=True)
     _link(session, 3, 50, claimed=True)
     _link(session, 3, 11)
@@ -392,7 +381,7 @@ def test_merge_needs_a_coauthor_whose_identity_is_certain_on_both_papers():
     _link(session, 4, 52)
     _link(session, 4, 50, claimed=True)
     _link(session, 5, 52)
-    _link(session, 5, 50)  # Zed by name only on paper 5: could be a namesake.
+    _link(session, 5, 50)
     session.commit()
     cleanup, _ = _cleanup(session)
 
@@ -407,13 +396,10 @@ def test_merge_needs_a_coauthor_whose_identity_is_certain_on_both_papers():
 def test_merge_counts_distinctive_name_only_coauthors(cat_accounts):
     session = _session()
     _account_with_namesake(session)
-    # Mia's anchor (paper 3) lists Hao Li (an HF row, never counted), Bob (12)
-    # and Cat (13); paper 4 lists all three, paper 5 only Hao Li and Bob.
     _link(session, 3, 13)
     _link(session, 4, 52)
     _link(session, 4, 12)
     _link(session, 5, 52)
-    # Accounts named "Cat Stranger" mean the Cat row may lump namesakes.
     session.add_all(
         Author(id=70 + i, name="Cat Stranger", hf_username=f"cat{i}", hf_id=f"c{i}")
         for i in range(cat_accounts)

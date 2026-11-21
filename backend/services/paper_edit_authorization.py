@@ -25,7 +25,6 @@ class PaperEditAuthorizationService:
         if self.db.get(Paper, paper_id) is None:
             raise CatalogNotFoundError("Paper not found")
         now = datetime.now(UTC)
-        # Bound anonymous storage even when a caller never opens the browser.
         self.access.lock_account("device-authorization-admission")
         self.db.execute(
             delete(PaperEditAuthorization).where(

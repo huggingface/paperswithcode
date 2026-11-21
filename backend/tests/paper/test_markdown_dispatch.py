@@ -464,7 +464,6 @@ def test_dry_reconciliation_appends_coverage_history(tmp_path, monkeypatch):
         }
         for row in rows
     )
-    # The full lane leaves the recent window's missing layout to the live lane.
     job._launch.assert_called_with([{**papers[1], "retry": False}])
 
 

@@ -37,7 +37,7 @@ def test_paper_label_prefers_the_name_before_the_colon():
 def test_compose_list_drops_entries_to_fit_but_keeps_three():
     labels = ["x" * 80] * 5
     text = compose_list("Top papers:", labels)
-    assert text.count("\n\n") == 3  # head and three entries, blank-line separated
+    assert text.count("\n\n") == 3
     assert compose_list("Top:", ["A", "B", "C"]) == "Top:\n\n1. A\n\n2. B\n\n3. C"
 
 
@@ -91,7 +91,7 @@ class FakeDb:
 
 
 def test_plan_kinds_morning_roundups_then_sota_evening_rotation():
-    monday_first = datetime(2026, 6, 1, 9, 43, tzinfo=UTC)  # a Monday
+    monday_first = datetime(2026, 6, 1, 9, 43, tzinfo=UTC)
     assert service.plan_kinds(FakeDb(), monday_first) == [
         "top_papers_month",
         "top_papers_week",
@@ -305,7 +305,7 @@ def test_hf_org_x_handle_reads_a_single_profile_link(monkeypatch):
         "get",
         page('<a href="https://x.com/a"></a><a href="https://x.com/b"></a>'),
     )
-    assert service.hf_org_x_handle("Org") is None  # ambiguous
+    assert service.hf_org_x_handle("Org") is None
     monkeypatch.setattr(service.httpx, "get", page("", status=404))
     assert service.hf_org_x_handle("Missing") is None
 

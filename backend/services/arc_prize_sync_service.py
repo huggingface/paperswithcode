@@ -31,11 +31,7 @@ ARC_PRIZE_SOURCE_URL = "https://arcprize.org/leaderboard"
 TASK_SLUG = "reasoning"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("ARC Prize")
 LEGACY_METHODOLOGY_PREFIX = "Strongest verified configuration for this paper/release"
-# Upstream model types that name one model. "Refinement", "Custom" and
-# "CoT + Synthesis" are systems built on a model; humans have no type.
 MODEL_TYPES = frozenset({"CoT", "Base LLM"})
-# Run settings in display names: "GPT-5.1 (Thinking, High)", "o3-mini (Low)",
-# "Claude Haiku 4.5 (Thinking 16K)", "Grok 4 (Thinking)".
 _CONFIG_SUFFIX = re.compile(
     r"\s*\((?=[^)])(?:thinking|reasoning)?,?\s*"
     r"(?:\d+k|none|minimal|low|medium|high|xhigh|max)?\)$",
@@ -117,8 +113,6 @@ def _arxiv(
     return PaperIdentity(arxiv_id=arxiv_id, is_open=is_open, hf_model_url=hf)
 
 
-# Exact upstream group/model IDs are the trust boundary between a display label
-# and a canonical release paper. Unknown families remain visible in job warnings.
 SELECTOR_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "group:anthropic-claude-opus-5-5": _source(
         "https://www.anthropic.com/claude-opus-5-5"
@@ -561,8 +555,6 @@ class ArcPrizeSyncService:
 
         try:
             task, leaderboards = self._leaderboards()
-            # Unreviewed models go to the shared matcher under one name per
-            # model; the rest become release-radar signals.
             unknown = {
                 name: LeaderboardModel(name, entry.provider or "")
                 for snapshot in snapshots

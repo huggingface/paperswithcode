@@ -148,7 +148,6 @@ class BookmarkService:
         """Remember the migration on the account, writing only the first time."""
         if self.bucket_migrated(username):
             return
-        # Upsert because the IDs and listing endpoints often run concurrently.
         self.db.execute(
             insert(UserPreference)
             .values(hf_username=username, saved_papers_bucket_migrated_at=func.now())
@@ -167,7 +166,6 @@ class BookmarkService:
         hf_user_id: str,
         username: str,
     ) -> BookmarkRefListing:
-        # Preserve the database fallback eagerly, including for connected Buckets.
         legacy = self.load_legacy_refs(username)
         try:
             store = self.initialize_bucket(

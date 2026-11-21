@@ -30,7 +30,7 @@ DASHBOARD_URL = "https://paperswithcode.co/admin-dashboard"
 @dataclass(frozen=True)
 class FailureAlert:
     job_id: str
-    kind: str  # "failing" or "recovered"
+    kind: str
     text: str
 
 
@@ -38,7 +38,6 @@ def load_state(path: Path) -> dict[str, dict[str, Any]]:
     try:
         payload = json.loads(path.read_text())
     except (OSError, ValueError):
-        # Missing before the first run, or unreadable from the web app user.
         return {}
     alerts = payload.get("alerts") if isinstance(payload, dict) else None
     return alerts if isinstance(alerts, dict) else {}
@@ -53,7 +52,6 @@ def save_state(
         "w", dir=path.parent, prefix=f".{path.name}.", delete=False
     ) as handle:
         json.dump(payload, handle, sort_keys=True)
-    # The monitor runs as pwc-cron; the dashboard reads this as the web app user.
     os.chmod(handle.name, 0o644)
     os.replace(handle.name, path)
 
@@ -103,10 +101,8 @@ def plan_alerts(
                 "last_failure_at": runs.get("last_failure_at"),
             }
         elif open_alert and streak:
-            # Failures that aged out of the 24h window are not a recovery.
             next_state[job.id] = dict(open_alert)
         elif open_alert:
-            # The latest launcher exit succeeded.
             alerts.append(
                 FailureAlert(
                     job.id,

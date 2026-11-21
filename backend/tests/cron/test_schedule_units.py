@@ -42,7 +42,6 @@ def _systemd_jobs():
         for job in list_cron_jobs()
         if job.scheduler == "systemd" and job.id != "process_curation_thumbnails"
         if job.id not in {"monitor_chat_operational_alerts", "review_submissions"}
-        # Autonomous operator units are installed separately, outside this table.
         if job.output_evaluator != "autonomous_cron_operator"
     ]
 
@@ -142,7 +141,6 @@ def test_unit_calendars_cover_every_registry_schedule_policy():
     for spec in cron_schedules.TIMERS:
         specs_by_job.setdefault(spec.job, []).append(spec)
 
-    # A Monday-through-Sunday UTC week, minute resolution.
     start = datetime(2026, 8, 24, tzinfo=timezone.utc)
     week = [start + timedelta(minutes=offset) for offset in range(7 * 24 * 60)]
 
@@ -243,8 +241,6 @@ def test_producer_chains_declare_storm_ordering(job_id, expected_after):
     "job_id", ["calculate_trending_scores", "calculate_paper_trending_scores"]
 )
 def test_trending_units_never_wait_on_the_hourly_stars_service(job_id):
-    # update_github_stars runs close to its full interval and re-fires under
-    # Persistent=, so an After= edge onto it starves the whole trending chain.
     unit = "pwc-cron-" + job_id.replace("_", "-")
     source = (UNIT_DIR / f"{unit}.service").read_text()
     assert "pwc-cron-update-github-stars.service" not in source

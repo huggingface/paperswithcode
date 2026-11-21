@@ -184,8 +184,6 @@ def test_parse_and_fetch_public_leaderboard_contract():
         ):
             assert version_id == "latest"
             assert (search_query, show_proprietary, show_llm) == ("", True, False)
-            # The Space's published default decides which datasets the
-            # average covers; License is added only to read open status.
             assert selected_columns == [*SPACE_DEFAULT_COLUMNS, "License"]
             assert api_name == "/_main_table_update"
             return {
@@ -287,8 +285,6 @@ def test_discovery_indexes_only_single_tag_with_exact_ownership():
                 "sophea/asr-k1 (preview)",
                 "org/ARK-ASR-3B",
                 "org/Audio8-ASR-0.1B",
-                # Keep the accepted paper last: SQLite cannot serialize the
-                # PostgreSQL ARRAY assigned to Paper.hf_models on autoflush.
                 "org/ARK-ASR-0.6B",
             ]
         )
@@ -439,7 +435,6 @@ def test_sync_refreshes_throughput_rank_on_preserved_paper_native_rows(monkeypat
     service.sync([OpenAsrEntry("vendor/legacy", 1, 5.0, 200.0, False)])
     assert manual.best_rank == 2
     assert manual.metrics == {"RTFx": 150.0}
-    # Updating or dropping secondary throughput must refresh manual ranks too.
     service.sync([OpenAsrEntry("vendor/legacy", 1, 5.0, None, False)])
     assert manual.best_rank == 1
 
@@ -571,7 +566,6 @@ def test_sync_renames_old_rows_and_supersedes_stale_curated_scores(monkeypatch):
     )
     entries = [
         OpenAsrEntry("org/model-hf", 1, 6.0, 100.0, True),
-        # Runtime variants resolve through their Hub repository id.
         OpenAsrEntry("org/model (fast-gpu-asr)", 2, 6.1, 900.0, True),
         OpenAsrEntry("vendor/api (preview)", 3, 5.2, None, False),
     ]
@@ -693,8 +687,6 @@ def test_new_best_runtime_variant_takes_over_the_existing_row():
 
 
 def test_parse_ignores_open_weights_badge_after_model_link():
-    # Since 2026-11-13 open-weights rows end in a badge span; it must not leak
-    # into the model identifier.
     payload = _payload()
     payload["data"][3][1] += ' <span title="Open weights">🤗</span>'
 

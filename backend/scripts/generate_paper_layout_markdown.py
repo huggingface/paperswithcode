@@ -274,8 +274,6 @@ def process(
         work = Path(directory)
         page_count, pages = ocr_pages(read_pdf(entry, source_bucket, work))
         markdown, blocks = build_paged_markdown(pages)
-        # Each paper records its own outcome, so a resumed or killed run never
-        # loses results that were already stored.
         meta = {
             "schema_version": LAYOUT_SCHEMA_VERSION,
             "paper_key": key,
@@ -302,7 +300,6 @@ def process(
             files.append((str(path), name))
         markdown_path = work / "paper.md"
         markdown_path.write_text(markdown, encoding="utf-8")
-        # The Markdown goes last: its presence marks the paper as complete.
         files.append((str(markdown_path), f"{key}.md"))
         bucket_bridge(
             {"operation": "upload", "bucket_id": layout_bucket, "files": files}
@@ -356,7 +353,7 @@ def main() -> None:
                     source_bucket=args.source_bucket,
                     run_id=run_id,
                 )
-            except Exception as error:  # one bad PDF must not end the run
+            except Exception as error:
                 result = {
                     "paper_key": entry["paper_key"],
                     "ok": False,

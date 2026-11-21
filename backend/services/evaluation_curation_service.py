@@ -85,8 +85,6 @@ class EvaluationCurationService:
             )
             created_id.append(int(result.id))
 
-        # Creation has no stale row. The stable entity is the paper-scoped
-        # evaluation collection loaded by the editor.
         paper_id = int(payload["paper_id"])
 
         def snapshot():

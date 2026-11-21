@@ -41,21 +41,18 @@ logger = logging.getLogger(__name__)
 
 AOE = timezone(timedelta(hours=-12))
 
-# Timezone abbreviations not covered by IANA / offset parsing.
 TZ_ABBREVIATIONS = {
-    "AOE": -12,  # Anywhere on Earth
+    "AOE": -12,
     "PST": -8,
     "PDT": -7,
     "EST": -5,
     "EDT": -4,
 }
 
-# Deprecated / non-canonical IANA names seen in the source data.
 TZ_IANA_ALIASES = {
     "Russia/Moscow": "Europe/Moscow",
 }
 
-# Legacy single-field YAML deadlines mapped to (type, default label).
 LEGACY_DEADLINE_FIELDS = [
     ("abstract_deadline", "abstract", "Abstract Submission"),
     ("deadline", "submission", "Paper Submission"),
@@ -66,8 +63,6 @@ LEGACY_DEADLINE_FIELDS = [
     ("final_decision_date", "final_decision", "Final Decision"),
 ]
 
-# Deadline types the research agent may emit (the admin API accepts any
-# snake_case type, matching legacy rows such as ``author_response``).
 AGENT_DEADLINE_TYPES = (
     "abstract",
     "paper",
@@ -88,14 +83,10 @@ DEADLINE_TYPE_RE = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 LOCAL_DATETIME_RE = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$")
 SERIES_SLUG_RE = re.compile(r"^(?P<series>[a-z0-9-]+?)-(?P<year>\d{4})$")
 
-# A deadline moved by more than this is far likelier a wrong year or edition
-# than an extension; the agent must not apply it without a human.
 MAX_DEADLINE_SHIFT = timedelta(days=120)
 
-# Series held every other year; most have too little history to detect it.
 BIENNIAL_SERIES = ("iccv", "eccv")
 
-# Sweep selection windows.
 WEEKLY_UPCOMING_WINDOW = timedelta(days=120)
 WEEKLY_EXPECTED_NEXT_WINDOW = timedelta(days=240)
 DAILY_IMMINENT_WINDOW = timedelta(days=21)
@@ -111,9 +102,6 @@ AGENT_ACTOR = {
 
 class DeadlineValidationError(ValueError):
     """A deadline or edition edit failed validation."""
-
-
-# --- Parsing ----------------------------------------------------------------
 
 
 def slugify(value: str) -> str:
@@ -135,7 +123,6 @@ def resolve_timezone(raw: Optional[str]) -> Optional[timezone | ZoneInfo]:
     """Resolve a source timezone string, or None when it is not recognised."""
     if not raw:
         return None
-    # Normalise unicode dashes (e.g. ``UTC–12:00``) to ASCII hyphen.
     cleaned = raw.strip().replace("–", "-").replace("—", "-")
     cleaned = cleaned.replace("−", "-")
 
@@ -180,7 +167,6 @@ def canonical_timezone(raw: str) -> str:
     if compact in {"AOE", "UTC-12", "UTC-12:00", "GMT-12"}:
         return "AoE"
     if compact.startswith(("UTC+12", "GMT+12")):
-        # Agents confuse AoE with UTC+12; a real UTC+12 deadline needs a human.
         raise DeadlineValidationError(
             f"ambiguous timezone {raw!r}: write AoE for Anywhere on Earth"
         )
@@ -232,9 +218,6 @@ def join_location(city: Optional[str], country: Optional[str]) -> Optional[str]:
     return ", ".join([p for p in (city, country) if p]) or None
 
 
-# --- Legacy YAML import (huggingface/ai-deadlines) -----------------------------
-
-
 def build_yaml_deadlines(block: dict) -> list[dict]:
     """Mirror ai-deadlines getAllDeadlines: new list + legacy fields, deduped."""
     conf_tz = block.get("timezone")
@@ -268,7 +251,6 @@ def build_yaml_deadlines(block: dict) -> list[dict]:
             )
             seen_types.add(dtype)
 
-    # Resolve instants and dedupe by absolute time.
     resolved: list[dict] = []
     seen_instants: set[datetime] = set()
     for item in collected:
@@ -325,13 +307,10 @@ def upsert_yaml_conference(db: Session, block: dict) -> Optional[Conference]:
         db.add(conference)
         db.flush()
     else:
-        # Deadline feature owns these columns; always refresh them.
         conference.tier = tier
         conference.tags = tags or None
         conference.country = country
         conference.city = city
-        # Fill in metadata only when missing so curated proceedings data
-        # (descriptions, hero images, hf_url, etc.) is never clobbered.
         conference.url = conference.url or url
         conference.venue = conference.venue or venue
         conference.location = conference.location or location
@@ -395,9 +374,6 @@ def import_yaml_directory(db: Session, data_dir: Path, dry_run: bool) -> dict[st
         if not dry_run:
             db.commit()
     return stats
-
-
-# --- Series snapshots -----------------------------------------------------------
 
 
 @dataclass
@@ -630,9 +606,6 @@ def series_manifest(series: SeriesState, today: date) -> dict:
     }
 
 
-# --- Sweep selection ----------------------------------------------------------------
-
-
 TIER_ORDER = {"a": 0, "b": 1, "c": 2}
 
 
@@ -683,9 +656,6 @@ def select_sweep_series(
         picked.append((key, item))
     picked.sort(key=lambda pair: (pair[0], pair[1].series))
     return [item for _key, item in picked[:limit]]
-
-
-# --- Agent change sets ----------------------------------------------------------
 
 
 def normalize_deadline_type(value: str) -> str:
@@ -757,7 +727,7 @@ def _http_urls(urls: list[str]) -> list[str]:
 class PlannedChange:
     """One field- or deadline-level change, with before/after values."""
 
-    kind: str  # create_edition | edition_field | add_deadline | update_deadline
+    kind: str
     slug: str
     field: Optional[str] = None
     before: Any = None
@@ -774,7 +744,6 @@ class EditionPlan:
     changes: list[PlannedChange] = field(default_factory=list)
     rejections: list[str] = field(default_factory=list)
     source_urls: list[str] = field(default_factory=list)
-    # Values for a new edition (copied series metadata + agent fields).
     new_edition: Optional[dict] = None
 
     def to_dict(self) -> dict:
@@ -855,8 +824,6 @@ def plan_edition_change(
         "country": change.country or None,
     }
     if existing is None:
-        # Official conference dates alone are enough: the edition is listed
-        # on /ai-deadlines as "deadlines TBA" until a later sweep adds them.
         if not change.deadlines and change.start_date is None:
             plan.rejections.append(
                 "a new edition needs a deadline or official conference dates"
@@ -901,9 +868,6 @@ def _plan_deadlines(
     change: EditionChange,
     now: datetime,
 ) -> None:
-    # Submissions open up to a year ahead; camera-ready and other
-    # post-conference deadlines can fall early in the following year. The
-    # one-day margins keep AoE / UTC+14 times on the boundary days inside.
     year_start = datetime(change.year - 1, 1, 1, tzinfo=timezone.utc) - timedelta(
         days=1
     )
@@ -931,7 +895,7 @@ def _plan_deadlines(
         match = _match_deadline(current, proposal, matched_ids)
         if match is None:
             if instant in instants:
-                continue  # Same instant under another type/label: a duplicate.
+                continue
             instants.add(instant)
             plan.changes.append(
                 PlannedChange(
@@ -994,9 +958,6 @@ def plan_series_change_set(
     ]
 
 
-# --- Writing --------------------------------------------------------------------
-
-
 def conference_snapshot(db: Session, slug: str) -> Optional[dict]:
     row = db.query(Conference).filter(Conference.slug == slug).first()
     if row is None:
@@ -1014,7 +975,6 @@ def conference_snapshot(db: Session, slug: str) -> Optional[dict]:
         "location": row.location,
         "tier": row.tier,
         "tags": list(row.tags) if row.tags else None,
-        # Query rather than use the relationship: writers bulk-delete rows.
         "deadlines": [
             {
                 "id": d.id,
@@ -1123,9 +1083,6 @@ def apply_series_change_set(
             request_id=request_id or f"conference-deadline-agent:{uuid.uuid4()}",
         )
     return plans
-
-
-# --- Admin edits ----------------------------------------------------------------
 
 
 class AdminDeadline(BaseModel):
@@ -1241,12 +1198,6 @@ def admin_replace_edition(
     return after
 
 
-# --- Freshness ------------------------------------------------------------------
-
-
-# Shared by the CRON dashboard and the CLI ``status`` command. A top-tier
-# series is "overdue" when nothing upcoming is recorded although, by last
-# cycle's calendar, its first deadline is less than 30 days away or past.
 FRESHNESS_SQL = r"""
 WITH editions AS (
     SELECT regexp_replace(c.slug, '-\d{4}$', '') AS series,

@@ -121,7 +121,6 @@ async def generate_thumbnail(
         HTTPException: If paper not found or generation fails
     """
     try:
-        # Get paper details
         paper_service = PaperService(db)
         paper = paper_service.get_paper_by_id(paper_id)
 
@@ -137,8 +136,6 @@ async def generate_thumbnail(
                 or thumbnail_service.get_external_thumbnail_url(paper.id)
             )
             if existing_url:
-                # Hydration fills `paper.thumbnail_url` from disk, so check the
-                # stored column on the ORM row rather than the API model.
                 db_paper = db.get(DBPaper, int(paper.id))
                 if db_paper is not None and not db_paper.thumbnail_url:
                     db_paper.thumbnail_url = existing_url
@@ -188,7 +185,6 @@ async def generate_thumbnail(
                 detail="Paper does not have an ArXiv ID, cannot generate thumbnail",
             )
 
-        # Check if thumbnail already exists
         existing_url = thumbnail_service.get_thumbnail_url(
             paper.arxiv_id, paper.version
         )
@@ -199,14 +195,12 @@ async def generate_thumbnail(
                 "message": "Thumbnail already exists",
             }
 
-        # Generate thumbnail in background
         async def generate_in_background():
             try:
                 await thumbnail_service.generate_thumbnail(
                     paper.arxiv_id, paper.version
                 )
             except Exception as e:
-                # Log error but don't fail the request
                 print(
                     f"Background thumbnail generation failed for {paper.arxiv_id}: {e}"
                 )
@@ -244,7 +238,6 @@ def get_thumbnail_status(
         HTTPException: If paper not found
     """
     try:
-        # Get paper details
         paper_service = PaperService(db)
         paper = paper_service.get_paper_by_id(paper_id)
 
@@ -267,7 +260,6 @@ def get_thumbnail_status(
                 "reason": "No ArXiv ID",
             }
 
-        # Check if thumbnail exists
         thumbnail_url = thumbnail_service.get_thumbnail_url(
             paper.arxiv_id, paper.version
         )

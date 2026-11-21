@@ -70,7 +70,6 @@ class LeaderboardMetricService:
             CatalogPersistenceError: If database query fails
         """
         try:
-            # Query for metric names linked to this task-dataset pair
             metric_names = (
                 self.db.query(DBMetric.name)
                 .join(DBTaskDatasetMetric, DBMetric.id == DBTaskDatasetMetric.metric_id)
@@ -113,17 +112,13 @@ class LeaderboardMetricService:
             CatalogPersistenceError: If database query fails
         """
         try:
-            # Get allowed metrics for this leaderboard
             allowed_metrics = self.get_allowed_metrics_for_leaderboard(
                 task_id, dataset_id
             )
 
-            # If no metrics are linked to the leaderboard, allow all metrics
-            # (for backwards compatibility during migration)
             if not allowed_metrics:
                 return True, None
 
-            # Check all provided metrics
             invalid_metrics = [m for m in metric_keys if m not in allowed_metrics]
 
             if invalid_metrics:
@@ -135,7 +130,6 @@ class LeaderboardMetricService:
                 )
                 return False, error_msg
 
-            # Validate best_metric if provided
             if best_metric and best_metric not in allowed_metrics:
                 allowed_list = ", ".join(sorted(allowed_metrics))
                 error_msg = (
@@ -171,26 +165,22 @@ class LeaderboardMetricService:
             CatalogPersistenceError: If database operation fails
         """
         try:
-            # Check if task exists
             task = self.db.query(DBTask).filter(DBTask.id == task_id).first()
             if not task:
                 raise CatalogNotFoundError(f"Task with ID {task_id} not found")
 
-            # Check if dataset exists
             dataset = (
                 self.db.query(DBDataset).filter(DBDataset.id == dataset_id).first()
             )
             if not dataset:
                 raise CatalogNotFoundError(f"Dataset with ID {dataset_id} not found")
 
-            # Check if metric exists
             metric = (
                 self.db.query(DBMetric).filter(DBMetric.name == metric_name).first()
             )
             if not metric:
                 raise CatalogNotFoundError(f"Metric '{metric_name}' not found")
 
-            # Check if link already exists
             existing_link = (
                 self.db.query(DBTaskDatasetMetric)
                 .filter(
@@ -208,7 +198,6 @@ class LeaderboardMetricService:
                     f"Metric '{metric_name}' is already linked to leaderboard (task {task_id}, dataset {dataset_id})"
                 )
 
-            # Create the link
             new_link = DBTaskDatasetMetric(
                 task_id=task_id, dataset_id=dataset_id, metric_id=metric.id
             )
@@ -250,14 +239,12 @@ class LeaderboardMetricService:
             CatalogPersistenceError: If database operation fails
         """
         try:
-            # Check if metric exists
             metric = (
                 self.db.query(DBMetric).filter(DBMetric.name == metric_name).first()
             )
             if not metric:
                 raise CatalogNotFoundError(f"Metric '{metric_name}' not found")
 
-            # Find and delete the link
             link = (
                 self.db.query(DBTaskDatasetMetric)
                 .filter(
@@ -307,19 +294,16 @@ class LeaderboardMetricService:
             CatalogPersistenceError: If database operation fails
         """
         try:
-            # Check if task exists
             task = self.db.query(DBTask).filter(DBTask.id == task_id).first()
             if not task:
                 raise CatalogNotFoundError(f"Task with ID {task_id} not found")
 
-            # Check if dataset exists
             dataset = (
                 self.db.query(DBDataset).filter(DBDataset.id == dataset_id).first()
             )
             if not dataset:
                 raise CatalogNotFoundError(f"Dataset with ID {dataset_id} not found")
 
-            # Check if all metrics exist
             metrics = (
                 self.db.query(DBMetric).filter(DBMetric.name.in_(metric_names)).all()
             )
@@ -331,13 +315,11 @@ class LeaderboardMetricService:
                     f"The following metrics were not found: {', '.join(missing_names)}"
                 )
 
-            # Delete all existing links for this leaderboard
             self.db.query(DBTaskDatasetMetric).filter(
                 DBTaskDatasetMetric.task_id == task_id,
                 DBTaskDatasetMetric.dataset_id == dataset_id,
             ).delete()
 
-            # Create new links
             for metric in metrics:
                 new_link = DBTaskDatasetMetric(
                     task_id=task_id, dataset_id=dataset_id, metric_id=metric.id
@@ -346,7 +328,6 @@ class LeaderboardMetricService:
 
             self.db.commit()
 
-            # Return updated metrics
             return {
                 "task_id": str(task_id),
                 "dataset_id": str(dataset_id),
@@ -384,12 +365,10 @@ class LeaderboardMetricService:
             CatalogPersistenceError: If database query fails
         """
         try:
-            # Check if task exists
             task = self.db.query(DBTask).filter(DBTask.id == task_id).first()
             if not task:
                 raise CatalogNotFoundError(f"Task with ID {task_id} not found")
 
-            # Check if dataset exists
             dataset = (
                 self.db.query(DBDataset).filter(DBDataset.id == dataset_id).first()
             )
@@ -405,7 +384,6 @@ class LeaderboardMetricService:
                 .first()
             )
 
-            # Get all metrics linked to this leaderboard
             links = (
                 self.db.query(DBTaskDatasetMetric, DBMetric)
                 .join(DBMetric, DBTaskDatasetMetric.metric_id == DBMetric.id)
@@ -414,16 +392,12 @@ class LeaderboardMetricService:
                     DBTaskDatasetMetric.dataset_id == dataset_id,
                 )
                 .order_by(
-                    # Keep the headline "Overall" metric first in the UI so
-                    # multi-metric leaderboards default to the benchmark's
-                    # primary score instead of a side metric.
                     DBMetric.name.ilike("%overall%").desc(),
                     DBMetric.name.asc(),
                 )
                 .all()
             )
 
-            # Build response
             metric_list = []
             for link, metric in links:
                 metric_list.append(

@@ -17,8 +17,6 @@ from backend.models.papers import (
 from backend.services.paper_service import PaperService
 from backend.utils.urls import normalize_paper_route_identifier, validate_arxiv_id
 
-# Short fingerprints ("gpt4", "nature") are more likely to be a venue, model
-# name, or author fragment than a title, so they never count as evidence.
 MIN_TITLE_FINGERPRINT_LENGTH = 12
 
 
@@ -74,8 +72,6 @@ class PaperReferenceService:
             {fingerprint for group in wanted_titles.values() for fingerprint in group}
         )
         for index, fingerprints in wanted_titles.items():
-            # The longest matching candidate wins, so a complete title beats a
-            # fragment that happens to be some other paper's title.
             for fingerprint in sorted(set(fingerprints), key=len, reverse=True):
                 papers = by_title.get(fingerprint)
                 if papers:

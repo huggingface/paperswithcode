@@ -652,9 +652,6 @@ def run_reference_backfill(
                     and accounted < eligible_now
                     and row.retryable_failures == 0
                 ):
-                    # A paper was imported behind the stable tuple cursor while
-                    # this month was running. Restart the bounded month; link
-                    # writes remain idempotent.
                     row.status = "pending"
                     row.processed_papers = 0
                     row.matched_papers = 0

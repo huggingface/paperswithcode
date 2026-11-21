@@ -43,7 +43,6 @@ class Conference(Base):
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     image_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     image_credit: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # DB-backed hero image (see Task.image_data for the deferred/flag rationale).
     image_data: Mapped[Optional[bytes]] = mapped_column(
         LargeBinary, nullable=True, deferred=True
     )
@@ -125,7 +124,6 @@ class ConferenceDeadlineSweep(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
-    # launching | running | applied | failed
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     hf_job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     series: Mapped[list] = mapped_column(JSONB, nullable=False)

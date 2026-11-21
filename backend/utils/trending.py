@@ -67,29 +67,21 @@ from __future__ import annotations
 import bisect
 from typing import Dict, Iterable, List, Sequence, Tuple
 
-# Blend weights between the GitHub and Hugging Face components. Equal weights so the top of each signal reaches the same
-# single-signal ceiling.
 GITHUB_WEIGHT = 0.5
 HF_WEIGHT = 0.5
 
-# Default X lift weight (off) and the slowest X post that still counts, in likes/hour.
 DEFAULT_X_WEIGHT = 0.0
 DEFAULT_X_MIN_LIKES_PER_HOUR = 1.0
-# Only posts from the last week count; refresh_x_post_likes stops reading them.
 X_POST_WINDOW_DAYS = 7
 
-# Per-kind importance of HF artifacts (applied to the quantile rank).
 KIND_WEIGHTS: Dict[str, float] = {
     "model": 1.0,
     "dataset": 0.8,
     "space": 0.7,
 }
 
-# A paper's own artifact is linked to a handful of papers; live trending models
-# never exceed 5, while aggregator Spaces and datasets reach thousands.
 HF_MAX_ARTIFACT_PAPERS = 5
 
-# Known aggregators, excluded whatever their current fan-out.
 HF_AGGREGATOR_DENYLIST = frozenset(
     {
         ("space", "tardellirs/paper-pulse"),
@@ -99,20 +91,13 @@ HF_AGGREGATOR_DENYLIST = frozenset(
     }
 )
 
-# Popularity mark-down: at most POPULARITY_SHARE of the momentum score is lost
-# (at P = 0), and the convex exponent spares papers with reasonable adoption.
 POPULARITY_SHARE = 0.5
 POPULARITY_EXPONENT = 2.0
-# A repository official for more papers than this is a shared monorepo whose
-# stars say nothing about one paper.
 MAX_OFFICIAL_REPO_PAPERS = 5
 
-# Final score multiplier (single-signal top ~= 50, both-signal top ~= 100).
 SCORE_SCALE = 100.0
-# Stored scores and components are rounded to 4 decimals before writing.
 STORED_SCORE_TOLERANCE = 0.02
 
-# Editorial decaying pin: temporary boost that linearly fades to the computed score.
 PIN_PEAK_SCORE = 100.0
 DEFAULT_PIN_DECAY_HOURS = 72.0
 

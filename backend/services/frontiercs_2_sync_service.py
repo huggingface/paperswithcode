@@ -30,7 +30,6 @@ from backend.services.live_leaderboard_sync import (
 )
 
 FRONTIERCS_2_URL = "https://frontier-cs.org/#leaderboard"
-# The leaderboard page renders client-side from constants in this bundle.
 FRONTIERCS_2_DATA_URL = "https://frontier-cs.org/assets/js/fcs2-data.js"
 TASK_SLUG = "coding-agents"
 DATASET_SLUG = "frontiercs-2"
@@ -40,17 +39,11 @@ METRIC_NAMES = (PASS_RATE, FCI)
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("FrontierCS 2")
 MIN_EXPECTED_ENTRIES = 8
 MAX_EXPECTED_ENTRIES = 200
-# Refuse to touch the managed leaderboard when the reviewed subset collapses.
 MIN_SELECTED_ENTRIES = 8
 
 
 _DEEPSEEK_V4_1_FLASH = "2609.19969"
 
-# Exact FrontierCS model names are the trust boundary between a leaderboard
-# entry and its introducing paper; the harness is shown per entry. Catalog
-# model names and papers follow the reviewed Vals AI sync identities.
-# Other names are matched automatically when the catalog names them
-# unambiguously, and otherwise handed to the release radar.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Claude Opus 5.5": ModelIdentity(
         "Claude Opus 5.5", source_url="https://www.anthropic.com/claude-opus-5-5"
@@ -155,9 +148,7 @@ class FrontierCSSyncStats:
     matched: int = 0
     created: int = 0
     changed: int = 0
-    # Names outside MODEL_IDENTITIES that the catalog matched on its own.
     auto_matched: list[str] = field(default_factory=list)
-    # Names with no paper yet; each is a release signal for the radar.
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
     missing_upstream: list[str] = field(default_factory=list)
@@ -171,7 +162,6 @@ def _literal(source: str, name: str) -> Any:
     matches = list(re.finditer(rf"(?<![\w.$]){name}=(?=[\[{{])", source))
     if len(matches) != 1:
         raise ValueError(f"FrontierCS data has {len(matches)} {name} literals")
-    # js_literal also restores minified fractions such as ".2" (2026-11-02).
     return js_literal(source, matches[0].end(), f"FrontierCS {name}")
 
 
@@ -217,8 +207,6 @@ def parse_frontiercs_2(source: str) -> FrontierCSLeaderboard:
         fci, low, high, _tasks = (_number(v, f"{upstream_id} FCI") for v in index_row)
         if not (runs > 0 and 0 <= passed <= runs and passed == int(passed)):
             raise ValueError(f"FrontierCS pass counts are invalid for {upstream_id}")
-        # The published one-decimal percent must agree with the pass count it
-        # summarizes, whichever way the site rounds a half tenth.
         if abs(passed / runs * 100 - rate) > 0.05 + 1e-9:
             raise ValueError(f"FrontierCS pass rate disagrees for {upstream_id}")
         if not low <= fci <= high:
@@ -311,7 +299,6 @@ class FrontierCS2SyncService:
             matched = matcher.match(
                 [LeaderboardModel(e.name, e.lab) for e in new_entries]
             )
-            # (paper id, catalog model name, is_open, HF model URL, entry)
             selected = [
                 (
                     paper_ids.get(identity.paper_key),
@@ -343,8 +330,6 @@ class FrontierCS2SyncService:
                     if e.name not in matched
                 ]
             )
-            # Effort settings of one model match one catalog model name; the
-            # board keeps that model's best row.
             best: dict[tuple[int | None, str, str | None], tuple] = {}
             for item in selected:
                 paper_id, model_name, _, _, entry = item

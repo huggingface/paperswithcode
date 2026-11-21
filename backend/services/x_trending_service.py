@@ -47,7 +47,6 @@ class XTrendingService:
                     )
                 )
                 continue
-            # A paper listed twice in one day keeps its best rank.
             entries.setdefault(
                 paper.id,
                 PaperXTrending(

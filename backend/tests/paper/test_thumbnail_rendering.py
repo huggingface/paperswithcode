@@ -107,7 +107,6 @@ def test_resize_to_card_fill_matches_card_aspect():
     filled = _resize_to_card_fill(image)
 
     assert filled.size == (EXPECTED_THUMBNAIL_WIDTH, EXPECTED_THUMBNAIL_HEIGHT)
-    # Contain-fit keeps the full page visible; the marker stays near the top.
     assert filled.getpixel((filled.width // 2, 45)) == (0, 0, 0)
 
 
@@ -201,8 +200,6 @@ def test_is_thumbnail_valid_rejects_non_jpeg_format(tmp_path: Path):
 
 
 def test_is_thumbnail_valid_rejects_squat_thumbnail(tmp_path: Path):
-    # Older buggy renders produced 400x258 (H/W = 0.645) by clipping the
-    # height. These are correct width but visually broken in card layouts.
     path = tmp_path / "squat.jpg"
     _save_jpeg(path, EXPECTED_THUMBNAIL_WIDTH, 258)
     assert is_thumbnail_valid(path) is False
@@ -325,7 +322,6 @@ def test_huggingface_pdf_follows_cdn_redirect(monkeypatch):
 def test_generic_binary_external_pdf_is_checked_by_magic_bytes(
     monkeypatch, content_type: str, body: bytes, expected: bytes | None
 ):
-    # raw.githubusercontent.com serves repository PDFs as octet-stream.
     service = _external_pdf_service()
 
     async def fetch(url, **kwargs):
@@ -487,7 +483,6 @@ def test_transient_pdf_url_error_falls_back_to_source_pdf(tmp_path: Path, monkey
 def test_external_thumbnail_uses_archived_pdf_when_source_is_gone(
     tmp_path: Path, monkeypatch
 ):
-    # Upstream deleted the branch holding the PDF after the paper was indexed.
     service = _external_generation_service(tmp_path)
     service._read_archived_external_pdf = MagicMock(return_value=b"%PDF-archived")
 

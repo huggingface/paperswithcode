@@ -273,7 +273,6 @@ def test_v3_parser_accepts_leaderboard_growth_past_one_hundred_rows():
         ),
         ("anthropic-claude-sonnet-5-5-provider-adapter", None),
         ("zai-glm-5-3-flash", "source:https://z.ai/blog/glm-5.3-flash"),
-        # Provider-adapter variants stay unmapped until they are reviewed.
         ("openai-gpt-6-astra-provider-adapter", None),
     ],
 )

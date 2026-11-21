@@ -61,12 +61,9 @@ class Paper(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Core paper identification
     id: str = Field(..., description="Paper ID")
     arxiv_id: Optional[str] = Field(None, description="ArXiv ID")
 
-    # Source split: 'arxiv' for ArXiv papers, 'external' for blog posts,
-    # technical reports, model release pages, etc.
     source: str = Field(
         default="arxiv",
         description="Origin of this paper row: 'arxiv' or 'external'",
@@ -79,9 +76,6 @@ class Paper(BaseModel):
         ),
     )
 
-    # URLs - source-aware. ArXiv rows have generated abs/pdf URLs from
-    # `arxiv_id`/`version`. External rows return `source_url` as `url_abs`
-    # and leave `url_pdf` NULL unless an explicit PDF is known.
     url_abs: Optional[str] = Field(
         None, description="URL to the paper abstract or external source page"
     )
@@ -93,7 +87,6 @@ class Paper(BaseModel):
         None, description="URL to the paper thumbnail image"
     )
 
-    # Paper content
     title: str = Field(..., description="Paper title")
     abstract: Optional[str] = Field(
         default="",
@@ -109,7 +102,6 @@ class Paper(BaseModel):
         ),
     )
 
-    # Publication information
     published: Optional[date] = Field(None, description="Paper publication date")
     conference: Optional[str] = Field(
         None, description="ID of the conference in which the paper was published"
@@ -142,7 +134,6 @@ class Paper(BaseModel):
         ),
     )
 
-    # Version tracking (our extension)
     version: str = Field(default="v1", description="Paper version (e.g., v1, v2, v3)")
     is_latest_version: bool = Field(
         default=True, description="Whether this is the latest version"
@@ -151,10 +142,8 @@ class Paper(BaseModel):
     @field_validator("version", mode="before")
     @classmethod
     def default_missing_version(cls, value: object) -> object:
-        # A NULL version column must not make the paper page fail to render.
         return "v1" if value is None else value
 
-    # Citation and importance metrics
     citation_count: int = Field(
         default=0, description="Number of citations from Semantic Scholar"
     )
@@ -165,7 +154,6 @@ class Paper(BaseModel):
         None, description="Last time citations were updated"
     )
 
-    # ArXiv category classification
     primary_category: Optional[str] = Field(
         None, description="Primary ArXiv category (e.g., cs.CV, cs.LG)"
     )
@@ -173,12 +161,10 @@ class Paper(BaseModel):
         default_factory=list, description="All ArXiv categories for this paper"
     )
 
-    # URL extraction tracking
     urls_extracted: bool = Field(
         default=False, description="Whether URLs have been extracted for this paper"
     )
 
-    # Frontend v2 schema additions (PLAN.md §11). Schema-only; no data ingestion in this migration.
     tldr: Optional[str] = Field(
         None,
         description="AI-generated TL;DR summary (frontend v2 PaperDetailView panel)",
@@ -210,10 +196,6 @@ class Paper(BaseModel):
         ),
     )
 
-    # Hugging Face artifact URLs explicitly linked to this paper. Populated
-    # for `source='external'` rows because external rows have no reliable
-    # `arxiv_id` to query the Hugging Face arxiv filter URL with. ArXiv rows
-    # leave these empty and derive artifacts from `arxiv_id` at render time.
     hf_models: List[str] = Field(
         default_factory=list,
         description=(
@@ -264,7 +246,6 @@ class Paper(BaseModel):
         ),
     )
 
-    # Associated resources (optional, populated when requested)
     repositories: Optional[List["Repository"]] = Field(
         None, description="GitHub repositories associated with this paper"
     )
@@ -330,7 +311,6 @@ class Paper(BaseModel):
     def parse_authors(cls, v):
         """Parse authors from various input formats."""
         if isinstance(v, str):
-            # If authors come as a single string, split by comma
             return [author.strip() for author in v.split(",")]
         elif isinstance(v, list):
             return v
@@ -594,11 +574,9 @@ class Author(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Core author identification
     id: str = Field(..., description="Author ID")
     full_name: str = Field(..., description="Author full name")
 
-    # Hugging Face integration (our extension)
     hf_username: Optional[str] = Field(None, description="Hugging Face username")
     hf_id: Optional[str] = Field(None, description="Hugging Face user ID")
     hf_avatar_url: Optional[str] = Field(None, description="Hugging Face avatar URL")
@@ -629,7 +607,6 @@ class Author(BaseModel):
         ),
     )
 
-    # Statistics (computed fields)
     paper_count: int = Field(default=0, description="Number of papers by this author")
 
     @field_validator("id", mode="before")
@@ -684,15 +661,12 @@ class Repository(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Core repository identification
     id: str = Field(..., description="Repository ID")
 
-    # Repository details
     url: str = Field(..., description="Full GitHub repository URL")
     owner: Optional[str] = Field(None, description="GitHub username/organization")
     name: Optional[str] = Field(None, description="Repository name")
 
-    # Repository metadata
     num_stars: int = Field(default=0, description="Number of GitHub stars")
     is_official: bool = Field(
         default=False,
@@ -703,7 +677,6 @@ class Repository(BaseModel):
         description="Source of the repository data (pwc_archive, ai_extraction, manual, etc.)",
     )
 
-    # Trending metrics
     trending_score: Optional[float] = Field(
         None,
         description="EMA trending score (stars per hour) - higher means faster recent growth",
@@ -712,7 +685,6 @@ class Repository(BaseModel):
         None, description="When the trending score was last calculated"
     )
 
-    # Timestamps
     created_at: Optional[date] = Field(None, description="Repository creation date")
     updated_at: Optional[date] = Field(None, description="Repository last update date")
 
@@ -853,11 +825,9 @@ class PaperRepository(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Relationship identification
     paper_id: str = Field(..., description="Associated paper ID")
     repository_id: str = Field(..., description="Associated repository ID")
 
-    # Optional embedded repository data for convenience
     repository: Optional[Repository] = Field(
         None, description="Full repository details"
     )
@@ -902,10 +872,8 @@ class ProjectPage(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Core project page identification
     id: str = Field(..., description="Project page ID")
 
-    # Project page details
     url: str = Field(..., description="Full URL to project page")
     is_official: bool = Field(
         default=False,
@@ -916,7 +884,6 @@ class ProjectPage(BaseModel):
         description="Source of the project page data (pwc_archive, ai_extraction, manual, etc.)",
     )
 
-    # Timestamps
     created_at: Optional[date] = Field(None, description="Project page creation date")
     updated_at: Optional[date] = Field(
         None, description="Project page last update date"
@@ -937,7 +904,6 @@ class PaperProjectPage(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Relationship identification (only the two ID columns)
     paper_id: str = Field(..., description="Associated paper ID")
     project_page_id: str = Field(..., description="Associated project page ID")
 
@@ -987,13 +953,10 @@ class ProjectPageWithPapers(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Project page details
     project_page: ProjectPage = Field(..., description="Project page information")
 
-    # Associated papers
     papers: List[str] = Field(..., description="List of associated paper IDs")
 
-    # Relationship metadata (if needed)
     relationships: Optional[List[PaperProjectPage]] = Field(
         None, description="Detailed relationship information"
     )
@@ -1213,7 +1176,6 @@ class OrganizationSummary(BaseModel):
         return str(v)
 
 
-# Resolve the paper model's forward references within this bounded module.
 Paper.model_rebuild()
 
 __all__ = [

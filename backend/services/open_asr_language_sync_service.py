@@ -52,12 +52,7 @@ from backend.services.open_asr_sync_service import (
 MULTILINGUAL_TABLE_API = "/_render_multilingual_combined"
 AVERAGE_VIEW = "Language averages"
 RTFX_COLUMN = "RTFx ⬆️️"
-# The Space renamed "Average WER" to "Average ER" on 2026-11-13 because a few
-# languages (e.g. Chinese) report CER. Every language synced here reports WER,
-# so for a single selected language both labels are that language's WER.
 ERROR_RATE_COLUMNS = ("Average ER ⬇️", "Average WER ⬇️")
-# Label -> the Space's `?languages=<code>` deeplink code. English is the
-# default `open-asr-leaderboard` board.
 LANGUAGE_BOARDS = {
     "🇩🇪 German": "de",
     "🇫🇷 French": "fr",
@@ -154,8 +149,6 @@ def parse_language_table(payload: Any, *, label: str) -> list[OpenAsrEntry]:
                 rank=rank,
                 wer=wer,
                 rtfx=rtfx,
-                # Refined from the English board's license where it lists the
-                # model; proprietary APIs link to vendor docs, not the Hub.
                 is_open=html.unescape(link.group(1)).startswith(_HF_PREFIX),
             )
         )
@@ -216,8 +209,6 @@ class OpenAsrLanguageSyncService:
             .all()
         )
         models: dict[str, _KnownModel] = {}
-        # Exact upstream ids win; a suffix-stripped Hub id ("org/m (runtime)"
-        # -> "org/m") also finds the row when the views spell it differently.
         for exact in (False, True):
             for row in rows:
                 model_id = OpenAsrSyncService._managed_model_id(row)

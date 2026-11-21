@@ -313,9 +313,6 @@ class CodexCurationCallbackService:
         return {
             "job": self.job_service.serialize(row, settings).model_dump(mode="json"),
             "retry_feedback": self._retry_feedback(row),
-            # The pinned runner reads these candidate fields for every
-            # resolution job; a radar lead is a page about the release, not
-            # a model card.
             "candidate": {
                 "id": str(signal.id),
                 "repo_id": f"{signal.lab}: {signal.model_name}",
@@ -348,7 +345,6 @@ class CodexCurationCallbackService:
     def context(self, row, settings: Settings) -> dict[str, Any]:
         snapshot = getattr(row, "context_snapshot", None)
         if snapshot is not None:
-            # A Pi shadow job sees the paper as its Codex pair first saw it.
             return {
                 **snapshot,
                 "job": self.job_service.serialize(row, settings).model_dump(
@@ -371,7 +367,6 @@ class CodexCurationCallbackService:
                     mode="json"
                 ),
                 "retry_feedback": self._retry_feedback(row),
-                # The pinned runner prints paper.id; these jobs have no paper.
                 "paper": {"id": None},
                 **scope,
             }
@@ -500,9 +495,6 @@ class CodexCurationCallbackService:
             .all()
             if hasattr(value, "method_id")
         ]
-        # An external release page is read from its prepared Markdown copy;
-        # first-party sites often refuse the runner's own fetch. Enrichment
-        # waits for it too, or it tags the paper without reading the page.
         markdown_expected = bool(
             getattr(row, "kind", None) in ADMIN_MARKDOWN_KINDS
             and paper.source == "external"
@@ -519,7 +511,6 @@ class CodexCurationCallbackService:
         )
         return {
             "job": self.job_service.serialize(row, settings).model_dump(mode="json"),
-            # A new-benchmark re-check may write only this benchmark's rows.
             "promoted_benchmark": (
                 {
                     "dataset_id": promoted,
@@ -926,10 +917,6 @@ class CodexCurationCallbackService:
 
             changed = before_state != after_state or created + updated + removed > 0
             row.submitted_at = datetime.now(UTC)
-            # Enrichment can enqueue thumbnail work or use adapters whose fake
-            # test/session projection cannot observe the relation write. Keep
-            # its accepted-apply lifecycle, while a true add-evals no-op remains
-            # distinguishable from a catalog mutation.
             if changed or row.kind == "enrich-paper":
                 row.applied_at = row.submitted_at
             row.proposal = body.model_dump(mode="json")
@@ -939,10 +926,6 @@ class CodexCurationCallbackService:
                 "existing_evaluation_rows_affected": sorted(
                     {int(item["id"]) for item in before_state.get("evaluations", [])}
                 ),
-                # Historical evaluation rows have no trustworthy author/source
-                # provenance column. Conservatively flag every changed existing
-                # row as manual-or-legacy so automatic corrections are prominent
-                # in the dashboard and trace instead of assuming automation.
                 "manual_or_legacy_evaluation_rows_affected": (
                     flagged_existing_evaluations
                 ),
@@ -1005,9 +988,6 @@ class CodexCurationCallbackService:
                     "benchmark_gaps_rejected": rejected_gaps,
                     "retryable": retryable_validation,
                 }
-                # A scheduled worker gets one opportunity to correct an ordinary
-                # proposal-validation error. Keep the mutation open after the
-                # first rejection; a second rejected proposal closes the job.
                 if not retryable_validation:
                     rejected_row.submitted_at = datetime.now(UTC)
                 should_commit = True
@@ -1762,8 +1742,6 @@ class CodexCurationCallbackService:
             raise CodexCurationMutationClosedError(
                 "Scheduled mutation requires a durable pre-apply trace"
             )
-        # The pre-apply trace is the reviewable record of what a scheduled job
-        # intends to change, so the apply must be exactly that proposal.
         if self._preapply_proposal(row) != (preapply_body or body).model_dump(
             mode="json"
         ):
@@ -1868,8 +1846,6 @@ class CodexCurationCallbackService:
                     page.url: getattr(page, "source", "unknown")
                     for page in self.db.get(Paper, row.paper_id).project_pages
                 }
-                # Legacy imported HTTP pages may be retained unchanged. New
-                # project links still require HTTPS.
                 for link in mutation.project_pages:
                     if (
                         link.url not in current_pages
@@ -1929,8 +1905,6 @@ class CodexCurationCallbackService:
             for item in body.validation_evidence
             if isinstance(item, dict) and str(item.get("evaluation_id", "")).isdigit()
         }
-        # Identical repeats and entries for rows the curator dropped are
-        # harmless; only conflicting or missing source cells are rejected.
         score_evidence = {}
         for entry in body.score_evidence:
             key = (entry.task_id, entry.dataset_id, entry.metric)
@@ -1984,13 +1958,7 @@ class CodexCurationCallbackService:
                 raise ValueError("Evaluation contains an unconfigured metric")
             if item.harness and not leaderboard.supports_harness:
                 raise ValueError("Harness is not supported by this leaderboard")
-            # Scheduled jobs do not get to choose the catalog source URL.  The
-            # paper route is already known and is the only accepted value, so
-            # canonicalize it deterministically instead of turning a harmless
-            # agent formatting mistake into a circuit-breaker event.  Primary
-            # arXiv/HF URLs remain available in validation evidence and traces.
             item.source_url = expected_source
-            # EvaluationService keeps both legacy source columns synchronized.
             item.external_source_url = expected_source
             for metric_name, value in item.metrics.items():
                 try:
@@ -2080,7 +2048,6 @@ class CodexCurationCallbackService:
         """Resolve the callback's closed mutation surface from catalog state."""
         capability, primary_resource = curation_primary_authorization(self.db, row)
         if row.kind == "review-benchmark-gaps" and body.review_benchmark_gaps:
-            # A mistyped id is a fixable proposal error, not a capability denial.
             scope = set(self._review_scope(row))
             outside = [
                 str(decision.candidate_id)
@@ -2125,8 +2092,6 @@ class CodexCurationCallbackService:
                 )
                 for method_id in body.enrich.method_ids or []
             )
-        # Evaluation task/dataset/metric references are resolved against the
-        # configured TaskDataset and TaskDatasetMetric rows immediately below.
         for resource in resources:
             if resource.kind not in CAPABILITY_RESOURCE_KINDS[capability]:
                 raise AutonomousCapabilityDenied("resource_kind_not_allowed")
@@ -2221,11 +2186,6 @@ class CodexCurationCallbackService:
         proposed = item.model_dump()
         if proposed.get("evaluated_on") is not None:
             proposed["evaluated_on"] = proposed["evaluated_on"].isoformat()
-        # These legacy update fields have no explicit "set" sentinel in
-        # EvaluationService: None means omitted, not clear.  best_rank is also
-        # recalculated after writes, so an omitted rank must accept the derived
-        # catalog value during post-write verification. create_evaluation also
-        # copies a paper-native source_url onto external_source_url.
         for field in (
             "methodology",
             "best_rank",
@@ -2302,9 +2262,6 @@ class CodexCurationCallbackService:
             values = item.model_dump()
             removed_id = removed_leaderboards.get((item.task_id, item.dataset_id))
             if existing is None and removed_id is not None:
-                # A row of this paper was deleted from this board; curators
-                # remove incompatible results and tell authors so. Never put
-                # one back automatically.
                 skipped_removed.append(
                     {
                         **_proposal_identity(values)._asdict(),
@@ -2313,9 +2270,6 @@ class CodexCurationCallbackService:
                 )
                 continue
             if existing is None:
-                # The model may already be on the leaderboard from a twin paper
-                # (an external release page, an older arXiv version); one entry
-                # per model, so leave that row and report the skip.
                 duplicate = self.evaluation_service.find_leaderboard_duplicate(
                     task_id=item.task_id,
                     dataset_id=item.dataset_id,
@@ -2377,7 +2331,6 @@ class CodexCurationCallbackService:
             )
             self._reject_sync_managed(existing, "removed")
             if (existing.task_id, existing.dataset_id) in removed_leaderboards:
-                # A curator already decided what survives on this board.
                 raise ValueError(
                     f"Task {existing.task_id} / dataset {existing.dataset_id} had "
                     "a row of this paper removed "

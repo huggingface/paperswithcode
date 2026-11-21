@@ -113,8 +113,6 @@ def test_resolve_prefers_arxiv_ids_then_exact_title_fingerprints():
     assert by_key["cite.gu2024"].paper.id == "13"
     assert by_key["cite.unknown"].paper is None
     assert by_key["cite.short"].paper is None
-    # One batched query per evidence kind, and no title lookup for entries
-    # already matched by arXiv ID or with fingerprints below the length floor.
     assert service.arxiv_queries == [{"2106.09685"}]
     assert service.title_queries == [
         {

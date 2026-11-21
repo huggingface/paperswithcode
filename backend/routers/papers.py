@@ -785,8 +785,6 @@ def get_paper_by_id(
             paper_id, include_resources=include_resources
         )
     except PaperNotFoundError as e:
-        # ``code`` sits beside the unchanged string ``detail`` so existing
-        # clients keep working; /public-metadata covers unindexed papers.
         return JSONResponse(
             status_code=404,
             content={"detail": str(e), "code": "paper_not_in_catalog"},
@@ -817,13 +815,11 @@ def get_paper_by_arxiv_id(
     - Modern: 1805.10616
     - Legacy: cs.DS/0610046
     """
-    # Validate ArXiv ID format
     if not validate_arxiv_id(arxiv_id):
         raise HTTPException(
             status_code=400, detail=f"Invalid ArXiv ID format: {arxiv_id}"
         )
 
-    # Validate version format if provided
     if version and not validate_version(version):
         raise HTTPException(
             status_code=400,
@@ -1197,15 +1193,12 @@ def get_paper_methods(
     - `/api/v1/papers/1234/methods/` - Get methods for paper ID 1234
     - `/api/v1/papers/1706.03762/methods/` - Get methods for ArXiv paper 1706.03762 (Attention is All You Need)
     """
-    # Import here to avoid circular imports
     from backend.services.method_service import MethodService
 
     paper_service = PaperService(db)
 
-    # Get the paper to verify it exists and get the numeric ID
     paper = paper_service.get_paper_by_id_or_arxiv(paper_id)
 
-    # Get methods for this paper
     method_service = MethodService(db)
     return method_service.get_methods_for_paper(
         paper_id=int(paper.id),
@@ -1400,7 +1393,6 @@ def update_paper_repositories(
     }
     ```
     """
-    # Convert Pydantic models to dict for service layer
     repositories_data = [
         {"url": repo.url, "is_official": repo.is_official}
         for repo in request.repositories
@@ -1451,7 +1443,6 @@ def update_paper_project_pages(
     }
     ```
     """
-    # Convert Pydantic models to dict for service layer
     project_pages_data = [
         {"url": page.url, "is_official": page.is_official}
         for page in request.project_pages

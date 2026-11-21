@@ -19,7 +19,6 @@ from backend.services.trending_ranking_service import active_paper_score_compone
 
 ROLLING_DAYS = 30
 RETENTION_DAYS = 120
-# Organizations with at least this many public papers are featured automatically.
 AUTO_FEATURE_MIN_PAPERS = 25
 
 
@@ -71,8 +70,6 @@ class OrganizationTrendingService:
             else:
                 snapshot.raw_score = float(raw_score or 0)
 
-        # Repository sessions disable autoflush, so make today's upserts visible
-        # to the rolling query in this same transaction.
         self.db.flush()
         rolling_start = snapshot_date - timedelta(days=ROLLING_DAYS - 1)
         rolling_rows = (

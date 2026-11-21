@@ -32,8 +32,6 @@ METRIC_NAME = "Elo (live, external)"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("CoArena")
 MIN_EXPECTED_ENTRIES = 5
 MAX_EXPECTED_ENTRIES = 100
-# Published CoArena statuses. `stable` is used for long-standing top models
-# such as Fable 5; treating it as invalid aborted the hourly sync.
 VALID_RATING_STATUSES = {"ranked", "provisional", "stable"}
 
 
@@ -48,8 +46,6 @@ class PaperIdentity:
             raise ValueError("PaperIdentity requires exactly one stable identity")
 
 
-# Exact upstream IDs are the trust boundary between a product label and a paper.
-# New models remain unmatched until their release identity has been reviewed.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "muse-wonder-1-0": PaperIdentity(
         source_url="https://research.meta.ai/blog/muse-wonder", is_open=False
@@ -216,13 +212,9 @@ def parse_coarena_leaderboard(payload: Any) -> list[CoArenaEntry]:
         name = raw.get("name")
         effort = raw.get("effort")
         company = raw.get("company")
-        # Upstream dropped its provider `model` field on 2026-11-13; the
-        # stable `id` is the paper-identity key and `name` the display label.
         for field_name, value in (("id", model_id), ("name", name)):
             if not isinstance(value, str) or not value.strip() or len(value) > 255:
                 raise ValueError(f"CoArena row has an invalid {field_name}")
-        # Company is display metadata, and upstream may omit it for a rated
-        # model. Stable IDs, ratings and paper mappings remain mandatory.
         if company is not None and (
             not isinstance(company, str) or not company.strip() or len(company) > 255
         ):
@@ -357,8 +349,6 @@ class CoArenaSyncService:
                 self._managed_model_id(row.methodology): row for row in managed_rows
             }
             upstream_ids = {entry.id for entry in entries}
-            # Models without a reviewed identity go to the shared matcher; the
-            # rest become release-radar signals under their CoArena company.
             unknown = {
                 entry.id: LeaderboardModel(entry.name, entry.company or "")
                 for entry in entries

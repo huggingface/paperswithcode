@@ -38,10 +38,8 @@ def _compile_postgres_container_sqlite(_element, _compiler, **_kw):
     return "TEXT"
 
 
-# Tables SQLite can create: some chat tables need PostgreSQL functions.
 TABLES = [table for table in Base.metadata.sorted_tables if table.name != "chat_shares"]
 
-# Test database setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
 engine = create_engine(
@@ -80,7 +78,6 @@ def sample_authors():
     """Create sample authors for testing."""
     db = TestingSessionLocal()
 
-    # Create test authors
     author1 = DBAuthor(
         id=1, name="John Doe", hf_username="johndoe", hf_id="hf123", hf_is_pro=True
     )
@@ -94,7 +91,6 @@ def sample_authors():
     db.add_all([author1, author2, author3])
     db.commit()
 
-    # Create test papers
     paper1 = DBPaper(
         id=1,
         title="Test Paper 1",
@@ -115,11 +111,9 @@ def sample_authors():
     db.add_all([paper1, paper2])
     db.commit()
 
-    # Create author-paper relationships
     paper_author1 = PaperAuthor(paper_id=1, author_id=1, claimed=True)
     paper_author2 = PaperAuthor(paper_id=2, author_id=1, claimed=True)
     paper_author3 = PaperAuthor(paper_id=1, author_id=2)
-    # Linked to Alice Johnson without an HF claim, as for most legacy papers.
     paper_author4 = PaperAuthor(paper_id=2, author_id=3)
 
     db.add_all([paper_author1, paper_author2, paper_author3, paper_author4])
@@ -139,7 +133,6 @@ def test_get_authors_list(client, sample_authors):
     assert data["count"] == 3
     assert len(data["results"]) == 3
 
-    # Check first author
     author = data["results"][0]
     assert "id" in author
     assert "full_name" in author
@@ -166,7 +159,7 @@ def test_get_authors_hf_filter(client, sample_authors):
     assert response.status_code == 200
     data = response.json()
 
-    assert data["count"] == 2  # Only John Doe and Alice Johnson have HF accounts
+    assert data["count"] == 2
     for author in data["results"]:
         assert author["hf_username"] is not None
 
@@ -253,7 +246,6 @@ def test_author_photo_is_served_with_its_credit(client, sample_authors):
     assert response.content == b"jpeg-bytes"
     assert response.headers["content-type"] == "image/jpeg"
     assert "immutable" in response.headers["cache-control"]
-    # A stale digest or another format is not this photo.
     assert client.get("/api/v1/authors/2/photo/old.jpg").status_code == 404
     assert client.get("/api/v1/authors/2/photo/abc123.png").status_code == 404
     assert client.get("/api/v1/authors/1/photo/abc123.jpg").status_code == 404
@@ -264,7 +256,6 @@ def test_follow_suggestions_carry_faces_and_logos(client):
     db.add_all(
         [
             DBAuthor(id=266, name="Yann LeCun"),
-            # A default HF avatar is no face.
             DBAuthor(
                 id=25,
                 name="Yoshua Bengio",
@@ -350,7 +341,6 @@ def test_get_author_papers(client, sample_authors):
     assert data["count"] == 2
     assert len(data["results"]) == 2
 
-    # Check paper structure
     paper = data["results"][0]
     assert "id" in paper
     assert "title" in paper
@@ -365,7 +355,6 @@ def test_search_authors(client, sample_authors):
     data = response.json()
 
     assert data["count"] >= 1
-    # Should find "John Doe"
     found_john = any(author["full_name"] == "John Doe" for author in data["results"])
     assert found_john
 
@@ -378,7 +367,6 @@ def test_search_authors_by_username(client, sample_authors):
     data = response.json()
 
     assert data["count"] >= 1
-    # Should find "Alice Johnson"
     found_alice = any(author["hf_username"] == "alicej" for author in data["results"])
     assert found_alice
 
@@ -392,14 +380,13 @@ def test_search_authors_single_character(client, sample_authors):
 
 def test_authors_ordering(client, sample_authors):
     """Test different ordering options."""
-    # Test ordering by name
     response = client.get("/api/v1/authors/?order_by=name&order_dir=asc")
 
     assert response.status_code == 200
     data = response.json()
 
     names = [author["full_name"] for author in data["results"]]
-    assert names == sorted(names)  # Should be alphabetically sorted
+    assert names == sorted(names)
 
 
 if __name__ == "__main__":

@@ -27,7 +27,6 @@ def setup_logging(
     Returns:
         Configured logger instance
     """
-    # Auto-detect script name if not provided
     if script_name is None:
         import inspect
 
@@ -38,24 +37,21 @@ def setup_logging(
         else:
             script_name = "unknown_script"
 
-    # Create logs directory if it doesn't exist
     log_dir_path = Path(log_dir)
     log_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # Generate timestamp for log file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_filename = f"{script_name}_{timestamp}.log"
     log_file_path = log_dir_path / log_filename
 
-    # Configure logging
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
             logging.FileHandler(log_file_path),
-            logging.StreamHandler(),  # Also log to console
+            logging.StreamHandler(),
         ],
-        force=True,  # Override any existing configuration
+        force=True,
     )
 
     logger = logging.getLogger(script_name)

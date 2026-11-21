@@ -129,11 +129,11 @@ def test_modes_judge_and_shared_spans_decide_links():
     rows = judge_paper(db, paper, _index(), judge)
 
     linked = {(r.entity_type, r.entity_id, r.surface) for r in rows if r.linked}
-    assert ("method", 10, "GRPO") in linked  # always, clean match: no judge call
+    assert ("method", 10, "GRPO") in linked
     assert ("method", 11, "Grouped-Query Attention (GQA)") in linked
-    assert ("method", 11, "GQA") in linked  # shared name won by the method
+    assert ("method", 11, "GQA") in linked
     assert not any(r.entity_id == 20 and r.linked for r in rows)
-    assert not any(r.entity_id == 12 for r in rows if r.linked)  # mode never
+    assert not any(r.entity_id == 12 for r in rows if r.linked)
     assert {r.key for r in judge.requests} == {("method", 11), ("dataset", 20)}
     assert all(r.abstract_sha == abstract_sha(ABSTRACT) for r in rows)
 
@@ -190,13 +190,12 @@ def test_rescan_reuses_verdicts_and_reports_no_change():
     silent = FakeJudge({})
     again = judge_paper(db, paper, _index(), silent)
 
-    assert silent.requests == []  # every verdict came from the stored rows
+    assert silent.requests == []
     assert not mentions_changed(db, 1, again)
 
 
 def test_losing_a_shared_span_keeps_the_entitys_other_occurrences():
     db = _session()
-    # The benchmark wins the bare "GQA"; the method keeps its long form.
     rows = judge_paper(
         db,
         db.get(Paper, 1),

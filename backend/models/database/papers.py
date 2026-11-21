@@ -43,35 +43,23 @@ class Paper(Base):
 
     __tablename__ = "papers"
 
-    # Primary key
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
 
-    # Core paper information
     title: Mapped[str] = mapped_column(Text, nullable=False)
     abstract: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Maintained by papers_search_vector_update() in PostgreSQL. Application
-    # code reads this column for ranking but never constructs it in Python.
     search_vector: Mapped[Optional[str]] = mapped_column(
         TSVECTOR().with_variant(Text(), "sqlite"), nullable=True
     )
 
-    # Source split: `arxiv` for ArXiv papers, `external` for blog posts,
-    # technical reports, model release pages, etc. Existing rows default to
-    # `arxiv`. External rows must populate `source_url`; ArXiv rows leave it
-    # NULL and continue to derive their URLs from `arxiv_id` + `version`.
     source: Mapped[str] = mapped_column(
         String(20), nullable=False, default="arxiv", server_default="arxiv"
     )
     source_url: Mapped[Optional[str]] = mapped_column(String(2000), nullable=True)
 
-    # ArXiv information with versioning support. `arxiv_id` is NULL for
-    # `source='external'` rows and required for `source='arxiv'` rows
-    # (enforced by `papers_source_identifier_check`).
     arxiv_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     version: Mapped[str] = mapped_column(String(10), default="v1")
     is_latest_version: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    # Publication information
     date_published: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     proceeding: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     conference: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
@@ -82,7 +70,6 @@ class Paper(Base):
         String(500), nullable=True
     )
 
-    # Citation and importance metrics
     citation_count: Mapped[int] = mapped_column(Integer, default=0)
     semantic_scholar_id: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True
@@ -91,36 +78,22 @@ class Paper(Base):
         DateTime(timezone=True), nullable=True
     )
 
-    # ArXiv category classification
     primary_category: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     all_categories: Mapped[Optional[List[str]]] = mapped_column(
         ARRAY(Text), nullable=True
     )
 
-    # URL extraction tracking
     urls_extracted: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # References-based method tagging tracking. NULL means the references-based
-    # cron has never processed this paper; populated rows are skipped.
     methods_scanned_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
-    # Optional explicit thumbnail URL. ArXiv rows usually leave this NULL and
-    # derive thumbnails from arxiv_id/version; external rows can point at a
-    # captured source-page thumbnail.
     thumbnail_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
 
-    # Frontend v2 schema additions (PLAN.md §11). Schema-only; no data ingestion in this migration.
-    # tldr      -> AI-generated summary surfaced in PaperDetailView "TL;DR" panel.
-    # num_pages -> source PDF page count; not surfaced in UI yet.
     tldr: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     num_pages: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
-    # Hugging Face artifact URLs explicitly linked to this paper. External rows
-    # need these because they have no reliable arxiv_id. ArXiv rows usually
-    # derive artifacts from arxiv_id, but retain curated URLs when an external
-    # release is later canonicalized onto an ArXiv paper.
     hf_models: Mapped[Optional[List[str]]] = mapped_column(
         ARRAY(Text).with_variant(JSON(), "sqlite"), nullable=True
     )
@@ -131,18 +104,12 @@ class Paper(Base):
         ARRAY(Text).with_variant(JSON(), "sqlite"), nullable=True
     )
 
-    # Composite trending score (GitHub star velocity + Hugging Face artifact
-    # trending). Computed by the calculate_paper_trending_scores cron and only
-    # consumed for ranking when PWC_TRENDING_RANKING_MODE=composite. The
-    # GitHub-only path keeps reading repositories.trending_score, so this column
-    # can stay populated-but-unused for an instant rollback.
     trending_score: Mapped[Optional[float]] = mapped_column(
         Numeric(12, 4), nullable=True
     )
     trending_score_updated_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # Normalized 0-1.5 components retained for debugging odd rankings.
     github_trending_component: Mapped[Optional[float]] = mapped_column(
         Numeric(12, 4), nullable=True
     )
@@ -152,17 +119,14 @@ class Paper(Base):
     x_trending_component: Mapped[Optional[float]] = mapped_column(
         Numeric(12, 4), nullable=True
     )
-    # When this paper was last scanned for linked Hugging Face artifacts.
     hf_artifacts_scanned_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
-    # Durable membership in HF daily papers, independent of conference metadata.
     hf_daily_featured_on: Mapped[Optional[date]] = mapped_column(
         Date, nullable=True, index=True
     )
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -170,7 +134,6 @@ class Paper(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     authors: Mapped[List["Author"]] = relationship(
         "Author", secondary="paper_authors", back_populates="papers"
     )
@@ -202,10 +165,7 @@ class Paper(Base):
         "HfArtifact", secondary="paper_hf_artifacts", back_populates="papers"
     )
 
-    # Constraints
     __table_args__ = (
-        # Partial unique indexes replace the prior `(arxiv_id, version)` UNIQUE
-        # constraint so external rows can omit ArXiv identifiers.
         Index(
             "uq_papers_arxiv_id_version_when_present",
             "arxiv_id",
@@ -265,7 +225,6 @@ class Author(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
 
-    # Hugging Face integration
     hf_username: Mapped[Optional[str]] = mapped_column(
         String(255), unique=True, nullable=True
     )
@@ -274,7 +233,6 @@ class Author(Base):
     hf_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     hf_is_pro: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -282,12 +240,10 @@ class Author(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    # Relationships
     papers: Mapped[List[Paper]] = relationship(
         "Paper", secondary="paper_authors", back_populates="authors"
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_authors_hf_username", "hf_username"),
         Index("idx_authors_hf_id", "hf_id"),
@@ -346,7 +302,6 @@ class AuthorPhoto(Base):
     )
     mime_type: Mapped[str] = mapped_column(String(50), nullable=False)
     sha256: Mapped[str] = mapped_column(String(64), nullable=False)
-    # Licenses like CC BY require crediting the photographer next to the photo.
     source_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     credit: Mapped[str] = mapped_column(String(500), nullable=False)
     license: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -368,13 +323,10 @@ class PaperAuthor(Base):
         BigInteger, ForeignKey("authors.id", ondelete="CASCADE"), primary_key=True
     )
     author_order: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    # The author claimed this paper on Hugging Face. Authors linked to an HF
-    # account list only claimed papers; everyone else is matched by name.
     claimed: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default=text("false"), nullable=False
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_paper_authors_paper_id", "paper_id"),
         Index("idx_paper_authors_author_id", "author_id"),
@@ -392,8 +344,6 @@ class PaperTask(Base):
     task_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
     )
-    # 'auto' = inserted by keyword matcher (rebuild may delete/re-insert).
-    # 'manual' = set via admin API / one-off script (rebuild leaves alone).
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="auto")
 
     __table_args__ = (
@@ -415,7 +365,6 @@ class PaperMethod(Base):
         BigInteger, ForeignKey("methods.id", ondelete="CASCADE"), primary_key=True
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_paper_methods_paper_id", "paper_id"),
         Index("idx_paper_methods_method_id", "method_id"),
@@ -489,7 +438,6 @@ class PaperDataset(Base):
         BigInteger, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True
     )
 
-    # Indexes
     __table_args__ = (
         Index("idx_paper_datasets_paper_id", "paper_id"),
         Index("idx_paper_datasets_dataset_id", "dataset_id"),

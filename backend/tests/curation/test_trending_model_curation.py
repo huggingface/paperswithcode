@@ -1919,11 +1919,9 @@ def test_trending_eval_ownership_accepts_point_release_card_scores():
             ]
         )
 
-    # Card-only scores for the triggering point release belong to it.
     service._validate_trending_model_ownership(
         row, proposal("DeepSeek-V4.1-Flash-1017")
     )
-    # The paper's earlier release cannot be relabeled onto this release's lane.
     with pytest.raises(
         ValueError, match="does not belong to the resolved model release"
     ):
@@ -2158,8 +2156,6 @@ def test_scheduled_retry_rejects_superseded_workflow_before_writes(
     db.commit()
     count = db.query(PaperCurationJob).count()
     if direct_retry:
-        # Even if ownership changes after the operator precheck, the DB invariant
-        # fails before enqueue's commit can leave behind an orphan job.
         with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
             CodexPaperJobService().retry(db, failed, get_settings(), priority=50)
         db.rollback()
@@ -2177,7 +2173,6 @@ def test_scheduled_retry_rejects_superseded_workflow_before_writes(
 @pytest.mark.parametrize(
     ("names", "title", "abstract", "conflict"),
     [
-        # 2026-10-25: Nanbeige4.3-33B was resolved to the 4.2-3B report.
         (
             ["Nanbeige/Nanbeige4.3-33B", "Nanbeige4.3"],
             "Nanbeige4.2-3B: Unlocking Agentic Capabilities in a Compact Model",
@@ -2196,10 +2191,8 @@ def test_scheduled_retry_rejects_superseded_workflow_before_writes(
         (["MiniMaxAI/MiniMax-M3.1-Flash"], "MiniMax-M3: Scaling", "", True),
         (["deepseek-ai/DeepSeek-V4.1-Flash"], "DeepSeek-V4: Towards", "", True),
         (["google/gemma-4-31b-it"], "Gemma 4 Technical Report", "", False),
-        # Parameter counts are not versions; unnamed families are not checked.
         (["openai/gpt-oss-120b"], "gpt-oss-120b & gpt-oss-20b Model Card", "", False),
         (["org/Model-2"], "Attention Is All You Need", "", False),
-        # A report whose abstract covers the point release is accepted.
         (
             ["meta-llama/Llama-3.1-8B"],
             "The Llama 3 Herd of Models",
@@ -2207,7 +2200,6 @@ def test_scheduled_retry_rejects_superseded_workflow_before_writes(
             False,
         ),
         (["meta-llama/Llama-3.1-8B"], "The Llama 3 Herd of Models", "", True),
-        # A coarse family alias does not cancel the release's own version.
         (
             ["Nanbeige/Nanbeige4.3-33B", "Nanbeige4"],
             "Nanbeige4-3B Technical Report",
@@ -2310,11 +2302,9 @@ def test_external_upgrade_moves_method_evidence_and_skips_same_name_authors():
     TrendingModelResolutionService(db)._upgrade_external_paper(external, arxiv)
     db.commit()
 
-    # The method link and its evidence move together; the old link is gone.
     assert db.get(PaperMethod, (arxiv.id, 7)) is not None
     assert db.get(PaperMethodEvidence, (arxiv.id, 7, "curation")) is not None
     assert db.query(PaperMethod).filter_by(paper_id=external.id).count() == 0
-    # "Alice Chen" is already listed under another author record; Bob moves.
     authors = {
         row.author_id
         for row in db.query(PaperAuthor).filter_by(paper_id=arxiv.id).all()

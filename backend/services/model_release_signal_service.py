@@ -54,30 +54,17 @@ from backend.services.trending_model_resolution_service import (
     release_version_conflict,
 )
 
-# Web-search extraction is nondeterministic, so a news-only signal must
-# reappear in a later run before it costs a curation job. Vendor feeds are
-# first-party and qualify on their first sighting.
 WEB_SEARCH_MIN_SIGHTINGS = 2
-# Leaderboard syncs report every unmatched model, so the backlog can reach
-# hundreds; resolve jobs mostly succeed and the curation runner handles
-# ~150+ jobs a day, so a backlog clears in about a week.
 MAX_RADAR_JOBS_PER_DAY = 30
-# A failed resolution is retried once the release has been seen again after
-# this long, so a transient Job failure does not drop the release.
 FAILED_RETRY_AFTER = timedelta(days=2)
 PAPER_CANDIDATE_LIMIT = 20
 
-# Hosts whose first path segment names the publishing organization.
 _ORGANIZATION_HOSTS = frozenset({"huggingface.co", "github.com", "modelscope.cn"})
-# Top-level domains owned by one company, so the TLD itself names it.
 _BRAND_TLDS = frozenset(
     {"google", "microsoft", "nvidia", "amazon", "apple", "ibm", "baidu", "alibaba"}
 )
-# Hub hosts whose repository pages (model cards) alone do not make a paper.
 _HUB_HOSTS = frozenset({"huggingface.co", "hf.co", "modelscope.cn"})
-# Hub pages that are written announcements rather than repositories.
 _HUB_ARTICLE_PREFIXES = frozenset({"blog"})
-# A Hub repository id such as "owensong/Inflect-Mini-v3".
 _REPO_ID_TITLE = re.compile(r"[\w.-]+/[\w.-]+")
 _ORGANIZATION_PATH_PREFIXES = frozenset(
     {"models", "datasets", "spaces", "collections", "organizations", "blog"}
@@ -162,8 +149,6 @@ def record_release_signals(
             continue
         row.sightings += 1
         row.last_seen_at = now
-        # The lab's own page is a better lead than a news page about the
-        # release, and a vendor feed outranks a web hit.
         if (official and not row.lead_is_official) or (
             row.source == WEB_SEARCH_PROVIDER and signal.source != WEB_SEARCH_PROVIDER
         ):
@@ -211,8 +196,6 @@ def queue_release_signals(
             ),
         )
         .order_by(
-            # Leaderboard signals have no publication date; without the
-            # fallback they sort after every dated signal and never run.
             func.coalesce(
                 ModelReleaseSignal.published,
                 func.date(ModelReleaseSignal.first_seen_at),
@@ -317,14 +300,10 @@ def _host_tokens(url: str) -> tuple[set[str], bool]:
     host = (parts.hostname or "").casefold().removeprefix("www.")
     if host in _ORGANIZATION_HOSTS:
         segments = [segment for segment in parts.path.split("/") if segment]
-        # huggingface.co/collections/<org>/..., huggingface.co/blog/<org>/...,
-        # modelscope.cn/models/<org>/...
         if segments and segments[0] in _ORGANIZATION_PATH_PREFIXES:
             segments = segments[1:]
         return _identity_tokens(segments[0] if segments else None), True
     labels = host.split(".")
-    # A public TLD (".pro", ".news") never names the publisher; a brand TLD
-    # does ("blog.google"). Joined labels catch short names: "x.ai" -> "xai".
     names = labels[:-1] + [label for label in labels[-1:] if label in _BRAND_TLDS]
     pairs = ["".join(labels[index : index + 2]) for index in range(len(labels) - 1)]
     return _identity_tokens(*names, *pairs), False
@@ -335,8 +314,6 @@ def _names_match(token: str, name: str, *, account: bool) -> bool:
         return True
     if len(name) < 4 or not token.startswith(name):
         return False
-    # Accounts append anything ("RecursiveSI"); a domain may append only a
-    # corporate suffix ("mistralai"), so "kimiupdates.com" is not Kimi's.
     return account or token[len(name) :] in _CORPORATE_SUFFIXES
 
 
@@ -582,7 +559,6 @@ class ReleaseSignalResolutionService:
                 date_published=external.date_published,
             ),
             commit=False,
-            # New external papers queue enrich-paper -> add-evals.
             queue_curation=True,
         )
         paper = self.db.get(Paper, int(result.paper.id))

@@ -82,14 +82,11 @@ def normalize_github_url(url: str) -> Optional[str]:
     if not url:
         return None
 
-    # Add https:// if missing
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
 
     owner, name = parse_github_url(url)
     if owner and name:
-        # Normalize to lowercase for case-insensitive comparison
-        # GitHub URLs are case-insensitive and redirect to the proper case
         return f"https://github.com/{owner.lower()}/{name.lower()}"
 
     return None

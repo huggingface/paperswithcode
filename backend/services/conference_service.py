@@ -143,9 +143,6 @@ class ConferenceService:
                     DBConference.id == PaperConference.conference_id,
                 )
                 .group_by(DBConference.id)
-                # Only surface conferences with imported papers so the
-                # deadline-only rows (no proceedings yet) don't pollute the
-                # "browse papers by conference" index.
                 .having(func.count(PaperConference.paper_id) > 0)
                 .order_by(asc(DBConference.year), DBConference.name)
                 .all()
@@ -224,8 +221,6 @@ class ConferenceService:
                 )
                 for conf in conferences
             ]
-            # Order conferences by their earliest deadline so the default
-            # (chronological) listing is stable before client-side sorting.
             results.sort(key=lambda c: min(d.deadline_at for d in c.deadlines))
             results.extend(
                 self._conference_to_api(conf, paper_count=0, deadlines=[])
@@ -288,8 +283,6 @@ class ConferenceService:
 
             area_rows = self.db.query(DBArea).order_by(DBArea.name).all()
 
-            # Start from this conference's papers rather than every task's
-            # paper links; tasks without conference papers are not listed.
             paper_counts = dict(
                 self.db.query(
                     PaperTask.task_id,

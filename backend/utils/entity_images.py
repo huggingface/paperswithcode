@@ -19,13 +19,8 @@ from typing import Optional, Tuple, Type
 
 from sqlalchemy.orm import Session, undefer
 
-# Entity images are curated and effectively immutable per slug, so they can be
-# cached aggressively by the browser and any shared CDN (mirrors the thumbnail
-# router's policy).
 IMAGE_CACHE_HEADERS = {"Cache-Control": "public, s-maxage=604800, max-age=604800"}
 
-# Returned on a 404 so clients don't hammer the endpoint for a missing image
-# but still re-check within the hour.
 IMAGE_MISSING_HEADERS = {"Cache-Control": "public, max-age=3600"}
 
 

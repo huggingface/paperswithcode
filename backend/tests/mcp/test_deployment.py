@@ -50,8 +50,6 @@ def test_mcp_paths_are_separate_from_site_releases():
     assert mcp_release.MCP_RELEASES == mcp_release.MCP_ROOT / "releases"
     assert mcp_release.MCP_PORTS == {"production": 8002, "staging": 8003}
     assert mcp_release.MCP_API_URLS["staging"].startswith("http://127.0.0.1:8011/")
-    # Production also reads the catalog over nginx's loopback bridge, never the
-    # public edge, so MCP calls do not consume the per-IP catalog rate limits.
     assert mcp_release.MCP_API_URLS["production"] == "http://127.0.0.1:8010/api/v1"
     assert not any(
         url.startswith("https://") for url in mcp_release.MCP_API_URLS.values()
@@ -150,7 +148,6 @@ def test_prepare_release_makes_new_release_traversable(tmp_path, monkeypatch):
 
     assert release.stat().st_mode & 0o777 == 0o755
     assert "--no-editable" in commands[0]
-    # uv runs with a throwaway cache, not root's, and the cache is removed.
     cache = environments[0]["UV_CACHE_DIR"]
     assert environments[0]["HOME"] == cache
     assert not cache.startswith("/root")

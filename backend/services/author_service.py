@@ -42,7 +42,6 @@ def normalize_arxiv_author_name(full_name: str) -> str:
 
 
 def _org_key(value: Optional[str]) -> str:
-    # Keep word breaks: "Hua Wei" is a person, "Huawei" an organization.
     return " ".join(re.findall(r"[a-z0-9]+", (value or "").lower()))
 
 
@@ -145,7 +144,6 @@ class AuthorService:
             DatabaseError: If database query fails
         """
         try:
-            # Base query with paper count
             query = (
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
@@ -154,14 +152,12 @@ class AuthorService:
                 .group_by(DBAuthor.id)
             )
 
-            # Apply filters
             if search:
                 query = query.filter(DBAuthor.name.ilike(f"%{search}%"))
 
             if hf_users_only:
                 query = query.filter(DBAuthor.hf_username.isnot(None))
 
-            # Apply ordering
             if order_by == "paper_count":
                 order_field = func.count(PaperAuthor.paper_id)
             elif order_by == "name":
@@ -169,26 +165,23 @@ class AuthorService:
             elif order_by == "created_at":
                 order_field = DBAuthor.created_at
             else:
-                order_field = func.count(PaperAuthor.paper_id)  # Default to paper_count
+                order_field = func.count(PaperAuthor.paper_id)
 
             if order_dir == "desc":
                 query = query.order_by(desc(order_field))
             else:
                 query = query.order_by(asc(order_field))
 
-            # Get total count
             total_count = query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             authors = []
             for db_author, paper_count in results:
                 author_dict = {
                     "id": str(db_author.id),
-                    "full_name": db_author.name,  # API model uses 'full_name', DB uses 'name'
+                    "full_name": db_author.name,
                     "hf_username": db_author.hf_username,
                     "hf_id": db_author.hf_id,
                     "hf_avatar_url": db_author.hf_avatar_url,
@@ -198,7 +191,6 @@ class AuthorService:
                 }
                 authors.append(Author(**author_dict))
 
-            # Calculate pagination
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 
@@ -234,7 +226,6 @@ class AuthorService:
             DatabaseError: If database query fails
         """
         try:
-            # Query with paper count
             result = (
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
@@ -325,18 +316,15 @@ class AuthorService:
             if not author_exists:
                 raise PaperNotFoundError(f"Author with ID {author_id} not found")
 
-            # Base query for papers by author
             query = (
                 self.db.query(DBPaper)
                 .join(PaperAuthor, DBPaper.id == PaperAuthor.paper_id)
                 .filter(PaperAuthor.author_id == resolved_id)
             )
 
-            # Apply latest version filter
             if latest_only:
                 query = query.filter(DBPaper.is_latest_version)
 
-            # Apply ordering
             if order_by == "date_published":
                 order_field = DBPaper.date_published
             elif order_by == "title":
@@ -351,20 +339,16 @@ class AuthorService:
             else:
                 query = query.order_by(asc(order_field))
 
-            # Get total count
             total_count = query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             db_papers = query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             from backend.services.paper_service import PaperService
 
             paper_service = PaperService(self.db)
             papers = paper_service.hydrate_cards(db_papers, include_resources=False)
 
-            # Calculate pagination
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 
@@ -405,7 +389,6 @@ class AuthorService:
             DatabaseError: If database query fails
         """
         try:
-            # Use ILIKE for case-insensitive search
             search_query = (
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
@@ -423,22 +406,18 @@ class AuthorService:
             if hf_users_only:
                 search_query = search_query.filter(DBAuthor.hf_username.isnot(None))
 
-            # Order by relevance (exact matches first, then by paper count)
             search_query = search_query.order_by(desc(func.count(PaperAuthor.paper_id)))
 
-            # Get total count
             total_count = search_query.count()
 
-            # Apply pagination
             offset = (page - 1) * page_size
             results = search_query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
             authors = []
             for db_author, paper_count in results:
                 author_dict = {
                     "id": str(db_author.id),
-                    "full_name": db_author.name,  # API model uses 'full_name', DB uses 'name'
+                    "full_name": db_author.name,
                     "hf_username": db_author.hf_username,
                     "hf_id": db_author.hf_id,
                     "hf_avatar_url": db_author.hf_avatar_url,
@@ -448,7 +427,6 @@ class AuthorService:
                 }
                 authors.append(Author(**author_dict))
 
-            # Calculate pagination
             next_page = page + 1 if offset + page_size < total_count else None
             previous_page = page - 1 if page > 1 else None
 

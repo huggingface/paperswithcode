@@ -20,13 +20,10 @@ def main():
     try:
         session = db_manager.session_local()
 
-        # Read the SQL file
         sql_file = "backend/database/migrations/add_trending_score.sql"
         with open(sql_file, "r") as f:
             sql_content = f.read()
 
-        # Split by statement (PostgreSQL allows multiple statements)
-        # Execute the entire migration
         session.execute(text(sql_content))
         session.commit()
 
@@ -34,7 +31,6 @@ def main():
         print()
         print("Verifying changes...")
 
-        # Verify the columns were added
         result = session.execute(
             text("""
             SELECT column_name, data_type

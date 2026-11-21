@@ -80,8 +80,6 @@ def search_database_url():
 def search_engine(search_database_url):
     engine = create_engine(search_database_url)
     Base.metadata.create_all(engine)
-    # Prove the idempotent schema migration adds the model-declared column,
-    # rather than merely relying on metadata.create_all in this test.
     with engine.begin() as connection:
         connection.execute(text("ALTER TABLE papers DROP COLUMN search_vector"))
         connection.exec_driver_sql(
@@ -1580,7 +1578,6 @@ def test_trigger_insert_update_coverage_and_partial_index(search_engine):
             text("SELECT search_vector::text FROM papers WHERE id = :id"),
             {"id": paper_id},
         ).scalar_one()
-        # The abstract follows the title and its punctuation-split copy.
         assert "'chang':7B" in abstract_updated
         assert "'abstract':8B" in abstract_updated
 
@@ -1620,9 +1617,6 @@ def test_trigger_insert_update_coverage_and_partial_index(search_engine):
         ).scalar_one()
         assert trigram_index_valid is True
 
-        # Give the planner a representative selective shape; on a one-row
-        # table either a sequential scan or the boolean latest-version index is
-        # rational even though the GIN index is healthy.
         connection.execute(
             text("""
                 INSERT INTO papers (
@@ -1638,10 +1632,6 @@ def test_trigger_insert_update_coverage_and_partial_index(search_engine):
                 FROM generate_series(1, 2000) AS n
             """)
         )
-        # The fixture created the GIN index while the table was empty, so the
-        # bulk insert above initially lives in GIN's pending list. Reindexing
-        # models the post-backfill production build (index built over populated
-        # rows) before collecting the representative plan.
         connection.execute(text("REINDEX INDEX idx_papers_latest_search_vector"))
         connection.execute(text("ANALYZE papers"))
         connection.execute(text("SET LOCAL enable_seqscan = off"))
@@ -1723,7 +1713,6 @@ def test_keyword_search_matches_version_numbers_inside_names(session_factory):
             ("Qwen2.5-VL", qwen),
         ]:
             assert [item.id for item in search(session, query)] == [str(paper.id)]
-        # "-V4.1" must still exclude an abstract that holds v4.1 as one token.
         add_paper(
             session,
             title="DeepSeek Serving Notes",

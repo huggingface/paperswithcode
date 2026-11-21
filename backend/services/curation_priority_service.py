@@ -14,7 +14,6 @@ from backend.models.database import (
     PaperXTrending,
 )
 
-# Lower runs first. Unprioritized backlog uses 100.
 X_TRENDING_PRIORITY = 5
 DAILY_PRIORITY = 10
 
@@ -59,7 +58,6 @@ def pending_daily_papers(db: Session):
         )
         .exists()
     )
-    # Also honor manual curation completed before scheduled workflows existed.
     stages = [
         db.query(PaperCurationJob.id)
         .filter(

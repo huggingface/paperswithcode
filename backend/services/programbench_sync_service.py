@@ -49,9 +49,6 @@ class PaperIdentity:
     is_open: bool = False
 
 
-# Exact upstream run IDs are the trust boundary between a displayed model label
-# and its reviewed official release page. New runs remain unpublished until the
-# model identity has been reviewed here.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "claude-fable-5-1-xhigh": PaperIdentity(
         "https://www.anthropic.com/claude-fable-and-mythos-5-1"

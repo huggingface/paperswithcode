@@ -35,7 +35,6 @@ class Settings(BaseSettings, ChatSettings):
     resend_webhook_secret: str = ""
     resend_webhooks_ready: bool = False
 
-    # Server configuration
     host: str = Field(default="0.0.0.0", description="Host to bind the server")
     port: int = Field(default=8000, description="Port to bind the server")
     environment: str = Field(
@@ -56,7 +55,6 @@ class Settings(BaseSettings, ChatSettings):
     )
     cron_lock_dir: str = Field(default="./.github/workflows/scripts/locks")
 
-    # Database configuration
     db_host: str = Field(default="localhost", description="Database host")
     db_port: int = Field(default=5432, description="Database port")
     db_name: str = Field(default="paperswithcode_hf", description="Database name")
@@ -64,7 +62,6 @@ class Settings(BaseSettings, ChatSettings):
     db_password: str = Field(default="", description="Database password")
     db_search_path: str = Field(default="public")
 
-    # CORS configuration
     allowed_origins: List[str] = Field(
         default=[
             "http://localhost:3000",
@@ -100,7 +97,6 @@ class Settings(BaseSettings, ChatSettings):
         ),
     )
 
-    # API configuration
     default_page_size: int = Field(
         default=50, description="Default page size for paginated responses"
     )
@@ -108,12 +104,6 @@ class Settings(BaseSettings, ChatSettings):
         default=500, description="Maximum page size for paginated responses"
     )
 
-    # Trending ranking mode for the papers feed:
-    #   "github"    -> rank by official GitHub repo star velocity (current/default;
-    #                  the instant rollback path).
-    #   "composite" -> rank by papers.trending_score (GitHub velocity + Hugging Face
-    #                  artifact trending), computed by calculate_paper_trending_scores.
-    # Set PWC_TRENDING_RANKING_MODE=composite to switch the public feed.
     trending_ranking_mode: str = Field(
         default="github",
         description="Papers trending ranking mode: 'github' or 'composite'",
@@ -149,17 +139,14 @@ class Settings(BaseSettings, ChatSettings):
     hybrid_lexical_weight: float = Field(default=1.0, gt=0)
     hybrid_semantic_weight: float = Field(default=1.0, gt=0)
 
-    # ArXiv configuration
     arxiv_base_url: str = Field(
         default="https://arxiv.org", description="ArXiv base URL"
     )
 
-    # Application URLs
     app_domain: str = Field(
         default="paperswithcode.ai", description="Application domain for URL generation"
     )
 
-    # Semantic Scholar API configuration
     semantic_scholar_api_key: str = Field(
         default="", description="Semantic Scholar API key for citation data"
     )
@@ -181,12 +168,10 @@ class Settings(BaseSettings, ChatSettings):
         default="", description="Optional OpenAlex API key for historical backfills"
     )
 
-    # LLM API keys
     gemini_api_key: str = Field(default="", description="Google Gemini API key")
     openrouter_api_key: str = Field(default="", description="OpenRouter API key")
     openai_api_key: str = Field(default="", description="OpenAI API key")
 
-    # Voice dictation in chat composers (see backend/services/dictation_service.py)
     dictation_enabled: bool = Field(default=False)
     dictation_endpoint_url: str = Field(
         default="",
@@ -201,7 +186,6 @@ class Settings(BaseSettings, ChatSettings):
     dictation_user_daily_seconds: int = Field(default=1800, ge=0)
     dictation_openai_daily_seconds: int = Field(default=18000, ge=0)
 
-    # Admin API configuration
     admin_api_token: str = Field(
         default="",
         description="API token required for administrative endpoints",
@@ -219,7 +203,6 @@ class Settings(BaseSettings, ChatSettings):
     autonomous_submission_hf_token: str = Field(default="")
     autonomous_submission_openai_api_key: str = Field(default="")
     autonomous_submission_job_image: str = Field(default="")
-    # Slack incoming webhook for CRON jobs that keep failing (monitor_cron_failures).
     cron_alert_slack_webhook_url: str = Field(default="", max_length=2000)
     autonomous_alert_slack_webhook_url: str = Field(default="", max_length=2000)
     autonomous_alert_fallback_webhook_url: str = Field(default="", max_length=2000)
@@ -242,40 +225,27 @@ class Settings(BaseSettings, ChatSettings):
         default=Decimal("0"), ge=0
     )
 
-    # Codex curation jobs. Immutable production releases may opt in; staging
-    # remains disabled because its catalog role is read-only.
     codex_add_evals_enabled: bool = Field(default=False)
     codex_enrich_paper_enabled: bool = Field(default=False)
     codex_add_evals_timeout_seconds: int = Field(default=3600, ge=60, le=7200)
     codex_add_evals_work_dir: str = Field(default="./runtime/codex-work")
     codex_add_evals_spool_dir: str = Field(default="/tmp/pwc-codex-add-evals")
-    # Remote paper-curation workers run on Hugging Face Jobs. Keep these
-    # credentials separate from the general Hub token and database credentials.
     codex_jobs_enabled: bool = Field(default=False)
-    # Deliberately has no default: launching into the wrong organization can
-    # fail with a generic Hub 403 and leaves no remote Job to inspect.
     codex_jobs_namespace: str = Field(default="")
     codex_jobs_token: str = Field(default="")
     codex_jobs_openai_api_key: str = Field(default="")
-    # Digest-pinned image built by .github/workflows/build-codex-curator-image.yml.
-    # Deliberately has no default; each deployment pins its own curator image.
     codex_jobs_image: str = Field(default="")
-    # Hub revision of a legacy Docker Space image; unused for registry digests.
     codex_jobs_image_revision: str = Field(default="")
     codex_jobs_api_url: str = Field(default="https://paperswithcode.co/api/v1")
     codex_jobs_timeout_seconds: int = Field(default=5400, ge=300, le=14400)
     codex_jobs_cli_version: str = Field(default="0.75.0")
     codex_jobs_model: str = Field(default="gpt-6-luna")
     codex_jobs_reasoning_effort: str = Field(default="medium")
-    # AI conference deadline research runs off-box on Hugging Face Jobs (Claude
-    # Agent SDK); only the validated, bounded DB writes happen on the VPS.
-    # The HF namespace/token fall back to the curation Jobs credentials.
     conference_deadlines_anthropic_api_key: str = Field(default="")
     conference_deadlines_hf_namespace: str = Field(default="")
     conference_deadlines_hf_token: str = Field(default="")
     conference_deadlines_job_image: str = Field(default="python:3.12-slim")
     conference_deadlines_job_flavor: str = Field(default="cpu-basic")
-    # 0.2.165 bundles Claude Code 2.1.294; claude-opus-5-5 needs >= 2.1.280.
     conference_deadlines_sdk_version: str = Field(default="0.2.165")
     conference_deadlines_retrieval_model: str = Field(default="claude-sonnet-5-5")
     conference_deadlines_aggregation_model: str = Field(default="claude-opus-5-5")
@@ -291,31 +261,19 @@ class Settings(BaseSettings, ChatSettings):
     codex_curation_queue_depth: int = Field(default=200, ge=1, le=2000)
     codex_curation_reconcile_limit: int = Field(default=200, ge=1, le=500)
     codex_curation_canary_limit: int = Field(default=10, ge=1, le=100)
-    # Pi shadow runs pair a sample of daily-curation stages with a second job on
-    # an open model through HF Inference Providers. They only store validated
-    # proposals for comparison, use their own small slot pool, and are skipped
-    # (never queued) while the pool is full or any setting below is missing.
     curation_pi_shadow_sample_rate: float = Field(default=0.0, ge=0.0, le=1.0)
     curation_pi_shadow_max_active: int = Field(default=2, ge=1, le=8)
-    # Digest-pinned image built by .github/workflows/build-pi-curator-image.yml.
     curation_pi_jobs_image: str = Field(default="")
-    # Fine-grained token limited to "Make calls to Inference Providers": the
-    # agent can read it, so it must not carry any other Hub permission.
     curation_pi_hf_token: str = Field(default="")
     curation_pi_bill_to: str = Field(default="huggingface")
     curation_pi_model: str = Field(default="deepseek-ai/DeepSeek-V4.1-Flash-1017")
-    # Preferred router provider; the runner retries once on automatic routing.
     curation_pi_provider: str = Field(default="novita")
     curation_pi_thinking: str = Field(default="high")
-    # Enrich is tag lookup, not score extraction: high thinking made it 1.6x
-    # slower than Codex while its tag precision already led by 5 points.
     curation_pi_enrich_thinking: str = Field(default="medium")
     curation_pi_cli_version: str = Field(default="1.3.0")
-    # Grades the disagreements between paired Codex and Pi shadow proposals.
     curation_judge_anthropic_api_key: str = Field(default="")
     curation_judge_model: str = Field(default="claude-opus-5-5")
 
-    # Hugging Face OAuth configuration (for "Sign in with Hugging Face")
     hf_oauth_client_id: str = Field(
         default="",
         description="Client ID of the Hugging Face OAuth application",
@@ -400,7 +358,6 @@ class Settings(BaseSettings, ChatSettings):
         description="Comma-separated origins accepted as OAuth return destinations",
     )
 
-    # Hugging Face API configuration
     hf_token: str = Field(
         default="", description="Hugging Face API token for higher rate limits"
     )
@@ -413,7 +370,6 @@ class Settings(BaseSettings, ChatSettings):
     native_pdf_reader_enabled: bool = Field(default=False)
     paper_reader_chat_enabled: bool = Field(default=False)
     paper_reader_selection_enabled: bool = Field(default=False)
-    # Reader chat cites PDF layout blocks when the paper has page-aware layout.
     paper_reader_citations_enabled: bool = Field(default=False)
     paper_layout_hf_bucket_id: str = Field(
         default="huggingface/pwc-papers-pages",
@@ -424,17 +380,12 @@ class Settings(BaseSettings, ChatSettings):
     thumbnail_mutations_enabled: bool = Field(default=True)
     cron_enabled: bool = Field(default=True)
 
-    # GitHub API configuration
     github_token: str = Field(
         default="", description="GitHub API token for higher rate limits"
     )
-    # Evaluation outreach identity. An open issue by this GitHub login marks a
-    # repository as already contacted, and the outreach token must belong to it.
     github_outreach_login: str = Field(default="")
-    # First name used to introduce and sign evaluation outreach issues.
     github_outreach_signer: str = Field(default="")
 
-    # Thumbnail configuration
     thumbnail_cache_dir: str = Field(
         default="./thumbnails", description="Directory to cache PDF thumbnails"
     )
@@ -469,8 +420,6 @@ class Settings(BaseSettings, ChatSettings):
     )
     paper_markdown_runtime_image: str = Field(default="vllm/vllm-openai:v0.17.0")
     paper_markdown_hardware: Literal["l40sx1"] = Field(default="l40sx1")
-    # These legacy settings remain accepted for deployment compatibility. New
-    # launches use the shared measured profiles as their authoritative contract.
     paper_markdown_incremental_batch_size: int = Field(
         default=PAPER_MARKDOWN_LIVE_JOB_PROFILE.max_papers, ge=1, le=100
     )
@@ -487,8 +436,6 @@ class Settings(BaseSettings, ChatSettings):
     paper_markdown_soft_deadline_seconds: int = Field(
         default=PAPER_MARKDOWN_LIVE_JOB_PROFILE.soft_deadline_seconds,
         ge=0,
-        # Accept the prior 11.25-hour environment value during rollout; the
-        # shared profile remains authoritative for all new launches.
         le=40_500,
     )
     paper_markdown_incremental_monthly_budget_usd: float = Field(default=100.0, gt=0)
@@ -511,8 +458,6 @@ class Settings(BaseSettings, ChatSettings):
     paper_markdown_image_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1)
     paper_markdown_image_max_pixels: int = Field(default=80_000_000, ge=1)
 
-    # bioRxiv / medRxiv TDM (requester-pays S3 bucket). Optional: when unset,
-    # thumbnails fall back to Europe PMC PDF mirrors where available.
     biorxiv_aws_access_key_id: str = Field(
         default="",
         description="AWS access key for bioRxiv/medRxiv requester-pays S3 PDF downloads",
@@ -614,8 +559,6 @@ class Settings(BaseSettings, ChatSettings):
         else:
             base = list(self.allowed_origins)
 
-        # Always merge any extra origins (e.g. the HF Space mirror) so the
-        # same setting works in staging/dev while testing the Space.
         for origin in self.extra_allowed_origins.split(","):
             origin = origin.strip()
             if origin and origin not in base:

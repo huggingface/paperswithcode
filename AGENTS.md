@@ -18,6 +18,11 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
 - Preserve public API, route, CLI, and persisted-data contracts. Compatibility is
   optional only for clearly unshipped internal work.
 - Keep logic simple and readable; avoid broad defensive `try`/`except` blocks.
+- Do not write comments in backend Python. Record non-obvious decisions in
+  `docs/adr/` and hacks as `comment-debt` GitHub issues
+  ([ADR 0001](docs/adr/0001-no-comments-in-backend.md)).
+  `python3 scripts/backend_comments.py check` enforces a ratchet; the
+  `delete-comment` skill removes what remains.
 - Preserve unrelated work in dirty trees and edit files narrowly.
 - Run Python and repository CLIs with
   `uv run --env-file backend/keys.env …`. Read `docs/database.md` before

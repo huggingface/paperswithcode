@@ -31,16 +31,13 @@ READ_OFFSETS = tuple(
     timedelta(hours=hours) for hours in (1, 2, 4, 8, 12, 24, 48, 72, 120, 144)
 )
 TRACKING_WINDOW = timedelta(days=X_POST_WINDOW_DAYS)
-# Same smoothing as the GitHub star velocity EMA.
 ALPHA = 0.75
 MIN_READING_HOURS = 0.25
 X_TWEETS_URL = "https://api.x.com/2/tweets"
 API_BATCH_SIZE = 100
 SYNDICATION_INTERVAL_SECONDS = 0.25
 
-# Returns the like count, or None when syndication cannot serve the post.
 SyndicationRead = Callable[[str], "int | None"]
-# Returns (like counts by id, ids X reports as unavailable).
 ApiRead = Callable[[list[str]], "tuple[dict[str, int], set[str]]"]
 
 
@@ -242,7 +239,6 @@ def make_api_reader(client: httpx.Client, bearer_token: str) -> ApiRead:
             post["id"]: int(post["public_metrics"]["like_count"])
             for post in payload.get("data", [])
         }
-        # Deleted, protected, or suspended posts come back as per-id errors.
         unavailable = {
             error["resource_id"]
             for error in payload.get("errors", [])

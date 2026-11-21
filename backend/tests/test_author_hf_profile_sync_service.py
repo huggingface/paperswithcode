@@ -120,7 +120,6 @@ def test_claim_moves_the_paper_to_the_accounts_own_author():
     assert author.hf_avatar_url == "https://cdn/y.jpeg"
     assert author.hf_status == "claimed_verified"
     assert author.hf_is_pro is True
-    # The name-matched author keeps its other papers and gets no account.
     assert session.get(Author, 11).hf_username is None
     assert _links(session) == {
         (10, 1, False),
@@ -155,8 +154,6 @@ def test_account_claiming_a_paper_listed_under_a_namesake_takes_it_over():
     session = _session()
     service = AuthorHfProfileSyncService(session)
 
-    # An account that already has an author claims the "Ziyue Hua" slot of a
-    # paper it is not linked to yet: the name-matched author 10 loses it.
     session.delete(session.get(PaperAuthor, (1, 12)))
     session.commit()
     service.sync_paper(_hf_paper(_claim("Ziyue Hua", "kunwww", "hf-kunwww")))
@@ -168,8 +165,6 @@ def test_account_claiming_a_paper_listed_under_a_namesake_takes_it_over():
 
 def test_claim_drops_the_name_matched_duplicate_of_a_linked_account():
     session = _session()
-    # The account's author is stored as "W. Wang"; the paper also lists a
-    # name-only "Weikun Wang", which is the same person.
     session.get(Author, 12).name = "W. Wang"
     session.get(Author, 14).name = "Weikun Wang"
     session.add(PaperAuthor(paper_id=1, author_id=14, author_order=5))
@@ -188,13 +183,11 @@ def test_unclaimed_namesake_link_moves_but_a_claimed_one_conflicts():
     session = _session()
     service = AuthorHfProfileSyncService(session)
 
-    # Author 13 ("someone") was matched to "Yang Liu" by name only.
     service.sync_paper(_hf_paper(_claim("Yang Liu", "other-yang", "hf-other-yang")))
     other = _account_author(session, "other-yang")
     assert (other.id, 4, True) in _links(session)
     assert session.get(Author, 13).hf_username == "someone"
 
-    # A second account claiming the same, now claimed, slot is a conflict.
     service.sync_paper(_hf_paper(_claim("Yang Liu", "third-yang", "hf-third-yang")))
     assert session.query(Author).filter_by(hf_username="third-yang").count() == 0
     assert service.stats.conflicts == 1
@@ -322,7 +315,6 @@ def test_account_takes_its_full_name_from_a_byline_it_claimed():
     session.commit()
     service = AuthorHfProfileSyncService(session)
 
-    # A former name on the byline leaves the row's name alone.
     service.sync_paper(
         _hf_paper(
             _claim("Weikun Wang", "kunwww", "hf-kunwww", fullname="Weikun Knaebel")
@@ -346,7 +338,6 @@ def test_account_takes_its_full_name_from_a_byline_it_claimed():
     assert (12, 3, True) in _links(session)
     assert service.stats.renamed == 1
 
-    # Another capitalization of the same name does not flip the row back.
     service.sync_paper(
         _hf_paper(
             _claim("Weikun Knaebel", "kunwww", "hf-kunwww", fullname="Weikun Knaebel")

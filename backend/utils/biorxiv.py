@@ -30,8 +30,6 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# The bioRxiv API rate-limits requests that use aiohttp's default user agent
-# (HTTP 429), so identify ourselves explicitly.
 _API_HEADERS = {
     "User-Agent": (
         "paperswithcode.co external resource indexer (+https://paperswithcode.co)"
@@ -43,14 +41,10 @@ _EUROPEPMC_SEARCH_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search
 _MAX_PDF_BYTES = 50 * 1024 * 1024
 
 
-# bioRxiv and medRxiv DOIs use `10.1101/<suffix>`; bioRxiv also assigns
-# `10.64898/<suffix>` for some newer submissions.
 _DOI_IN_URL_RE = re.compile(
     r"((?:10\.1101|10\.64898)/[A-Za-z0-9._\-]+?)(?:v\d+)?(?:\.full(?:\.pdf)?)?(?:[/?#]|$)"
 )
 
-# Fallback for the "early" URL form:
-# https://www.biorxiv.org/content/early/2025/05/18/2025.05.14.654049v1
 _EARLY_DOI_TAIL_RE = re.compile(r"^(\d{4}\.\d{2}\.\d{2}\.\d+)(?:v\d+)?(?:\.full)?$")
 
 _PREPRINT_SERVERS = {
@@ -94,8 +88,6 @@ def parse_biorxiv_doi(url: str) -> Optional[tuple[str, str]]:
     if match:
         return server, match.group(1)
 
-    # Fallback for /content/early/YYYY/MM/DD/<suffix>vN forms that omit the
-    # `10.1101/` segment from the path.
     tail = parsed.path.rstrip("/").rsplit("/", 1)[-1]
     early_match = _EARLY_DOI_TAIL_RE.match(tail)
     if early_match:
@@ -161,7 +153,6 @@ async def fetch_biorxiv_metadata(
     if not isinstance(collection, list) or not collection:
         return None
 
-    # Pick the latest version by `version` if present.
     def _version_key(item: dict) -> int:
         try:
             return int(str(item.get("version") or "1"))
@@ -251,7 +242,6 @@ async def fetch_europepmc_pdf_url(
         url = (entry.get("url") or "").strip()
         if not url:
             continue
-        # Skip biorxiv.org links — they are Cloudflare-protected for bots.
         host = (urlparse(url).hostname or "").lower()
         if host.endswith("biorxiv.org") or host.endswith("medrxiv.org"):
             continue

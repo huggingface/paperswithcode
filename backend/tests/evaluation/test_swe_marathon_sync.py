@@ -57,8 +57,6 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-# Per-task pass and trial counts of every v1.1 config in the site bundle on
-# 2026-11-10; ``_bundle`` renders them back into the bundle's layout.
 FIXTURE = json.loads(
     (Path(__file__).parent / "fixtures" / "swe_marathon_v1_1.json").read_text()
 )
@@ -68,8 +66,6 @@ HOME = (
     f'src="{BUNDLE_PATH}"></script></head><body><div id="root"></div></body></html>'
 )
 
-# The board's Abundant AI rows as imported by hand on 2026-10-14 and 2026-11-10,
-# renamed to catalog model names: model_name -> (harness, stored value).
 PRODUCTION_ROWS = {
     "Gemini 4 Carbon": ("Antigravity CLI", 53.75),
     "Muse Wonder Full": ("Muse Code", 53.12),
@@ -91,7 +87,6 @@ PRODUCTION_ROWS = {
     "GLM-5.3-Flash": ("Claude Code", 38.75),
     "GPT-5.6 Terra": ("Codex", 32.5),
     "Grok 4.6": ("Grok Build", 31.88),
-    # Stale: Abundant AI's data now has a complete max run at 46.25.
     "Muse Spark 1.3": ("Muse Code", 30.62),
     "Claude Sonnet 5": ("Claude Code", 30.0),
     "Grok 4.5": ("Grok Build", 29.38),
@@ -248,7 +243,6 @@ def _seed_production(session: Session) -> None:
                 external=True,
             )
         )
-    # Kimi's own launch figure, run with Claude Code; never Abundant AI's row.
     session.add(
         Evaluation(
             paper_id=KIMI_K3_1_PRO,
@@ -291,18 +285,14 @@ def test_parse_complete_runs_at_each_models_best_effort():
         "Google DeepMind",
     )
     assert first.evaluated_on == date(2026, 11, 7)
-    # A config without a reasoning effort is the site's default, max.
     assert by_label["Claude Opus 5 (Claude Code)"].detail.endswith(
         "at max reasoning effort"
     )
     assert by_label["Claude Opus 5 (Claude Code)"].value == Decimal("50.00")
-    # Max (74/160) beats the xhigh run (73/160) of the same model and agent.
     assert by_label["Claude Opus 5.5 (Claude Code)"].value == Decimal("46.25")
     assert by_label["Muse Spark 1.3 (Muse Code)"].value == Decimal("46.25")
     assert by_label["Muse Wonder Full (Muse Code)"].lab == "Meta"
-    # Half-hundredths round up, as the site's one-decimal display does.
     assert by_label["Kimi K3 (Claude Code)"].value == Decimal("48.13")
-    # GPT-6 Astra's medium run (66/153, 43.14%) misses trials; max stands.
     assert by_label["GPT-6 Astra (Codex)"].value == Decimal("42.50")
     assert "DeepSeek V4 Pro (Mini-SWE-Agent)" in by_label
     assert {entry.name for entry in entries} <= set(MODEL_IDENTITIES)
@@ -356,7 +346,6 @@ def test_first_run_adopts_hand_imported_rows_and_leaves_vendor_rows():
     stats = _sync(session, parse_swe_marathon_bundle(BUNDLE))
 
     assert stats.fetched == 29
-    # Claude Fable 5 had no row; every other Abundant AI row is adopted.
     assert (stats.matched, stats.adopted, stats.created) == (29, 28, 1)
     assert stats.unreviewed == [] and stats.auto_matched == []
     assert stats.missing_papers == [] and stats.missing_upstream == []

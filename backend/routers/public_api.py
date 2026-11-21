@@ -28,9 +28,6 @@ class PublicReadCorsMiddleware:
 
     def __init__(self, app, allowed_origins=()):
         self.app = app
-        # Only exactly listed origins are credentialed. Origins admitted by
-        # PWC_EXTRA_ALLOWED_ORIGIN_REGEX (any Hugging Face Space) read the
-        # public catalog anonymously, like every other origin.
         self.credentialed_origins = frozenset(allowed_origins)
 
     async def __call__(self, scope, receive, send):
@@ -43,8 +40,6 @@ class PublicReadCorsMiddleware:
         get_scope = {**scope, "method": "GET"}
         selected = self._is_public_route(get_scope)
         if selected is None and scope["app"].router.redirect_slashes:
-            # Follow the router's slash redirect only when no actual route won.
-            # A real private route must never inherit a public neighbor's CORS.
             path = scope["path"]
             redirect_scope = {
                 **get_scope,
@@ -56,8 +51,6 @@ class PublicReadCorsMiddleware:
             return
         if scope["method"] == "OPTIONS":
             if not origin or credentialed_origin:
-                # Preserve the website/mirror preflight policy, including its
-                # existing allowed headers and methods.
                 await self.app(scope, receive, send)
                 return
             requested_method = request.headers.get("access-control-request-method", "")
@@ -72,7 +65,6 @@ class PublicReadCorsMiddleware:
                 "accept",
                 "content-type",
             }:
-                # Preserve existing CORS rules for credentialed/administrative requests.
                 await self.app(scope, receive, send)
                 return
             response = JSONResponse(
@@ -90,8 +82,6 @@ class PublicReadCorsMiddleware:
         async def cors_send(message):
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                # Responses differ for absent, anonymous, and credentialed
-                # origins; shared caches must retain that distinction.
                 vary = {
                     value.strip().lower()
                     for value in headers.get("Vary", "").split(",")
@@ -126,8 +116,6 @@ class PublicReadCorsMiddleware:
                 path = getattr(route, "path", "")
                 if path in public_paths:
                     return True
-                # An explicitly registered slashless alias must point at the
-                # same endpoint, not merely resemble a public route's URL.
                 canonical = path + "/"
                 return canonical in public_paths and any(
                     getattr(candidate, "path", None) == canonical
@@ -135,5 +123,4 @@ class PublicReadCorsMiddleware:
                     for candidate in scope["app"].routes
                 )
             partial_match |= match == Match.PARTIAL
-        # Starlette returns 405 before considering slash redirects.
         return False if partial_match else None

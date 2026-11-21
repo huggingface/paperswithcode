@@ -75,7 +75,6 @@ def get_areas(
     """
     area_service = AreaService(db)
 
-    # Parse ordering
     order_by = "name"
     order_dir = "asc"
     if ordering:
@@ -85,7 +84,6 @@ def get_areas(
         else:
             order_by = ordering
 
-    # Use search if q is provided, otherwise use filtering
     if q:
         return area_service.search_areas(query=q, page=page, page_size=page_size)
     return area_service.list_areas(

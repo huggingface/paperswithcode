@@ -52,8 +52,6 @@ def pytest_configure(config):
             )
         return real_connect(*args, **kwargs)
 
-    # SQLAlchemy's psycopg2 dialect resolves ``psycopg2.connect`` at connect
-    # time, so this also covers engines built from ``db_manager``.
     psycopg2.connect = guarded_connect
     config.add_cleanup(lambda: setattr(psycopg2, "connect", real_connect))
 

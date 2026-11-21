@@ -7,7 +7,6 @@ from backend.config import get_settings
 
 router = APIRouter()
 
-# Commercial SEO and backlink crawlers send heavy traffic and bring no readers.
 BLOCKED_SEO_CRAWLERS = (
     "AhrefsBot",
     "AhrefsSiteAudit",

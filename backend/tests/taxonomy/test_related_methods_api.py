@@ -91,11 +91,9 @@ def seed_methods(db):
         for i, (name, slug, desc) in methods.items()
     )
     links = []
-    # XGBoost shares 4 papers with Random Forest and 3 with CatBoost.
     links += [(p, 1) for p in range(1, 9)]
     links += [(p, 4) for p in range(1, 5)]
     links += [(p, 3) for p in range(6, 9)]
-    # The LLM method is on many papers but shares only 2 with XGBoost.
     links += [(p, 5) for p in [*range(7, 9), *range(100, 200)]]
     db.add_all(PaperMethod(paper_id=p, method_id=m) for p, m in links)
     db.commit()
@@ -109,8 +107,6 @@ def related(client, slug):
 
 
 def test_description_links_come_first_then_co_tagged_methods(client):
-    # LightGBM links to XGBoost from its own description, so XGBoost leads
-    # even though they share no papers; the popular LLM method never appears.
     assert related(client, "xgboost") == ["lightgbm", "random-forest", "catboost"]
     assert related(client, "lightgbm") == ["xgboost"]
 

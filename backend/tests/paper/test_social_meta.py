@@ -107,11 +107,6 @@ def _reset_index_cache():
     spa_shell_service.reset_cache()
 
 
-# ---------------------------------------------------------------------------
-# Unit tests
-# ---------------------------------------------------------------------------
-
-
 def test_load_index_html_prefers_active_release(tmp_path, monkeypatch):
     release_index = tmp_path / "release-index.html"
     dist_index = tmp_path / "dist-index.html"
@@ -269,22 +264,16 @@ def test_inject_paper_meta_escapes_user_supplied_strings():
         meta,
     )
 
-    # The user-supplied title was `A <Great> Paper & Friends` and must be
-    # HTML-escaped in every place we render it.
     assert "A &lt;Great&gt; Paper &amp; Friends | Papers with Code" in html
-    # Old, generic tags must be replaced (no duplicate `Papers with Code`
-    # title or generic `og:type=website`).
     assert html.count("<title>") == 1
     assert 'og:type" content="website"' not in html
     assert 'og:type" content="article"' in html
     assert 'twitter:card" content="summary"' not in html
     assert 'twitter:card" content="summary_large_image"' in html
-    # Canonical URL points at the singular `/paper/{id}` shape.
     assert (
         '<link rel="canonical" href="https://paperswithcode.co/paper/2504.12516" />'
         in html
     )
-    # Real thumbnail URL is absolute.
     assert (
         'og:image" content="https://paperswithcode.co/api/thumbnails/'
         '2504_12516_v1.jpg?fit=fit2"'
@@ -293,10 +282,8 @@ def test_inject_paper_meta_escapes_user_supplied_strings():
         'twitter:image" content="https://paperswithcode.co/api/thumbnails/'
         '2504_12516_v1.jpg?fit=fit2"'
     ) in html
-    # Exactly one image tag of each kind so crawlers never see conflicts.
     assert html.count('property="og:image"') == 1
     assert html.count('name="twitter:image"') == 1
-    # Crawler-friendly image metadata for the real JPEG thumbnail.
     assert 'og:image:type" content="image/jpeg"' in html
     assert 'og:image:width" content="400"' in html
     assert 'og:image:height" content="550"' in html
@@ -330,9 +317,6 @@ def test_inject_paper_meta_uses_hf_preview_when_arxiv_thumbnail_disk_misses():
         'og:image" content="https://cdn-thumbnails.huggingface.co/'
         'social-thumbnails/papers/2504.12516/gradient.png"'
     ) in html
-    # The upstream image carries explicit dimensions and type so
-    # summary_large_image cards render cleanly even before the platform has
-    # scraped the asset.
     assert 'og:image:type" content="image/png"' in html
     assert 'og:image:width" content="1200"' in html
     assert 'og:image:height" content="630"' in html
@@ -380,13 +364,9 @@ def test_inject_paper_meta_strips_all_generic_static_tags():
     )
     html = inject_paper_meta(_STATIC_INDEX_HEAD, meta)
 
-    # The generic site-wide preview image must be gone entirely so X cannot
-    # cache it ahead of the per-paper thumbnail.
     assert "og-image.png" not in html
-    # Generic site values must be replaced, not duplicated.
     assert 'og:url" content="https://paperswithcode.co/"' not in html
     assert 'og:type" content="website"' not in html
-    # Exactly one of each social tag survives.
     for needle in (
         'property="og:image"',
         'name="twitter:image"',
@@ -400,7 +380,6 @@ def test_inject_paper_meta_strips_all_generic_static_tags():
         'property="og:image:alt"',
     ):
         assert html.count(needle) == 1, needle
-    # And the single survivor points at the paper thumbnail.
     assert (
         'og:image" content="https://paperswithcode.co/api/thumbnails/'
         '2504_12516_v1.jpg?fit=fit2"'
@@ -421,22 +400,10 @@ def test_inject_paper_meta_uses_authors_when_abstract_empty():
     assert meta.description.startswith("By Alice Author")
 
 
-# ---------------------------------------------------------------------------
-# Default OG image endpoint
-# ---------------------------------------------------------------------------
-
-
 def test_default_og_image_is_a_png():
     payload = default_og_image.get_default_og_image_bytes()
-    # PNG magic header.
     assert payload[:8] == b"\x89PNG\r\n\x1a\n"
-    # Cached on second call.
     assert default_og_image.get_default_og_image_bytes() is payload
-
-
-# ---------------------------------------------------------------------------
-# Route integration tests
-# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
@@ -578,7 +545,7 @@ def test_legacy_pwc_paper_slug_redirects_to_arxiv_route(client, monkeypatch):
 def test_legacy_papers_route_redirects_to_canonical_url(client, monkeypatch):
     paper = _make_paper()
     _stub_paper_lookup(monkeypatch, paper)
-    _stub_thumbnail_present(monkeypatch, set())  # force fallback image
+    _stub_thumbnail_present(monkeypatch, set())
 
     response = client.get(
         "/papers/2504.12516",

@@ -24,7 +24,6 @@ from backend.utils.urls import get_paper_route_identifier
 
 EXTERNAL_PAPER_REQUESTED_BY = "external-paper-created"
 EXTERNAL_PAPER_BACKFILL_REQUESTED_BY = "external-paper-backfill"
-# Behind interactive admin jobs (priority 0) in the shared admin lane.
 EXTERNAL_PAPER_PRIORITY = 50
 _LIVE_JOB_STATUSES = {"queued", "dispatching", "running", "awaiting_markdown"}
 

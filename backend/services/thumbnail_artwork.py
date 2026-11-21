@@ -17,20 +17,14 @@ from PIL import Image, UnidentifiedImageError
 
 CARD_WIDTH = 400
 CARD_HEIGHT = 550
-# The artwork is contained (never cropped) inside this box, centered on the card.
 ARTWORK_BOX = (360, 430)
-# Smaller images are favicons, logos, or tiny book covers (Springer serves a
-# 153 px proceedings cover); they would look worse than a title card.
 MIN_ARTWORK_WIDTH = 200
 MIN_ARTWORK_HEIGHT = 100
-# Wider banners become an unreadable strip on a portrait card.
 MAX_ARTWORK_ASPECT = 2.6
 MIN_ARTWORK_ASPECT = 1 / 3
 MAX_ARTWORK_PIXELS = 40_000_000
 TRANSPARENT_BACKGROUND = (248, 247, 251)
 
-# Site-wide images that say nothing about the paper: publisher/site logos
-# (arXiv's `arxiv-logo-fb.png`) and Springer journal or book covers.
 GENERIC_ARTWORK_PATH = re.compile(r"logo|/cover(?:-hires)?/(?:journal|book)/", re.I)
 
 ARTWORK_META_KEYS = (

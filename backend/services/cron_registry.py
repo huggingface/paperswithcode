@@ -94,8 +94,6 @@ class CronJobDefinition:
     critical: bool
     healthy_no_work_allowed: bool
     db_freshness_query: Optional[str] = None
-    # False when the query reports coverage only: its tables carry no write
-    # timestamp, so a missing `last_write` is not evidence of stale output.
     db_freshness_reports_writes: bool = True
     workflow_file: Optional[str] = None
     workflow_jobs: Tuple[str, ...] = ()
@@ -107,8 +105,6 @@ class CronJobDefinition:
     schedule_grace_minutes: int = 20
     systemd_timer: Optional[str] = None
     systemd_service: Optional[str] = None
-    # Additional timer/service pairs when one duty runs under several units
-    # (for example the five preload_thumbnails lanes).
     systemd_extra_units: Tuple[Tuple[str, str], ...] = ()
     output_evaluator: Optional[str] = None
     work_metrics_provider: Optional[
@@ -124,11 +120,7 @@ class CronJobDefinition:
     db_metrics_provider: Optional[Literal["thumbnail_cache"]] = None
     dependency_job_id: Optional[str] = None
     enablement_settings: Tuple[str, ...] = ()
-    # True when runs differ in their work (lanes sharing one launcher lock), so
-    # a lock-skipped run is missed work rather than a harmless overlap.
     lock_skip_misses_work: bool = False
-    # Post a Slack alert once this many consecutive production runs failed
-    # (counted from launcher exits in the last 24h, so it must fit that window).
     failure_alert_after: Optional[int] = None
 
     @property
@@ -257,9 +249,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         output_evaluator="research_digests",
         workflow_freshness_required=False,
         enablement_settings=("research_email_enabled",),
-        # Digests are written once a week (Monday 08:00 UTC window), so the
-        # hourly job's output is judged by window coverage, not write age.
-        # Aggregates only: never recipients or payloads.
         db_freshness_query="""
             WITH windows AS (
               SELECT
@@ -505,12 +494,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         process_patterns=("url_extraction_agent.database",),
         lock_file=None,
         expected_runtime_minutes=110,
-        # Manual dispatch only: expect a run about weekly, not hourly.
         stale_after_minutes=7 * 24 * 60,
         critical=False,
         healthy_no_work_allowed=True,
-        # Only rows the extraction agent created prove it ran; papers.updated_at
-        # moves for every catalog edit.
         db_freshness_query="""
             WITH extracted AS (
                 SELECT created_at FROM repositories WHERE source = 'ai_extraction'
@@ -2307,9 +2293,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-scan-model-releases.timer",
         systemd_service="pwc-cron-scan-model-releases.service",
         systemd_extra_units=(),
-        # The radar JSON goes to the journal and unindexed releases become
-        # queued resolution jobs. The job exits 1 only when every source
-        # failed, so a clean exit proves the scan.
         output_evaluator="report_only",
         display_name="Model Release Radar",
         category="hourly",
@@ -2463,7 +2446,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         expected_runtime_minutes=3,
         stale_after_minutes=180,
         critical=False,
-        # Hours without a due post, and report-only runs, write nothing.
         healthy_no_work_allowed=True,
         db_freshness_query="""
             SELECT max(last_read_at) AS last_write,
@@ -2493,7 +2475,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         expected_runtime_minutes=10,
         stale_after_minutes=180,
         critical=False,
-        # Hours without new or edited abstracts write nothing.
         healthy_no_work_allowed=True,
         db_freshness_query="""
             SELECT max(created_at) AS last_write,
@@ -2524,7 +2505,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         expected_runtime_minutes=15,
         stale_after_minutes=180,
         critical=False,
-        # Hours without new papers or followed topics judge nothing.
         healthy_no_work_allowed=True,
         db_freshness_query="""
             WITH followed AS (
@@ -2579,7 +2559,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         expected_runtime_minutes=30,
         stale_after_minutes=60,
         critical=False,
-        # Minutes without a new topic claim nothing.
         healthy_no_work_allowed=True,
         db_freshness_query=None,
         workflow_freshness_required=False,
@@ -2606,7 +2585,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         expected_runtime_minutes=60,
         stale_after_minutes=1560,
         critical=False,
-        # A night without catalog changes rewrites nothing.
         healthy_no_work_allowed=True,
         db_freshness_query=None,
         workflow_freshness_required=False,
@@ -2634,8 +2612,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=180,
         critical=False,
         healthy_no_work_allowed=True,
-        # A run with every visible paper covered writes no row, so the
-        # evaluator judges the home-feed cohort's coverage instead of writes.
         db_freshness_query="""
             WITH home_feed AS (
                 SELECT id
@@ -2793,7 +2769,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             JOIN papers p ON p.id = po.paper_id
             WHERE po.source = 'openalex'
         """,
-        # paper_organizations has no timestamp; the run log is the output proof.
         db_freshness_reports_writes=False,
         workflow_file="cron-link-openalex-organizations.yml",
         workflow_jobs=("run",),
@@ -2934,8 +2909,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             ),
         ),
         output_evaluator="thumbnail_preload",
-        # Each lane has its own launcher lock; a skip means a lane overran its
-        # own next slot, which is still missed work.
         lock_skip_misses_work=True,
         display_name="Preload Thumbnails",
         category="daily",

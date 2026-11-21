@@ -411,7 +411,6 @@ def test_api_ownership_optin_and_unsubscribe(db, now, monkeypatch):
     assert client.get(several).status_code == 200
     assert client.delete(f"/me/follows/task/{t.id}").status_code == 204
     assert db.get(ResearchFollow, ("bob", "task", t.id)) is not None
-    # The follow turned the weekly email on by default; unfollowing keeps it.
     assert client.get("/me/research-email").json()["enabled"] is True
     assert (
         client.put("/me/research-email", json={"enabled": True}).json()["email"]
@@ -597,7 +596,6 @@ def test_following_direct_navigation_serves_spa_without_catalog_lookup(
 
     app = FastAPI()
     app.include_router(discovery_pages.router)
-    # A private client route must not fall through to an organization lookup.
     app.dependency_overrides[get_database_session] = lambda: object()
     monkeypatch.setattr(
         discovery_pages, "load_index_html", lambda: "<!doctype html><html>app</html>"
@@ -729,7 +727,6 @@ def test_feed_uses_home_feed_trending_order(db, now, monkeypatch):
     follow(db, "task", task, now)
     follow(db, "method", method, now)
     db.flush()
-    # Trending wins over match strength; stale scores fall back to recency.
     assert [e.paper.id for e in follows.feed_entries(db, "alice", now, 0, 3)] == [
         str(hot.id),
         str(stale.id),
@@ -764,7 +761,6 @@ def test_feed_filters_match_the_home_feed(db, now):
             e.paper.id for e in follows.feed_entries(db, "alice", now, 0, 10, **filters)
         ]
 
-    # The default window stays 30 days; explicit and all-time ranges widen it.
     assert ids() == [str(recent.id)]
     assert set(ids(all_time=True)) == {str(recent.id), str(old.id)}
     window = {
@@ -846,8 +842,8 @@ def test_webhook_body_limit_refuses_declared_and_streamed_oversize():
 
     assert read(Request([b"12345", b"678"])) == b"12345678"
     for request in (
-        Request([b"x" * 4] * 5),  # chunked, no Content-Length
-        Request([pytest.fail], declared="11"),  # refused before reading
+        Request([b"x" * 4] * 5),
+        Request([pytest.fail], declared="11"),
     ):
         with pytest.raises(HTTPException) as error:
             read(request)

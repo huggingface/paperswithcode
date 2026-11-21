@@ -276,7 +276,6 @@ def test_preflight_dead_project_page_keeps_paper_evidence(monkeypatch, project_s
 
 
 def test_preflight_oversized_project_page_keeps_paper_evidence(monkeypatch):
-    # 2611.18529: the project page is 23.6 MB of HTML with inlined images.
     monkeypatch.setattr(
         url_preflight.urllib.request,
         "urlopen",
@@ -324,7 +323,6 @@ def test_preflight_oversized_project_page_blocks_without_paper_text(monkeypatch)
 
 
 def test_preflight_skips_arxiv_pdf_listed_as_project_page(monkeypatch):
-    # 2611.08538: Hugging Face lists the paper's own arXiv PDF as projectPage.
     monkeypatch.setattr(
         url_preflight.urllib.request,
         "urlopen",
@@ -605,7 +603,6 @@ def test_enrich_preflight_supplies_pdf_front_matter_alongside_markdown(
     assert hashlib.sha256(body).hexdigest() == front_matter[0]["sha256"]
     assert b"Fudan University" in body
     assert b"https://huggingface.co/collections/OpenMOSS-Team/moss-image" in body
-    # Page-1 PDF text is supplementary; Markdown stays the paper text source.
     assert result["markdown_available"] is True
     assert not any(item["kind"] == "paper_pdf" for item in result["source_documents"])
 
@@ -728,7 +725,6 @@ def test_external_preflight_reads_the_prepared_page_copy(monkeypatch, tmp_path):
     source = next(
         item for item in result["source_documents"] if item["kind"] == "paper_source"
     )
-    # The copy belongs to the release page the curator must cite.
     assert source["url"] == "https://openai.com/index/introducing-gpt-6-1-terra"
     assert Path(source["local_path"]).read_bytes() == PAPER_TEXT
     assert hashlib.sha256(PAPER_TEXT).hexdigest() == source["sha256"]
@@ -804,13 +800,11 @@ def test_add_evals_external_preflight_downloads_results_images(monkeypatch, tmp_
     images = [
         item for item in result["source_documents"] if item["kind"] == "results_image"
     ]
-    # The oversized original falls back to the inline copy.
     assert [(item["url"], item["alt"]) for item in images] == [
         ("https://cdn.example/images/evals-table.w1200.webp", "Model benchmark table")
     ]
     assert Path(images[0]["local_path"]).suffix == ".webp"
     assert images[0]["page_url"] == context["paper"]["source_url"]
-    # An image that cannot be read never blocks curation.
     assert result["complete"] is True
     assert {
         "source": "results_image",

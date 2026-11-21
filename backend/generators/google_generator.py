@@ -27,14 +27,11 @@ gemini_roles = {
 
 GEMINI_API_KEY = get_settings().gemini_api_key
 
-# Global semaphore to limit concurrent API calls
-# Adjust this value based on your API quota
 API_CONCURRENCY_LIMIT = 10
 api_semaphore = asyncio.Semaphore(API_CONCURRENCY_LIMIT)
 
 
 class GoogleGenerator(RateLimitingMixin, Generator):
-    # Primary model for URL extraction and other Gemini call sites.
     DEFAULT_MODEL_NAMES = (
         "gemini-3.5-flash",
         "gemini-2.5-flash",
@@ -47,7 +44,6 @@ class GoogleGenerator(RateLimitingMixin, Generator):
         model_names: tuple[str, ...] | list[str] | None = None,
         **kwargs,
     ):
-        # Initialize rate limiting with Gemini's typical limits
         super().__init__(
             requests_per_minute=requests_per_minute,
             requests_per_day=requests_per_day,
@@ -64,20 +60,17 @@ class GoogleGenerator(RateLimitingMixin, Generator):
         """
         contents = []
 
-        # create a temporary directory
         temp_dir = await asyncio.to_thread(tempfile.mkdtemp)
 
         uploaded_file_names = []
         try:
             for message in messages:
-                # can be either a string or a list of strings
                 is_string_content = isinstance(message.content, str)
                 parts = (
                     [Part(text=message.content)]
                     if is_string_content
                     else [Part(text=text) for text in message.content]
                 )
-                # Image inputs are only supported by OpenRouterGenerator.
                 if message.image_urls:
                     print(
                         f"Warning: image URLs are not supported by GoogleGenerator: {message.image_urls}"
@@ -89,7 +82,7 @@ class GoogleGenerator(RateLimitingMixin, Generator):
                     )
 
                 if message.pdf_path is not None:
-                    # Read and upload the PDF using the File API
+
                     def _read_and_upload_pdf():
                         with open(message.pdf_path, "rb") as f_read:
                             doc_io_bytes = f_read.read()
@@ -110,7 +103,6 @@ class GoogleGenerator(RateLimitingMixin, Generator):
                 content = Content(role=gemini_roles[message.role], parts=parts)
                 contents.append(content)
         finally:
-            # clean up the temporary directory
             await asyncio.to_thread(shutil.rmtree, temp_dir)
 
         return contents, uploaded_file_names
@@ -130,7 +122,6 @@ class GoogleGenerator(RateLimitingMixin, Generator):
                 "response_schema": schema,
             }
 
-        # Use semaphore to limit concurrent API calls
         async with api_semaphore:
             response = await self.client.aio.models.generate_content(
                 model=model_name,
@@ -138,7 +129,6 @@ class GoogleGenerator(RateLimitingMixin, Generator):
                 config=config,
             )
 
-            # Log usage metadata
             if response.usage_metadata:
                 print(
                     f"Token usage - Prompt: {response.usage_metadata.prompt_token_count}, "
@@ -146,7 +136,6 @@ class GoogleGenerator(RateLimitingMixin, Generator):
                     f"Total: {response.usage_metadata.total_token_count}"
                 )
 
-            # Clean up the files from Gemini storage
             if uploaded_file_names:
                 for file_name in uploaded_file_names:
                     await asyncio.to_thread(self.client.files.delete, name=file_name)
@@ -179,7 +168,6 @@ class GoogleGenerator(RateLimitingMixin, Generator):
         Given a list of messages, this function generates a response using the Gemini API
         along with the model name used.
         """
-        # Use configured models in priority order (first success wins).
         models = list(self.model_names)
         last_exception = None
         for model_name in models:
@@ -194,15 +182,14 @@ class GoogleGenerator(RateLimitingMixin, Generator):
             except Exception as e:
                 print(f"An error occurred with model {model_name}: {str(e)}")
                 last_exception = e
-                # Add a small delay before trying the next model to avoid immediate rate limiting
                 if self._is_rate_limit_error(e):
                     print("Adding delay before trying next model...")
-                    await asyncio.sleep(5)  # Small delay before trying next model
+                    await asyncio.sleep(5)
                 elif self._is_service_unavailable_error(e):
                     print(
                         "Service unavailable - adding delay before trying next model..."
                     )
-                    await asyncio.sleep(3)  # Small delay before trying next model
+                    await asyncio.sleep(3)
                 continue
         if last_exception:
             raise last_exception
@@ -254,10 +241,8 @@ if __name__ == "__main__":
         )
 
         try:
-            # Test with typical Gemini limits
             generator = GoogleGenerator(requests_per_minute=60, requests_per_day=1500)
 
-            # Show initial rate limit status
             print("\n📊 Initial Rate Limit Status:")
             status = generator.get_rate_limit_status()
             for key, value in status.items():
@@ -278,7 +263,6 @@ if __name__ == "__main__":
                 f"   Response: {response[:100]}{'...' if len(response) > 100 else ''}"
             )
 
-            # Show updated rate limit status
             print("\n📊 Updated Rate Limit Status:")
             status = generator.get_rate_limit_status()
             for key, value in status.items():

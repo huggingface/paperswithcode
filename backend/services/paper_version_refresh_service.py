@@ -90,9 +90,6 @@ class PaperVersionRefreshService:
         }
         hf_paper = None
         if self._claimed_authors(claim_sources).keys() - _name_keys(metadata.authors):
-            # A claimed author is no longer on the byline under their row's
-            # name, usually because the row took a new name from Hugging Face.
-            # Re-apply the claim from HF's verified claims instead.
             hf_paper = await _fetch_hf_paper(metadata.arxiv_id)
 
         try:
@@ -184,7 +181,6 @@ class PaperVersionRefreshService:
             target.is_latest_version = True
             self.db.add(target)
             if hf_paper is not None:
-                # The sync queries the new links and latest version.
                 self.db.flush()
                 AuthorHfProfileSyncService(self.db).sync_paper(hf_paper)
             self.db.commit()
@@ -298,8 +294,6 @@ class PaperVersionRefreshService:
                 dataset_id=link.dataset_id,
             )
 
-        # Leaderboards list every version's rows, so results move to the new
-        # version rather than being copied; the old version keeps none.
         EvaluationService(self.db).move_paper_evaluations(
             source_paper_id, target_paper_id
         )
@@ -327,11 +321,6 @@ class PaperVersionRefreshService:
     def _replace_paper_authors(
         self, paper_id: int, author_names: List[str], claims_from: Optional[int]
     ) -> None:
-        # Keep Hugging Face claims (on this version or the previous latest one)
-        # attached to the claiming author instead of re-matching it by name. A
-        # claim follows its author's exact name (any case); if arXiv now spells
-        # the name differently, guessing could hand it to a namesake, so the
-        # claim is dropped here and refresh_arxiv_paper re-applies it from HF.
         names = [normalize_arxiv_author_name(full_name) for full_name in author_names]
         claimed_authors = self._claimed_authors({paper_id, claims_from or paper_id})
         self.db.query(PaperAuthor).filter(PaperAuthor.paper_id == paper_id).delete()
@@ -366,7 +355,6 @@ async def _fetch_hf_paper(arxiv_id: str) -> Optional[Dict[str, Any]]:
             response = await client.get(f"{HF_PAPERS_URL}/{arxiv_id}")
             response.raise_for_status()
     except httpx.HTTPError as exc:
-        # The claim stays dropped until sync_hf_author_profiles sees the paper.
         logger.warning("hf_paper_claims_unavailable %s: %s", arxiv_id, exc)
         return None
     return response.json()

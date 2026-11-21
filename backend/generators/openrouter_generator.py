@@ -16,7 +16,6 @@ from backend.config import get_settings
 
 OPENROUTER_API_KEY = get_settings().openrouter_api_key
 
-# Set up logging
 logger = logging.getLogger(__name__)
 
 
@@ -26,9 +25,6 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
     """
 
     def __init__(self, requests_per_minute=200, requests_per_day=10000, **kwargs):
-        # Initialize rate limiting with OpenRouter's paid model limits
-        # Note: 20 req/min and 1000 req/day limits only apply to :free models
-        # For paid models like grok-4.3 with a paid account, limits are much higher
         super().__init__(
             requests_per_minute=requests_per_minute,
             requests_per_day=requests_per_day,
@@ -37,8 +33,6 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
         self.client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1", api_key=OPENROUTER_API_KEY
         )
-        # `x-ai/grok-4-fast` was deprecated by xAI in May 2026; xAI recommends
-        # switching to `grok-4.3`.
         self.model_name = "x-ai/grok-4.3"
 
     def encode_image(self, image_path: str) -> str:
@@ -60,19 +54,15 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
         """
         formatted_messages = []
         for message in messages:
-            # Handle text content
             if isinstance(message.content, str):
                 text_content = message.content
             else:
                 text_content = " ".join(message.content)
 
-            # Start with text content
             content_parts = [{"type": "text", "text": text_content}]
 
-            # Add images from file paths
             if message.image_paths:
                 for image_path in message.image_paths:
-                    # Get image extension to determine MIME type
                     _, ext = os.path.splitext(image_path.lower())
                     mime_type = {
                         ".jpg": "jpeg",
@@ -80,9 +70,8 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
                         ".png": "png",
                         ".gif": "gif",
                         ".webp": "webp",
-                    }.get(ext, "jpeg")  # Default to jpeg if unknown
+                    }.get(ext, "jpeg")
 
-                    # Encode image to base64
                     base64_image = self.encode_image(image_path)
 
                     content_parts.append(
@@ -94,14 +83,12 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
                         }
                     )
 
-            # Add images from URLs
             if message.image_urls:
                 for image_url in message.image_urls:
                     content_parts.append(
                         {"type": "image_url", "image_url": {"url": image_url}}
                     )
 
-            # If we have images, use multimodal content, otherwise just text
             if len(content_parts) > 1:
                 content = content_parts
             else:
@@ -110,8 +97,6 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
             formatted_messages.append({"role": message.role, "content": content})
 
         return formatted_messages
-
-    # Rate limiting methods are now inherited from RateLimitingMixin
 
     async def _generate_with_reasoning_http_internal(
         self,
@@ -132,11 +117,9 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
             "messages": formatted_messages,
         }
 
-        # Add reasoning configuration if provided
         if reasoning_config:
             payload["reasoning"] = reasoning_config
 
-        # Add schema if provided
         if schema is not None:
             payload["response_format"] = {
                 "type": "json_schema",
@@ -161,7 +144,6 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
                 result = await response.json()
 
                 if schema is not None:
-                    # Parse the JSON response according to the schema
                     content = result["choices"][0]["message"]["content"]
                     try:
                         parsed_content = json.loads(content)
@@ -215,13 +197,11 @@ class OpenRouterGenerator(RateLimitingMixin, Generator):
         Generate response with optional reasoning tokens support and rate limiting.
         """
         if use_reasoning:
-            # Use HTTP method with reasoning support
             reasoning_config = {"effort": "high"}
             return await self.generate_with_reasoning_http(
                 messages, schema, reasoning_config
             )
         else:
-            # Use original OpenAI SDK method with rate limiting
             return await self._execute_with_rate_limiting(
                 self._generate_openai_sdk_internal, messages, schema
             )
@@ -235,16 +215,13 @@ if __name__ == "__main__":
         print("🧪 Testing OpenRouter Generator with Rate Limiting...")
 
         try:
-            # Test with default paid tier limits (200/min, 10000/day)
             generator = OpenRouterGenerator()
 
-            # Show initial rate limit status
             print("\n📊 Initial Rate Limit Status:")
             status = generator.get_rate_limit_status()
             for key, value in status.items():
                 print(f"   {key}: {value}")
 
-            # Test text-only message
             print("\n📝 Testing text-only message with rate limiting...")
             messages = [
                 Message(
@@ -263,13 +240,11 @@ if __name__ == "__main__":
                 f"   Response: {response[:100]}{'...' if len(response) > 100 else ''}"
             )
 
-            # Show updated rate limit status
             print("\n📊 Updated Rate Limit Status:")
             status = generator.get_rate_limit_status()
             for key, value in status.items():
                 print(f"   {key}: {value}")
 
-            # Test image message formatting (without actual API call)
             print("\n🖼️  Testing image message formatting...")
             image_messages = [
                 Message(
@@ -278,11 +253,10 @@ if __name__ == "__main__":
                     image_paths=[
                         "/path/to/test/image1.jpg",
                         "/path/to/test/image2.png",
-                    ],  # These won't exist, just for format testing
+                    ],
                 )
             ]
 
-            # Test the formatting without making API call
             try:
                 formatted = await generator.format_messages(image_messages)
                 print("✅ Image message formatting structure created!")
@@ -296,7 +270,6 @@ if __name__ == "__main__":
             except Exception as format_error:
                 print(f"❌ Image formatting error: {format_error}")
 
-            # Test rate limiting simulation
             print("\n⏳ Testing rate limiting behavior...")
             print("   (This would normally trigger rate limiting with real API calls)")
 

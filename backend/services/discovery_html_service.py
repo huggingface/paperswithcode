@@ -16,7 +16,6 @@ from backend.services.spa_shell_service import (
     route_preload_links,
 )
 
-# Site-wide social tags in the SPA shell that each discovery page replaces.
 _SOCIAL_META_RE = re.compile(
     r'<meta\b[^>]*\b(?:property=["\']og:(?:title|description|url)["\']'
     r'|name=["\']twitter:(?:title|description)["\'])[^>]*>\s*',
@@ -168,9 +167,6 @@ def render_discovery_shell(shell: str, page: DiscoveryPage, request_path: str) -
         f'<meta property="og:url" content="{escape(page.canonical_url, quote=True)}">'
         f'<meta name="twitter:title" content="{title}">'
         f'<meta name="twitter:description" content="{description}">'
-        # The requested route decides which view renders: nested pages such as
-        # /conferences/:slug/:task share their parent's canonical URL. Legacy
-        # aliases (/sota/…, /{slug}) fall back to the canonical route.
         + (
             route_preload_links(request_path)
             or route_preload_links(page.canonical_path)

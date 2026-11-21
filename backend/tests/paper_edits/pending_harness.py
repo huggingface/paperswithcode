@@ -37,7 +37,6 @@ from backend.models.database import (
 )
 
 
-# SQLite stand-ins for PostgreSQL types, registered for every importer.
 @compiles(BigInteger, "sqlite")
 def _compile_bigint_sqlite(_element, _compiler, **_kw):
     return "INTEGER"
@@ -112,8 +111,6 @@ def paper_fixture(db_session):
             DBMethod(id=10, name="Method X", slug="method-x"),
             DBMethod(id=11, name="Method Y", slug="method-y"),
             DBRepository(id=100, url="https://github.com/owner/repo"),
-            # `is_official` lives on ProjectPage itself (not the junction),
-            # so the snapshot reads it from this column.
             DBProjectPage(id=200, url="https://example.com/project", is_official=False),
         ]
     )

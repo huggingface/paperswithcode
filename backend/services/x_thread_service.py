@@ -74,15 +74,12 @@ def _display_text(post: dict) -> str:
     text = post.get("text") or ""
     start, end = post.get("display_text_range") or (0, len(text))
     visible = text[start:end]
-    # Swap t.co shortlinks for their destinations; media links fall outside
-    # the display range and are rendered from mediaDetails instead.
     for entity in (post.get("entities") or {}).get("urls", []):
         if entity.get("url") and entity.get("expanded_url"):
             visible = visible.replace(entity["url"], entity["expanded_url"])
     return html.unescape(visible).strip()
 
 
-# Inline previews are sidebar-sized, so 360p (~0.8 Mbps) is sharp enough.
 _MAX_PREVIEW_VIDEO_BITRATE = 1_000_000
 
 
@@ -136,7 +133,6 @@ def preview_from_syndication(post: dict) -> XPostPreview:
         url=f"https://x.com/{user['screen_name']}/status/{tweet_id}",
         author_name=user.get("name") or user["screen_name"],
         author_handle=user["screen_name"],
-        # `_normal` is 48 px; `_bigger` stays sharp on high-density screens.
         author_avatar_url=avatar.replace("_normal.", "_bigger.") if avatar else None,
         text=_display_text(post),
         posted_at=_posted_at(post.get("created_at")),

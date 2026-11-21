@@ -103,7 +103,6 @@ def test_common_names_need_seventy_percent():
 
 def test_borderline_overlap_reads_the_rest_of_a_truncated_profile():
     papers = [paper(i) for i in range(10)]
-    # The first 3 pages hold 5 of the author's papers; later pages hold 4 more.
     titles = (
         [f"Paper {i}" for i in range(5)]
         + ["Other"]

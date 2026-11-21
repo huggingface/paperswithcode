@@ -38,7 +38,6 @@ class LinkingStats:
     matched_works: int = 0
     last_id: int = 0
     linked: Counter[str] = field(default_factory=Counter)
-    # HTTP status OpenAlex refused with, if the run stopped early.
     stopped_status: int | None = None
 
 

@@ -130,8 +130,6 @@ class ConferenceDeadlineSweeps:
             self._api = HfApi(token=credentials.token)
         return self._api
 
-    # --- launch -------------------------------------------------------------
-
     def running(self) -> list[ConferenceDeadlineSweep]:
         return (
             self.db.query(ConferenceDeadlineSweep)
@@ -215,7 +213,7 @@ class ConferenceDeadlineSweeps:
                 },
                 namespace=credentials.namespace,
             )
-        except Exception as exc:  # Record why the Job never started, then re-raise.
+        except Exception as exc:
             sweep.status = "failed"
             sweep.error = f"launch failed: {type(exc).__name__}: {exc}"[:2000]
             sweep.finished_at = datetime.now(timezone.utc)
@@ -225,8 +223,6 @@ class ConferenceDeadlineSweeps:
         sweep.status = "running"
         self.db.commit()
         return sweep
-
-    # --- collect ------------------------------------------------------------
 
     def collect(self, *, now: datetime, dry_run: bool = False) -> list[dict]:
         reports = []
@@ -240,7 +236,6 @@ class ConferenceDeadlineSweeps:
         self, sweep: ConferenceDeadlineSweep, *, now: datetime, dry_run: bool = False
     ) -> Optional[dict]:
         if sweep.hf_job_id is None:
-            # Crashed between the ledger insert and run_job returning.
             if now - aware_utc(sweep.launched_at) > timedelta(hours=1):
                 sweep.status = "failed"
                 sweep.error = "no Hugging Face Job was recorded for this sweep"
@@ -337,9 +332,6 @@ class ConferenceDeadlineSweeps:
         sweep.cost_usd = round(cost, 4)
         sweep.finished_at = now
         researched = [r for r in results if r.get("status") not in ("error", "timeout")]
-        # A sweep in which aggregation failed (error, timeout, crash) and no
-        # majority vote succeeded verified nothing, e.g. an aggregation model
-        # the bundled CLI cannot run: never count it as fresh.
         aggregation_broken = any(
             r.get("aggregation_failed") for r in results
         ) and not any(agent.aggregation_succeeded(r) for r in results)

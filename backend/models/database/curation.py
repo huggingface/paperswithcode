@@ -116,10 +116,7 @@ class ModelReleaseSignal(Base):
     model_name: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     lead_url: Mapped[str] = mapped_column(Text, nullable=False)
-    # Feed URL of a vendor source, or "web-search".
     source: Mapped[str] = mapped_column(Text, nullable=False)
-    # The lead is the lab's own page (a vendor feed, or a web hit the
-    # extractor cited as official), not a news article.
     lead_is_official: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
@@ -158,7 +155,6 @@ class PaperCurationBootstrapBundle(Base):
 
     __tablename__ = "paper_curation_bootstrap_bundles"
 
-    # SHA-256 of the bundle's canonical JSON (sorted keys, compact separators).
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     bundle: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -193,7 +189,6 @@ class PaperCurationJob(Base):
     )
     paper_route: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     paper_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    # Candidate ids a review-benchmark-gaps job was served; it must decide each.
     review_scope: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
     parent_workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -250,8 +245,6 @@ class PaperCurationJob(Base):
     retry_of_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), ForeignKey("paper_curation_jobs.id"), nullable=True
     )
-    # "pi" jobs are shadow-only comparison runs paired with a Codex job; they
-    # never apply mutations and stay outside every scheduled lane and breaker.
     runner: Mapped[str] = mapped_column(
         String(8), nullable=False, default="codex", server_default="codex"
     )
@@ -385,7 +378,6 @@ class PaperCurationJob(Base):
             "kind",
             "policy_version",
             unique=True,
-            # Pi shadow rows run beside the Codex stage they mirror.
             postgresql_where=text(
                 "trigger NOT IN ('admin', 'pi-shadow') "
                 "AND status IN ('queued', 'dispatching', 'running')"
@@ -580,7 +572,6 @@ class BenchmarkCurationCandidate(Base):
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # Paper count when last rejected; new evidence doubling it reopens review.
     reviewed_paper_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     deferred_until: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -590,7 +581,6 @@ class BenchmarkCurationCandidate(Base):
         ForeignKey("benchmark_curation_candidates.id", ondelete="SET NULL"),
         nullable=True,
     )
-    # Catalog rows the creation job used or created, for audit and rollback.
     resolution: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     __table_args__ = (

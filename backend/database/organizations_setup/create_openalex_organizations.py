@@ -39,7 +39,6 @@ from backend.services.hf_organization_service import (
 
 OPENALEX_API = "https://api.openalex.org/institutions"
 MAX_PROFILES_PER_SEARCH = 5
-# Reviewed: personal accounts that carry an institution's exact name.
 REJECTED_HF_HANDLES = {"actsproject", "bupt2023213296", "jordanlee7677888"}
 
 
@@ -145,7 +144,6 @@ def main() -> int:
                 try:
                     logo_data, mime_type = client.fetch_logo(organization.logo_url)
                 except HFOrganizationError as exc:
-                    # Placeholder avatars (gravatar) are not organization logos.
                     print(f"         {item.slug}: no logo ({exc})")
                     organization.logo_url = None
                 else:

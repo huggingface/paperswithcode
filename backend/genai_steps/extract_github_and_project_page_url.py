@@ -51,13 +51,10 @@ class Response(BaseModel):
     project_page_url: str
 
 
-# Set up logging
 logger = logging.getLogger(__name__)
 
-# Initialize variables
 template = load_prompt("extract_github_and_project_page_url.json")
 
-# ArXiv rate limiting - 3 seconds between requests
 ARXIV_RATE_LIMIT_DELAY = 3.0
 _last_arxiv_request_time = None
 
@@ -94,7 +91,6 @@ class FewShotPDFCache:
                 logger.debug(f"Using cached PDF for index {idx}: {cached_path}")
                 return cached_path
 
-        # Download and cache the PDF
         cache_filename = f"few_shot_pdf_{idx}.pdf"
         cached_path = self.cache_dir / cache_filename
 
@@ -107,7 +103,6 @@ class FewShotPDFCache:
                 repo_type="dataset",
             )
 
-            # Copy to our cache directory
             await asyncio.to_thread(
                 lambda: __import__("shutil").copy2(downloaded_path, cached_path)
             )
@@ -142,7 +137,6 @@ class FewShotManager:
 
     async def get_few_shot_messages(self, generator=None) -> list[Message]:
         """Get cached few-shot messages, creating them if necessary."""
-        # Use cached messages if available
         if self._cached_messages is not None:
             logger.debug("Using cached few-shot messages")
             return self._cached_messages
@@ -155,15 +149,12 @@ class FewShotManager:
             zip(arxiv_ids, responses)
         ):
             try:
-                # Get cached PDF path
                 pdf_file_path = await self.pdf_cache.get_pdf_path(idx)
 
-                # Create user message
                 message = await create_user_message(few_shot_arxiv_id, pdf_file_path)
                 messages.append(message)
                 messages.append(Message(role="assistant", content=response_content))
 
-                # Track image paths for cleanup
                 if hasattr(message, "image_paths") and message.image_paths:
                     all_image_paths.extend(message.image_paths)
 
@@ -188,12 +179,10 @@ class FewShotManager:
             self._cached_image_paths = []
 
 
-# Global instances
 pdf_cache = FewShotPDFCache()
 few_shot_manager = FewShotManager(pdf_cache)
 
 
-# add few-shots
 arxiv_ids = [
     "2409.18313",
     "2410.00337",
@@ -232,17 +221,13 @@ async def create_user_message(
         pdf_file_path: Path to the PDF file
         abstract: Optional pre-fetched abstract. If None, will fetch from web.
     """
-    # Get the abstract of the paper
     if abstract is None:
         abstract = await get_abstract(arxiv_id=arxiv_id)
 
-    # Get the comments of the paper page
     paper_page_comments = await get_comments(arxiv_id=arxiv_id)
 
-    # Get the text of the first two pages of the PDF
     pdf_text = await asyncio.to_thread(extract_text_from_pdf, pdf_path=pdf_file_path)
 
-    # Get the hyperlinks of the first two pages of the PDF
     hyperlinks = await safe_extract_hyperlinks_async(pdf_file_path, timeout_seconds=10)
 
     prompt = template.format(
@@ -256,7 +241,6 @@ async def create_user_message(
         filename="extract_github_and_project_page_url_prompt", value=prompt
     )
 
-    # Extract the images from the PDF
     image_paths = await safe_pdf_to_images_async(pdf_file_path, timeout_seconds=30)
 
     message = Message(
@@ -295,7 +279,6 @@ async def get_project_github_urls(
     github_url = ""
     project_page_url = ""
 
-    # Step 1: Try simple extraction methods first (without PDF)
     print("Step 1: Trying simple methods...")
     (
         github_url,
@@ -307,25 +290,21 @@ async def get_project_github_urls(
 
     print(f"Step 1: Github URL: {github_url}, Project page URL: {project_page_url}")
 
-    # Step 2: Use LLM (only if URLs not found and requires PDF download)
     if not github_url or not project_page_url:
         print(
             "Not all URLs found with simple methods, downloading PDF and trying LLM..."
         )
 
         try:
-            # Apply rate limiting before downloading from ArXiv
             await _rate_limit_arxiv()
 
             async with temp_pdf_download(arxiv_id=arxiv_id) as (
                 pdf_path,
                 error_message,
             ):
-                # Check if download failed
                 if pdf_path is None or error_message is not None:
                     error_msg = error_message or "Unknown error"
 
-                    # Check if it's a critical error (reCAPTCHA, rate limiting, etc.)
                     error_str = error_msg.lower()
                     is_critical = (
                         "recaptcha" in error_str
@@ -339,24 +318,19 @@ async def get_project_github_urls(
                             f"Failed to download PDF for {arxiv_id}: {error_msg}"
                         )
                     else:
-                        # Non-critical error, log and continue
                         print(f"Failed to download PDF for {arxiv_id}: {error_msg}")
-                        # Continue with whatever URLs we found
                         return reasoning, {
                             "github_url": github_url,
                             "project_page_url": project_page_url,
                         }
 
-                # PDF downloaded successfully, process it
                 pdf_path_processed = await extract_first_two_pages_pymupdf(pdf_path)
 
-                # Try PDF-based project page extraction if not found yet
                 if not project_page_url:
                     project_page_url = await find_project_page_url(
                         pdf_path=pdf_path_processed
                     )
 
-                # Use LLM if still missing URLs
                 if not github_url or not project_page_url:
                     reasoning, llm_response = await _extract_urls_with_llm(
                         arxiv_id, pdf_path_processed, abstract, use_reasoning, generator
@@ -368,7 +342,6 @@ async def get_project_github_urls(
                         project_page_url = llm_response["project_page_url"]
 
         except Exception as e:
-            # Re-raise critical errors (rate limiting, quota, PDF download failures, reCAPTCHA, API key errors)
             error_str = str(e).lower()
             auth_markers = [
                 "api key",
@@ -395,11 +368,9 @@ async def get_project_github_urls(
             )
 
             if is_critical:
-                raise  # Re-raise as-is with full context
+                raise
 
-            # For non-critical errors, log and continue with whatever URLs we found
             print(f"Non-critical error during PDF processing: {e}")
-            # Continue with github_url and project_page_url as they are (may be empty)
 
     response = {
         "github_url": github_url,
@@ -432,14 +403,11 @@ async def _extract_urls_with_llm(
     if generator is None:
         generator = OpenRouterGenerator()
 
-    # Get few-shot messages (cached after first call)
     few_shot_messages = await few_shot_manager.get_few_shot_messages(generator)
 
-    # Create query message
     print("Processing main query...")
     query_message = await create_user_message(arxiv_id, pdf_path, abstract)
 
-    # Combine few-shot examples with query
     messages = few_shot_messages + [query_message]
 
     query_image_paths = []
@@ -447,21 +415,17 @@ async def _extract_urls_with_llm(
         query_image_paths = query_message.image_paths
 
     try:
-        # Check if generator supports use_reasoning parameter
         from backend.generators.google_generator import GoogleGenerator
 
         if isinstance(generator, GoogleGenerator):
-            # GoogleGenerator doesn't support use_reasoning
             response_str, _ = await generator.generate(
                 messages=messages, schema=Response
             )
         else:
-            # OpenRouterGenerator supports use_reasoning
             response_str, _ = await generator.generate(
                 messages=messages, schema=Response, use_reasoning=use_reasoning
             )
 
-        # Handle different response types (Pydantic model vs dict)
         if isinstance(response_str, dict):
             reasoning = response_str.get("reasoning", "")
             project_page_url = response_str.get("project_page_url", "")
@@ -471,7 +435,6 @@ async def _extract_urls_with_llm(
             project_page_url = response_str.project_page_url
             github_url = response_str.github_url
 
-        # Verify the project page URL
         if isinstance(project_page_url, str) and project_page_url:
             is_valid_url = await verify_url(project_page_url)
             project_page_url = project_page_url if is_valid_url else ""
@@ -485,7 +448,6 @@ async def _extract_urls_with_llm(
 
     except Exception as e:
         logger.error(f"LLM extraction failed for {arxiv_id}: {e}")
-        # Re-raise critical errors that should stop processing
         error_str = str(e).lower()
         auth_markers = [
             "api key",
@@ -509,10 +471,8 @@ async def _extract_urls_with_llm(
         )
         if is_critical:
             raise Exception(f"Critical error: {e}") from e
-        # For other errors, return empty results
         return "", {"github_url": "", "project_page_url": ""}
     finally:
-        # Clean up query-specific image files
         if query_image_paths:
             print(f"Cleaning up {len(query_image_paths)} query image files...")
             cleanup_image_files(query_image_paths)
@@ -533,7 +493,6 @@ async def warm_pdf_cache():
         f"PDF cache ready: {cache_info['cached_count']} files, {cache_info['total_size_mb']:.1f} MB"
     )
 
-    # Also warm the few-shot messages cache
     logger.info("Warming few-shot messages cache...")
     try:
         messages = await few_shot_manager.get_few_shot_messages(generator=None)
@@ -547,7 +506,6 @@ async def warm_pdf_cache():
 async def main(
     arxiv_id: str, use_reasoning: bool = True, abstract: Optional[str] = None
 ):
-    # Show cache info
     cache_info = pdf_cache.get_cache_info()
     print(
         f"📋 PDF Cache: {cache_info['cached_count']}/{len(arxiv_ids)} files cached ({cache_info['total_size_mb']:.1f} MB)"

@@ -10,8 +10,6 @@ from backend.services.github_issue_body_service import (
     validate_issue_body,
 )
 
-# Title of the Hugging Face artifact-release request that the community-science
-# paper-parsing pipeline opens from the same account (``Release X on Hugging Face``).
 RELEASE_ISSUE_TITLE = re.compile(r"Release .+ on Hugging Face", re.IGNORECASE)
 
 

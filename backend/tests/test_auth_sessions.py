@@ -681,8 +681,6 @@ def test_copied_cookies_are_rejected_after_logout(monkeypatch, auth_sessions):
     auth.logout(_request("paperswithcode.co", copied), return_to=None, everywhere=False)
 
     assert auth.decode_request_session(_request("paperswithcode.co", copied)) is None
-    # The host-only production legacy cookie a staging logout cannot delete is
-    # revoked with the shared one.
     residual = _cookie_header(cookies, "pwc_session")
     assert auth.decode_request_session(_request("paperswithcode.co", residual)) is None
 

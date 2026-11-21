@@ -59,16 +59,13 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "ecmlpkdd-storage.s3.eu-central-1.amazonaws.com",
         "github.com",
         "huggingface.co",
-        # huggingface.co/.../resolve/... redirects LFS and Xet files to these CDNs.
         "cas-bridge.xethub.hf.co",
         "cdn-lfs.hf.co",
         "cdn-lfs-eu-1.hf.co",
         "cdn-lfs-us-1.hf.co",
         "us.aws.cdn.hf.co",
         "ieeexplore.ieee.org",
-        # github.com/<owner>/<repo>/raw/... redirects Git LFS files here.
         "media.githubusercontent.com",
-        # ECCV conference PDFs (papers.conference_url_pdf).
         "media.eventhosts.cc",
         "medrxiv.org",
         "microsoft.ai",
@@ -94,15 +91,12 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "zenodo.org",
     }
 )
-# raw.githubusercontent.com and many object stores label PDFs as generic binary;
-# the `%PDF` magic-byte check below still rejects anything that is not a PDF.
 EXTERNAL_PDF_CONTENT_TYPES = frozenset(
     {"application/pdf", "application/octet-stream", "binary/octet-stream"}
 )
 PERMANENT_EXTERNAL_PDF_SAFE_STATUSES = frozenset({403, 409, 413, 415, 422})
 PERMANENT_EXTERNAL_PDF_ORIGIN_STATUSES = frozenset({403, 404, 410})
 EXTERNAL_PAGE_CONTENT_TYPES = frozenset({"text/html", "application/xhtml+xml"})
-# Some object stores label images as generic binary; Pillow decides.
 EXTERNAL_ARTWORK_CONTENT_TYPES = frozenset(
     {
         "image/gif",
@@ -118,21 +112,9 @@ EXTERNAL_PAGE_MAX_BYTES = 5 * 1024 * 1024
 EXTERNAL_ARTWORK_MAX_BYTES = 15 * 1024 * 1024
 EXTERNAL_ARTWORK_TIMEOUT_SECONDS = 20.0
 MAX_EXTERNAL_ARTWORK_CANDIDATES = 3
-# Paper cards render thumbnails in a 160×220 box, but PDF pages have their own
-# MediaBox/CropBox aspect ratio. Keep the page ratio in the JPEG and let the
-# frontend containment frame handle the small per-page difference.
 CARD_THUMB_ASPECT = 160 / 220
-# Kept for card-sized non-PDF fallbacks and compatibility with callers that
-# need the nominal card dimensions. PDF thumbnails use a native, variable
-# height instead (e.g. US Letter at width 400 is about 518px tall).
 EXPECTED_THUMBNAIL_HEIGHT = int(EXPECTED_THUMBNAIL_WIDTH / CARD_THUMB_ASPECT)
-# Older renders produced squat thumbnails around H/W = 0.65 because the
-# height was clipped. Keep validation deliberately permissive above the
-# portrait threshold because PDF pages may use custom dimensions.
 MIN_THUMBNAIL_HEIGHT_TO_WIDTH_RATIO = 1.0
-# Only strip sparse footer rows from the bottom band of the page; without this
-# limit, low-density body text (e.g. abstract paragraphs) can be mistaken for
-# copyright/page-number footers and cropped away.
 MAX_SPARSE_FOOTER_HEIGHT_FRACTION = 0.05
 
 
@@ -393,12 +375,10 @@ class ThumbnailService:
             if self.settings.thumbnail_mutations_enabled:
                 self.legacy_cache_dir.mkdir(parents=True, exist_ok=True)
 
-        # Thumbnail settings
-        self.thumbnail_width = EXPECTED_THUMBNAIL_WIDTH  # Target width in pixels
-        self.thumbnail_quality = 85  # JPEG quality
-        self.pdf_timeout = 30  # Timeout for PDF downloads in seconds
-        self.max_pdf_size = 50 * 1024 * 1024  # 50MB max PDF size
-        # ArXiv service for API interactions
+        self.thumbnail_width = EXPECTED_THUMBNAIL_WIDTH
+        self.thumbnail_quality = 85
+        self.pdf_timeout = 30
+        self.max_pdf_size = 50 * 1024 * 1024
         self.arxiv_service = ArxivService()
 
     def parse_filename(self, filename: str) -> tuple[str, str]:
@@ -524,12 +504,11 @@ class ThumbnailService:
             ThumbnailGenerationError: If conversion fails
         """
         try:
-            # Convert first page only with reasonable DPI
             images = convert_from_bytes(
                 pdf_content,
                 first_page=1,
                 last_page=1,
-                dpi=150,  # Good balance of quality and performance
+                dpi=150,
                 fmt="jpeg",
             )
 
@@ -788,17 +767,12 @@ class ThumbnailService:
             cache_path: Path where to save the image
         """
         try:
-            # Convert to RGB if necessary (for JPEG)
             if image.mode != "RGB":
                 image = image.convert("RGB")
 
             image.save(
                 cache_path, "JPEG", quality=self.thumbnail_quality, optimize=True
             )
-            # The shared cache is written by cron/admin processes but served by
-            # the unprivileged production backend. Thumbnail contents are
-            # public, so make every generated JPEG readable across service users
-            # regardless of the writer's umask.
             cache_path.chmod(0o644)
         except Exception as e:
             raise ThumbnailGenerationError(f"Failed to save thumbnail: {str(e)}")
@@ -914,7 +888,6 @@ class ThumbnailService:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            # Download PDF using ArXiv service (handles rate limiting)
             try:
                 pdf_content = await self.arxiv_service.download_pdf(arxiv_id, version)
             except ArxivPdfUnavailableError as exc:
@@ -934,10 +907,8 @@ class ThumbnailService:
                     f"Could not download PDF for ArXiv ID {arxiv_id}"
                 )
 
-            # Convert to thumbnail
             thumbnail = self._convert_pdf_to_thumbnail(pdf_content)
 
-            # Save to cache
             self._save_thumbnail(thumbnail, cache_path)
             self._upload_to_bucket(cache_path, filename)
 
@@ -998,8 +969,6 @@ class ThumbnailService:
         if pdf_content is None:
             pdf_content = self._read_archived_external_pdf(paper_id)
         if pdf_content is None and pdf_url_error is not None:
-            # Retry later instead of caching a metadata card in place of
-            # a PDF that is only temporarily unavailable.
             raise pdf_url_error
         if pdf_content is not None:
             thumbnail = self._convert_pdf_to_thumbnail(pdf_content)
@@ -1085,7 +1054,6 @@ class ThumbnailService:
                     thumbnail_file.unlink()
                     deleted_count += 1
             except Exception:
-                # Skip files that can't be processed
                 continue
 
         return deleted_count
@@ -1116,7 +1084,7 @@ class ThumbnailService:
                 try:
                     size = thumbnail_file.stat().st_size
                 except FileNotFoundError:
-                    continue  # removed by a concurrent cleanup/mirror
+                    continue
                 total_files += 1
                 total_size += size
 

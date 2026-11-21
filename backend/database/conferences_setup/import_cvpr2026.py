@@ -198,7 +198,6 @@ def link_github_repo(db: Session, paper: Paper, github_url: str) -> bool:
         repo.owner = repo.owner or owner
         repo.name = repo.name or name
 
-    # Drop links to case-variant duplicates of the same GitHub repo.
     variant_links = (
         db.query(PaperRepository)
         .join(Repository, Repository.id == PaperRepository.repository_id)

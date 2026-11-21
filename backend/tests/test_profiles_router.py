@@ -83,7 +83,6 @@ def _submission_row(
         user_review_reason="Reviewed" if status != "pending" else None,
         created_at=created_at,
         reviewed_at=created_at if status != "pending" else None,
-        # These private/admin fields must never enter the profile projection.
         source_ip="192.0.2.1",
         admin_note="internal-only",
         reviewed_by="admin",

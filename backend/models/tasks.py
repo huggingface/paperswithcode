@@ -16,7 +16,6 @@ class Task(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    # Core task identification
     id: str = Field(..., description="Task ID")
     name: str = Field(..., description="Task name (e.g., 'Image Classification')")
     description: Optional[str] = Field(None, description="Task description")
@@ -29,12 +28,10 @@ class Task(BaseModel):
         None, description="Comma-separated keywords for matching papers to this task"
     )
 
-    # Hierarchical structure
     parent_id: Optional[str] = Field(None, description="ID of the parent task")
     area_id: Optional[str] = Field(None, description="ID of the research area")
     level: int = Field(default=0, description="Depth in task hierarchy (0=top-level)")
 
-    # Metadata
     paper_count: Optional[int] = Field(
         None, description="Number of papers for this task"
     )
@@ -51,7 +48,6 @@ class Task(BaseModel):
         None, description="Image source/credit information"
     )
 
-    # Timestamps
     created_at: Optional[datetime] = Field(None, description="Task creation timestamp")
     updated_at: Optional[datetime] = Field(None, description="Last update timestamp")
 

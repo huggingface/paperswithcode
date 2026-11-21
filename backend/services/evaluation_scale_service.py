@@ -47,8 +47,6 @@ def validate_source_score(
         )
 
 
-# A board needs this many other rows, with its lowest 5% scoring at least this
-# much, before its own values can contradict a submitted sub-1 percentage.
 BOARD_SCALE_MIN_ROWS = 3
 BOARD_SCALE_MIN_LOW_TAIL = 5.0
 

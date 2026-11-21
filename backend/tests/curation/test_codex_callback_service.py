@@ -65,7 +65,6 @@ def _score_evidence(**overrides):
 
 @pytest.fixture(autouse=True)
 def _no_removed_leaderboards(monkeypatch):
-    # These fake sessions do not model the tombstone aggregate query.
     monkeypatch.setattr(
         "backend.services.codex_curation_callback_service."
         "CodexCurationCallbackService._removed_leaderboards",
@@ -747,9 +746,7 @@ def test_scheduled_enrichment_can_leave_project_pages_unchanged():
 @pytest.mark.parametrize(
     "preapply_proposal",
     [
-        # The worker previewed adding a task but applies something else.
         {"enrich": {"task_ids": [7], "method_ids": [], "urls_extracted": True}},
-        # No usable pre-apply proposal was recorded.
         {},
         None,
     ],
@@ -1082,7 +1079,6 @@ def test_scheduled_evaluation_checks_sub_one_percent_against_leaderboard(
             "evaluations": [_evaluation(model_name="Useful Model")],
             "score_evidence": [_score_evidence()],
         },
-        # Curators often nest each row's source cell inside that row.
         {
             "evaluations": [
                 {
@@ -1091,7 +1087,6 @@ def test_scheduled_evaluation_checks_sub_one_percent_against_leaderboard(
                 }
             ],
         },
-        # Identical repeats and cells for rows the curator dropped are harmless.
         {
             "evaluations": [_evaluation(model_name="Useful Model")],
             "score_evidence": [

@@ -38,17 +38,13 @@ def test_sorted_positive_filters_and_sorts():
 
 def test_quantile_rank_bounds_and_monotonicity():
     corpus = sorted_positive([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-    # Non-positive / empty corpus -> 0.
     assert quantile_rank(corpus, 0) == 0.0
     assert quantile_rank([], 5) == 0.0
-    # Max maps to 1.0; values below max are strictly smaller.
     assert quantile_rank(corpus, 10) == 1.0
     assert quantile_rank(corpus, 5) == 0.5
     assert quantile_rank(corpus, 1) == 0.1
-    # Monotonic non-decreasing.
     ranks = [quantile_rank(corpus, x) for x in range(1, 11)]
     assert ranks == sorted(ranks)
-    # A value beyond the corpus max still caps at 1.0.
     assert quantile_rank(corpus, 9999) == 1.0
 
 
@@ -61,31 +57,27 @@ def test_github_component_uses_quantile():
 
 def test_hf_component_empty_is_zero():
     assert hf_component([], {"model": [1.0, 2.0]}) == 0.0
-    # Artifact with no corpus for its kind contributes nothing.
     assert hf_component([("dataset", 5)], {"model": [1.0, 2.0]}) == 0.0
 
 
 def test_hf_component_soft_or_and_diminishing_returns():
     models = sorted_positive([1, 4, 46, 102])
     by_kind = {"model": models, "dataset": [], "space": []}
-    # Single top model -> rank 1.0 -> H = 1.0.
     single = hf_component([("model", 102)], by_kind)
     assert single == 1.0
-    # Two mid models: soft-OR exceeds each but stays < 1.
     two = hf_component([("model", 4), ("model", 1)], by_kind)
-    r4 = quantile_rank(models, 4)  # 0.5
-    r1 = quantile_rank(models, 1)  # 0.25
+    r4 = quantile_rank(models, 4)
+    r1 = quantile_rank(models, 1)
     assert two == 1 - (1 - r4) * (1 - r1)
     assert r4 < two < 1.0
 
 
 def test_hf_component_applies_kind_weights():
     by_kind = {"model": [10.0], "dataset": [10.0], "space": [10.0]}
-    # Same raw + same corpus, different kind weights => model > dataset > space.
     m = hf_component([("model", 10)], by_kind)
     d = hf_component([("dataset", 10)], by_kind)
     s = hf_component([("space", 10)], by_kind)
-    assert m == 1.0  # weight 1.0 * rank 1.0
+    assert m == 1.0
     assert d == 0.8
     assert s == 0.7
 
@@ -111,16 +103,14 @@ def test_deepseek_like_paper_trends_on_hf_alone():
     )
     assert g == 0.0
     assert h == 1.0
-    assert deepseek_score == SCORE_SCALE * HF_WEIGHT  # 50
+    assert deepseek_score == SCORE_SCALE * HF_WEIGHT
 
     mid_github, *_ = compute_paper_score(2.0, github_sorted, [], by_kind)
     top_github, *_ = compute_paper_score(20.0, github_sorted, [], by_kind)
     both, *_ = compute_paper_score(20.0, github_sorted, [("model", 102)], by_kind)
 
-    # HF-only DeepSeek paper beats a mid GitHub paper and ties the top one.
     assert deepseek_score > mid_github
     assert deepseek_score == top_github
-    # A paper strong on BOTH signals outranks either single-signal paper.
     assert both > deepseek_score
     assert both > top_github
     assert both == SCORE_SCALE
@@ -158,7 +148,6 @@ def test_decaying_pin_fades_to_computed_score():
     assert decaying_pin_floor(36, 72) == 50.0
     assert decaying_pin_floor(72, 72) == 0.0
 
-    # True score wins once it exceeds the fading floor.
     assert apply_decaying_pin(51.7, 0, 72) == 100.0
     assert apply_decaying_pin(51.7, 36, 72) == 51.7
     assert apply_decaying_pin(80.0, 36, 72) == 80.0
@@ -170,28 +159,23 @@ def test_hf_aggregators_are_excluded_by_fan_out_and_denylist():
     assert not is_hf_aggregator("model", "org/model", HF_MAX_ARTIFACT_PAPERS)
     assert is_hf_aggregator("model", "org/model", HF_MAX_ARTIFACT_PAPERS + 1)
     assert is_hf_aggregator("space", "tardellirs/paper-pulse", 1)
-    # The denylist is per kind: a same-named repo of another kind still counts.
     assert not is_hf_aggregator("model", "tardellirs/paper-pulse", 1)
 
 
 def test_x_only_lifts_the_github_hf_score():
-    # A paper without X data keeps its GitHub/HF score.
     assert composite_score(1.0, 0.0, 0.0, x_weight=1.0) == pytest.approx(
         SCORE_SCALE * GITHUB_WEIGHT
     )
-    # A faster X rank lifts the paper, a slower one never lowers it.
     assert composite_score(0.2, 0.2, 0.9, x_weight=1.0) == pytest.approx(
         SCORE_SCALE * 0.9
     )
     assert composite_score(0.8, 0.8, 0.5, x_weight=1.0) == pytest.approx(
         SCORE_SCALE * 0.8
     )
-    # The weight scales the lift; a viral post alone can reach the top.
     assert composite_score(0.0, 0.0, 1.0, x_weight=0.5) == pytest.approx(
         SCORE_SCALE / 2
     )
     assert composite_score(0.0, 0.0, 1.0, x_weight=1.0) == pytest.approx(SCORE_SCALE)
-    # Weighted at 0, X never changes a score.
     assert composite_score(0.4, 0.6, 1.0) == composite_score(0.4, 0.6)
 
 

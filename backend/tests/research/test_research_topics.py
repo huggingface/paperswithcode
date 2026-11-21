@@ -198,7 +198,6 @@ def test_accounts_follow_several_topics_up_to_the_limit(db, now, monkeypatch):
     speech = topics.follow_topic(
         db, "alice", "speech recognition", now + timedelta(seconds=1)
     )
-    # Following a topic already followed is a no-op, even at the limit.
     assert topics.follow_topic(db, "alice", "Video generation", now) == video
     with pytest.raises(OverflowError):
         topics.follow_topic(db, "alice", "robot learning", now)
@@ -206,12 +205,10 @@ def test_accounts_follow_several_topics_up_to_the_limit(db, now, monkeypatch):
         "video generation",
         "speech recognition",
     ]
-    # Replacing a topic frees its slot; replacing one not followed fails.
     robots = topics.follow_topic(db, "alice", "robot learning", now, replace=video)
     assert {t.id for t in topics.topic_views(db, "alice")} == {speech, robots}
     with pytest.raises(LookupError):
         topics.follow_topic(db, "alice", "anything", now, replace=video)
-    # Replacing with another followed topic's text merges the two.
     topics.follow_topic(db, "alice", "speech recognition", now, replace=robots)
     assert [t.id for t in topics.topic_views(db, "alice")] == [speech]
     topics.follow_topic(db, "alice", "video generation", now)
@@ -228,7 +225,6 @@ def test_follow_topic_suggests_catalog_names(db, now):
     assert [(s.kind, s.name) for s in view.suggestions] == [
         ("task", "Speech Recognition")
     ]
-    # Case, punctuation and hyphens do not matter; narrower phrasings do.
     assert [s.name for s in topics.suggestions(db, "Time series forecasting.")] == [
         "Time-series forecasting"
     ]
@@ -439,7 +435,6 @@ def test_feed_merges_topic_and_entity_hits_with_reasons(db, now):
         follows.feed_entries(db, "alice", now, 0, 40, follows=[("method", task.id)])
         == []
     )
-    # Several bubbles show papers matching any of them.
     both_topics = follows.feed_entries(
         db, "alice", now, 0, 40, topic_ids=[topic_id, other]
     )
@@ -516,12 +511,10 @@ def test_topic_api_follows_several_and_keeps_the_single_topic_routes(db, monkeyp
     robots = client.put(f"/me/topics/{video.json()['id']}", json={"text": "robots"})
     assert robots.json()["text"] == "robots"
     assert client.put("/me/topics/0", json={"text": "robots"}).status_code == 404
-    # An edited topic keeps its place in the account's order.
     assert [t["text"] for t in client.get("/me/topics").json()] == [
         "robots",
         "speech recognition",
     ]
-    # The single-topic routes read and replace the account's first topic.
     assert client.get("/me/topic").json()["id"] == robots.json()["id"]
     assert client.put("/me/topic", json={"text": "audio"}).json()["text"] == "audio"
     assert [t["text"] for t in client.get("/me/topics").json()] == [

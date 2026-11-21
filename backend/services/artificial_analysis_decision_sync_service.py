@@ -39,8 +39,6 @@ DECISION_INDEX_URL = (
 TASK_SLUG = "decision-making"
 DATASET_SLUG = "artificial-analysis-decision-index"
 METRIC_NAME = "Score"
-# The board publishes the v2.1 headline index. Another version reweights the
-# components, so it needs a review before its scores replace these.
 INDEX_VERSION = "v2.1"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix(
     "Artificial Analysis Decision Index"
@@ -51,14 +49,10 @@ KIND_SOURCE_PREFIXES = {
 }
 MIN_EXPECTED_DECISION_MODELS = 10
 MAX_EXPECTED_CONTESTANTS = 200
-# Reasoning-effort settings of one language model; the board keeps the best.
 _EFFORT_SUFFIX = re.compile(
     r"\s*\((?:max|xhigh|high|medium|low|minimal)\)\s*$", re.IGNORECASE
 )
 
-# Contestant slugs ("<host>_<model>") reviewed against their canonical paper.
-# Other contestants bind through the model-release catalog or become radar
-# signals until a paper exists.
 DREX_REPORT = PaperIdentity(arxiv_id="2611.07854", is_open=True)
 CLAUDE_HAIKU_5_5 = external(
     "https://www.anthropic.com/claude-haiku-5-5",
@@ -79,7 +73,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "Gemini Decisions API: Fast, calibrated multimodal decisions",
         "2026-11-11",
     ),
-    # Drex Max v1.1 is served by API only; v2.0 has public weights.
     "nace_drex-max-v1-1": PaperIdentity(arxiv_id="2611.07854"),
     "nace_drex-v2-0": DREX_REPORT,
     "openai_gpt-6-luna": GPT_6_LUNA,
@@ -97,7 +90,6 @@ class DecisionIndexEntry:
 
     @property
     def source_url(self) -> str:
-        # "nace_drex-max-v1-1" -> /decision-models/drex-max-v1-1
         return KIND_SOURCE_PREFIXES[self.kind] + self.slug.split("_", 1)[1]
 
 
@@ -114,11 +106,8 @@ class DecisionIndexSyncStats:
     created: int = 0
     updated: int = 0
     retired: int = 0
-    # Lower effort settings of a model already on the board.
     collapsed: list[str] = field(default_factory=list)
-    # Names outside MODEL_PAPER_IDENTITIES that the catalog matched.
     auto_matched: list[str] = field(default_factory=list)
-    # Names with no paper yet; each is a release signal for the radar.
     unreviewed: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -253,13 +242,11 @@ class DecisionIndexSyncService:
                 for row in rows
                 if (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
             }
-            # (paper id, is_open) per contestant slug
             bound: dict[str, tuple[int, bool]] = {}
             for entry in leaderboard.entries:
                 if (identity := MODEL_PAPER_IDENTITIES.get(entry.slug)) is not None:
                     paper_id = discovery.papers.get(entry.slug)
                     if paper_id is None:
-                        # A dry run does not index the reviewed paper.
                         if commit:
                             raise RuntimeError(
                                 f"No reviewed paper resolved for {entry.slug}"
@@ -284,14 +271,12 @@ class DecisionIndexSyncService:
                     bound[entry.slug] = (match.paper_id, match.is_open)
                     stats.auto_matched.append(entry.name)
                 elif (row := managed.get(entry.source_url)) is not None:
-                    # Keep the binding an earlier run matched.
                     bound[entry.slug] = (row.paper_id, bool(row.is_open))
                 else:
                     stats.unreviewed.append(entry.name)
                     unmatched.append(LeaderboardModel(entry.name, entry.lab))
             matcher.report_unmatched(unmatched, now=now)
 
-            # One row per model and paper: effort settings keep their best.
             best: dict[tuple[int, str], DecisionIndexEntry] = {}
             for entry in leaderboard.entries:
                 if entry.slug not in bound:
@@ -306,8 +291,6 @@ class DecisionIndexSyncService:
                     stats.collapsed.append(entry.name)
             selected = {entry.source_url: entry for entry in best.values()}
 
-            # The page lists every scored contestant; owned rows it no longer
-            # selects were withdrawn upstream or collapsed into a better setting.
             for source_url, row in managed.items():
                 if source_url not in selected:
                     self.db.delete(row)

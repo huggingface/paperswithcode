@@ -353,7 +353,6 @@ def test_unknown_models_match_announcements_or_become_radar_signals():
 
 
 def test_parse_accepts_rows_without_provider_model_field():
-    # CoArena removed `model` from every entry on 2026-11-13.
     payload = {"entries": [_payload_row(index) for index in range(6)]}
     for row in payload["entries"]:
         row.pop("model", None)

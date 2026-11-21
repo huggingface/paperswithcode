@@ -118,9 +118,6 @@ def neurips_series() -> SeriesState:
     )
 
 
-# --- Parsing ----------------------------------------------------------------
-
-
 def test_parse_deadline_instant_handles_aoe_offsets_and_iana():
     assert parse_deadline_instant("2026-11-13 23:59:59", "AoE") == at(
         "2026-11-14 11:59:59"
@@ -199,9 +196,6 @@ def test_change_set_normalizes_types_and_dates():
         )
 
 
-# --- Labels, manifests, selection ------------------------------------------
-
-
 def test_year_labels_mark_the_missing_next_edition():
     labels = year_labels(cvpr_series(), NOW.date())
     assert labels == {2026: "PAST", 2027: "MISSING_NEXT_YEAR"}
@@ -246,7 +240,7 @@ def test_a_skipped_year_does_not_make_an_annual_series_biennial():
     series.editions.insert(
         0, EditionState(slug="cvpr-2024", year=2024, end_date=date(2024, 6, 21))
     )
-    series.editions.pop()  # 2024 and ... no 2025/2026 row with deadlines left
+    series.editions.pop()
     series.editions.append(
         EditionState(
             slug="cvpr-2026",
@@ -272,9 +266,6 @@ def test_weekly_selection_puts_missing_top_tier_editions_first():
         [far, imminent, cvpr_series()], mode="daily", now=NOW, limit=5
     )
     assert [s.series for s in daily] == ["cvpr"]
-
-
-# --- Guarded planner ---------------------------------------------------------
 
 
 def plan(series, edition: dict):
@@ -480,7 +471,6 @@ def test_omitted_deadlines_are_never_deleted_and_duplicates_skipped():
         {
             "year": 2027,
             "deadlines": [
-                # Same instant as the existing paper deadline under another type.
                 {
                     "type": "submission",
                     "label": "Full paper",
@@ -514,9 +504,6 @@ def test_metadata_corrections_are_logged_per_field():
         ("end_date", "2027-12-11", "2027-12-12"),
         ("venue", None, "Convention Centre"),
     ]
-
-
-# --- Writer and admin edits (SQLite) -------------------------------------------
 
 
 @pytest.fixture
@@ -661,7 +648,6 @@ def test_deadline_listing_appends_announced_tba_editions(db):
     today = date.today()
     db.add_all(
         [
-            # Announced, deadlines not out yet: listed last.
             Conference(
                 id=3,
                 slug=f"neurips-{today.year + 2}",
@@ -669,7 +655,6 @@ def test_deadline_listing_appends_announced_tba_editions(db):
                 year=today.year + 2,
                 start_date=today + timedelta(days=400),
             ),
-            # Already over, and untracked or undated rows: never listed.
             Conference(
                 id=4,
                 slug=f"neurips-{today.year - 1}",
@@ -757,9 +742,6 @@ def test_admin_endpoint_is_admin_only(monkeypatch):
     assert response.status_code == 403
 
 
-# --- Sweeps ----------------------------------------------------------------------
-
-
 class FakeApi:
     def __init__(self, stage="COMPLETED", lines=()):
         self.stage = stage
@@ -787,8 +769,6 @@ def sweep_settings():
 
 def test_job_command_runs_the_worker_as_a_non_root_user():
     version = Settings().conference_deadlines_sdk_version
-    # claude-opus-5-5 (aggregation) needs a bundled Claude Code >= 2.1.280;
-    # claude-agent-sdk 0.2.165 bundles 2.1.294, 0.2.115 bundled 2.1.206.
     assert tuple(int(x) for x in version.split(".")) >= (0, 2, 165)
     command = sweeps.job_command(version)
     assert command[:2] == ["bash", "-c"]
@@ -1001,9 +981,6 @@ def test_running_jobs_are_left_alone_until_terminal(db):
     )
     assert runner.collect(now=NOW + timedelta(hours=1)) == []
     assert runner.running()[0].status == "running"
-
-
-# --- Agent helpers (no SDK) ----------------------------------------------------
 
 
 def test_tool_budget_nudges_on_the_last_search_then_denies():

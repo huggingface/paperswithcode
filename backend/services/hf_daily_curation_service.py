@@ -194,8 +194,6 @@ class HFDailyCurationService:
                 workflow.error = "Paper was deleted while awaiting Markdown"
                 continue
             if not self.markdown_available(paper, self.settings):
-                # Rotate checked-but-unavailable rows behind the rest of the
-                # bounded scan so a large backlog cannot starve ready papers.
                 workflow.updated_at = datetime.now(UTC)
                 continue
             external = workflow.policy_version == EXTERNAL_PAPER_POLICY_VERSION
@@ -217,7 +215,6 @@ class HFDailyCurationService:
                     paper.source, paper.arxiv_id, paper.id
                 ),
                 paper_title=paper.title,
-                # External-paper workflows stay in the admin lane.
                 requested_by="external-paper-markdown-ready"
                 if external
                 else "hf-daily-cron-markdown-ready",
@@ -569,8 +566,6 @@ class HFDailyCurationService:
         today = today or datetime.now(UTC).date()
         released_admin = self.release_admin_awaiting_markdown()
         if not dry_run:
-            # Publish releases before the slow cohort fetch rather than holding
-            # their row locks against admin cancels.
             self.db.commit()
         discovered: list[tuple[date, int, str]] = []
         seen: set[str] = set()
@@ -587,7 +582,6 @@ class HFDailyCurationService:
                     paper.hf_daily_featured_on or cohort_date, cohort_date
                 )
         self.db.flush()
-        # Papers trending on X are admitted ahead of the HF daily cohort.
         x_trending = [
             (shared_on, order, paper.arxiv_id)
             for order, (paper, shared_on) in enumerate(
@@ -609,8 +603,6 @@ class HFDailyCurationService:
         state = self._state()
         daily_pending = has_pending_daily_papers(self.db)
         if daily_pending and state.canary_released:
-            # Keep queued attempts intact, but free their admission slots. Never
-            # interrupt running remote jobs or strand an active second stage.
             active_job = (
                 self.db.query(PaperCurationJob.id)
                 .filter(
@@ -633,8 +625,6 @@ class HFDailyCurationService:
                 workflow.deferred_reason = "queue_cap"
             self.db.flush()
 
-        # Deferred overflow is durable backlog, not part of the initial ten
-        # workflows whose terminal health decides whether that backlog may run.
         policy_workflows = (
             self.db.query(PaperCurationWorkflow)
             .filter(
@@ -674,8 +664,6 @@ class HFDailyCurationService:
             "retried": 0,
         }
 
-        # Awaiting workflows already belong to the canary. Releasing one uses
-        # queue capacity, but must not be blocked by the new-canary gate.
         markdown_ready = self.release_awaiting_markdown(
             min(capacity, reconcile_limit), daily_only=daily_pending
         )
@@ -686,7 +674,6 @@ class HFDailyCurationService:
         if state.canary_released:
             canary_capacity = capacity
         elif existing_canary:
-            # Never grow the first canary cohort on a later reconciliation.
             canary_capacity = 0
         else:
             canary_capacity = self.settings.codex_curation_canary_limit
@@ -717,8 +704,6 @@ class HFDailyCurationService:
                 .first()
             )
             if existing:
-                # The live HF cohort is authoritative, including papers originally
-                # queued through a conference backfill under the same policy.
                 if existing.status in {"queued", "running", "deferred"}:
                     existing.cohort_date = cohort_date
                     existing.cohort_order = order
@@ -801,16 +786,11 @@ class HFDailyCurationService:
             if workflow.status == "queued":
                 self._enqueue_workflow(workflow, paper, priority=priority)
 
-        # Resume source-ready historical work too; blocked daily papers must
-        # not prevent it from using capacity left after daily admission. Existing
-        # awaiting-Markdown workflows may resume even before the canary opens.
         self.db.flush()
         markdown_ready = self.release_awaiting_markdown(admission_capacity)
         create_capacity = max(0, create_capacity - markdown_ready)
         summary["released_markdown_ready"] += markdown_ready
 
-        # Only fill spare capacity with historical work after admitting today's
-        # rolling HF daily cohort, including previously deferred daily papers.
         self.db.flush()
         deferred = deferred_workflows_for_release(self.db, create_capacity)
         for workflow in deferred:

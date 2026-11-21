@@ -22,7 +22,6 @@ from backend.services.hf_daily_curation_service import HFDailyCurationService
 def queue_db():
     engine = create_engine("sqlite://")
     metadata = MetaData()
-    # Only storage is simplified; service queries and ORM mappings are real.
     for model in (Paper, PaperCurationJob, PaperCurationWorkflow, PaperXTrending):
         columns = []
         for column in model.__table__.columns:
@@ -119,7 +118,6 @@ def test_existing_conference_job_promoted_when_featured_on_hf(queue_db, job_stat
     db.add(job)
     db.commit()
     svc, jobs = service(db, [fresh.arxiv_id], 1)
-    # Observe values before the intentional dry-run rollback.
     observed = []
     original_flush = db.flush
 
@@ -460,8 +458,6 @@ def test_x_trending_admitted_before_hf_daily_cohort(queue_db):
 
     svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
 
-    # The most recently shared X papers take the capacity, at X priority, even
-    # though they are not HF daily papers.
     calls = [call.kwargs for call in jobs.enqueue.call_args_list]
     assert [(call["paper_id"], call["priority"]) for call in calls] == [
         (newer.id, 5),

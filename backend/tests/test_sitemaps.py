@@ -236,8 +236,6 @@ def test_paper_shard_is_rendered_before_the_response_starts(client, monkeypatch)
     response = client.get("/sitemaps/papers-2026-0.xml")
 
     assert response.status_code == 200
-    # A materialized body carries its length; a streamed one would be chunked
-    # and hold the database connection open for the whole download.
     assert response.headers["content-length"] == str(len(response.content))
     assert "transfer-encoding" not in response.headers
     assert response.content.count(b"<url>") == 3

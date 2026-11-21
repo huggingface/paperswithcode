@@ -19,14 +19,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.models.database import Paper as DBPaper
 from backend.utils.exceptions import DatabaseError
 
-# Configure logging
 logger = logging.getLogger(__name__)
 
-# Semantic Scholar API configuration
 SEMANTIC_SCHOLAR_BASE_URL = "https://api.semanticscholar.org/graph/v1"
 REQUEST_TIMEOUT = 30.0
-RATE_LIMIT_DELAY = 1.0  # Delay between requests to respect rate limits (1 req/sec)
-CITATION_UPDATE_INTERVAL = timedelta(days=7)  # Update citations weekly
+RATE_LIMIT_DELAY = 1.0
+CITATION_UPDATE_INTERVAL = timedelta(days=7)
 
 
 class SemanticScholarUnavailableError(Exception):
@@ -106,7 +104,6 @@ class SemanticScholarService:
         if response and response.get("data"):
             papers = response["data"]
             if papers:
-                # Return the first (most relevant) result
                 return papers[0]
 
         return None
@@ -121,7 +118,6 @@ class SemanticScholarService:
         Returns:
             Paper data with citation count or None if not found
         """
-        # Try direct lookup first
         url = f"{SEMANTIC_SCHOLAR_BASE_URL}/paper/arXiv:{arxiv_id}"
         params = {"fields": "paperId,title,citationCount,year,authors"}
 
@@ -155,9 +151,7 @@ class SemanticScholarService:
         """
         import re
 
-        # Convert to lowercase and remove extra whitespace
         normalized = re.sub(r"\s+", " ", title.lower().strip())
-        # Remove common punctuation that might differ between sources
         normalized = re.sub(r"[^\w\s]", "", normalized)
         return normalized
 
@@ -181,7 +175,6 @@ class SemanticScholarService:
             True if successfully updated, False otherwise
         """
         try:
-            # Skip if recently updated
             if (
                 db_paper.citation_updated_at
                 and datetime.now() - db_paper.citation_updated_at.replace(tzinfo=None)
@@ -189,26 +182,21 @@ class SemanticScholarService:
             ):
                 return True
 
-            # Try to find paper by Semantic Scholar ID first
             paper_data = None
             if db_paper.semantic_scholar_id:
                 paper_data = await self.get_paper_by_semantic_scholar_id(
                     db_paper.semantic_scholar_id
                 )
 
-            # If not found, try by ArXiv ID
             if not paper_data:
                 paper_data = await self.search_paper_by_arxiv_id(db_paper.arxiv_id)
 
-            # If still not found, try by title
             if not paper_data:
                 paper_data = await self.search_paper_by_title(db_paper.title)
 
             if paper_data:
-                # CRITICAL: Verify title match before updating
                 ss_title = paper_data.get("title", "")
                 if self._titles_match(db_paper.title, ss_title):
-                    # Update paper with citation data
                     db_paper.citation_count = paper_data.get("citationCount", 0)
                     db_paper.semantic_scholar_id = paper_data.get("paperId")
                     db_paper.citation_updated_at = datetime.now()
@@ -220,8 +208,7 @@ class SemanticScholarService:
                     )
                     return True
                 else:
-                    # Titles don't match - mark as processed but don't update citation count
-                    db_paper.semantic_scholar_id = None  # Clear any incorrect ID
+                    db_paper.semantic_scholar_id = None
                     db_paper.citation_updated_at = datetime.now()
                     self.db.commit()
 
@@ -230,7 +217,6 @@ class SemanticScholarService:
                     )
                     return False
             else:
-                # Mark as processed even if not found to avoid repeated attempts
                 db_paper.semantic_scholar_id = None
                 db_paper.citation_updated_at = datetime.now()
                 self.db.commit()
@@ -258,7 +244,6 @@ class SemanticScholarService:
             Number of papers successfully updated
         """
         try:
-            # Find papers that need citation updates
             cutoff_date = datetime.now() - CITATION_UPDATE_INTERVAL
 
             papers_to_update = (
@@ -281,13 +266,11 @@ class SemanticScholarService:
                     if await self.update_paper_citation_count(paper):
                         updated_count += 1
                 except SemanticScholarUnavailableError as error:
-                    # Leave the paper untouched so the next batch retries it.
                     logger.warning(
                         f"Stopping citation batch, Semantic Scholar unavailable: {error}"
                     )
                     break
 
-                # Rate limiting
                 await asyncio.sleep(RATE_LIMIT_DELAY)
 
             logger.info(

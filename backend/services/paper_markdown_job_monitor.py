@@ -118,8 +118,6 @@ def _logical_shards(provider_attempts: list[dict[str, Any]]) -> list[dict[str, A
 
     logical: list[dict[str, Any]] = []
     for (run_id, shard_id), attempts in grouped.items():
-        # Jobs arrive newest first. A complete canonical checkpoint is authoritative
-        # even when an earlier or late provider attempt reports an error.
         successful = next(
             (item for item in attempts if item["effective_outcome"] == "success"),
             None,
@@ -406,9 +404,6 @@ def _fetch(settings: Settings) -> dict[str, Any]:
         stage_message = str(getattr(status, "message", "") or "")[:1000] or None
         durations = getattr(job, "durations", None)
         stage = _stage(job)
-        # Replacement attempts share the logical progress path. A provider-confirmed
-        # mount failure never reached that path, so a replacement's checkpoint must
-        # not retroactively turn the failed provider attempt into a success.
         if (
             stage in {"ERROR", "CANCELED"}
             and _failure_cause("infrastructure_failure", stage_message, None)
@@ -472,8 +467,6 @@ def _fetch(settings: Settings) -> dict[str, Any]:
         if shard.get("failure_cause"):
             cause = shard["failure_cause"]
             failure_causes[cause] = failure_causes.get(cause, 0) + 1
-    # Keyed by lane (the run-id prefix), so a 5-minute live-fresh run never
-    # hides the latest hourly live run.
     latest_run_ids: dict[str, str] = {}
     for shard in logical_shards:
         mode = shard.get("mode")

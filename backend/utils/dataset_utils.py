@@ -39,15 +39,12 @@ def find_dataset_by_name(
 
     dataset_name_lower = dataset_name.lower().strip()
 
-    # First, try exact name match
     exact_match = db.query(DBDataset).filter(DBDataset.name.ilike(dataset_name)).first()
 
     if exact_match:
         logger.debug(f"Found exact match for '{dataset_name}': {exact_match.name}")
         return exact_match
 
-    # Try to identify if this is a split reference
-    # Common patterns: "COCO test-dev", "COCO minival", "ImageNet val", etc.
     split_patterns = {
         "test-dev": ["test-dev", "testdev", "test dev"],
         "test-challenge": ["test-challenge", "test challenge", "testchallenge"],
@@ -58,16 +55,13 @@ def find_dataset_by_name(
         "train": ["train", "training"],
     }
 
-    # Check if dataset name contains split indicators
     for split_name, patterns in split_patterns.items():
         for pattern in patterns:
             if pattern in dataset_name_lower:
-                # Extract base dataset name (e.g., "COCO" from "COCO test-dev")
                 base_name = dataset_name_lower
                 for p in patterns:
                     base_name = base_name.replace(p, "").strip()
 
-                # Try to find the split
                 split_match = (
                     db.query(DBDataset)
                     .filter(
@@ -84,13 +78,10 @@ def find_dataset_by_name(
                     )
                     return split_match
 
-    # Try fuzzy matching on name
-    # Look for datasets where the name contains key words from the query
     words = [w for w in dataset_name_lower.split() if len(w) > 2]
     if words:
-        # Build a query that matches datasets containing these words
         query = db.query(DBDataset)
-        for word in words[:3]:  # Use first 3 significant words
+        for word in words[:3]:
             query = query.filter(DBDataset.name.ilike(f"%{word}%"))
 
         fuzzy_match = query.first()
@@ -98,10 +89,7 @@ def find_dataset_by_name(
             logger.debug(f"Found fuzzy match for '{dataset_name}': {fuzzy_match.name}")
             return fuzzy_match
 
-    # If prefer_splits is False and we haven't found anything,
-    # try to find a parent dataset
     if not prefer_splits:
-        # Extract potential base dataset name
         base_keywords = ["coco", "imagenet", "pascal", "cifar", "mnist"]
         for keyword in base_keywords:
             if keyword in dataset_name_lower:
@@ -145,7 +133,6 @@ def get_or_create_dataset_split(
     Returns:
         DBDataset object for the split
     """
-    # Check if split already exists
     existing_split = (
         db.query(DBDataset)
         .filter(
@@ -158,11 +145,9 @@ def get_or_create_dataset_split(
     if existing_split:
         return existing_split
 
-    # Generate name and slug
     split_display_name = f"{parent_dataset.name} {split_name}"
     slug = split_display_name.lower().replace(" ", "-").replace("_", "-")
 
-    # Create new split
     new_split = DBDataset(
         name=split_display_name,
         slug=slug,
@@ -203,7 +188,6 @@ def get_dataset_with_splits(db: Session, dataset_id: int) -> dict:
     if not dataset:
         return None
 
-    # Get all splits (children where variant_type='split')
     splits = (
         db.query(DBDataset)
         .filter(
@@ -213,7 +197,6 @@ def get_dataset_with_splits(db: Session, dataset_id: int) -> dict:
         .all()
     )
 
-    # Get all variants (children where variant_type != 'split')
     variants = (
         db.query(DBDataset)
         .filter(

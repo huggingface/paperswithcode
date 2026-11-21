@@ -39,8 +39,6 @@ RETRY_BACKOFF_SECONDS = (2.0, 4.0, 8.0)
 MAX_RETRY_AFTER_SECONDS = 30.0
 
 
-# This deliberately exact manifest is the trust boundary between an upstream model
-# label and a PwC paper. Product names without a defensible paper are left unmatched.
 MODEL_PAPER_ARXIV_IDS: dict[str, str] = {
     "TRELLIS-3DGS": "2412.01506",
     "TRELLIS": "2412.01506",
@@ -251,10 +249,6 @@ class ThreeDArenaSyncService:
                 managed_by_name[row.model_name] = keep
                 duplicate_rows.append(discard)
             upstream_names = {entry.name for entry in entries}
-            # Models outside the manifest go to the shared matcher; the rest
-            # become release-radar signals. The Space publishes no organization,
-            # so the product name stands in for the lab: "3D Arena" would make
-            # the leaderboard Space itself look like a first-party source.
             unknown = [
                 LeaderboardModel(entry.name, entry.name)
                 for entry in entries
@@ -318,11 +312,6 @@ class ThreeDArenaSyncService:
             matcher.report_unmatched(
                 [model for model in unknown if model.name not in auto_matched]
             )
-            # A successful, validated upstream response is authoritative for model
-            # presence. Rows whose model disappeared are removed, while a current
-            # but temporarily unresolved model is protected from deletion.
-            # Duplicate leftovers (same model, stale source URL) are removed so
-            # the canonical Space URL row is the only managed copy.
             skipped_duplicates = {id(row) for row in duplicate_rows}
             for row in duplicate_rows:
                 self.db.delete(row)
