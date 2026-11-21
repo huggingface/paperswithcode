@@ -158,6 +158,16 @@ export function parseAcknowledgeEvents(
   return { ...parsed, type: "ack_events" };
 }
 
+function validProviderFallback(value: unknown, external: boolean): boolean {
+  // Only external runs carry gateway capabilities to authorize a second route.
+  if (!external || !value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fallback = value as Record<string, unknown>;
+  return Object.keys(fallback).length === 3
+    && typeof fallback.model === "string" && Boolean(fallback.model)
+    && (fallback.provider_protocol === "anthropic-messages" || fallback.provider_protocol === "openai-responses")
+    && typeof fallback.capability === "string" && Boolean(fallback.capability);
+}
+
 export function parseRunTurn(value: unknown, external: true): ExternalRunTurn;
 export function parseRunTurn(value: unknown, external?: false): RunTurn;
 export function parseRunTurn(value: unknown, external = false): RunTurn | ExternalRunTurn {
@@ -179,7 +189,7 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
   const optional = new Set([
     "turn_id", "assignment_token", "worker_generation", "reader_mode", "poster_mode",
     "paper_artifacts_enabled", "paper_descriptor", "provider_protocol", "agent_session_id",
-    "user_files_enabled",
+    "user_files_enabled", "provider_fallback",
   ]);
   if (Object.keys(frame).some((key) => !required.has(key) && !optional.has(key))) {
     throw new TurnProtocolError("Invalid Pi run frame keys");
@@ -205,6 +215,7 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
     (frame.poster_mode !== undefined && typeof frame.poster_mode !== "boolean") ||
     (frame.paper_artifacts_enabled !== undefined && typeof frame.paper_artifacts_enabled !== "boolean") ||
     (frame.user_files_enabled !== undefined && typeof frame.user_files_enabled !== "boolean") ||
+    (frame.provider_fallback !== undefined && !validProviderFallback(frame.provider_fallback, external)) ||
     (frame.paper_descriptor !== undefined && (!frame.paper_descriptor || typeof frame.paper_descriptor !== "object" || Array.isArray(frame.paper_descriptor))) ||
     !new Set(["low", "medium", "high", "max"]).has(String(frame.reasoning_effort)) ||
     typeof frame.hf_username !== "string" || !Array.isArray(frame.fetchable_urls) ||

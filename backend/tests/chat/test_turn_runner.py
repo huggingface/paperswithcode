@@ -212,3 +212,112 @@ def test_reconstructed_admission_uses_persisted_qualification_and_reservation(
     # The turn must be recorded against the external fleet so it is not billed
     # for a Modal sandbox it never allocates.
     assert marked == [runner.kwargs["request_id"]]
+
+
+def _failover_factory(monkeypatch, *, session_has_files: bool, enabled: bool = True):
+    settings = get_settings().model_copy(
+        update={
+            "environment": "production",
+            "chat_external_pi_admission_enabled": True,
+            "chat_openai_direct_enabled": True,
+            "chat_provider_failover_enabled": enabled,
+        }
+    )
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
+        user_message_id=uuid.uuid4(),
+        selected_model=settings.chat_openai_luna_route,
+        model_route=settings.chat_openai_luna_route,
+        sdk_session_id=None,
+        sdk_project_key=None,
+        agent_harness="pi",
+        execution_backend="modal_cli",
+        reasoning_effort="medium",
+    )
+    issued: list[dict] = []
+
+    class DB:
+        def commit(self):
+            return None
+
+        def scalar(self, _statement):
+            return session_has_files
+
+    @contextmanager
+    def session_local():
+        yield DB()
+
+    class Capabilities:
+        def __init__(self, _db):
+            pass
+
+        def issue(self, **kwargs):
+            issued.append(kwargs)
+            return IssuedCapability(
+                token=f"capability-{len(issued)}",
+                capability_id=uuid.uuid4(),
+                expires_at=datetime.now(UTC) + timedelta(minutes=1),
+            )
+
+    class ExternalRunner:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class Latency:
+        def __init__(self, _db):
+            pass
+
+        def mark_external_pi(self, _request_id):
+            return True
+
+    monkeypatch.setattr(runner_module.db_manager, "_session_local", session_local)
+    monkeypatch.setattr(runner_module, "ChatLatencyService", Latency)
+    monkeypatch.setattr(runner_module, "ChatCapabilityService", Capabilities)
+    monkeypatch.setattr(runner_module, "ExternalPiChatTurnRunner", ExternalRunner)
+    runner = create_chat_turn_runner(
+        settings=settings,
+        owner=ChatOwner("owner", "owner"),
+        admission=admission,
+        prompt="content-free",
+        request_id=str(uuid.uuid4()),
+        resume_id=None,
+        store=object(),
+    )
+    return settings, issued, runner
+
+
+def test_luna_turn_offers_a_credential_free_sponsored_fallback(monkeypatch):
+    settings, issued, runner = _failover_factory(monkeypatch, session_has_files=False)
+
+    route = settings.chat_sponsored_deepseek_route
+    assert [kwargs["model"] for kwargs in issued] == [
+        settings.chat_openai_luna_route,
+        route,
+    ]
+    fallback_issue = issued[1]
+    assert fallback_issue["scopes"] == {"model", "external_turn"}
+    assert fallback_issue["provider_mode"] == "huggingface"
+    assert "provider_token" not in fallback_issue
+    assert fallback_issue["turn_id"] == issued[0]["turn_id"]
+    fallback = runner.kwargs["provider_fallback"]
+    assert fallback.route == route
+    assert fallback.model == route
+    assert fallback.protocol == "anthropic-messages"
+    assert fallback.capability.token == "capability-2"
+
+
+def test_sessions_with_uploaded_files_get_no_fallback(monkeypatch):
+    _settings, issued, runner = _failover_factory(monkeypatch, session_has_files=True)
+
+    assert len(issued) == 1
+    assert runner.kwargs["provider_fallback"] is None
+
+
+def test_disabled_failover_issues_only_the_primary_capability(monkeypatch):
+    _settings, issued, runner = _failover_factory(
+        monkeypatch, session_has_files=False, enabled=False
+    )
+
+    assert len(issued) == 1
+    assert runner.kwargs["provider_fallback"] is None
