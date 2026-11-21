@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 
 import { codexApi, type CodexPaperJob } from "@/lib/api/codex";
+import { ApiError } from "@/lib/apiTransport";
 import { PaperCurationHistory } from "./PaperCurationHistory";
 
 afterEach(() => vi.restoreAllMocks());
@@ -55,5 +56,57 @@ it("lists the paper's jobs and explains a paused queue", async () => {
     "href",
     expect.stringContaining("/admin/codex-curation/jobs/done-job/trace"),
   );
+  client.clear();
+});
+
+const renderHistory = (client: QueryClient) =>
+  render(
+    <QueryClientProvider client={client}>
+      <PaperCurationHistory paperId={133665} />
+    </QueryClientProvider>,
+  );
+
+const emptyHistory = { paper_id: 133665, jobs: [job("done-job", "completed")], scheduler_pause: null };
+
+it("keeps showing loaded jobs when a background refetch fails", async () => {
+  const history = vi.spyOn(codexApi, "paperHistory").mockResolvedValueOnce(emptyHistory);
+  const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+  renderHistory(client);
+  expect(await screen.findByText(/1 job/)).toBeInTheDocument();
+
+  history.mockRejectedValue(new TypeError("Failed to fetch"));
+  await act(() => client.refetchQueries({ queryKey: ["admin", "paperCurationHistory", 133665] }));
+
+  expect(history).toHaveBeenCalledTimes(3);
+  expect(client.getQueryState(["admin", "paperCurationHistory", 133665])?.status).toBe("error");
+  await act(async () => {});
+  expect(screen.getByText(/1 job/)).toBeInTheDocument();
+  expect(screen.queryByText("Failed to fetch")).not.toBeInTheDocument();
+  client.clear();
+});
+
+it("retries a dropped connection once on first load", async () => {
+  const history = vi
+    .spyOn(codexApi, "paperHistory")
+    .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    .mockResolvedValueOnce(emptyHistory);
+  const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+  renderHistory(client);
+
+  expect(await screen.findByText(/1 job/)).toBeInTheDocument();
+  expect(history).toHaveBeenCalledTimes(2);
+  expect(screen.queryByText("Failed to fetch")).not.toBeInTheDocument();
+  client.clear();
+});
+
+it("shows an HTTP error from the first load without retrying", async () => {
+  const history = vi
+    .spyOn(codexApi, "paperHistory")
+    .mockRejectedValue(new ApiError(new Response(null, { status: 500, statusText: "Internal Server Error" }), ""));
+  const client = new QueryClient({ defaultOptions: { queries: { retryDelay: 0 } } });
+  renderHistory(client);
+
+  await waitFor(() => expect(screen.getByText(/API request failed: 500/)).toBeInTheDocument());
+  expect(history).toHaveBeenCalledTimes(1);
   client.clear();
 });
