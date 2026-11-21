@@ -915,9 +915,14 @@ class CodexCurationCallbackService:
                 else []
             )
 
-            changed = before_state != after_state or created + updated + removed > 0
+            thumbnail_queued = bool(body.enrich and body.enrich.regenerate_thumbnail)
+            changed = (
+                before_state != after_state
+                or created + updated + removed > 0
+                or thumbnail_queued
+            )
             row.submitted_at = datetime.now(UTC)
-            if changed or row.kind == "enrich-paper":
+            if changed:
                 row.applied_at = row.submitted_at
             row.proposal = body.model_dump(mode="json")
             row.validation_summary = {
@@ -1105,6 +1110,7 @@ class CodexCurationCallbackService:
             return {
                 "paper_id": row.paper_id,
                 "urls_extracted": bool(paper.urls_extracted),
+                "thumbnail_url": paper.thumbnail_url,
                 "tasks": [
                     {"id": int(item.task_id), "source": item.source}
                     for item in sorted(task_links, key=lambda value: value.task_id)

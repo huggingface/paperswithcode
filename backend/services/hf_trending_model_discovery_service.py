@@ -1,22 +1,18 @@
-"""Discover globally trending Hugging Face models through the installed CLI."""
+"""Discover globally trending Hugging Face models through huggingface_hub."""
 
 from __future__ import annotations
 
 import hashlib
-import json
-import os
-import shutil
-import subprocess
-import sys
-from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from huggingface_hub import HfApi
 
 from backend.database.organizations_setup.organizations import featured_for_hf_handle
 
 
-CommandRunner = Callable[[list[str]], str]
 _CONVERSION_SUFFIXES = (
     "-gguf",
     "-awq",
@@ -29,26 +25,11 @@ _CONVERSION_SUFFIXES = (
     "-w4a16",
     "-w8a16",
 )
+_TRENDING_EXPAND = ["author", "tags", "createdAt", "lastModified", "trendingScore"]
 
 
-def _run(command: list[str]) -> str:
-    if command[0] == str(Path(sys.executable).with_name("hf")):
-        command = [sys.executable, *command]
-    result = subprocess.run(
-        command,
-        check=True,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    return result.stdout
-
-
-def _hf_cli() -> str:
-    sibling = Path(sys.executable).with_name("hf")
-    if sibling.is_file() and os.access(sibling, os.X_OK):
-        return str(sibling)
-    return shutil.which("hf") or "hf"
+def _isoformat(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 @dataclass(frozen=True)
@@ -79,9 +60,8 @@ class HFTrendingModel:
 
 
 class HFTrendingDiscoveryClient:
-    def __init__(self, *, run: CommandRunner = _run, hf_cli: str | None = None) -> None:
-        self.run = run
-        self.hf_cli = hf_cli or _hf_cli()
+    def __init__(self, *, api: HfApi | None = None) -> None:
+        self.api = api or HfApi()
 
     def list_top_models(
         self, *, limit: int = 50, featured_limit: int = 100
@@ -89,25 +69,23 @@ class HFTrendingDiscoveryClient:
         """Return the global top `limit`, plus featured publishers up to `featured_limit`."""
         if limit <= 0:
             raise ValueError("limit must be positive")
-        output = self.run(
-            [
-                self.hf_cli,
-                "models",
-                "list",
-                "--sort",
-                "trending_score",
-                "--limit",
-                str(max(limit, featured_limit)),
-                "--expand",
-                "author,tags,createdAt,lastModified,trendingScore",
-                "--format",
-                "json",
-            ]
-        )
-        payload = json.loads(output)
-        if not isinstance(payload, list):
-            raise ValueError("hf models list did not return a JSON array")
-        models = [HFTrendingModel.from_payload(item) for item in payload]
+        models = [
+            HFTrendingModel.from_payload(
+                {
+                    "id": info.id,
+                    "author": info.author,
+                    "tags": info.tags,
+                    "trending_score": info.trending_score,
+                    "created_at": _isoformat(info.created_at),
+                    "last_modified": _isoformat(info.last_modified),
+                }
+            )
+            for info in self.api.list_models(
+                sort="trending_score",
+                limit=max(limit, featured_limit),
+                expand=_TRENDING_EXPAND,
+            )
+        ]
         return models[:limit] + [
             model for model in models[limit:] if model.featured_publisher
         ]
@@ -121,41 +99,14 @@ class HFModelCardSnapshot:
 
 
 class HFModelCardClient:
-    def __init__(self, *, run: CommandRunner = _run, hf_cli: str | None = None) -> None:
-        self.run = run
-        self.hf_cli = hf_cli or _hf_cli()
+    def __init__(self, *, api: HfApi | None = None) -> None:
+        self.api = api or HfApi()
 
     def snapshot(self, repo_id: str) -> HFModelCardSnapshot:
-        info = json.loads(
-            self.run(
-                [
-                    self.hf_cli,
-                    "models",
-                    "info",
-                    repo_id,
-                    "--expand",
-                    "sha",
-                    "--format",
-                    "json",
-                ]
-            )
-        )
-        revision = str(info.get("sha") or "")
+        revision = str(self.api.model_info(repo_id, expand=["sha"]).sha or "")
         if not revision:
             raise ValueError(f"Hugging Face model {repo_id} has no revision")
-        path = Path(
-            self.run(
-                [
-                    self.hf_cli,
-                    "download",
-                    repo_id,
-                    "README.md",
-                    "--revision",
-                    revision,
-                    "--quiet",
-                ]
-            ).strip()
-        )
+        path = Path(self.api.hf_hub_download(repo_id, "README.md", revision=revision))
         markdown = path.read_text(encoding="utf-8")
         return HFModelCardSnapshot(
             repo_revision=revision,

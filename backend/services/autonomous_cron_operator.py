@@ -77,8 +77,6 @@ _SAFE_SOURCE_REPAIRS = frozenset(
     }
 )
 
-_SHARED_CRON_SOURCE: tuple[str, ...] = ()
-
 _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     "paper_markdown_backfill": (
         "backend/services/paper_markdown_budget_service.py",
@@ -371,7 +369,6 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
 class CronRepairContract:
     job_name: str
     source_paths: tuple[str, ...]
-    shared_source_paths: tuple[str, ...]
     test_paths: tuple[str, ...]
     retry_command: tuple[str, str] | None
     source_repair_allowed: bool = True
@@ -513,7 +510,6 @@ class CronCandidateEditor:
             dict.fromkeys(
                 (
                     *contract.source_paths,
-                    *contract.shared_source_paths,
                     *contract.test_paths,
                 )
             )
@@ -736,7 +732,6 @@ def build_cron_repair_contracts(
         contracts[definition.id] = CronRepairContract(
             job_name=definition.id,
             source_paths=_owned_source(definition),
-            shared_source_paths=_SHARED_CRON_SOURCE,
             test_paths=tuple(
                 dict.fromkeys(
                     (
@@ -759,7 +754,7 @@ def build_cron_source_repair_targets(
     contracts = contracts or build_cron_repair_contracts()
     return {
         name: RepairTarget(
-            (*contract.source_paths, *contract.shared_source_paths),
+            contract.source_paths,
             contract.test_paths,
         )
         for name, contract in contracts.items()

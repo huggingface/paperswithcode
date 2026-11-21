@@ -83,53 +83,87 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-def test_discovery_uses_hf_cli_global_top_fifty_plus_featured_top_hundred():
-    calls = []
+class _FakeHfApi:
+    def __init__(self, models=(), *, sha="repo-revision-1", readme=None):
+        self.models = list(models)
+        self.sha = sha
+        self.readme = readme
+        self.calls = []
 
-    def run(command):
-        calls.append(command)
-        return json.dumps(
-            [
-                {
-                    "id": "Qwen/Qwen3.8-Flash-Next",
-                    "author": "Qwen",
-                    "tags": ["transformers", "safetensors", "eval-results"],
-                    "created_at": "2026-08-25T00:00:00+00:00",
-                    "last_modified": "2026-08-26T00:00:00+00:00",
-                    "trending_score": 999,
-                }
-            ]
-        )
+    def list_models(self, **kwargs):
+        self.calls.append(("list_models", kwargs))
+        return iter(self.models)
 
-    models = HFTrendingDiscoveryClient(run=run, hf_cli="hf").list_top_models()
+    def model_info(self, repo_id, **kwargs):
+        self.calls.append(("model_info", repo_id, kwargs))
+        return SimpleNamespace(sha=self.sha)
 
-    assert calls == [
+    def hf_hub_download(self, repo_id, filename, **kwargs):
+        self.calls.append(("hf_hub_download", repo_id, filename, kwargs))
+        return str(self.readme)
+
+
+def _model_info(repo_id, author, trending_score, **values):
+    return SimpleNamespace(
+        id=repo_id,
+        author=author,
+        tags=values.get("tags"),
+        trending_score=trending_score,
+        created_at=values.get("created_at"),
+        last_modified=values.get("last_modified"),
+    )
+
+
+def test_discovery_lists_global_top_fifty_plus_featured_top_hundred():
+    api = _FakeHfApi(
         [
-            "hf",
-            "models",
-            "list",
-            "--sort",
-            "trending_score",
-            "--limit",
-            "100",
-            "--expand",
-            "author,tags,createdAt,lastModified,trendingScore",
-            "--format",
-            "json",
+            _model_info(
+                "Qwen/Qwen3.8-Flash-Next",
+                "Qwen",
+                999,
+                tags=["transformers", "safetensors", "eval-results"],
+                created_at=datetime(2026, 8, 25, tzinfo=UTC),
+                last_modified=datetime(2026, 8, 26, tzinfo=UTC),
+            )
         ]
+    )
+
+    models = HFTrendingDiscoveryClient(api=api).list_top_models()
+
+    assert api.calls == [
+        (
+            "list_models",
+            {
+                "sort": "trending_score",
+                "limit": 100,
+                "expand": [
+                    "author",
+                    "tags",
+                    "createdAt",
+                    "lastModified",
+                    "trendingScore",
+                ],
+            },
+        )
     ]
     assert models[0].repo_id == "Qwen/Qwen3.8-Flash-Next"
     assert models[0].featured_publisher is True
+    assert models[0].trending_score == 999
+    assert models[0].tags == ("transformers", "safetensors", "eval-results")
+    assert models[0].created_at == "2026-08-25T00:00:00+00:00"
+    assert models[0].last_modified == "2026-08-26T00:00:00+00:00"
 
 
 def test_discovery_keeps_only_featured_publishers_beyond_top_fifty():
-    payload = [
-        {"id": f"{author}/model-{rank}", "author": author, "trending_score": 100 - rank}
-        for rank, author in enumerate(["community"] * 2 + ["Qwen", "community"])
-    ]
-    models = HFTrendingDiscoveryClient(
-        run=lambda _command: json.dumps(payload), hf_cli="hf"
-    ).list_top_models(limit=2, featured_limit=4)
+    api = _FakeHfApi(
+        [
+            _model_info(f"{author}/model-{rank}", author, 100 - rank)
+            for rank, author in enumerate(["community"] * 2 + ["Qwen", "community"])
+        ]
+    )
+    models = HFTrendingDiscoveryClient(api=api).list_top_models(
+        limit=2, featured_limit=4
+    )
 
     assert [model.repo_id for model in models] == [
         "community/model-0",
@@ -157,24 +191,6 @@ def test_source_url_identity_preserves_distinct_legacy_and_namespaced_sources():
     assert source_url_identity("https://example.com:8443/report") != (
         source_url_identity("https://example.com/report")
     )
-
-
-def test_discovery_prefers_hf_cli_from_running_virtualenv(tmp_path, monkeypatch):
-    python = tmp_path / "venv" / "bin" / "python"
-    python.parent.mkdir(parents=True)
-    python.touch()
-    hf = python.with_name("hf")
-    hf.touch(mode=0o755)
-    monkeypatch.setattr("sys.executable", str(python))
-    calls = []
-
-    def run(command):
-        calls.append(command)
-        return "[]"
-
-    HFTrendingDiscoveryClient(run=run).list_top_models(limit=1)
-
-    assert calls[0][0] == str(hf)
 
 
 def test_non_featured_original_release_is_not_deterministically_rejected():
@@ -260,27 +276,26 @@ def test_model_identity_schema_has_stable_unique_keys():
 def test_model_card_snapshot_hashes_readme_not_noisy_repo_metadata(tmp_path):
     readme = tmp_path / "README.md"
     readme.write_text("# Release\n\n| Benchmark | Score |\n| X | 42 |\n")
-    calls = []
+    api = _FakeHfApi(readme=readme)
 
-    def run(command):
-        calls.append(command)
-        if command[:3] == ["hf", "models", "info"]:
-            return json.dumps({"sha": "repo-revision-1"})
-        return str(readme)
-
-    snapshot = HFModelCardClient(run=run, hf_cli="hf").snapshot("org/model")
+    snapshot = HFModelCardClient(api=api).snapshot("org/model")
 
     assert snapshot.repo_revision == "repo-revision-1"
     assert len(snapshot.readme_sha) == 64
-    assert calls[1] == [
-        "hf",
-        "download",
-        "org/model",
-        "README.md",
-        "--revision",
-        "repo-revision-1",
-        "--quiet",
+    assert api.calls == [
+        ("model_info", "org/model", {"expand": ["sha"]}),
+        (
+            "hf_hub_download",
+            "org/model",
+            "README.md",
+            {"revision": "repo-revision-1"},
+        ),
     ]
+
+
+def test_model_card_snapshot_requires_a_revision():
+    with pytest.raises(ValueError, match="has no revision"):
+        HFModelCardClient(api=_FakeHfApi(sha=None)).snapshot("org/model")
 
 
 def test_resolution_accepts_exactly_one_canonical_paper_identity():
@@ -2024,20 +2039,6 @@ def test_trending_source_coverage_accepts_equivalent_repository_urls():
             ]
         ),
     )
-
-
-def test_hf_runner_survives_relocated_virtualenv(tmp_path, monkeypatch):
-    from backend.services.hf_trending_model_discovery_service import _run
-    import sys
-
-    python = tmp_path / "bin" / "python"
-    python.parent.mkdir()
-    python.symlink_to(sys.executable)
-    hf = python.with_name("hf")
-    hf.write_text("#!/deleted-build-directory/bin/python\nprint('[]')\n")
-    hf.chmod(0o755)
-    monkeypatch.setattr(sys, "executable", str(python))
-    assert _run([str(hf), "models", "list"]).strip() == "[]"
 
 
 def test_scheduled_resolution_retry_reuses_active_candidate_job():

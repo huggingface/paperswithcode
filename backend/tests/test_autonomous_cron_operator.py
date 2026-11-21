@@ -158,7 +158,6 @@ def test_every_declared_job_has_bounded_source_and_runtime_contract():
         in contracts["sync_hf_organizations"].source_paths
     )
     assert contracts["monitor_chat_operational_alerts"].source_repair_allowed is False
-    assert all(not contract.shared_source_paths for contract in contracts.values())
     assert {
         name
         for name, contract in contracts.items()
@@ -376,7 +375,7 @@ def test_candidate_editor_exposes_only_declared_source_and_test_files(tmp_path):
         uuid.uuid4(), context(), object(), uuid.uuid4(), "a" * 40, tmp_path
     )
     contract = CronRepairContract(
-        "update_github_stars", (source,), (), (test,), ("pwc-cron", "job")
+        "update_github_stars", (source,), (test,), ("pwc-cron", "job")
     )
     captured = []
 
