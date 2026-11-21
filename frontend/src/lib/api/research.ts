@@ -56,6 +56,8 @@ export interface PublicTopic {
   id: number;
   text: string;
   label: string | null;
+  /** One LLM-written sentence on what the topic collects; null until the topic CRON writes it. */
+  summary?: string | null;
   status: ResearchTopic['status'];
   creator: TopicPerson | null;
   is_public: boolean;
@@ -74,6 +76,10 @@ export interface TopicBubble {
   label: string | null;
   creator: TopicPerson | null;
   followers: number;
+  /** Set only on the few most followed topics, which the homepage shows as cards. */
+  week_papers?: number | null;
+  follower_avatars?: TopicPerson[];
+  top_paper?: { id: number; arxiv_id: string | null; title: string } | null;
 }
 export type TopicPaperOrder = 'trending' | 'newest';
 export const TOPIC_PAPERS_PAGE_SIZE = 20;

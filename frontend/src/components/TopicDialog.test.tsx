@@ -74,6 +74,7 @@ describe("TopicDialog afterSavePath", () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
+    await userEvent.click(await screen.findByRole("tab", { name: /Tasks, methods/ }));
     await userEvent.click(await screen.findByRole("button", { name: /Robotics/ }));
     await userEvent.click(screen.getByRole("button", { name: "Follow" }));
     expect(await screen.findByText("Following feed")).toBeInTheDocument();
@@ -90,6 +91,7 @@ describe("TopicDialog afterSavePath", () => {
       return <TopicDialog open={open} afterSavePath="/following" onOpenChange={setOpen} />;
     }
     renderWithProviders(<Host />);
+    await userEvent.click(await screen.findByRole("tab", { name: /Tasks, methods/ }));
     await userEvent.click(await screen.findByRole("button", { name: /Robotics/ }));
     await userEvent.click(screen.getByRole("button", { name: "Follow" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled());
@@ -122,18 +124,35 @@ describe("TopicDialog feed management", () => {
 
   it("links every chip to its page in a new tab, beside its toggle", async () => {
     renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
-    const links = [
-      ["Open the Real-time video generation page", "/topics/1-real-time-video-generation"],
-      ["Open the OCR releases page", "/topics/23-ocr-releases"],
-      ["Open the Robotics page", "/tasks/robotics"],
-      ["Open the SWE-bench Verified page", "/benchmark/swe-bench-verified"],
-    ];
-    for (const [name, href] of links) {
+    const expectNewTab = async (name: string, href: string) => {
       const link = await screen.findByRole("link", { name });
       expect(link).toHaveAttribute("href", href);
       expect(link).toHaveAttribute("target", "_blank");
       expect(link.closest("button")).toBeNull();
-    }
+    };
+    await expectNewTab("Open the Real-time video generation page", "/topics/1-real-time-video-generation");
+    // Popular topics are cards whose title links out.
+    await expectNewTab("OCR releases", "/topics/23-ocr-releases");
+    await userEvent.click(screen.getByRole("tab", { name: /Tasks, methods/ }));
+    await expectNewTab("Open the Robotics page", "/tasks/robotics");
+    await expectNewTab("Open the SWE-bench Verified page", "/benchmark/swe-bench-verified");
+  });
+
+  it("links to the following feed and closes on the way there", async () => {
+    const close = vi.fn();
+    renderWithProviders(<TopicDialog open onOpenChange={close} />);
+    const link = await screen.findByRole("link", { name: "Open your following feed" });
+    expect(link).toHaveAttribute("href", "/following");
+    await userEvent.click(link);
+    expect(close).toHaveBeenCalledWith(false);
+    expect(await screen.findByText("Following feed")).toBeInTheDocument();
+  });
+
+  it("offers no feed link to guests", async () => {
+    auth.value = { user: null, isLoading: false };
+    renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
+    await screen.findByRole("heading", { name: /research feed/ });
+    expect(screen.queryByRole("link", { name: "Open your following feed" })).not.toBeInTheDocument();
   });
 
   it("names the creator of a followed topic someone else made, not your own", async () => {
@@ -149,9 +168,10 @@ describe("TopicDialog feed management", () => {
     const group = (await screen.findByRole("heading", { name: "Popular topics" })).parentElement!;
     // The topic you already follow is not suggested again.
     expect(within(group).queryByRole("button", { name: /Real-time video generation/ })).not.toBeInTheDocument();
-    const chip = within(group).getByRole("button", { name: /OCR releases/ });
-    expect(chip).toHaveTextContent("@nielsr");
-    fireEvent.click(chip);
+    const card = within(group).getByRole("button", { name: "Follow OCR releases" }).closest("li")!;
+    expect(card).toHaveTextContent("by @nielsr");
+    expect(card).toHaveTextContent("5 followers");
+    fireEvent.click(within(card).getByRole("button", { name: "Follow OCR releases" }));
     fireEvent.click(screen.getByRole("button", { name: "Follow" }));
     await waitFor(() => expect(follow).toHaveBeenCalledWith(23));
   });

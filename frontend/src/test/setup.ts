@@ -3,6 +3,8 @@ import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
 afterEach(cleanup);
+// The homepage keeps the last popular topics in storage; one test's must not seed the next.
+afterEach(() => localStorage.removeItem("pwc:featured-topics"));
 
 class ResizeObserverStub {
   observe() {}
