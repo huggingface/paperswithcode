@@ -8,6 +8,12 @@
   color: var(--ink);
   font-family: var(--sans);
 }
+.api-docs.api-docs-banded {
+  max-width: none;
+  margin-left: var(--api-band-left);
+  margin-right: var(--api-band-right);
+  padding: 0;
+}
 .api-sidebar {
   position: sticky;
   top: 90px;
