@@ -76,7 +76,7 @@ MAX_TOPICS = 10
 SUMMARY_URL = "https://router.huggingface.co/v1/chat/completions"
 SUMMARY_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
 SUMMARY_BILL_TO = "huggingface"
-SUMMARY_TIMEOUT = 60
+SUMMARY_TIMEOUT = 20
 SUMMARY_MAX_LENGTH = 300
 SUMMARY_BATCH = 10
 
@@ -502,7 +502,10 @@ def describe(value: str, client: httpx.Client) -> str | None:
 
 
 def fill_summaries(db: Session, client: httpx.Client) -> int:
-    """Summarize followed topics that have no summary yet, a batch at a time."""
+    """Summarize followed topics that have no summary yet, a batch at a time.
+
+    Stops at the first failed call, so an unavailable provider costs one timeout.
+    """
     topics = db.scalars(
         select(ResearchTopic)
         .where(
@@ -514,9 +517,12 @@ def fill_summaries(db: Session, client: httpx.Client) -> int:
     ).all()
     filled = 0
     for topic in topics:
-        topic.summary = describe(topic.text, client)
-        filled += topic.summary is not None
+        summary = describe(topic.text, client)
+        if summary is None:
+            break
+        topic.summary = summary
         db.commit()
+        filled += 1
     return filled
 
 
