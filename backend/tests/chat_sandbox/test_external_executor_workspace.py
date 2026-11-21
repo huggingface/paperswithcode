@@ -375,7 +375,10 @@ def test_failed_executor_health_uses_fenced_termination_before_one_replacement()
     assert create_indices[0] < terminate_index < create_indices[1]
 
 
-def test_health_cleanup_failure_preserves_typed_failure_and_busy_fence():
+def test_health_cleanup_failure_preserves_typed_failure_and_busy_fence(caplog):
+    caplog.set_level(
+        "WARNING", logger="backend.services.chat_external_executor_workspace"
+    )
     health = ExecutorHealth("draining")
     manager, sessions, session_id, provider = setup_manager(health=health)
 
@@ -392,6 +395,11 @@ def test_health_cleanup_failure_preserves_typed_failure_and_busy_fence():
     asyncio.run(exercise())
 
     assert len(provider.create_options) == 1
+    assert any(
+        "workspace invalidation failed" in record.getMessage()
+        and "failure_class=RuntimeError" in record.getMessage()
+        for record in caplog.records
+    )
     with sessions() as db:
         lease = manager.state_repository.load_lease(db, session_id, lock=False)
         assert lease is not None

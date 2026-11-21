@@ -400,7 +400,9 @@ environment. A tier fixes four values together: admitted concurrent turns
 `tier / 8`), OpenAI global concurrency, and the OpenAI ten-minute call
 allowance. Runtime validation accepts only these shapes once external Pi
 admission is on; deploy tooling sizes replicas from the protected value and
-recognises the other tier's workers while a slot drains.
+recognises the other tier's workers while a slot drains. Both runtime validation and
+`deploy/configure_host_env.py` read the tiers from
+`backend/chat_configuration/capacity_tiers.py`.
 
 | Tier | Turns | Replicas × sessions | OpenAI concurrency | OpenAI calls / 10 min |
 | --- | ---: | --- | ---: | ---: |

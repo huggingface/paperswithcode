@@ -131,11 +131,13 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
         "huggingface",
         "hf_user_billed",
     )
-    records: tuple[ChatModelRecord, ...] = (
-        (glm,) if environment == "production" else (deepseek,)
-    )
-    if environment == "production" and settings.chat_openai_direct_enabled:
+    records: tuple[ChatModelRecord, ...]
+    if environment != "production":
+        records = (deepseek,)
+    elif settings.chat_openai_direct_enabled:
         records = (_direct_luna(settings, "GPT-6 Luna"),)
+    else:
+        records = (glm,)
     if environment == "production" and settings.chat_sponsored_deepseek_enabled:
         records = records + (_sponsored_deepseek(settings),)
     if environment == "staging":

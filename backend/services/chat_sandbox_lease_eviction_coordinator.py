@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from collections.abc import Callable
@@ -27,6 +28,8 @@ SpendFactory = Callable[[Session], ChatSandboxSpendService]
 CapacityLocker = Callable[[Session], bool]
 UtcClock = Callable[[], datetime]
 TokenFactory = Callable[[], str]
+
+logger = logging.getLogger(__name__)
 
 
 class SnapshotWriter(Protocol):
@@ -189,8 +192,15 @@ class ChatSandboxLeaseEvictionCoordinator:
                     image_version=self.settings.chat_modal_image_version,
                     now=self.utcnow(),
                 )
-        except Exception:
-            pass
+        except Exception as error:
+            logger.warning(
+                "chat sandbox eviction snapshot failed "
+                "chat_session_id=%s sandbox_id=%s failure_class=%s",
+                chat_session_id,
+                sandbox_id,
+                type(error).__name__,
+                exc_info=True,
+            )
 
     def _finalize(
         self,

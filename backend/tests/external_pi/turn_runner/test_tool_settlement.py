@@ -177,7 +177,10 @@ def test_external_task_cancellation_settles_exact_active_workspace(
         assert len(manager.invalidated) == 1
 
 
-def test_cleanup_failures_do_not_override_successful_tool_result():
+def test_cleanup_failures_do_not_override_successful_tool_result(caplog):
+    caplog.set_level(
+        "WARNING", logger="backend.services.chat_external_pi_tool_executor"
+    )
     manager = FakeWorkspaceManager(FakeProvider())
     manager.release_error = RuntimeError("release failed")
     manager.invalidate_error = RuntimeError("invalidate failed")
@@ -198,6 +201,15 @@ def test_cleanup_failures_do_not_override_successful_tool_result():
     assert result["ok"] is True
     assert len(manager.released) == 1
     assert len(manager.invalidated) == 1
+    cleanup_logs = [
+        record.getMessage()
+        for record in caplog.records
+        if "workspace cleanup failed" in record.getMessage()
+    ]
+    assert len(cleanup_logs) == 2
+    assert "stage=release " in cleanup_logs[0]
+    assert "stage=invalidate " in cleanup_logs[1]
+    assert all("failure_class=RuntimeError" in line for line in cleanup_logs)
 
 
 def test_false_workspace_release_records_stale_fence_without_changing_tool_result():

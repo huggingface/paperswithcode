@@ -465,42 +465,8 @@ def validate_chat_schema(db, settings: Settings) -> None:
         db.execute(
             text("""
                 SELECT name, to_regclass(name)::text
-                FROM (VALUES
-                    ('chat_sessions'),
-                    ('chat_messages'),
-                    ('chat_shares'),
-                    ('chat_sandbox_leases'),
-                    ('chat_sandbox_pool'),
-                    ('chat_sandbox_compute_intervals'),
-                    ('chat_sandbox_budget_states'),
-                    ('chat_sandbox_circuit_events'),
-                    ('chat_title_budget_states'),
-                    ('chat_title_provider_calls'),
-                    ('chat_title_budget_events'),
-                    ('chat_turn_capabilities'),
-                    ('chat_turn_latency'),
-                    ('chat_artifacts'),
-                    ('chat_latex_paper_versions'),
-                    ('chat_openrouter_credentials'),
-                    ('chat_openrouter_monthly_usage'),
-                    ('chat_openrouter_provider_calls'),
-                    ('chat_openrouter_credential_audit')
-                    ,('chat_web_search_budget_states')
-                    ,('chat_web_search_circuit_events')
-                    ,('chat_web_search_owner_usage')
-                    ,('chat_pi_sessions')
-                    ,('chat_pi_transcript_entries')
-                    ,('chat_pi_prepared_forks')
-                    ,('chat_harness_assignment_audit')
-                    ,('chat_turn_jobs')
-                    ,('chat_turn_event_chunks')
-                    ,('chat_external_workers')
-                    ,('chat_external_worker_reservations')
-                    ,('chat_qualification_scopes')
-                    ,('chat_qualification_evidence_events')
-                    ,('chat_feedback')
-                ) AS required(name)
-                """)
+                FROM unnest(CAST(:names AS text[])) AS required(name)
+                """).bindparams(names=sorted(required_tables))
         ).all()
     )
     missing = [name for name in required_tables if rows.get(name) is None]

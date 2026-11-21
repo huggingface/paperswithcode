@@ -1028,16 +1028,36 @@ def test_qualification_schema_readiness_refuses_each_missing_contract_object(
         validate_qualification_evidence_schema(BrokenQualificationSchemaDB("off"))
 
 
-def test_chat_schema_probe_lists_every_required_table():
-    import inspect
-    import re
+def _probed_chat_tables(settings: Settings) -> list[str]:
+    db = _ChatSchemaDB("off")
+    original_execute = db.execute
+    probed: list[str] = []
 
-    from backend.services import runtime_validation
+    def recording(statement):
+        if "to_regclass" in str(statement):
+            probed.extend(statement.compile().params["names"])
+        return original_execute(statement)
 
-    source = inspect.getsource(runtime_validation.validate_chat_schema)
-    declared_section, probe_section = source.split("rows = dict(", 1)
-    declared = set(re.findall(r'"(chat_[a-z_]+)"', declared_section))
-    probed = set(re.findall(r"\('(chat_[a-z_]+)'\)", probe_section))
+    db.execute = recording
+    validate_chat_schema(db, settings)
+    return probed
 
-    assert declared, "no required chat tables declared"
-    assert declared <= probed, sorted(declared - probed)
+
+def test_chat_schema_probe_binds_exactly_the_enabled_required_tables():
+    staging = _probed_chat_tables(
+        Settings(environment="staging", chat_external_pi_admission_enabled=True)
+    )
+    production = _probed_chat_tables(
+        Settings(environment="production", chat_openrouter_server_funded_enabled=False)
+    )
+
+    assert staging == sorted(set(staging))
+    assert {
+        "chat_sessions",
+        "chat_feedback",
+        "chat_external_worker_reservations",
+        "chat_qualification_evidence_events",
+    } <= set(staging)
+    assert "chat_sessions" in production
+    assert not any(name.startswith("chat_openrouter_") for name in production)
+    assert "chat_external_worker_reservations" not in production

@@ -124,6 +124,7 @@ class FakeWorkspaceManager:
         self.acquired.append((session_id, turn_claim))
         return SimpleNamespace(
             session_id=session_id,
+            turn_id=turn_claim.turn_id,
             sandbox=self.sandbox,
             sandbox_id=self.sandbox.object_id,
             worker_generation=self.worker_generation,
