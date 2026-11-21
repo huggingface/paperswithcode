@@ -74,6 +74,10 @@ export interface TopicBubble {
   label: string | null;
   creator: TopicPerson | null;
   followers: number;
+  /** Set only on the few most followed topics, which the homepage shows as cards. */
+  week_papers?: number | null;
+  follower_avatars?: TopicPerson[];
+  top_paper?: { id: number; arxiv_id: string | null; title: string } | null;
 }
 export type TopicPaperOrder = 'trending' | 'newest';
 export const TOPIC_PAPERS_PAGE_SIZE = 20;
