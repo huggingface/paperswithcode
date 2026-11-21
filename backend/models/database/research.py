@@ -64,6 +64,7 @@ class ResearchTopic(Base):
     text: Mapped[str] = mapped_column(String(300))
     normalized: Mapped[str] = mapped_column(String(300), unique=True)
     label: Mapped[str | None] = mapped_column(String(80))
+    summary: Mapped[str | None] = mapped_column(String(300))
     created_by_hf_subject: Mapped[str | None] = mapped_column(String(255))
     is_public: Mapped[bool] = mapped_column(
         Boolean, default=True, server_default="true"
