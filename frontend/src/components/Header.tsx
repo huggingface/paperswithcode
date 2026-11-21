@@ -273,6 +273,9 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
                 </NavLink>
               );
             })}
+            <NavLink to="/docs/api" className="mobile-nav-link" onClick={closeMobile}>
+              API docs
+            </NavLink>
             <a
               className="mobile-nav-link"
               href={GITHUB_URL}

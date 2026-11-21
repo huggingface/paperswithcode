@@ -81,6 +81,9 @@ const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout }) => {
         <DropdownMenuItem asChild>
           <Link to="/trends">Trends</Link>
         </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to="/docs/api">API docs</Link>
+        </DropdownMenuItem>
         {user.is_admin && (
           <>
             <DropdownMenuItem asChild>

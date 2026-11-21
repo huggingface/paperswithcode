@@ -1,12 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import ReactMarkdown from "react-markdown";
 import { useQuery } from "@tanstack/react-query";
 import {
+  Braces,
+  Database,
+  FileText,
+  Gauge,
+  KeyRound,
+  ListTree,
+  Trophy,
+  type LucideProps,
+} from "lucide-react";
+import {
   codeExample,
   exampleUrl,
+  groupByTag,
   publicSpecQuery,
   schemaLabel,
+  shortPath,
   type Operation,
+  type PublicSpec,
   type Schema,
 } from "@/lib/api/publicDocs";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -15,6 +28,85 @@ import "./ApiDocsView.css";
 const LANGUAGES = ["curl", "Python", "JavaScript"];
 const FEEDBACK =
   "https://github.com/huggingface/paperswithcode/issues/new?template=api.yml";
+
+const RESOURCES: Record<
+  string,
+  { label: string; blurb: string; icon: ComponentType<LucideProps> }
+> = {
+  papers: {
+    label: "Papers",
+    blurb: "Search, recent and trending papers, with code and project links.",
+    icon: FileText,
+  },
+  tasks: {
+    label: "Tasks",
+    blurb: "The research task taxonomy, from image classification to agents.",
+    icon: ListTree,
+  },
+  datasets: {
+    label: "Datasets",
+    blurb: "Benchmarks and the task and metric pairs that form leaderboards.",
+    icon: Database,
+  },
+  evaluations: {
+    label: "Evaluations",
+    blurb: "Reported scores tying a paper to a dataset, task, and metric.",
+    icon: Trophy,
+  },
+};
+
+function resource(tag: string) {
+  return (
+    RESOURCES[tag] ?? {
+      label: tag.charAt(0).toUpperCase() + tag.slice(1),
+      blurb: "",
+      icon: Braces,
+    }
+  );
+}
+
+const LEADERBOARD_STEPS = [
+  { title: "Find a dataset", path: "/api/v1/datasets/", query: "?q=ImageNet" },
+  {
+    title: "List its tasks",
+    path: "/api/v1/datasets/{dataset_id}/tasks/",
+    query: "",
+  },
+  {
+    title: "Pick a metric",
+    path: "/api/v1/datasets/{dataset_id}/tasks/{task_id}/metrics",
+    query: "",
+  },
+  {
+    title: "Rank evaluations",
+    path: "/api/v1/evaluations/",
+    query: "?dataset_id=…&task_id=…&ordering=best_rank",
+  },
+];
+
+const ERRORS = [
+  { status: "400", tone: "warn", text: "Invalid request." },
+  { status: "404", tone: "warn", text: "Record not found." },
+  {
+    status: "422",
+    tone: "warn",
+    text: "Invalid parameter type, value, or missing parameter.",
+  },
+  {
+    status: "429",
+    tone: "limit",
+    text: (
+      <>
+        Traffic limit exceeded; obey <code>Retry-After</code>.
+      </>
+    ),
+  },
+  {
+    status: "5xx",
+    tone: "error",
+    text: "Temporary server failure; retry with bounded backoff.",
+  },
+];
 
 function Code({ value }: { value: string }) {
   const [status, setStatus] = useState("Copy");
@@ -38,10 +130,23 @@ function Code({ value }: { value: string }) {
   );
 }
 
+function Method() {
+  return <span className="api-method">GET</span>;
+}
+
+function openModel(name: string) {
+  const model = document.getElementById(`model-${name}`);
+  if (model instanceof HTMLDetailsElement) model.open = true;
+}
+
 function SchemaDetails({ schema }: { schema: Schema }) {
   if (schema.$ref) {
     const name = schemaLabel(schema);
-    return <a href={`#model-${name}`}>{name}</a>;
+    return (
+      <a href={`#model-${name}`} onClick={() => openModel(name)}>
+        {name}
+      </a>
+    );
   }
   if (schema.anyOf || schema.allOf)
     return (
@@ -127,11 +232,13 @@ function Fields({ schema }: { schema: Schema }) {
 
 function Endpoint({ path, operation }: { path: string; operation: Operation }) {
   const [language, setLanguage] = useState("curl");
+  const tag = operation.tags?.[0];
   return (
     <section id={operation.operationId} className="api-endpoint">
+      {tag && <span className="api-eyebrow">{resource(tag).label}</span>}
       <h2>{operation.summary}</h2>
       <p className="api-path">
-        <b>GET</b> <code>{path}</code>
+        <Method /> <code>{path}</code>
       </p>
       <div className="api-description">
         <ReactMarkdown>{operation.description}</ReactMarkdown>
@@ -197,13 +304,16 @@ function Endpoint({ path, operation }: { path: string; operation: Operation }) {
       <h3>Responses</h3>
       {Object.entries(operation.responses).map(([status, response]) => (
         <div className="api-response" key={status}>
-          <strong>{status}</strong> {response.description}
+          <span className={`api-status api-status-${status[0]}`}>{status}</span>{" "}
+          {response.description}
           {response.content?.["application/json"]?.schema && (
-            <p>
+            <>
+              {" "}
+              →{" "}
               <SchemaDetails
                 schema={response.content["application/json"].schema!}
               />
-            </p>
+            </>
           )}
         </div>
       ))}
@@ -211,45 +321,123 @@ function Endpoint({ path, operation }: { path: string; operation: Operation }) {
   );
 }
 
+function ResourceMap({ spec }: { spec: PublicSpec }) {
+  return (
+    <div className="api-resources">
+      {groupByTag(spec.paths).map(([tag, entries]) => {
+        const { label, blurb, icon: Icon } = resource(tag);
+        return (
+          <article key={tag} className="api-resource">
+            <header>
+              <span className="api-resource-icon" aria-hidden="true">
+                <Icon size={18} />
+              </span>
+              <h3>{label}</h3>
+            </header>
+            {blurb && <p>{blurb}</p>}
+            <ul>
+              {entries.map(({ path, operation }) => (
+                <li key={path}>
+                  <a href={`#${operation.operationId}`} title={operation.summary}>
+                    <Method />
+                    <code>{shortPath(path)}</code>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function openHashTarget() {
+  const target = window.location.hash
+    ? document.getElementById(decodeURIComponent(window.location.hash.slice(1)))
+    : null;
+  if (!target) return;
+  const details = target.closest("details");
+  if (details) details.open = true;
+  target.scrollIntoView();
+}
+
 export default function ApiDocsView() {
   const { data, isPending, isError, refetch } = useQuery(publicSpecQuery);
   useDocumentTitle("API documentation — Papers With Code", { restorePrevious: true });
   useEffect(() => {
-    if (!data || !window.location.hash) return;
-    const frame = requestAnimationFrame(() => {
-      document.getElementById(window.location.hash.slice(1))?.scrollIntoView();
-    });
-    return () => cancelAnimationFrame(frame);
+    if (!data) return;
+    const frame = requestAnimationFrame(openHashTarget);
+    window.addEventListener("hashchange", openHashTarget);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("hashchange", openHashTarget);
+    };
   }, [data]);
+  const groups = data ? groupByTag(data.paths) : [];
+  const endpointCount = data ? Object.keys(data.paths).length : null;
   return (
     <div className="api-docs">
       <nav className="api-sidebar" aria-label="API documentation">
         <strong>API documentation</strong>
-        <a href="#getting-started">Getting started</a>
-        <a href="#limits">Traffic limits</a>
-        <a href="#pagination">Pagination & identifiers</a>
-        <a href="#benchmarks">Reading leaderboards</a>
-        <a href="#errors">Errors</a>
-        <a href="#changelog">Changelog</a>
-        {data &&
-          Object.entries(data.paths).map(([path, { get }]) => (
-            <a key={path} href={`#${get.operationId}`}>
-              {get.summary}
-            </a>
-          ))}
-        <a href="#response-models">Response models</a>
+        <div className="api-sidebar-group">
+          <span>Guides</span>
+          <a href="#getting-started">Getting started</a>
+          <a href="#overview">Catalog overview</a>
+          <a href="#limits">Traffic limits</a>
+          <a href="#pagination">Pagination & identifiers</a>
+          <a href="#benchmarks">Reading leaderboards</a>
+          <a href="#errors">Errors</a>
+          <a href="#changelog">Changelog</a>
+        </div>
+        {groups.map(([tag, entries]) => (
+          <div key={tag} className="api-sidebar-group">
+            <span>{resource(tag).label}</span>
+            {entries.map(({ path, operation }) => (
+              <a key={path} href={`#${operation.operationId}`}>
+                <Method />
+                {operation.summary}
+              </a>
+            ))}
+          </div>
+        ))}
+        <div className="api-sidebar-group">
+          <span>Reference</span>
+          <a href="#response-models">Response models</a>
+        </div>
       </nav>
       <div className="api-content">
-        <section id="getting-started">
+        <section id="getting-started" className="api-hero">
           <span className="api-beta">Experimental beta</span>
-          <h1>Papers With Code API</h1>
+          <h1>Papers with Code API</h1>
           <p className="api-lead">
             Find papers, explore benchmarks, and bring research results into
             your scripts and applications.
           </p>
+          <div className="api-facts">
+            <div>
+              <KeyRound size={18} aria-hidden="true" />
+              <b>No API key</b>
+              <span>Free, anonymous, read-only access</span>
+            </div>
+            <div>
+              <Gauge size={18} aria-hidden="true" />
+              <b>120 / minute</b>
+              <span>Per IP, with short bursts</span>
+            </div>
+            <div>
+              <Braces size={18} aria-hidden="true" />
+              <b>
+                {endpointCount === null
+                  ? "OpenAPI"
+                  : `${endpointCount} endpoints`}
+              </b>
+              <span>JSON responses, OpenAPI schema</span>
+            </div>
+          </div>
           <p>
-            Free, anonymous, read-only access. No account or API key required.
-            The public beta covers keyword search and core catalog lookups.
+            No account or API key required. The public beta covers keyword
+            search and core catalog lookups.
           </p>
           <p>
             <a href="https://paperswithcode.co/api/v1/openapi.json">
@@ -258,11 +446,16 @@ export default function ApiDocsView() {
             · <a href={FEEDBACK}>Report a bug or request a feature</a>
           </p>
           <h2>Your first request</h2>
-          <Code
-            value={
-              'curl --fail-with-body "https://paperswithcode.co/api/v1/papers/search?q=attention&mode=keyword&page_size=5"'
-            }
-          />
+          <div className="api-terminal">
+            <div className="api-terminal-bar" aria-hidden="true">
+              Shell
+            </div>
+            <Code
+              value={
+                'curl --fail-with-body "https://paperswithcode.co/api/v1/papers/search?q=attention&mode=keyword&page_size=5"'
+              }
+            />
+          </div>
           <p>
             Responses are JSON. Python examples require{" "}
             <code>pip install requests</code>; JavaScript examples use built-in{" "}
@@ -273,8 +466,32 @@ export default function ApiDocsView() {
             Base URL: <code>https://paperswithcode.co/api/v1</code>
           </p>
         </section>
+        <section id="overview">
+          <h2>Catalog overview</h2>
+          <p>
+            Four resources make up the catalog. Evaluations connect them: each
+            one is a score a paper reports on a dataset for a task.
+          </p>
+          {data ? (
+            <ResourceMap spec={data} />
+          ) : (
+            <p className="api-muted">The endpoint overview loads with the reference below.</p>
+          )}
+        </section>
         <section id="limits">
           <h2>Traffic limits</h2>
+          <div className="api-limits">
+            <div>
+              <b>120</b>
+              <span>requests/minute</span>
+              <p>All catalog reads · bursts of up to 60 more</p>
+            </div>
+            <div>
+              <b>60</b>
+              <span>requests/minute</span>
+              <p>List and search endpoints · bursts of up to 20 more</p>
+            </div>
+          </div>
           <p>
             Each IP address shares a catalog allowance of 120 requests/minute.
             List and search endpoints also share a stricter allowance of 60
@@ -316,6 +533,26 @@ export default function ApiDocsView() {
         </section>
         <section id="benchmarks">
           <h2>Reading leaderboards</h2>
+          <ol className="api-steps">
+            {LEADERBOARD_STEPS.map((step, index) => {
+              const operationId = data?.paths[step.path]?.get.operationId;
+              const label = (
+                <code>
+                  {shortPath(step.path)}
+                  {step.query}
+                </code>
+              );
+              return (
+                <li key={step.path}>
+                  <span className="api-step-number" aria-hidden="true">
+                    {index + 1}
+                  </span>
+                  <b>{step.title}</b>
+                  {operationId ? <a href={`#${operationId}`}>{label}</a> : label}
+                </li>
+              );
+            })}
+          </ol>
           <p>
             Search datasets, select a dataset, then fetch its tasks and the
             metrics for a dataset/task pair. Fetch{" "}
@@ -339,22 +576,13 @@ export default function ApiDocsView() {
             usually contain a <code>detail</code> field, which can be a string,
             object, or validation-error array.
           </p>
-          <ul>
-            <li>
-              <b>400:</b> invalid request.
-            </li>
-            <li>
-              <b>404:</b> record not found.
-            </li>
-            <li>
-              <b>422:</b> invalid parameter type, value, or missing parameter.
-            </li>
-            <li>
-              <b>429:</b> traffic limit exceeded; obey <code>Retry-After</code>.
-            </li>
-            <li>
-              <b>5xx:</b> temporary server failure; retry with bounded backoff.
-            </li>
+          <ul className="api-errors">
+            {ERRORS.map(({ status, tone, text }) => (
+              <li key={status}>
+                <span className={`api-status api-status-${tone}`}>{status}</span>
+                <span>{text}</span>
+              </li>
+            ))}
           </ul>
           <Code
             value={
@@ -387,12 +615,17 @@ export default function ApiDocsView() {
             ))}
             <section id="response-models">
               <h2>Response models</h2>
+              <p className="api-muted">
+                Expand a model to see its fields. Type links jump to the model.
+              </p>
               {Object.entries(data.components.schemas).map(([name, schema]) => (
-                <article id={`model-${name}`} key={name}>
-                  <h3>{name}</h3>
-                  <p>{schema.description}</p>
+                <details id={`model-${name}`} key={name} className="api-model">
+                  <summary>
+                    <code>{name}</code>
+                    {schema.description && <span>{schema.description}</span>}
+                  </summary>
                   <Fields schema={schema} />
-                </article>
+                </details>
               ))}
             </section>
           </>

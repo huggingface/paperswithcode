@@ -49,6 +49,23 @@ export const publicSpecQuery = {
   staleTime: 5 * 60 * 1000,
 };
 
+export type EndpointEntry = { path: string; operation: Operation };
+
+export function groupByTag(
+  paths: PublicSpec["paths"],
+): [string, EndpointEntry[]][] {
+  const groups = new Map<string, EndpointEntry[]>();
+  for (const [path, { get }] of Object.entries(paths)) {
+    const tag = get.tags?.[0] ?? "other";
+    groups.set(tag, [...(groups.get(tag) ?? []), { path, operation: get }]);
+  }
+  return [...groups];
+}
+
+export function shortPath(path: string): string {
+  return path.replace(/^\/api\/v1/, "");
+}
+
 export function exampleUrl(path: string, operation: Operation): string {
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(
