@@ -884,7 +884,7 @@ def test_popular_benchmarks_take_turns_between_flagship_tasks(db, now):
     db.flush()
     db.add(TaskDataset(task_id=robotics.id, dataset_id=variant.id))
     db.flush()
-    assert [d.name for d in follows.popular_benchmarks(db)] == [
+    assert [d.name for d in follows.rank_popular_benchmarks(db)] == [
         "Terminal-Bench 4.0",
         "RoboTwin 2.0 Easy",
         "DeepSWE",
