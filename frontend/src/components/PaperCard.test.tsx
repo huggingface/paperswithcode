@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -159,5 +159,32 @@ describe("PaperCard thumbnails", () => {
     vi.unstubAllGlobals();
     expect(container.querySelector(".paper-thumb-wrap")).toBeInTheDocument();
     expect(container.querySelector(".paper-thumb-wrap img")).toBeNull();
+  });
+
+  it("loads a thumbnail URL that arrives after the first render", () => {
+    const observed: Element[] = [];
+    let notify: (entries: Partial<IntersectionObserverEntry>[]) => void = () => {};
+    vi.stubGlobal("IntersectionObserver", class {
+      constructor(callback: (entries: Partial<IntersectionObserverEntry>[]) => void) {
+        notify = callback;
+      }
+      observe(node: Element) {
+        observed.push(node);
+      }
+      disconnect() {}
+    });
+    const card = (thumbnailUrl: string | null) => (
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <PaperCard paper={{ ...paper, thumbnailUrl }} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    const { container, rerender } = render(card(null));
+    rerender(card("/thumb.png"));
+    expect(observed).toHaveLength(1);
+    act(() => notify([{ isIntersecting: true }]));
+    vi.unstubAllGlobals();
+    expect(container.querySelector(".paper-thumb-wrap img")).toHaveAttribute("src", "/thumb.png");
   });
 });
