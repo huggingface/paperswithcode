@@ -109,6 +109,7 @@ class MethodService:
             full_name=db_method.full_name,
             description=db_method.description,
             keywords=db_method.keywords,
+            aliases=list(db_method.aliases or ()),
             area_id=str(db_method.area_id) if db_method.area_id else None,
             introduced_year=db_method.introduced_year,
             source_paper_id=(

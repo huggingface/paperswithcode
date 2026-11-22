@@ -8,14 +8,16 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    JSON,
     ForeignKey,
     Index,
     Integer,
     LargeBinary,
     String,
     Text,
+    text,
 )
-from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
 
@@ -135,6 +137,12 @@ class Method(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    aliases: Mapped[List[str]] = mapped_column(
+        ARRAY(Text).with_variant(JSON(), "sqlite"),
+        nullable=False,
+        default=list,
+        server_default=text("'{}'"),
+    )
 
     area_id: Mapped[Optional[int]] = mapped_column(
         BigInteger, ForeignKey("areas.id"), nullable=True

@@ -68,6 +68,13 @@ class Method(BaseModel):
     keywords: Optional[str] = Field(
         None, description="Comma-separated keywords for matching papers to this method"
     )
+    aliases: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Curated alternative names for the method, such as other "
+            "expansions or acronyms (e.g., 'Fully Sharded Data Parallel (FSDP)')"
+        ),
+    )
 
     area_id: Optional[str] = Field(None, description="ID of the research area")
 
