@@ -147,7 +147,7 @@ def test_topic_view_shows_creator_followers_and_visible_avatars(db, now):
         public.set_show_as_follower(db, name, show)
     view = public.topic_view(db, topic_id, None)
     assert view.creator.username == "alice"
-    assert view.creator.avatar_url.endswith("/api/users/alice/avatar?redirect=true")
+    assert view.creator.avatar_url == "/api/v1/research/avatars/alice"
     assert view.followers == 4
     assert [p.username for p in view.follower_avatars] == ["alice", "bob", "dave"]
     assert view.indexable
@@ -214,6 +214,22 @@ def test_bubbles_rank_eligible_public_topics_by_followers(db, now, monkeypatch):
     assert [b.id for b in public.bubbles(db, now)] == [popular, quiet]
     assert public.bubbles(db, now)[0].followers == 2
     assert public.bubbles(db, now)[0].creator.username == "alice"
+    public.set_show_as_follower(db, "bob", False)
+    verdict(db, popular, paper(db, now, "8", "Last month", days=20), score=0.99)
+    best = paper(db, now, "7", "Best v1", days=2)
+    best.is_latest_version = False
+    newer = paper(db, now, "70", "Best", days=2)
+    newer.arxiv_id, newer.version = best.arxiv_id, "v2"
+    db.flush()
+    verdict(db, popular, best, score=0.98)
+    verdict(db, popular, newer, score=0.9)
+    featured = public.bubbles(db, now)[0]
+    assert featured.week_papers == 4
+    assert featured.top_paper.title == "Best"
+    assert [p.username for p in featured.follower_avatars] == ["alice"]
+    assert featured.follower_avatars[0].avatar_url == "/api/v1/research/avatars/alice"
+    assert public.has_account(db, "alice")
+    assert not public.has_account(db, "nobody")
     topics.set_public(db, "bob", quiet, False)
     public.set_hidden(db, popular, True, now)
     assert public.bubbles(db, now) == []
@@ -245,6 +261,15 @@ def test_public_topic_api(db, monkeypatch, now):
     )
     assert client.get(f"/research/topics/{topic_id}/papers").json() == []
     assert client.get("/research/topics/featured").json() == []
+    monkeypatch.setattr(
+        research.hf_avatar_service,
+        "avatar_image",
+        lambda name: ("image/svg+xml", f"<svg>{name}</svg>".encode()),
+    )
+    avatar = client.get("/research/avatars/alice")
+    assert avatar.content == b"<svg>alice</svg>"
+    assert "sandbox" in avatar.headers["content-security-policy"]
+    assert client.get("/research/avatars/nobody").status_code == 404
     assert (
         client.put(
             "/me/topic-follower-visibility", json={"show_as_follower": False}
