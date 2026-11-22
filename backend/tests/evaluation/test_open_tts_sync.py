@@ -66,7 +66,7 @@ def _payload(count: int = 15):
         "headers": [
             "Rank",
             "Model",
-            "Average WER ⬇️",
+            "Average ER ⬇️",
             "Average RTFx ⬆️",
             "Size (B)",
             "License",
