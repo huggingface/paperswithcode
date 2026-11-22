@@ -49,7 +49,7 @@ from backend.genai_steps.extract_github_and_project_page_url import (
 )
 from backend.generators.google_generator import GoogleGenerator
 from backend.database.logging_config import setup_logging
-from backend.utils.github_utils import normalize_github_url, parse_github_url
+from backend.utils.github_utils import parse_github_url
 
 logger = setup_logging("batch_extract", log_level=logging.INFO)
 
@@ -212,14 +212,16 @@ class BatchURLExtractor:
             repo_service = RepositoryService(db)
             project_service = ProjectPageService(db)
 
-            repository_url = normalize_github_url((github_url or "").strip())
-            if github_url and repository_url is None:
+            candidate = (github_url or "").strip()
+            if candidate and not candidate.startswith(("http://", "https://")):
+                candidate = f"https://{candidate}"
+            owner, name = parse_github_url(candidate)
+            if github_url and not (owner and name):
                 logger.info(f"⏭️  Skipped non-repository GitHub URL: {github_url}")
-            if repository_url:
-                owner, name = parse_github_url(repository_url)
+            if owner and name:
                 repository = repo_service.create_repository_for_paper(
                     paper_id=str(paper_id),
-                    url=repository_url,
+                    url=candidate,
                     owner=owner,
                     name=name,
                     num_stars=0,

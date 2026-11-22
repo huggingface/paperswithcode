@@ -329,5 +329,7 @@ def test_save_accepts_github_url_without_scheme(monkeypatch):
 
     extractor.save_results_to_db(FakeDB(), 7, "github.com/Owner/Repo", "")
 
-    assert [call["url"] for call in created] == ["https://github.com/owner/repo"]
+    assert [(c["url"], c["owner"], c["name"]) for c in created] == [
+        ("https://github.com/Owner/Repo", "Owner", "Repo")
+    ]
     assert extractor.stats["papers_with_github"] == 1
