@@ -30,12 +30,22 @@ from backend.models.papers import (
     RepositoryWithPaperCount,
 )
 
+from backend.services.catalog_errors import CatalogValidationError
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
 from backend.utils.github_utils import normalize_github_url, parse_github_url
 from backend.services.repository_ordering import primary_repository_order
 from backend.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def require_github_repository_url(url: str) -> str:
+    normalized = normalize_github_url(url.strip())
+    if normalized is None:
+        raise CatalogValidationError(
+            f"Repository links must be github.com repository URLs: {url}"
+        )
+    return normalized
 
 
 def find_repository_by_url(session: Session, url: str) -> Optional[DBRepository]:
@@ -380,6 +390,7 @@ class RepositoryService:
             PaperNotFoundError: If paper not found
             DatabaseError: On database errors
         """
+        url = require_github_repository_url(url)
         try:
             if skip_if_official_exists:
                 existing_official = (
@@ -421,13 +432,10 @@ class RepositoryService:
         source: str,
     ) -> DBRepository:
         """Create or update a repository row and flush it without committing."""
-        normalized_url = normalize_github_url(url)
-        if normalized_url:
-            url = normalized_url
-            parsed_owner, parsed_name = parse_github_url(url)
-            owner = owner or parsed_owner
-            name = name or parsed_name
-            logger.debug(f"Normalized GitHub URL to: {url}")
+        url = require_github_repository_url(url)
+        parsed_owner, parsed_name = parse_github_url(url)
+        owner = owner or parsed_owner
+        name = name or parsed_name
 
         existing_repo = find_repository_by_url(self.db, url)
 

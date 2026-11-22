@@ -50,7 +50,9 @@ text. The missing Markdown or PDF is not missing evidence. For `enrich-paper`:
   `hf_models`, `hf_datasets`, or `hf_spaces`. A `paper.source_url` on
   `huggingface.co/<org>/<repo>` is the release's own model card. Include the
   publisher's official quantized or size variants of this release, never
-  community mirrors or fine-tunes.
+  community mirrors or fine-tunes. Never put Hugging Face URLs in
+  `repositories`: it holds only `https://github.com/<owner>/<repo>` URLs, and
+  the API rejects anything else.
 - Link the publisher as an organization when the page names it.
 - Set `urls_extracted=true` after this complete check, including a clean
   no-result.

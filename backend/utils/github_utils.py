@@ -39,7 +39,7 @@ def parse_github_url(url: str) -> Tuple[Optional[str], Optional[str]]:
     """
     try:
         parsed = urlparse(url)
-        if parsed.netloc != "github.com":
+        if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
             return None, None
 
         path_parts = parsed.path.strip("/").split("/")
