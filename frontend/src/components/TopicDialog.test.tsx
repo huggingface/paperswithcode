@@ -138,6 +138,23 @@ describe("TopicDialog feed management", () => {
     await expectNewTab("Open the SWE-bench Verified page", "/benchmark/swe-bench-verified");
   });
 
+  it("lists popular benchmarks below trending methods, after the ones already followed", async () => {
+    vi.spyOn(researchApi, "followSuggestions").mockResolvedValue({ authors: [], organizations: [], benchmarks: [
+      { entity_id: 12, name: "SWE-bench Verified", url: "/benchmark/swe-bench-verified", image_url: null },
+      { entity_id: 45, name: "GSM8K", url: "/benchmark/gsm8k", image_url: null },
+    ] });
+    vi.spyOn(catalogApi, "trendingMethods").mockResolvedValue({ results: [{ id: "3", name: "LoRA", slug: "lora" }] } as never);
+    renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
+    await userEvent.click(screen.getByRole("tab", { name: /Tasks, methods/ }));
+    const heading = await screen.findByRole("heading", { name: "Popular benchmarks" });
+    const headings = screen.getAllByRole("heading", { level: 3 }).map(node => node.textContent);
+    expect(headings.indexOf("Popular benchmarks")).toBe(headings.indexOf("Trending methods") + 1);
+    const group = within(heading.parentElement!);
+    expect(group.getAllByRole("button").map(node => node.textContent)).toEqual(["SWE-bench Verified", "GSM8K"]);
+    expect(group.getByRole("button", { name: "SWE-bench Verified" })).toHaveAttribute("aria-pressed", "true");
+    expect(group.getByRole("link", { name: "Open the GSM8K page" })).toHaveAttribute("href", "/benchmark/gsm8k");
+  });
+
   it("links to the following feed and closes on the way there", async () => {
     const close = vi.fn();
     renderWithProviders(<TopicDialog open onOpenChange={close} />);
