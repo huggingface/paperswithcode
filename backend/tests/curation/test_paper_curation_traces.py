@@ -48,6 +48,7 @@ def test_trace_redaction_keeps_every_jsonl_line_parseable():
         {"cmd": 'export HF_TOKEN="quoted-assignment-secret" PASSWORD=bare-secret'},
         {"msg": "token=", "x": 1},
         {"a": "token=", "b": "c"},
+        {"output": json.dumps({"a": "token=", "b": "c", "token=": "v", "n": 1})},
     ]
     raw = "\n".join(json.dumps(line) for line in lines).encode()
 
@@ -64,6 +65,16 @@ def test_trace_redaction_keeps_every_jsonl_line_parseable():
     assert json.loads(parsed[5]["output"])["refresh_token"] is None
     assert parsed[6]["cmd"] == 'export HF_TOKEN="<redacted>" PASSWORD=<redacted>'
     assert parsed[7:] == lines[7:]
+    assert json.loads(parsed[9]["output"]) == json.loads(lines[9]["output"])
+
+
+def test_unparseable_trace_lines_still_redact_escaped_secrets():
+    truncated = b'{"output": "{\\"api_key\\": \\"escaped-secret\\", \\"token\\": \\"other-secret'
+
+    redacted = redact_trace(truncated).decode()
+
+    assert "escaped-secret" not in redacted
+    assert "other-secret" not in redacted
 
 
 def test_checked_in_proposal_schema_requires_benchmark_gaps():

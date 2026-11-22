@@ -30,7 +30,8 @@ SECRET_KEY = re.compile(SECRET_NAME + r"$", re.IGNORECASE)
 SECRET_PATTERNS = (
     re.compile(
         r"(" + SECRET_NAME + r")"
-        r"(\"\s*[:=]\s*\"|\s*[:=]\s*\"?)([^\s\"']+)",
+        r"(\\*\"\s*[:=]\s*\\*\"|\s*[:=]\s*(?:\\*\")?)"
+        r"([^\s\"'\\,:{}\[\]][^\s\"'\\,{}\[\]]*)",
         re.IGNORECASE,
     ),
     re.compile(r"\b(?:hf|sk)-[A-Za-z0-9_-]{12,}\b"),
