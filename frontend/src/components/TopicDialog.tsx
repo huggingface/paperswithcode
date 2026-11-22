@@ -105,7 +105,7 @@ function TopicDialogForm({ topicId, afterSavePath, restore, onDone }: {
     const link = (event.target as Element).closest('a');
     if (!link || link.target === '_blank' || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey
       || event.altKey || new URL(link.href, window.location.href).origin !== window.location.origin) return;
-    saveTopicDialog(location.key, {
+    saveTopicDialog({
       topicId, editId, draft, selection, removals, topicFollows, order, privacy, tab,
       scrollTop: form.current?.closest<HTMLElement>('.topic-dialog')?.scrollTop ?? 0,
     });

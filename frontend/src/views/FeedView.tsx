@@ -9,7 +9,7 @@ import { clearPendingTopic, isConflict, isTopicBuilding, readPendingFollows, rea
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { PaperFeedList, type PaperFeedCard } from "@/components/PaperFeed";
 import { McpShowcase } from "@/components/McpShowcase";
@@ -478,8 +478,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   // The pop-up edits one topic (its id) or the whole feed (null); undefined while closed.
   // `?edit=1` (linked from Settings) opens it on arrival.
   // Back from a page a link in the pop-up opened reopens it as it was.
-  const location = useLocation();
-  const [restoredDialog, setRestoredDialog] = useState(() => readTopicDialog(location.key));
+  const [restoredDialog, setRestoredDialog] = useState(() => readTopicDialog());
   const [editingTopic, setEditingTopic] = useState<number | null | undefined>(
     () => restoredDialog ? restoredDialog.topicId
       : following && searchParams.get("edit") === "1" ? null : undefined,
@@ -746,7 +745,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 restore={restoredDialog}
                 onOpenChange={(open) => {
                   if (open) return;
-                  clearTopicDialog(location.key);
+                  clearTopicDialog();
                   setRestoredDialog(null);
                   setEditingTopic(undefined);
                   if (searchParams.has("edit")) {
