@@ -155,6 +155,41 @@ def test_methods_search_uses_displayed_name_only(client, methods_with_image_keyw
     assert "Transformer" not in names
 
 
+def test_methods_list_and_detail_expose_aliases(client):
+    db = TestingSessionLocal()
+    db.add_all(
+        [
+            DBMethod(
+                id=10,
+                name="ZeRO",
+                slug="zero",
+                full_name="Zero Redundancy Optimizer",
+                aliases=["Fully Sharded Data Parallel (FSDP)"],
+            ),
+            DBMethod(id=11, name="Adam", slug="adam"),
+        ]
+    )
+    db.commit()
+    db.close()
+
+    listing = client.get("/api/v1/methods/?page_size=10")
+    assert listing.status_code == 200
+    aliases = {m["slug"]: m["aliases"] for m in listing.json()["results"]}
+    assert aliases == {
+        "zero": ["Fully Sharded Data Parallel (FSDP)"],
+        "adam": [],
+    }
+
+    detail = client.get("/api/v1/methods/zero")
+    assert detail.status_code == 200
+    assert detail.json()["aliases"] == ["Fully Sharded Data Parallel (FSDP)"]
+
+    search = client.get("/api/v1/methods/?q=zero")
+    assert search.json()["results"][0]["aliases"] == [
+        "Fully Sharded Data Parallel (FSDP)"
+    ]
+
+
 def test_methods_expose_recent_usage_trend_score(client):
     """Method activity mirrors benchmark trends using paper publication dates."""
     db = TestingSessionLocal()
