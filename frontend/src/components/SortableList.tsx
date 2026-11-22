@@ -83,21 +83,26 @@ export default function SortableList<T>({ items, itemKey, itemLabel, onReorder, 
       const row = key === undefined ? undefined : rows.current.get(key);
       if (row) followPointer(row);
       // Compare layout positions (not on-screen ones, which shift while rows slide): the dragged row goes
-      // after every other row whose middle is above its own middle, or in a grid, every item on an earlier
-      // grid row or left of it on its own.
+      // after every other row whose middle is above its own middle. In a grid it goes after every item on an
+      // earlier grid row or left of it on its own, and takes the slot of the item it is over, which moves
+      // back if it came after the dragged item and forward if it came before.
       const middle = pointer.current.y - pointer.current.grabY + (row?.offsetHeight ?? 0) / 2;
       const center = pointer.current.x - pointer.current.grabX + (row?.offsetWidth ?? 0) / 2;
-      const before = (other: HTMLElement) => grid
-        ? other.offsetTop + other.offsetHeight < middle
-          || (other.offsetTop <= middle && other.offsetLeft + other.offsetWidth / 2 < center)
-        : other.offsetTop + other.offsetHeight / 2 < middle;
+      const before = (other: HTMLElement, wasAfter: boolean) => {
+        if (!grid) return other.offsetTop + other.offsetHeight / 2 < middle;
+        if (other.offsetTop + other.offsetHeight < middle) return true;
+        if (other.offsetTop > middle) return false;
+        const over = other.offsetLeft <= center && center <= other.offsetLeft + other.offsetWidth;
+        return over ? wasAfter : other.offsetLeft + other.offsetWidth / 2 < center;
+      };
       setDrag(current => {
         if (!current) return current;
-        const dragged = current.order.find(item => itemKey(item) === current.key)!;
+        const draggedAt = current.order.findIndex(item => itemKey(item) === current.key);
+        const dragged = current.order[draggedAt];
         const others = current.order.filter(item => itemKey(item) !== current.key);
         const index = others.filter(item => {
           const other = rows.current.get(itemKey(item));
-          return other ? before(other) : false;
+          return other ? before(other, current.order.indexOf(item) > draggedAt) : false;
         }).length;
         const order = [...others.slice(0, index), dragged, ...others.slice(index)];
         return sameOrder(order, current.order) ? current : { ...current, order };
