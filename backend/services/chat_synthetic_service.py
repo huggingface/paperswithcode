@@ -91,7 +91,10 @@ class HttpSyntheticChatTransport:
             base_url="https://paperswithcode.co",
             timeout=httpx.Timeout(240, connect=15),
             cookies={cookie_name: cookie},
-            headers={"User-Agent": "pwc-synthetic-chat-reliability/1"},
+            headers={
+                "User-Agent": "pwc-synthetic-chat-reliability/1",
+                "Origin": "https://paperswithcode.co",
+            },
         )
 
     async def verify_login(self) -> bool:
