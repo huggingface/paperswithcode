@@ -201,6 +201,7 @@ from backend.models.trends import (
     TrendsResponse as TrendsResponse,
 )
 from backend.models.research import (
+    FeaturedTopicPaper as FeaturedTopicPaper,
     FollowView as FollowView,
     FollowerVisibilityUpdate as FollowerVisibilityUpdate,
     PublicTopicView as PublicTopicView,
