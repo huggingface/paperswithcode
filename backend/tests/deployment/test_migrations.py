@@ -46,6 +46,21 @@ def test_staging_role_defaults_to_read_only_outside_application_pool():
     assert 'read_only_default != "on"' in audit
 
 
+def test_staging_twin_repair_owns_sequences_and_audit_detects_drift():
+    repository = Path(__file__).resolve().parents[3]
+    migration = (
+        repository / "backend/database/migrations/repair_staging_twin_tables.sql"
+    ).read_text()
+    audit = (repository / "deploy/audit_staging_db.py").read_text()
+
+    assert "WHERE n.nspname = 'staging' AND sn.nspname <> 'staging'" in migration
+    assert "ALTER SEQUENCE staging.%I OWNED BY staging.%I.%I" in migration
+    assert "GRANT USAGE, SELECT ON SEQUENCE staging.%I TO pwc_staging" in migration
+    assert "ADD COLUMN IF NOT EXISTS candidate_id UUID" in migration
+    assert "staging columns use non-staging sequences" in audit
+    assert "staging tables lack public columns" in audit
+
+
 def test_chat_edit_preparation_migration_is_environment_scoped_and_typed():
     repository = Path(__file__).resolve().parents[3]
     migration = (

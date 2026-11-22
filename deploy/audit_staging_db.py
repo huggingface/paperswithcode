@@ -50,6 +50,51 @@ def main() -> int:
             if unqualified != "chat_sessions" or qualified != "chat_sessions":
                 raise RuntimeError("chat_sessions does not resolve through staging")
 
+            cursor.execute(
+                """
+                SELECT c.relname || '.' || a.attname
+                FROM pg_attrdef d
+                JOIN pg_class c ON c.oid = d.adrelid
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = d.adnum
+                JOIN pg_depend dep ON dep.objid = d.oid
+                    AND dep.classid = 'pg_attrdef'::regclass
+                    AND dep.refclassid = 'pg_class'::regclass
+                JOIN pg_class s ON s.oid = dep.refobjid AND s.relkind = 'S'
+                JOIN pg_namespace sn ON sn.oid = s.relnamespace
+                WHERE n.nspname = 'staging' AND sn.nspname <> 'staging'
+                ORDER BY 1
+                """
+            )
+            foreign_sequences = [row[0] for row in cursor.fetchall()]
+            if foreign_sequences:
+                raise RuntimeError(
+                    "staging columns use non-staging sequences: "
+                    + ", ".join(foreign_sequences)
+                )
+
+            cursor.execute(
+                """
+                SELECT p.table_name || '.' || p.column_name
+                FROM information_schema.columns p
+                JOIN information_schema.tables t
+                    ON t.table_schema = 'staging' AND t.table_name = p.table_name
+                WHERE p.table_schema = 'public'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM information_schema.columns s
+                      WHERE s.table_schema = 'staging'
+                        AND s.table_name = p.table_name
+                        AND s.column_name = p.column_name
+                  )
+                ORDER BY 1
+                """
+            )
+            missing_columns = [row[0] for row in cursor.fetchall()]
+            if missing_columns:
+                raise RuntimeError(
+                    "staging tables lack public columns: " + ", ".join(missing_columns)
+                )
+
             session_id = str(uuid.uuid4())
             cursor.execute(
                 """
