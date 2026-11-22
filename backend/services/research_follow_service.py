@@ -3,6 +3,7 @@
 from datetime import date, datetime, timedelta
 import re
 import secrets
+import time
 from collections.abc import Sequence
 from itertools import zip_longest
 from typing import NamedTuple
@@ -52,6 +53,8 @@ POPULAR_AUTHOR_IDS = (266, 4049, 13379, 25, 264)
 POPULAR_ORGANIZATION_LIMIT = 10
 POPULAR_BENCHMARK_TASKS = ("coding-agents", "image-understanding", "robotics")
 POPULAR_BENCHMARKS_PER_TASK = 4
+POPULAR_BENCHMARK_SECONDS = 3600
+_popular_benchmarks: tuple[float, list[int]] = (0.0, [])
 
 
 def _image_urls(db: Session, kind: str, entities: list) -> dict[int, str | None]:
@@ -79,6 +82,20 @@ def _family(name: str) -> str:
 
 
 def popular_benchmarks(db: Session) -> list[Dataset]:
+    """`rank_popular_benchmarks`, re-ranked at most hourly since every Edit feed pop-up asks for it."""
+    global _popular_benchmarks
+    expires, ids = _popular_benchmarks
+    if time.monotonic() >= expires:
+        ids = [dataset.id for dataset in rank_popular_benchmarks(db)]
+        _popular_benchmarks = (time.monotonic() + POPULAR_BENCHMARK_SECONDS, ids)
+    datasets = {
+        dataset.id: dataset
+        for dataset in db.scalars(select(Dataset).where(Dataset.id.in_(ids)))
+    }
+    return [datasets[i] for i in ids if i in datasets]
+
+
+def rank_popular_benchmarks(db: Session) -> list[Dataset]:
     """The top benchmarks of a few flagship tasks, ranked as their task pages rank them.
 
     Takes turns between the tasks and keeps one benchmark per family, so RoboTwin Easy and Hard or a
