@@ -45,6 +45,7 @@ def test_trace_redaction_keeps_every_jsonl_line_parseable():
         {"path": "backend/services/hf_artifact_service.py"},
         {"id_token": None, "password": 1234, "secret": True, "api_key": {"v": 1}},
         {"output": json.dumps({"refresh_token": None, "token": "nested-secret"})},
+        {"cmd": 'export HF_TOKEN="quoted-assignment-secret" PASSWORD=bare-secret'},
     ]
     raw = "\n".join(json.dumps(line) for line in lines).encode()
 
@@ -59,6 +60,7 @@ def test_trace_redaction_keeps_every_jsonl_line_parseable():
     assert parsed[4] == lines[4]
     assert "nested-secret" not in redacted
     assert json.loads(parsed[5]["output"])["refresh_token"] is None
+    assert parsed[6]["cmd"] == 'export HF_TOKEN="<redacted>" PASSWORD=<redacted>'
 
 
 def test_checked_in_proposal_schema_requires_benchmark_gaps():
