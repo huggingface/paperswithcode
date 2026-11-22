@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowRight, ArrowUpRight, Check, Pencil, Plus, Trash2, Undo2 } from 'lucide-react';
@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import TopicCard from '@/components/TopicCard';
 import SortableList from '@/components/SortableList';
 import { hfLoginUrl } from '@/lib/apiUrl';
+import { saveTopicDialog, type TopicDialogSnapshot } from '@/lib/topicDialogSnapshot';
 import {
   TOPIC_LIMIT, TOPIC_MAX_LENGTH, type FollowKind, type FollowSuggestion, type ResearchTopic,
 } from '@/lib/api/research';
@@ -30,33 +31,36 @@ const POPULAR_TOPICS = 6;
 /** Edits the Following feed in a pop-up, the one place to manage it. The Topics tab (the default) writes a new topic
  * or rewords one, reorders, unfollows, or makes your topics private, and offers popular topics as cards; the second
  * tab follows trending tasks and methods, benchmarks, popular authors, and organizations. Every chip and card links
- * to its page in a new tab, so a look never loses unsaved picks.
+ * to its page; following a link saves the pop-up as it is, and Back reopens it there with its unsaved picks
+ * (`restore`).
  * Nothing is saved until Save. Guests sign in on submit, and /following saves what they picked when they return.
  * Opened elsewhere, `afterSavePath` (/following) is where a save leads and where guests return after signing in. */
-export default function TopicDialog({ open, topicId = null, afterSavePath, onOpenChange }: {
+export default function TopicDialog({ open, topicId = null, afterSavePath, restore, onOpenChange }: {
   open: boolean;
   topicId?: number | null;
   afterSavePath?: string;
+  restore?: TopicDialogSnapshot | null;
   onOpenChange: (open: boolean) => void;
 }) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="topic-dialog" aria-describedby={undefined}>
-      <TopicDialogForm key={topicId ?? 'new'} topicId={topicId} afterSavePath={afterSavePath} onDone={() => onOpenChange(false)} />
+      <TopicDialogForm key={topicId ?? 'new'} topicId={topicId} afterSavePath={afterSavePath} restore={restore}
+        onDone={() => onOpenChange(false)} />
     </DialogContent>
   </Dialog>;
 }
 
-/** Opens a chip's page in a new tab, beside (never inside) the chip's toggle. */
+/** Opens a chip's page, beside (never inside) the chip's toggle. */
 function PageLink({ to, name }: { to: string; name: string }) {
-  return <a className="topic-dialog-chip-open" href={to} target="_blank" rel="noopener noreferrer"
-    aria-label={`Open the ${name} page`} title="Open its page in a new tab">
+  return <Link className="topic-dialog-chip-open" to={to} aria-label={`Open the ${name} page`} title="Open its page">
     <ArrowUpRight aria-hidden="true" />
-  </a>;
+  </Link>;
 }
 
-function TopicDialogForm({ topicId, afterSavePath, onDone }: {
+function TopicDialogForm({ topicId, afterSavePath, restore, onDone }: {
   topicId: number | null;
   afterSavePath?: string;
+  restore?: TopicDialogSnapshot | null;
   onDone: () => void;
 }) {
   const { user } = useAuth();
@@ -73,19 +77,39 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
   const suggested = (items: FollowSuggestion[] = []) =>
     items.map(item => ({ id: String(item.entity_id), name: item.name, image: item.image_url, url: item.url }));
   // The topic loaded into the text box: one being reworded, or null for a new one.
-  const [editId, setEditId] = useState(topicId);
-  const [draft, setDraft] = useState<string | null>(null);
+  const [editId, setEditId] = useState(restore ? restore.editId : topicId);
+  const [draft, setDraft] = useState<string | null>(restore?.draft ?? null);
   // The follow state chosen per chip; submit sends only those that differ from the current follows,
   // so chips stay right when a partial save refreshes the follows.
-  const [selection, setSelection] = useState<FollowPick[]>([]);
+  const [selection, setSelection] = useState<FollowPick[]>(restore?.selection ?? []);
   // Followed topics show as chips; unselecting one removes it on submit.
-  const [removals, setRemovals] = useState<number[]>([]);
+  const [removals, setRemovals] = useState<number[]>(restore?.removals ?? []);
   // Popular topics picked to follow, a new order for your topics, and public/private switches, all saved on submit.
-  const [topicFollows, setTopicFollows] = useState<number[]>([]);
-  const [order, setOrder] = useState<ResearchTopic[] | null>(null);
-  const [privacy, setPrivacy] = useState<Record<number, boolean>>({});
+  const [topicFollows, setTopicFollows] = useState<number[]>(restore?.topicFollows ?? []);
+  const [order, setOrder] = useState<ResearchTopic[] | null>(restore?.order ?? null);
+  const [privacy, setPrivacy] = useState<Record<number, boolean>>(restore?.privacy ?? {});
   // Picks on either tab survive switching: both tabs' state lives here.
-  const [tab, setTab] = useState('topics');
+  const [tab, setTab] = useState(restore?.tab ?? 'topics');
+  const form = useRef<HTMLFormElement>(null);
+  // The scroll position to return to, applied once the restored pop-up is tall enough to reach it.
+  const pendingScroll = useRef(restore?.scrollTop ?? 0);
+  useLayoutEffect(() => {
+    const scroller = form.current?.closest<HTMLElement>('.topic-dialog');
+    if (!pendingScroll.current || !scroller) return;
+    if (scroller.scrollHeight - scroller.clientHeight < pendingScroll.current) return;
+    scroller.scrollTop = pendingScroll.current;
+    pendingScroll.current = 0;
+  });
+  // A plain click on a link to another page of the site keeps the pop-up for Back.
+  const keepForBack = (event: MouseEvent) => {
+    const link = (event.target as Element).closest('a');
+    if (!link || link.target === '_blank' || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey
+      || event.altKey || new URL(link.href, window.location.href).origin !== window.location.origin) return;
+    saveTopicDialog(location.key, {
+      topicId, editId, draft, selection, removals, topicFollows, order, privacy, tab,
+      scrollTop: form.current?.closest<HTMLElement>('.topic-dialog')?.scrollTop ?? 0,
+    });
+  };
   const saveTopic = useSaveTopic();
   const removeTopics = useRemoveTopics();
   const saveFollows = useSaveFollows();
@@ -231,7 +255,7 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
     </div>;
   };
   const editingPublic = editing ? privacy[editing.id] ?? editing.is_public : true;
-  return <form className="topic-dialog-form" onSubmit={event => {
+  return <form ref={form} className="topic-dialog-form" onClickCapture={keepForBack} onSubmit={event => {
     event.preventDefault();
     submit();
   }}>
@@ -255,9 +279,8 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
           <p className="topic-dialog-hint">
             {!editing && atLimit ? `You follow ${TOPIC_LIMIT} topics, the most allowed. Remove one below to add another.`
               : <>
-                A model reads every new paper and adds the ones that match to your {user
-                  ? <Link to="/following" className="topic-dialog-feed-link" onClick={onDone}>Following feed</Link>
-                  : 'Following feed'}. New topics are public and show your Hugging Face username; make one private from
+                A model reads every new paper and adds the ones that match to your <Link to="/following"
+                  className="topic-dialog-feed-link" onClick={onDone}>Following feed</Link>. New topics are public and show your Hugging Face username; make one private from
                 its ✎ button below, or remove one with its trash button.
               </>}
           </p>
@@ -317,7 +340,7 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
               const on = !removals.includes(topic.id);
               const title = topicTitle(topic);
               const toggleRemoval = () => setRemovals(current => on ? [...current, topic.id] : current.filter(id => id !== topic.id));
-              return <TopicCard as="div" topic={topic} newTab showCreator
+              return <TopicCard as="div" topic={topic} showCreator
                 className={`topic-dialog-own-topic ${topic.id === editId ? 'is-editing' : ''} ${on ? '' : 'is-removed'}`}
                 action={<div className="topic-dialog-card-actions">
                   <button type="button" className={`home-topic-follow ${on ? 'is-following' : ''}`} aria-pressed={on}
@@ -344,7 +367,7 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
           <ul className="home-topics-list topic-dialog-topic-cards">
             {popularTopics.map(topic => {
               const on = topicFollows.includes(topic.id);
-              return <TopicCard key={topic.id} topic={topic} newTab showCreator action={
+              return <TopicCard key={topic.id} topic={topic} showCreator action={
                 <button type="button" className={`home-topic-follow ${on ? 'is-following' : ''}`} aria-pressed={on}
                   aria-label={`Follow ${topicTitle(topic)}`} disabled={saving || (!on && atLimit)}
                   onClick={() => setTopicFollows(current => on ? current.filter(id => id !== topic.id) : [...current, topic.id])}>
