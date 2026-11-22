@@ -12,6 +12,7 @@ import { getPaperLayout, getPaperWebMarkdown, getPaperWebPage, papersApi } from 
 import { profilesApi } from "@/lib/api/profiles";
 import { researchApi } from "@/lib/api/research";
 import { statsApi } from "@/lib/api/stats";
+import { readFeaturedTopics, writeFeaturedTopics } from "@/lib/featuredTopicsCache";
 
 /**
  * The one place that names React Query cache entries.
@@ -371,8 +372,15 @@ export const researchQueries = {
   }),
   featuredTopics: () => queryOptions({
     queryKey: ["research-featured-topics"],
-    queryFn: researchApi.featuredTopics,
+    queryFn: async () => {
+      const topics = await researchApi.featuredTopics();
+      writeFeaturedTopics(topics);
+      return topics;
+    },
     staleTime: TEN_MINUTES,
+    // Last visit's topics paint at once; a stale copy refetches in the background.
+    initialData: () => readFeaturedTopics()?.topics,
+    initialDataUpdatedAt: () => readFeaturedTopics()?.at,
   }),
   topicMatches: (text: string) => queryOptions({
     queryKey: ["research-topic-matches", text],
