@@ -46,6 +46,11 @@ export interface ResearchTopic {
   is_creator: boolean;
   /** Who made a public topic the account follows from someone else; null for its own. */
   creator?: TopicPerson | null;
+  /** Card stats, as on popular topics. */
+  followers?: number | null;
+  week_papers?: number | null;
+  follower_avatars?: TopicPerson[];
+  top_paper?: { id: number; arxiv_id: string | null; title: string } | null;
 }
 /** A Hugging Face account shown on a public topic. */
 export interface TopicPerson {

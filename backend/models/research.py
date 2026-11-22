@@ -54,6 +54,14 @@ class TopicPerson(BaseModel):
     avatar_url: str
 
 
+class FeaturedTopicPaper(BaseModel):
+    """This week's best match for a featured topic."""
+
+    id: int
+    arxiv_id: str | None = None
+    title: str
+
+
 class TopicView(BaseModel):
     id: int
     text: str
@@ -66,6 +74,10 @@ class TopicView(BaseModel):
     is_public: bool = True
     is_creator: bool = False
     creator: TopicPerson | None = None
+    followers: int | None = None
+    week_papers: int | None = None
+    follower_avatars: list[TopicPerson] = []
+    top_paper: FeaturedTopicPaper | None = None
 
 
 class TopicOrderUpdate(BaseModel):
@@ -93,14 +105,6 @@ class PublicTopicView(BaseModel):
     follower_avatars: list[TopicPerson] = Field(default_factory=list)
     following: bool = False
     is_creator: bool = False
-
-
-class FeaturedTopicPaper(BaseModel):
-    """This week's best match for a featured topic."""
-
-    id: int
-    arxiv_id: str | None = None
-    title: str
 
 
 class TopicBubble(BaseModel):

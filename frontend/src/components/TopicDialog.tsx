@@ -16,7 +16,7 @@ import { useDebounce } from '@/hooks/useDebounce';
 import { displayTaskName } from '@/lib/transform';
 import { catalogQueries, researchQueries } from '@/lib/api/queries';
 import {
-  isConflict, stashPendingFollows, stashPendingTopic, stashPendingTopicFollows, topicPath, topicTitle, useFollowTopic,
+  isConflict, stashPendingFollows, stashPendingTopic, stashPendingTopicFollows, topicTitle, useFollowTopic,
   useRemoveTopics, useReorderTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic,
   useSetTopicPublic, type FollowPick,
 } from '@/lib/researchTopic';
@@ -306,7 +306,8 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
         {ownTopics.length > 0 && <div className="topic-dialog-group">
           <h3>Your topics</h3>
           <SortableList
-            className="topic-dialog-topic-list"
+            className="home-topics-list topic-dialog-topic-cards"
+            grid
             items={orderedTopics}
             itemKey={topic => topic.id}
             itemLabel={topic => topicTitle(topic)}
@@ -314,28 +315,27 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
             onReorder={setOrder}
             renderItem={(topic, handle) => {
               const on = !removals.includes(topic.id);
+              const title = topicTitle(topic);
               const toggleRemoval = () => setRemovals(current => on ? [...current, topic.id] : current.filter(id => id !== topic.id));
-              return <div className={`topic-dialog-topic ${topic.id === editId ? 'is-editing' : ''} ${on ? '' : 'is-removed'}`}>
-                {handle}
-                <span className="topic-dialog-chip-wrap">
-                  <button type="button" className="topic-dialog-chip" aria-pressed={on} disabled={saving} title={topic.text}
+              return <TopicCard as="div" topic={topic} newTab showCreator
+                className={`topic-dialog-own-topic ${topic.id === editId ? 'is-editing' : ''} ${on ? '' : 'is-removed'}`}
+                action={<div className="topic-dialog-card-actions">
+                  <button type="button" className={`home-topic-follow ${on ? 'is-following' : ''}`} aria-pressed={on}
+                    aria-label={title} title={on ? 'Remove from your feed on Save' : 'Keep this topic'} disabled={saving}
                     onClick={toggleRemoval}>
-                    {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}
-                    {topicTitle(topic)}
-                    {topic.creator && <span className="topic-dialog-chip-creator">@{topic.creator.username}</span>}
+                    {on ? <Check aria-hidden="true" /> : <Plus aria-hidden="true" />}{on ? 'Following' : 'Follow'}
                   </button>
                   <button type="button" className="topic-dialog-chip-open" disabled={saving || topic.id === editId}
-                    aria-label={`Reword ${topicTitle(topic)}`} title="Reword this topic" onClick={() => startEditing(topic.id)}>
+                    aria-label={`Reword ${title}`} title="Reword this topic" onClick={() => startEditing(topic.id)}>
                     <Pencil aria-hidden="true" />
                   </button>
-                  <PageLink to={topicPath(topic)} name={topicTitle(topic)} />
                   <button type="button" className="topic-dialog-chip-open topic-dialog-chip-remove" disabled={saving}
-                    aria-label={on ? `Remove ${topicTitle(topic)}` : `Keep ${topicTitle(topic)}`}
+                    aria-label={on ? `Remove ${title}` : `Keep ${title}`}
                     title={on ? 'Remove from your feed on Save' : 'Keep this topic'} onClick={toggleRemoval}>
                     {on ? <Trash2 aria-hidden="true" /> : <Undo2 aria-hidden="true" />}
                   </button>
-                </span>
-              </div>;
+                  <span className="topic-dialog-card-handle">{handle}</span>
+                </div>} />;
             }}
           />
         </div>}

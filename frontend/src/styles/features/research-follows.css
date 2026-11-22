@@ -554,14 +554,18 @@
 .topic-dialog-chip-open:hover:not(:disabled),
 .topic-dialog-chip-open:focus-visible { color: var(--accent-text); background: var(--accent-soft); }
 .topic-dialog-chip-open:disabled { opacity: 0.35; cursor: default; }
-.topic-dialog-topic:not(.is-removed) .topic-dialog-chip-remove:hover:not(:disabled),
-.topic-dialog-topic:not(.is-removed) .topic-dialog-chip-remove:focus-visible { color: var(--danger, #b42318); background: color-mix(in srgb, var(--danger, #b42318) 10%, transparent); }
-.topic-dialog-topic.is-removed .topic-dialog-chip { text-decoration: line-through; opacity: 0.6; }
-.topic-dialog-topic.is-removed .topic-dialog-chip-remove { color: var(--accent-text); }
-.topic-dialog-chip-creator { color: inherit; opacity: 0.7; font-size: 12px; }
-.topic-dialog-topic { display: flex; align-items: center; gap: 6px; }
-.topic-dialog-topic.is-editing .topic-dialog-chip { outline: 2px solid var(--accent); outline-offset: 1px; }
-.topic-dialog-topic-list .sortable-item + .sortable-item { margin-top: 6px; }
+.topic-dialog-own-topic:not(.is-removed) .topic-dialog-chip-remove:hover:not(:disabled),
+.topic-dialog-own-topic:not(.is-removed) .topic-dialog-chip-remove:focus-visible { color: var(--danger, #b42318); background: color-mix(in srgb, var(--danger, #b42318) 10%, transparent); }
+.topic-dialog-own-topic.is-removed > :not(.topic-dialog-card-actions) { opacity: 0.5; }
+.topic-dialog-own-topic.is-removed .home-topic-title { text-decoration: line-through; }
+.topic-dialog-own-topic.is-removed .topic-dialog-chip-remove { color: var(--accent-text); }
+.topic-dialog-own-topic.is-editing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.topic-dialog-topic-cards > .sortable-item { display: flex; }
+.topic-dialog-topic-cards > .sortable-item > .home-topic-card { flex: 1; }
+.topic-dialog-card-actions { display: flex; align-items: center; gap: 4px; width: 100%; margin-top: auto; }
+.topic-dialog-card-actions .home-topic-follow { margin-right: auto; }
+.topic-dialog-card-handle { display: inline-flex; }
+.topic-dialog-card-handle .sortable-handle { margin-left: 0; }
 .topic-dialog-editing {
   display: flex;
   flex-wrap: wrap;

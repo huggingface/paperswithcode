@@ -97,6 +97,8 @@ def test_first_follower_is_the_creator_and_keeps_it(db, now):
     assert db.get(ResearchTopic, topic_id).created_by_hf_subject == "alice"
     views = {v.text: v for v in topics.topic_views(db, "bob")}
     assert views["OCR releases"].is_creator is False
+    assert views["OCR releases"].followers == 1
+    assert views["OCR releases"].week_papers == 0
 
 
 def test_creator_less_topics_go_to_their_next_follower(db, now):

@@ -130,8 +130,8 @@ describe("TopicDialog feed management", () => {
       expect(link).toHaveAttribute("target", "_blank");
       expect(link.closest("button")).toBeNull();
     };
-    await expectNewTab("Open the Real-time video generation page", "/topics/1-real-time-video-generation");
-    // Popular topics are cards whose title links out.
+    // Your topics and popular topics are cards whose title links out.
+    await expectNewTab("Real-time video generation", "/topics/1-real-time-video-generation");
     await expectNewTab("OCR releases", "/topics/23-ocr-releases");
     await userEvent.click(screen.getByRole("tab", { name: /Tasks, methods/ }));
     await expectNewTab("Open the Robotics page", "/tasks/robotics");
@@ -175,8 +175,10 @@ describe("TopicDialog feed management", () => {
   it("names the creator of a followed topic someone else made, not your own", async () => {
     renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
     const group = (await screen.findByRole("heading", { name: "Your topics" })).parentElement!;
-    expect(await within(group).findByRole("button", { name: /^Speculative decoding/ })).toHaveTextContent("@nielsr");
-    expect(within(group).getByRole("button", { name: /^Real-time video generation/ })).not.toHaveTextContent("@");
+    const card = (name: string) => within(group).getByRole("button", { name }).closest(".home-topic-card")!;
+    await within(group).findByRole("button", { name: "Speculative decoding" });
+    expect(card("Speculative decoding")).toHaveTextContent("by @nielsr");
+    expect(card("Real-time video generation")).not.toHaveTextContent("@");
   });
 
   it("offers popular topics you do not follow yet, with their creator, and follows them on save", async () => {
