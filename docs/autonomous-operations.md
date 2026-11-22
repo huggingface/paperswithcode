@@ -79,8 +79,9 @@ qualified.
 
 The production chat alert monitor (`pwc-chat-alert-monitor.timer`, every
 minute, `backend/scripts/monitor_chat_operational_alerts.py`) runs a content-free
-aggregate check every 15 minutes over terminal user turns in the chat database
-(`chat_messages` status and `error_code`, joined to `chat_turn_latency`). It reads
+aggregate check every 15 minutes over the user turns that finished in the
+window. It takes each outcome from `chat_turn_latency.terminal_status` and the
+user row's `error_code`, so editing a prompt later does not change it. It reads
 no prompt or answer text and no longer depends on Langfuse, which stopped
 receiving chat observations when Trackio replaced it. User stops and per-user
 limits (`context_too_large`, OpenAI user concurrency, rate, and budget limits) do
@@ -95,8 +96,9 @@ not count as failures. A window alerts when:
   OpenAI failed before the turn's first output.
 
 Replaying the 14 days before 2026-11-22, the failure-rate and provider-error
-rules fired only in real incident windows: the 2026-11-16 to 11-19
-`gateway_unavailable` outage and the 2026-11-19 OpenAI outage. The latency rule
+rules fired only in real incident windows: a 2026-11-09 worker-loss cluster,
+the 2026-11-16 to 11-19 `gateway_unavailable` outage, and the 2026-11-19 OpenAI
+outage. The latency rule
 fired in 4 of 1,222 windows. Existing sanitized operational counters still
 supply persistence and capacity failures.
 

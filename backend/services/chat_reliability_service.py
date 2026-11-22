@@ -30,7 +30,6 @@ CONTRACTS = (
     "capacity",
     "provider_failover",
 )
-TERMINAL_TURN_STATUSES = ("complete", "error", "superseded", "interrupted")
 USER_SIDE_ERROR_CODES = frozenset(
     {
         "cancelled",
@@ -50,6 +49,7 @@ MIN_PROVIDER_ERRORS = 2
 MIN_LATENCY_SAMPLES = 5
 TTFT_MEDIAN_LIMIT_MS = 15_000
 COMPLETION_P95_LIMIT_MS = 180_000
+MAX_TURN_DURATION = timedelta(hours=1)
 
 
 def release_probe_triggers(
@@ -266,9 +266,11 @@ def classify_chat_aggregates(
     return tuple(findings)
 
 
-def turn_outcome(status: str, error_code: str | None) -> str | None:
-    if status == "complete":
+def turn_outcome(terminal_status: str | None, error_code: str | None) -> str | None:
+    if terminal_status == "complete":
         return "success"
+    if terminal_status not in {"error", "interrupted"}:
+        return None
     if error_code is None or error_code in USER_SIDE_ERROR_CODES:
         return None
     if error_code in PROVIDER_ERROR_CODES:
@@ -289,7 +291,7 @@ def database_turn_observations(
 ) -> tuple[SafeChatTurnObservation, ...]:
     rows = db.execute(
         select(
-            ChatMessageRecord.status,
+            ChatTurnLatency.terminal_status,
             ChatMessageRecord.error_code,
             ChatTurnLatency.first_semantic_event_ms,
             ChatTurnLatency.total_ms,
@@ -302,15 +304,15 @@ def database_turn_observations(
             ),
         )
         .where(
-            ChatTurnLatency.admitted_at >= start,
-            ChatTurnLatency.admitted_at < end,
+            ChatTurnLatency.admitted_at >= start - MAX_TURN_DURATION,
+            ChatTurnLatency.completed_at >= start,
+            ChatTurnLatency.completed_at < end,
             ChatTurnLatency.qualification_run_id.is_(None),
-            ChatMessageRecord.status.in_(TERMINAL_TURN_STATUSES),
         )
     ).all()
     observations = []
-    for status, error_code, ttft_ms, total_ms in rows:
-        outcome = turn_outcome(status, error_code)
+    for terminal_status, error_code, ttft_ms, total_ms in rows:
+        outcome = turn_outcome(terminal_status, error_code)
         if outcome is None:
             continue
         succeeded = outcome == "success"
@@ -346,8 +348,9 @@ def database_provider_failovers(
             ),
         )
         .where(
-            ChatTurnLatency.admitted_at >= start,
-            ChatTurnLatency.admitted_at < end,
+            ChatTurnLatency.admitted_at >= start - MAX_TURN_DURATION,
+            ChatTurnLatency.completed_at >= start,
+            ChatTurnLatency.completed_at < end,
             ChatTurnLatency.qualification_run_id.is_(None),
             user.model_route == settings.chat_openai_luna_route,
             assistant.model_route == settings.chat_sponsored_deepseek_route,

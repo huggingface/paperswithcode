@@ -259,12 +259,20 @@ def db():
         yield session
 
 
+TERMINAL_FOR_STATUS = {
+    "complete": "complete",
+    "error": "error",
+    "interrupted": "interrupted",
+}
+
+
 def _turn(
     db,
     *,
     status="complete",
     error_code=None,
-    admitted_at=NOW - timedelta(minutes=5),
+    terminal_status=None,
+    completed_at=NOW - timedelta(minutes=5),
     ttft_ms=1_000,
     total_ms=10_000,
     user_route="gpt-5.6-luna@openai",
@@ -292,7 +300,9 @@ def _turn(
             execution_backend="modal_cli",
             model_route=user_route,
             app_release_id="release",
-            admitted_at=admitted_at,
+            admitted_at=(completed_at or NOW) - timedelta(minutes=1),
+            completed_at=completed_at,
+            terminal_status=terminal_status or TERMINAL_FOR_STATUS.get(status, "error"),
             first_semantic_event_ms=ttft_ms,
             total_ms=total_ms,
             qualification_run_id=qualification_run_id,
@@ -365,14 +375,14 @@ def test_probe_ignores_user_stops_limits_qualification_and_other_windows(db):
     _turn(db, status="superseded", error_code="cancel_control_missing")
     _turn(db, status="error", error_code="context_too_large")
     _turn(db, status="error", error_code="openai_user_concurrency_limited")
-    _turn(db, status="superseded")
-    _turn(db, status="generating")
+    _turn(db, status="interrupted", terminal_status="stopped", error_code="cancelled")
+    _turn(db, status="generating", terminal_status="running", completed_at=None)
     _turn(db, status="error", error_code="provider_error", qualification_run_id="q")
     _turn(
         db,
         status="error",
         error_code="provider_error",
-        admitted_at=NOW - timedelta(minutes=20),
+        completed_at=NOW - timedelta(minutes=20),
     )
 
     by_contract = _probe(db)
@@ -380,6 +390,31 @@ def test_probe_ignores_user_stops_limits_qualification_and_other_windows(db):
     assert by_contract["success_rate"].evidence["total_requests"] == 1
     assert by_contract["success_rate"].state == FindingState.HEALTHY
     assert by_contract["provider_errors"].evidence["failure_count"] == 0
+
+
+def test_edited_prompts_keep_their_recorded_outcome(db):
+    _turn(db, status="superseded", terminal_status="complete")
+    _turn(db, status="superseded", terminal_status="complete")
+    _turn(db, status="superseded", error_code="provider_error")
+
+    finding = _probe(db)["success_rate"]
+
+    assert finding.evidence["total_requests"] == 3
+    assert finding.evidence["failed_requests"] == 1
+
+
+def test_turns_count_in_the_window_where_they_finish(db):
+    _turn(
+        db,
+        status="error",
+        error_code="provider_error",
+        completed_at=NOW - timedelta(minutes=2),
+    )
+    latency = db.query(ChatTurnLatency).one()
+    latency.admitted_at = NOW - timedelta(minutes=40)
+    db.flush()
+
+    assert _probe(db)["provider_errors"].evidence["failure_count"] == 1
 
 
 def test_isolated_failures_do_not_alert(db):
