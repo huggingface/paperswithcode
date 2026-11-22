@@ -31,7 +31,7 @@ from backend.models.research import (
     TopicVisibilityUpdate,
 )
 from backend.routers.auth import decode_request_session
-from backend.services import public_topic_service
+from backend.services import hf_avatar_service, public_topic_service
 from backend.services import research_follow_service as service
 from backend.services import research_topic_service
 from backend.services.research_delivery_service import (
@@ -237,6 +237,27 @@ def topic_matches(
 def featured_topics(response: Response, db: Session = Depends(get_database_session)):
     response.headers["Cache-Control"] = "public, max-age=600"
     return public_topic_service.bubbles(db, datetime.now(timezone.utc))
+
+
+@router.get("/research/avatars/{username}", include_in_schema=False)
+def follower_avatar(username: str, db: Session = Depends(get_database_session)):
+    """An account's HF avatar, served from our origin for topic pages and cards."""
+    if not public_topic_service.has_account(db, username):
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    db.close()
+    image = hf_avatar_service.avatar_image(username)
+    if image is None:
+        raise HTTPException(status_code=404, detail="Avatar not found")
+    content_type, content = image
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            "Cache-Control": "public, max-age=86400",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/research/topics/{topic_id}", response_model=PublicTopicView)
