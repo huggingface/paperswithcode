@@ -175,7 +175,10 @@ const ReasoningBlockView: React.FC<{
   if (!block.text.trim()) {
     return (
       <div className="chat-reason-done">
-        <div className="chat-reason-done-head chat-reason-done-head-static">
+        <div
+          className="chat-reason-done-head chat-reason-done-head-static"
+          title="The model returned no reasoning summary for this step."
+        >
           <CheckIcon />
           <span>{reasoningDoneLabel(block)}</span>
         </div>
