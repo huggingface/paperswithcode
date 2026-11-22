@@ -25,10 +25,13 @@ from backend.models.database import PaperCurationJob, PaperCurationSchedulerStat
 
 logger = logging.getLogger(__name__)
 
+SECRET_NAME = r"(?:authorization|api[-_]?key|token|secret|password)"
+SECRET_KEY = re.compile(SECRET_NAME + r"$", re.IGNORECASE)
 SECRET_PATTERNS = (
     re.compile(
-        r"(?i)(authorization|api[-_]?key|token|secret|password)"
-        r"(\\*\"\s*[:=]\s*\\*\"|\s*[:=]\s*(?:\\*\")?)([^\s\"'\\]+)"
+        r"(" + SECRET_NAME + r")"
+        r"(\"\s*[:=]\s*\"|\s*[:=]\s*\"?)([^\s\"']+)",
+        re.IGNORECASE,
     ),
     re.compile(r"\b(?:hf|sk)-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\bhf_[A-Za-z0-9]{30,}\b"),
@@ -41,14 +44,42 @@ SESSION_OBJECT = "session.jsonl"
 HUB_BUCKET_URI_PREFIX = "hf://buckets/"
 
 
-def redact_trace(raw: bytes) -> bytes:
-    text = raw.decode("utf-8", "replace")
+def _redact_text(text: str) -> str:
     for pattern in SECRET_PATTERNS:
         if pattern.groups >= 3:
             text = pattern.sub(r"\1\2<redacted>", text)
         else:
             text = pattern.sub("<redacted>", text)
-    return text.encode()
+    return text
+
+
+def _redact_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return _redact_text(value)
+    if isinstance(value, list):
+        return [_redact_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: "<redacted>"
+            if SECRET_KEY.search(key) and isinstance(item, str) and item
+            else _redact_value(item)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _redact_line(line: str) -> str:
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError:
+        return _redact_text(line)
+    return json.dumps(_redact_value(value), ensure_ascii=False, separators=(",", ":"))
+
+
+def redact_trace(raw: bytes) -> bytes:
+    """Redact secrets line by line, re-serializing JSON lines so JSONL stays valid."""
+    text = raw.decode("utf-8", "replace")
+    return "\n".join(_redact_line(line) for line in text.split("\n")).encode()
 
 
 def sha256(value: bytes) -> str:

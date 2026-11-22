@@ -46,6 +46,8 @@ def test_trace_redaction_keeps_every_jsonl_line_parseable():
         {"id_token": None, "password": 1234, "secret": True, "api_key": {"v": 1}},
         {"output": json.dumps({"refresh_token": None, "token": "nested-secret"})},
         {"cmd": 'export HF_TOKEN="quoted-assignment-secret" PASSWORD=bare-secret'},
+        {"msg": "token=", "x": 1},
+        {"a": "token=", "b": "c"},
     ]
     raw = "\n".join(json.dumps(line) for line in lines).encode()
 
@@ -61,6 +63,7 @@ def test_trace_redaction_keeps_every_jsonl_line_parseable():
     assert "nested-secret" not in redacted
     assert json.loads(parsed[5]["output"])["refresh_token"] is None
     assert parsed[6]["cmd"] == 'export HF_TOKEN="<redacted>" PASSWORD=<redacted>'
+    assert parsed[7:] == lines[7:]
 
 
 def test_checked_in_proposal_schema_requires_benchmark_gaps():
