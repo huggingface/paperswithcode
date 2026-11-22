@@ -78,12 +78,33 @@ qualified.
 ## Chat reliability monitoring
 
 The production chat alert monitor (`pwc-chat-alert-monitor.timer`, every
-minute, `backend/scripts/monitor_chat_operational_alerts.py`) runs content-free
-Langfuse aggregate checks every 15 minutes. Its Langfuse requests select only `core`, `basic`, `time`, and
-`metrics`; they never request trace input, output, or metadata. End-to-end turn
-observations supply success, interruption, first-token, and completion timing,
-while provider observations supply provider/auth/billing classes. Existing
-sanitized operational counters supply persistence and capacity failures.
+minute, `backend/scripts/monitor_chat_operational_alerts.py`) runs a content-free
+aggregate check every 15 minutes over the user turns that finished in the
+window. It takes each outcome from `chat_turn_latency.terminal_status` and the
+user row's `error_code`, so editing a prompt later does not change it. It reads
+no prompt or answer text and no longer depends on Langfuse, which stopped
+receiving chat observations when Trackio replaced it. User stops and per-user
+limits (`context_too_large`, OpenAI user concurrency, rate, and budget limits) do
+not count as failures. A window alerts when:
+
+- at least 3 turns failed and fewer than 95% succeeded;
+- at least 2 turns failed with `provider_error` or `openai_unavailable`;
+- any billing, authentication, interruption, or persistence failure occurred;
+- the median time to first event exceeds 15 s, or the p95 total exceeds 180 s,
+  over at least 5 completed turns;
+- any Luna turn was answered by the hidden sponsored failover route, which means
+  OpenAI failed before the turn's first output.
+
+Replaying the 14 days before 2026-11-22, the failure-rate and provider-error
+rules fired only in real incident windows: a 2026-11-09 worker-loss cluster,
+the 2026-11-16 to 11-19 `gateway_unavailable` outage, and the 2026-11-19 OpenAI
+outage. The latency rule
+fired in 4 of 1,222 windows. Existing sanitized operational counters still
+supply persistence and capacity failures.
+
+A session-store call for a chat the user deleted mid-turn returns 404, not 403,
+so the `session_store_forbidden` runtime alert counts only real capability
+rejections.
 
 A separately allowlisted synthetic job (`run_chat_synthetic_probe`,
 `pwc-cron-run-chat-synthetic-probe.timer`) polls its due/trigger state every minute

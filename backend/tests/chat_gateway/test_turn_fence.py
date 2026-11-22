@@ -571,3 +571,28 @@ def test_only_external_pi_runner_capabilities_receive_external_turn_scope(
 
     assert created == ("external-runner" if external else "sandbox-runner")
     assert ("external_turn" in observed_scopes[0]) is external
+
+
+def _reject_capability(*_args, **_kwargs):
+    raise gateway.CapabilityError("rejected")
+
+
+@pytest.mark.parametrize(
+    ("scope", "chat_exists", "status_code"),
+    [
+        ("session_store", False, 404),
+        ("session_store", True, 403),
+        ("model", False, 403),
+    ],
+)
+def test_rejected_capability_is_404_only_for_a_deleted_chat_session_store(
+    monkeypatch, scope, chat_exists, status_code
+):
+    monkeypatch.setattr(gateway.ChatCapabilityService, "validate", _reject_capability)
+    db = FenceDB(on_get=lambda *_args: object() if chat_exists else None)
+
+    with pytest.raises(HTTPException) as error:
+        gateway._scope("token", scope, str(uuid.uuid4()), str(uuid.uuid4()), db)
+
+    assert error.value.status_code == status_code
+    assert db.rollbacks == 1

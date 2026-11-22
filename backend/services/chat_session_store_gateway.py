@@ -57,7 +57,7 @@ class ChatSessionStoreGateway:
             .with_for_update()
         ).scalar_one_or_none()
         if chat is None:
-            raise SessionStoreGatewayError(403, "Session store scope rejected")
+            raise SessionStoreGatewayError(404, "Chat session not found")
         if (
             getattr(capability, "agent_harness", "claude") != "claude"
             or getattr(chat, "agent_harness", "claude") != "claude"

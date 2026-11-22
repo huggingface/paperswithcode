@@ -6,8 +6,19 @@ from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import Session
 
 from backend.config import Settings
+from backend.models.database import (
+    Base,
+    ChatMessageRecord,
+    ChatSession,
+    ChatTurnLatency,
+)
 from backend.services.autonomous_cron_probe import FindingState
 from backend.services.chat_reliability_service import (
     ChatAggregateSnapshot,
@@ -188,7 +199,7 @@ def test_aggregate_classification_is_deterministic_and_content_free():
         provider_errors=2,
         auth_errors=1,
         billing_errors=1,
-        ttft_ms=(500, 700, 900, 12_000, 14_000),
+        ttft_ms=(500, 16_000, 17_000, 18_000, 19_000),
         completion_ms=(2_000, 3_000, 4_000, 5_000, 200_000),
         stream_interruptions=2,
         persistence_failures=1,
@@ -196,6 +207,7 @@ def test_aggregate_classification_is_deterministic_and_content_free():
         collection_complete=True,
         window_start=NOW - timedelta(minutes=15),
         window_end=NOW,
+        provider_failovers=1,
     )
 
     findings = classify_chat_aggregates(snapshot)
@@ -213,6 +225,7 @@ def test_aggregate_classification_is_deterministic_and_content_free():
         "stream_integrity",
         "persistence",
         "capacity",
+        "provider_failover",
     }
     assert degraded["auth_errors"].evidence["incident_signature"] == (
         "chat:authentication:auth_error"
@@ -224,31 +237,229 @@ def test_aggregate_classification_is_deterministic_and_content_free():
     assert "trace_id" not in serialized
 
 
-def test_probe_combines_safe_langfuse_observations_and_operational_counts(monkeypatch):
-    monkeypatch.setattr(
-        "backend.services.chat_reliability_service.fetch_provider_request_observations",
-        lambda _settings, _start, _end: SimpleNamespace(
-            complete=True,
-            observations=(
-                SafeProviderObservation("success", 300, 1000),
-                SafeProviderObservation("provider_error", None, 2000),
-            ),
-        ),
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_sqlite(_type, _compiler, **_kwargs):
+    return "JSON"
+
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            ChatSession.__table__,
+            ChatMessageRecord.__table__,
+            ChatTurnLatency.__table__,
+        ],
     )
-    monkeypatch.setattr(
-        "backend.services.chat_reliability_service.fetch_chat_turn_observations",
-        lambda _settings, _start, _end: SimpleNamespace(
-            complete=True,
-            observations=(
-                SafeChatTurnObservation("success", 300, 1000),
-                SafeChatTurnObservation("interrupted", 400, 2000),
-            ),
-        ),
+    with engine.begin() as connection:
+        connection.execute(text("DROP INDEX idx_chat_messages_current_revision"))
+    with Session(engine) as session:
+        yield session
+
+
+TERMINAL_FOR_STATUS = {
+    "complete": "complete",
+    "error": "error",
+    "interrupted": "interrupted",
+}
+
+
+def _turn(
+    db,
+    *,
+    status="complete",
+    error_code=None,
+    terminal_status=None,
+    completed_at=NOW - timedelta(minutes=5),
+    ttft_ms=1_000,
+    total_ms=10_000,
+    user_route="gpt-5.6-luna@openai",
+    answer_route=None,
+    qualification_run_id=None,
+):
+    session_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+    db.add(
+        ChatSession(
+            id=session_id,
+            hf_user_id="owner",
+            hf_username="owner",
+            selected_model="model",
+            execution_backend="modal_cli",
+        )
     )
+    db.flush()
+    db.add(
+        ChatTurnLatency(
+            turn_id=turn_id,
+            request_id=uuid.uuid4(),
+            chat_session_id=session_id,
+            traffic_class="new_chat",
+            execution_backend="modal_cli",
+            model_route=user_route,
+            app_release_id="release",
+            admitted_at=(completed_at or NOW) - timedelta(minutes=1),
+            completed_at=completed_at,
+            terminal_status=terminal_status or TERMINAL_FOR_STATUS.get(status, "error"),
+            first_semantic_event_ms=ttft_ms,
+            total_ms=total_ms,
+            qualification_run_id=qualification_run_id,
+        )
+    )
+    db.add(
+        ChatMessageRecord(
+            id=uuid.uuid4(),
+            session_id=session_id,
+            turn_id=turn_id,
+            sequence=1,
+            role="user",
+            content="omitted",
+            status=status,
+            error_code=error_code,
+            model_route=user_route,
+        )
+    )
+    if answer_route is not None:
+        db.add(
+            ChatMessageRecord(
+                id=uuid.uuid4(),
+                session_id=session_id,
+                turn_id=turn_id,
+                sequence=2,
+                role="assistant",
+                content="omitted",
+                status="complete",
+                model_route=answer_route,
+            )
+        )
+    db.flush()
+
+
+def _probe(db, **overrides):
+    settings = Settings(
+        environment="production",
+        chat_sponsored_deepseek_route="deepseek-route",
+        **overrides,
+    )
+    findings = probe_chat_aggregates(
+        timedelta(minutes=15), settings=settings, db=db, now=NOW
+    )
+    return {item.contract: item for item in findings}
+
+
+def test_probe_reads_terminal_turn_outcomes_from_the_database(db):
+    for _ in range(6):
+        _turn(db)
+    _turn(db, status="error", error_code="provider_error")
+    _turn(db, status="superseded", error_code="openai_unavailable")
+    _turn(db, status="error", error_code="gateway_unavailable")
+    _turn(db, status="error", error_code="hf_inference_billing_exhausted")
+    _turn(db, status="interrupted", error_code="external_worker_lost")
+
+    by_contract = _probe(db)
+
+    assert by_contract["success_rate"].state == FindingState.DEGRADED
+    assert by_contract["success_rate"].evidence["failed_requests"] == 5
+    assert by_contract["provider_errors"].evidence["failure_count"] == 2
+    assert by_contract["provider_errors"].state == FindingState.DEGRADED
+    assert by_contract["billing_errors"].state == FindingState.DEGRADED
+    assert by_contract["stream_integrity"].state == FindingState.DEGRADED
+    assert by_contract["provider_failover"].state == FindingState.HEALTHY
+
+
+def test_probe_ignores_user_stops_limits_qualification_and_other_windows(db):
+    _turn(db)
+    _turn(db, status="interrupted", error_code="cancelled")
+    _turn(db, status="superseded", error_code="cancel_control_missing")
+    _turn(db, status="error", error_code="context_too_large")
+    _turn(db, status="error", error_code="openai_user_concurrency_limited")
+    _turn(db, status="interrupted", terminal_status="stopped", error_code="cancelled")
+    _turn(db, status="generating", terminal_status="running", completed_at=None)
+    _turn(db, status="error", error_code="provider_error", qualification_run_id="q")
+    _turn(
+        db,
+        status="error",
+        error_code="provider_error",
+        completed_at=NOW - timedelta(minutes=20),
+    )
+
+    by_contract = _probe(db)
+
+    assert by_contract["success_rate"].evidence["total_requests"] == 1
+    assert by_contract["success_rate"].state == FindingState.HEALTHY
+    assert by_contract["provider_errors"].evidence["failure_count"] == 0
+
+
+def test_edited_prompts_keep_their_recorded_outcome(db):
+    _turn(db, status="superseded", terminal_status="complete")
+    _turn(db, status="superseded", terminal_status="complete")
+    _turn(db, status="superseded", error_code="provider_error")
+
+    finding = _probe(db)["success_rate"]
+
+    assert finding.evidence["total_requests"] == 3
+    assert finding.evidence["failed_requests"] == 1
+
+
+def test_turns_count_in_the_window_where_they_finish(db):
+    _turn(
+        db,
+        status="error",
+        error_code="provider_error",
+        completed_at=NOW - timedelta(minutes=2),
+    )
+    latency = db.query(ChatTurnLatency).one()
+    latency.admitted_at = NOW - timedelta(minutes=40)
+    db.flush()
+
+    assert _probe(db)["provider_errors"].evidence["failure_count"] == 1
+
+
+def test_isolated_failures_do_not_alert(db):
+    for _ in range(3):
+        _turn(db)
+    _turn(db, status="error", error_code="provider_error")
+    _turn(db, status="error", error_code="gateway_unavailable")
+
+    findings = _probe(db).values()
+
+    assert reliability_alert_classifications(tuple(findings)) == {}
+
+
+def test_probe_alerts_on_luna_turns_answered_by_the_failover_route(db):
+    _turn(db, answer_route="deepseek-route")
+    _turn(db, answer_route="gpt-5.6-luna@openai")
+    _turn(db, user_route="deepseek-route", answer_route="deepseek-route")
+
+    by_contract = _probe(db)
+
+    assert by_contract["provider_failover"].state == FindingState.DEGRADED
+    assert by_contract["provider_failover"].evidence["failover_count"] == 1
+    assert by_contract["success_rate"].state == FindingState.HEALTHY
+
+
+def test_latency_needs_enough_samples_and_uses_the_median(db):
+    for ttft in (500, 600, 20_000, 21_000):
+        _turn(db, ttft_ms=ttft)
+    assert _probe(db)["time_to_first_token"].state == FindingState.UNKNOWN
+
+    _turn(db, ttft_ms=22_000)
+    finding = _probe(db)["time_to_first_token"]
+    assert finding.state == FindingState.DEGRADED
+    assert finding.evidence["p50_ms"] == 20_000
+
+
+def test_probe_adds_operational_counts_to_database_outcomes(db):
+    _turn(db)
+    _turn(db, status="error", error_code="transcript_mirror_error")
+    settings = Settings(environment="production")
 
     findings = probe_chat_aggregates(
         timedelta(minutes=15),
-        settings=Settings(environment="production"),
+        settings=settings,
+        db=db,
         now=NOW,
         operational_counts={
             "stream_persistence_failure": 1,
@@ -257,59 +468,22 @@ def test_probe_combines_safe_langfuse_observations_and_operational_counts(monkey
     )
 
     by_contract = {item.contract: item for item in findings}
-    assert by_contract["provider_errors"].state == FindingState.DEGRADED
-    assert by_contract["persistence"].evidence["failure_count"] == 1
+    assert by_contract["persistence"].evidence["failure_count"] == 2
     assert by_contract["capacity"].evidence["failure_count"] == 2
 
 
-def test_probe_counts_predispatch_turn_provider_auth_and_billing_failures(monkeypatch):
-    monkeypatch.setattr(
-        "backend.services.chat_reliability_service.fetch_provider_request_observations",
-        lambda _settings, _start, _end: SimpleNamespace(
-            complete=True,
-            observations=(SafeProviderObservation("success", 300, 1000),),
-        ),
-    )
-    monkeypatch.setattr(
-        "backend.services.chat_reliability_service.fetch_chat_turn_observations",
-        lambda _settings, _start, _end: SimpleNamespace(
-            complete=True,
-            observations=(
-                SafeChatTurnObservation("provider_error", None, 100),
-                SafeChatTurnObservation("auth_error", None, 200),
-                SafeChatTurnObservation("billing_error", None, 300),
-            ),
-        ),
-    )
+def test_database_failure_makes_the_aggregate_source_unknown():
+    class BrokenSession:
+        def execute(self, *_args, **_kwargs):
+            raise OperationalError("select", {}, Exception("down"))
+
+        def rollback(self):
+            pass
 
     findings = probe_chat_aggregates(
         timedelta(minutes=15),
         settings=Settings(environment="production"),
-        now=NOW,
-    )
-
-    by_contract = {item.contract: item for item in findings}
-    assert by_contract["provider_errors"].state == FindingState.DEGRADED
-    assert by_contract["provider_errors"].evidence["failure_count"] == 1
-    assert by_contract["auth_errors"].state == FindingState.DEGRADED
-    assert by_contract["auth_errors"].evidence["failure_count"] == 1
-    assert by_contract["billing_errors"].state == FindingState.DEGRADED
-    assert by_contract["billing_errors"].evidence["failure_count"] == 1
-
-
-def test_unavailable_or_truncated_aggregate_source_is_unknown(monkeypatch):
-    monkeypatch.setattr(
-        "backend.services.chat_reliability_service.fetch_provider_request_observations",
-        lambda _settings, _start, _end: None,
-    )
-    monkeypatch.setattr(
-        "backend.services.chat_reliability_service.fetch_chat_turn_observations",
-        lambda _settings, _start, _end: None,
-    )
-
-    findings = probe_chat_aggregates(
-        timedelta(minutes=15),
-        settings=Settings(environment="production"),
+        db=BrokenSession(),
         now=NOW,
     )
 
@@ -320,9 +494,9 @@ def test_unavailable_or_truncated_aggregate_source_is_unknown(monkeypatch):
 def test_alert_projection_contains_only_contract_and_stable_signature():
     findings = classify_chat_aggregates(
         ChatAggregateSnapshot(
-            total_requests=1,
+            total_requests=3,
             successful_requests=0,
-            provider_errors=1,
+            provider_errors=2,
             auth_errors=0,
             billing_errors=0,
             ttft_ms=(),
@@ -354,7 +528,7 @@ def test_trace_content_access_requires_finding_no_telemetry_and_durable_audit(
             ChatAggregateSnapshot(
                 total_requests=1,
                 successful_requests=0,
-                provider_errors=1,
+                provider_errors=2,
                 auth_errors=0,
                 billing_errors=0,
                 ttft_ms=(),
@@ -432,7 +606,7 @@ def test_trace_content_access_rejects_failed_durable_audit(monkeypatch, tmp_path
     snapshot = ChatAggregateSnapshot(
         total_requests=1,
         successful_requests=0,
-        provider_errors=1,
+        provider_errors=2,
         auth_errors=0,
         billing_errors=0,
         ttft_ms=(),
@@ -486,7 +660,7 @@ def test_authorized_incident_trace_content_fetch_is_bounded_to_permit(
             ChatAggregateSnapshot(
                 total_requests=1,
                 successful_requests=0,
-                provider_errors=1,
+                provider_errors=2,
                 auth_errors=0,
                 billing_errors=0,
                 ttft_ms=(),
