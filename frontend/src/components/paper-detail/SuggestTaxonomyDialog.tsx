@@ -22,6 +22,8 @@ import { submissionsApi } from "@/lib/api/submissions";
 import { catalogApi } from "@/lib/api/catalog";
 import { pendingEditSubmission } from "@/lib/pendingEdits";
 import { useToast } from "@/hooks/use-toast";
+import { isStagingEnvironment } from "@/lib/apiUrl";
+import { STAGING_SUBMISSION_TOAST } from "@/lib/submissionOutcome";
 
 type TaxonomyKind = "task" | "method" | "benchmark" | "metric" | "conference";
 
@@ -224,7 +226,7 @@ export function SuggestTaxonomyDialog({
       }
     },
     onSuccess: () => {
-      toast({
+      toast(isStagingEnvironment() ? STAGING_SUBMISSION_TOAST : {
         title: "Suggestion submitted for review",
         description: `Thanks! An admin will review your suggested ${label} shortly.`,
       });
