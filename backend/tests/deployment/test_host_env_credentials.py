@@ -13,8 +13,8 @@ import pytest
 import deploy.configure_host_env as configure_host_env
 
 CURATOR_IMAGE = (
-    "cr.hf.co/nielsr/pwc-codex-curator:runner-f165a0e4c56a"
-    "@sha256:3c4c6b16737946f69a0390f3c014ffea5a46be8b7e63633e804c21d3e0046496"
+    "cr.hf.co/nielsr/pwc-codex-curator:runner-395e4434f4fa"
+    "@sha256:11bec45f755a071b1d9c02308c415bfb2388b483171db85a07cc3a4bc9f6196d"
 )
 
 
