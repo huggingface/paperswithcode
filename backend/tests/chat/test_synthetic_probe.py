@@ -454,3 +454,25 @@ def test_synthetic_job_pauses_without_monitor_credentials(
     assert health[-1]["status"] == "paused"
     assert health[-1]["reason_code"] == "credential_unavailable"
     assert state["events"] == []
+
+
+def test_http_transport_passes_the_chat_same_origin_check():
+    from starlette.requests import Request
+
+    from backend.routers.chat import _require_same_origin_csrf
+
+    transport = chat_synthetic_service.HttpSyntheticChatTransport(
+        cookie="token", expected_username="monitor"
+    )
+    outgoing = transport.client.build_request("POST", "/api/v1/chat/sessions")
+    asyncio.run(transport.client.aclose())
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": outgoing.url.path,
+            "headers": [(name.lower(), value) for name, value in outgoing.headers.raw],
+        }
+    )
+
+    _require_same_origin_csrf(request, SimpleNamespace(is_deployed=True))
