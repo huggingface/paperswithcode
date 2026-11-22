@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { BrowserRouter, MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { researchApi, TOPIC_LIMIT } from '@/lib/api/research';
 import { ApiError } from '@/lib/apiTransport';
@@ -817,21 +817,24 @@ it('reopens Edit feed as it was on Back from a page a link in it opened', async 
     return <button type="button" onClick={() => navigate(-1)}>Back</button>;
   }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/following']}><Routes>
+  window.history.pushState(null, '', '/following');
+  render(<QueryClientProvider client={client}><BrowserRouter><Routes>
     <Route path="/following" element={<FollowingView />} /><Route path="/tasks/:slug" element={<TaskPage />} />
-  </Routes></MemoryRouter></QueryClientProvider>);
+  </Routes></BrowserRouter></QueryClientProvider>);
   fireEvent.click(await screen.findByRole('button', { name: 'Edit feed' }));
   fireEvent.mouseDown(await screen.findByRole('tab', { name: /Tasks, methods/ }));
   const chip = await screen.findByRole('button', { name: 'Task' });
   fireEvent.click(chip);
   expect(chip).toHaveAttribute('aria-pressed', 'false');
   fireEvent.click(screen.getByRole('link', { name: 'Open the Task page' }));
-  fireEvent.click(await screen.findByRole('button', { name: 'Back' }));
+  expect(await screen.findByRole('button', { name: 'Back' })).toBeInTheDocument();
+  expect(window.location.pathname).toBe('/tasks/task');
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
   expect(await screen.findByRole('dialog')).toBeInTheDocument();
   expect(screen.getByRole('tab', { name: /Tasks, methods/ })).toHaveAttribute('aria-selected', 'true');
   expect(await screen.findByRole('button', { name: 'Task' })).toHaveAttribute('aria-pressed', 'false');
   // Closing it forgets that state, so the next Back to this page leaves it closed.
   fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-  expect(Object.keys(sessionStorage).filter(key => key.startsWith('pwc:topic-dialog:'))).toEqual([]);
+  expect(window.history.state.pwcTopicDialog).toBeUndefined();
 });

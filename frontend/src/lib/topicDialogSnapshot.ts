@@ -15,30 +15,21 @@ export interface TopicDialogSnapshot {
   scrollTop: number;
 }
 
-const PREFIX = 'pwc:topic-dialog:';
+const KEY = 'pwcTopicDialog';
 
-/** Kept per history entry, so only Back (or Forward) to the page the pop-up was on reopens it. */
-export function saveTopicDialog(entry: string, snapshot: TopicDialogSnapshot) {
-  try {
-    sessionStorage.setItem(PREFIX + entry, JSON.stringify(snapshot));
-  } catch {
-    return;
-  }
+/** Kept in the current history entry's state, so only Back (or Forward, or a reload) to that very entry reopens
+ * the pop-up; a fresh visit to the same page is a new entry without it. */
+export function saveTopicDialog(snapshot: TopicDialogSnapshot) {
+  window.history.replaceState({ ...window.history.state, [KEY]: snapshot }, '');
 }
 
-export function readTopicDialog(entry: string): TopicDialogSnapshot | null {
-  try {
-    const raw = sessionStorage.getItem(PREFIX + entry);
-    return raw ? JSON.parse(raw) as TopicDialogSnapshot : null;
-  } catch {
-    return null;
-  }
+export function readTopicDialog(): TopicDialogSnapshot | null {
+  return window.history.state?.[KEY] ?? null;
 }
 
-export function clearTopicDialog(entry: string) {
-  try {
-    sessionStorage.removeItem(PREFIX + entry);
-  } catch {
-    return;
-  }
+export function clearTopicDialog() {
+  if (!window.history.state?.[KEY]) return;
+  const state = { ...window.history.state };
+  delete state[KEY];
+  window.history.replaceState(state, '');
 }
