@@ -81,9 +81,9 @@ The goal is to split up those tasks in the future.
 - `object-tracking` — Object Tracking
 - `video-compression` — Video Compression
 - `video-text-retrieval` — Video-Text Retrieval
+- `video-captioning` — Video Captioning
 - `video-frame-interpolation` — Video frame interpolation
 - `video-super-resolution` — Video super-resolution
-- `video-restoration` — Video Restoration
 
 ### Vision
 
@@ -129,6 +129,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `aspect-based-sentiment-analysis` — Aspect-Based Sentiment Analysis
 - `atari-games` — Atari Games
 - `audio-editing` — Audio and Speech Editing
+- `audio-captioning` — Audio Captioning
 - `audio-classification` — Audio Classification
 - `audio-compression` — Audio Compression
 - `audio-generation` — Audio Generation
@@ -203,6 +204,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `few-shot-segmentation` — Few-Shot Segmentation
 - `finance` — Finance
 - `fine-grained-image-classification` — Fine-Grained Image Classification
+- `formal-verification` — Formal Verification
 - `full-duplex-spoken-dialogue` — Full-Duplex Spoken Dialogue
 - `gaze-estimation` — Gaze Estimation
 - `generative-recommendation` — Generative Recommendation
@@ -210,6 +212,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `graph-classification` — Graph Classification
 - `graph-machine-learning` — Graph Machine Learning
 - `graph-regression` — Graph Regression
+- `hand-detection` — Hand Detection
 - `handwritten-text-recognition` — Handwritten Text Recognition
 - `harness-engineering` — Harness Engineering
 - `head-pose-estimation` — Head Pose Estimation
@@ -244,10 +247,12 @@ This compact index contains every current task and subtask. Treat names and slug
 - `instruction-following` — Instruction Following
 - `intent-detection` — Intent Detection
 - `inverse-rendering` — Inverse Rendering
+- `keyword-spotting` — Keyword Spotting
 - `knowledge-graph-completion` — Knowledge Graph Completion
 - `knowledge-tracing` — Knowledge Tracing
 - `knowledge-aware-multimodal-recommendation` — Knowledge-Aware and Multimodal Recommendation
 - `label-distribution-learning` — Label Distribution Learning
+- `lane-detection` — Lane Detection
 - `language-modeling` — Language Modeling
 - `learning-to-rank` — Learning to Rank
 - `line-segment-detection` — Line Segment Detection
@@ -297,6 +302,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `oriented-object-detection` — Oriented Object Detection
 - `panoptic-segmentation` — Panoptic Segmentation
 - `part-of-speech-tagging` — Part-of-Speech Tagging
+- `path-planning` — Path Planning
 - `person-re-identification` — Person Re-Identification
 - `pii-detection` — PII Detection
 - `pitch-estimation` — Pitch Estimation
@@ -364,9 +370,11 @@ This compact index contains every current task and subtask. Treat names and slug
 - `time-series-forecasting` — Time-series forecasting
 - `topic-modeling` — Topic Modeling
 - `traffic-forecasting` — Traffic Forecasting
+- `traffic-sign-recognition` — Traffic Sign Recognition
 - `trajectory-prediction` — Trajectory Prediction
 - `unsupervised-domain-adaptation` — Unsupervised Domain Adaptation
 - `video-anomaly-detection` — Video Anomaly Detection
+- `video-captioning` — Video Captioning
 - `video-classification` — Video classification
 - `video-compression` — Video Compression
 - `video-editing` — Video Editing
@@ -389,6 +397,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `visual-grounding` — Visual Grounding
 - `visual-place-recognition` — Visual Place Recognition
 - `visual-place-recognition-re-ranking` — Visual Place Recognition with Re-ranking
+- `visual-servoing` — Visual Servoing
 - `visual-slam` — Visual SLAM
 - `visual-speech-recognition` — Visual Speech Recognition
 - `voice-activity-detection` — Voice Activity Detection
