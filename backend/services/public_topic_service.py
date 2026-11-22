@@ -23,12 +23,19 @@ from backend.models.database.research import (
     ResearchTopicFollow,
 )
 from backend.models.papers import Paper
-from backend.models.research import PublicTopicView, TopicBubble, TopicPerson
+from backend.models.research import (
+    FeaturedTopicPaper,
+    PublicTopicView,
+    TopicBubble,
+    TopicPerson,
+)
 from backend.services.research_topic_service import THRESHOLD
 
 BUBBLE_LIMIT = 20
 BUBBLE_MIN_RECENT_PAPERS = 5
 RECENT_DAYS = 30
+FEATURED_DAYS = 7
+FEATURED_AVATARS = 3
 INDEX_MIN_FOLLOWERS = 3
 AVATAR_LIMIT = 100
 
@@ -61,13 +68,35 @@ ORDER BY followers DESC, recent DESC, id
 LIMIT :limit
 """
 
+FEATURED_SQL = """
+SELECT t.id, count(w.id) week_papers,
+ (array_agg(w.id ORDER BY w.score DESC, w.date_published DESC, w.id DESC))[1] top_paper_id,
+ ARRAY(SELECT u.current_username FROM research_topic_follows f
+  JOIN user_profiles u ON u.hf_subject=f.hf_subject
+  LEFT JOIN research_subscriptions s ON s.hf_subject=f.hf_subject
+  WHERE f.topic_id=t.id AND coalesce(s.show_as_follower, true)
+  ORDER BY f.created_at, f.hf_subject LIMIT :avatars) avatars
+FROM research_topics t
+LEFT JOIN LATERAL (
+ -- Each hit counts once, as its arXiv id's latest version, like the topic page.
+ SELECT p.id, p.date_published, max(v.score) score
+ FROM research_topic_verdicts v JOIN papers source ON source.id=v.paper_id
+ JOIN papers p ON (source.arxiv_id IS NOT NULL AND p.arxiv_id=source.arxiv_id AND p.is_latest_version)
+  OR (source.arxiv_id IS NULL AND p.id=source.id)
+ WHERE v.topic_id=t.id AND v.score>=:threshold AND p.date_published>=:week
+ GROUP BY p.id, p.date_published
+) w ON true
+WHERE t.id = ANY(:ids)
+GROUP BY t.id
+"""
+
 
 def person(username: str | None) -> TopicPerson | None:
     if not username:
         return None
     return TopicPerson(
         username=username,
-        avatar_url=f"https://huggingface.co/api/users/{username}/avatar?redirect=true",
+        avatar_url=f"/api/v1/research/avatars/{username}",
     )
 
 
@@ -123,6 +152,7 @@ def topic_view(db: Session, topic_id: int, viewer: str | None) -> PublicTopicVie
         id=topic.id,
         text=topic.text,
         label=topic.label,
+        summary=topic.summary or None,
         status=topic.backfill_status,
         creator=person(creator),
         is_public=topic.is_public,
@@ -186,7 +216,7 @@ def bubbles(db: Session, now: datetime) -> list[TopicBubble]:
             "limit": BUBBLE_LIMIT,
         },
     ).mappings()
-    return [
+    topics = [
         TopicBubble(
             id=row["id"],
             text=row["text"],
@@ -196,6 +226,64 @@ def bubbles(db: Session, now: datetime) -> list[TopicBubble]:
         )
         for row in rows
     ]
+    return with_featured_stats(db, topics, now)
+
+
+def with_featured_stats(
+    db: Session, topics: list[TopicBubble], now: datetime
+) -> list[TopicBubble]:
+    """Add this week's papers, the top paper and a few followers' faces to each topic."""
+    if not topics:
+        return topics
+    week = (now - timedelta(days=FEATURED_DAYS)).date()
+    stats = {
+        row["id"]: row
+        for row in db.execute(
+            text(FEATURED_SQL),
+            {
+                "threshold": THRESHOLD,
+                "week": week,
+                "avatars": FEATURED_AVATARS,
+                "ids": [topic.id for topic in topics],
+            },
+        ).mappings()
+    }
+    papers = {
+        row.id: row
+        for row in db.execute(
+            select(DBPaper.id, DBPaper.arxiv_id, DBPaper.title).where(
+                DBPaper.id.in_(
+                    [
+                        row["top_paper_id"]
+                        for row in stats.values()
+                        if row["top_paper_id"]
+                    ]
+                )
+            )
+        )
+    }
+    for topic in topics:
+        row = stats[topic.id]
+        topic.week_papers = row["week_papers"]
+        topic.follower_avatars = [person(name) for name in row["avatars"]]
+        if row["top_paper_id"] is not None:
+            paper = papers[row["top_paper_id"]]
+            topic.top_paper = FeaturedTopicPaper(
+                id=paper.id, arxiv_id=paper.arxiv_id, title=paper.title
+            )
+    return topics
+
+
+def has_account(db: Session, username: str) -> bool:
+    """Whether a Papers with Code account uses this Hugging Face username."""
+    return (
+        db.scalar(
+            select(UserProfile.hf_subject)
+            .where(UserProfile.current_username == username)
+            .limit(1)
+        )
+        is not None
+    )
 
 
 def set_hidden(db: Session, topic_id: int, hidden: bool, now: datetime) -> None:
