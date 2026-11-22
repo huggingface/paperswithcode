@@ -9,14 +9,14 @@ from datetime import UTC, datetime, timedelta
 from math import ceil
 from typing import Any, Mapping
 
+from sqlalchemy import and_, func, select
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session, aliased
+
 from backend.config import Settings
+from backend.models.database import ChatMessageRecord, ChatTurnLatency
 from backend.services.autonomous_cron_probe import FindingState, HealthFinding
-from backend.services.chat_tracing_service import (
-    SafeChatTurnObservation,
-    SafeProviderObservation,
-    fetch_chat_turn_observations,
-    fetch_provider_request_observations,
-)
+from backend.services.chat_tracing_service import SafeChatTurnObservation
 
 CONTRACTS = (
     "success_rate",
@@ -28,7 +28,28 @@ CONTRACTS = (
     "stream_integrity",
     "persistence",
     "capacity",
+    "provider_failover",
 )
+TERMINAL_TURN_STATUSES = ("complete", "error", "superseded", "interrupted")
+USER_SIDE_ERROR_CODES = frozenset(
+    {
+        "cancelled",
+        "cancel_control_missing",
+        "context_too_large",
+        "openai_budget_exhausted",
+        "openai_user_concurrency_limited",
+        "openai_user_rate_limited",
+    }
+)
+PROVIDER_ERROR_CODES = frozenset({"provider_error", "openai_unavailable"})
+BILLING_ERROR_CODES = frozenset({"hf_inference_billing_exhausted"})
+INTERRUPTION_ERROR_CODES = frozenset({"external_worker_lost", "lease_expired"})
+PERSISTENCE_ERROR_CODES = frozenset({"persistence_error", "transcript_mirror_error"})
+MIN_FAILED_TURNS = 3
+MIN_PROVIDER_ERRORS = 2
+MIN_LATENCY_SAMPLES = 5
+TTFT_MEDIAN_LIMIT_MS = 15_000
+COMPLETION_P95_LIMIT_MS = 180_000
 
 
 def release_probe_triggers(
@@ -81,6 +102,7 @@ class ChatAggregateSnapshot:
     collection_complete: bool
     window_start: datetime
     window_end: datetime
+    provider_failovers: int = 0
 
 
 def _percentile(values: tuple[int, ...], percentile: int) -> int | None:
@@ -136,22 +158,29 @@ def classify_chat_aggregates(
         )
 
     total = snapshot.total_requests
+    failed = total - snapshot.successful_requests
     success_percent = (
         round(snapshot.successful_requests * 100 / total) if total else None
     )
-    p95_ttft = _percentile(snapshot.ttft_ms, 95)
+    p50_ttft = _percentile(snapshot.ttft_ms, 50)
     p95_completion = _percentile(snapshot.completion_ms, 95)
     specs = (
         (
             "success_rate",
-            total == 0 or (success_percent is not None and success_percent < 95),
+            failed >= MIN_FAILED_TURNS
+            and success_percent is not None
+            and success_percent < 95,
             "request_path",
             "success_rate_low" if total else "no_samples",
-            {"total_requests": total, "success_percent": success_percent},
+            {
+                "total_requests": total,
+                "failed_requests": failed,
+                "success_percent": success_percent,
+            },
         ),
         (
             "provider_errors",
-            snapshot.provider_errors > 0,
+            snapshot.provider_errors >= MIN_PROVIDER_ERRORS,
             "provider",
             "provider_error",
             {"failure_count": snapshot.provider_errors},
@@ -172,14 +201,14 @@ def classify_chat_aggregates(
         ),
         (
             "time_to_first_token",
-            p95_ttft is not None and p95_ttft > 10_000,
+            p50_ttft is not None and p50_ttft > TTFT_MEDIAN_LIMIT_MS,
             "stream",
             "ttft_regression",
-            {"p95_ms": p95_ttft, "sample_count": len(snapshot.ttft_ms)},
+            {"p50_ms": p50_ttft, "sample_count": len(snapshot.ttft_ms)},
         ),
         (
             "completion_latency",
-            p95_completion is not None and p95_completion > 180_000,
+            p95_completion is not None and p95_completion > COMPLETION_P95_LIMIT_MS,
             "stream",
             "completion_latency",
             {"p95_ms": p95_completion, "sample_count": len(snapshot.completion_ms)},
@@ -205,6 +234,13 @@ def classify_chat_aggregates(
             "saturated",
             {"failure_count": snapshot.capacity_failures},
         ),
+        (
+            "provider_failover",
+            snapshot.provider_failovers > 0,
+            "provider",
+            "failover",
+            {"failover_count": snapshot.provider_failovers},
+        ),
     )
     findings = []
     for contract, degraded, component, error_class, evidence in specs:
@@ -213,7 +249,7 @@ def classify_chat_aggregates(
             state = FindingState.UNKNOWN
         if (
             contract in {"time_to_first_token", "completion_latency"}
-            and evidence["sample_count"] == 0
+            and evidence["sample_count"] < MIN_LATENCY_SAMPLES
         ):
             state = FindingState.UNKNOWN
             error_class = "no_samples"
@@ -230,29 +266,111 @@ def classify_chat_aggregates(
     return tuple(findings)
 
 
+def turn_outcome(status: str, error_code: str | None) -> str | None:
+    if status == "complete":
+        return "success"
+    if error_code is None or error_code in USER_SIDE_ERROR_CODES:
+        return None
+    if error_code in PROVIDER_ERROR_CODES:
+        return "provider_error"
+    if error_code in BILLING_ERROR_CODES:
+        return "billing_error"
+    if "auth" in error_code:
+        return "auth_error"
+    if error_code in INTERRUPTION_ERROR_CODES:
+        return "interrupted"
+    if error_code in PERSISTENCE_ERROR_CODES:
+        return "persistence_error"
+    return "error"
+
+
+def database_turn_observations(
+    db: Session, start: datetime, end: datetime
+) -> tuple[SafeChatTurnObservation, ...]:
+    rows = db.execute(
+        select(
+            ChatMessageRecord.status,
+            ChatMessageRecord.error_code,
+            ChatTurnLatency.first_semantic_event_ms,
+            ChatTurnLatency.total_ms,
+        )
+        .join(
+            ChatMessageRecord,
+            and_(
+                ChatMessageRecord.turn_id == ChatTurnLatency.turn_id,
+                ChatMessageRecord.role == "user",
+            ),
+        )
+        .where(
+            ChatTurnLatency.admitted_at >= start,
+            ChatTurnLatency.admitted_at < end,
+            ChatTurnLatency.qualification_run_id.is_(None),
+            ChatMessageRecord.status.in_(TERMINAL_TURN_STATUSES),
+        )
+    ).all()
+    observations = []
+    for status, error_code, ttft_ms, total_ms in rows:
+        outcome = turn_outcome(status, error_code)
+        if outcome is None:
+            continue
+        succeeded = outcome == "success"
+        observations.append(
+            SafeChatTurnObservation(
+                outcome=outcome,
+                ttft_ms=ttft_ms if succeeded else None,
+                duration_ms=total_ms if succeeded else None,
+            )
+        )
+    return tuple(observations)
+
+
+def database_provider_failovers(
+    db: Session, settings: Settings, start: datetime, end: datetime
+) -> int:
+    if not settings.chat_sponsored_deepseek_route:
+        return 0
+    user = aliased(ChatMessageRecord)
+    assistant = aliased(ChatMessageRecord)
+    return db.scalar(
+        select(func.count())
+        .select_from(ChatTurnLatency)
+        .join(
+            user,
+            and_(user.turn_id == ChatTurnLatency.turn_id, user.role == "user"),
+        )
+        .join(
+            assistant,
+            and_(
+                assistant.turn_id == ChatTurnLatency.turn_id,
+                assistant.role == "assistant",
+            ),
+        )
+        .where(
+            ChatTurnLatency.admitted_at >= start,
+            ChatTurnLatency.admitted_at < end,
+            ChatTurnLatency.qualification_run_id.is_(None),
+            user.model_route == settings.chat_openai_luna_route,
+            assistant.model_route == settings.chat_sponsored_deepseek_route,
+        )
+    )
+
+
 def _snapshot(
-    observations: tuple[SafeProviderObservation, ...],
     turns: tuple[SafeChatTurnObservation, ...],
     *,
     complete: bool,
+    provider_failovers: int,
     operational_counts: Mapping[str, int],
     start: datetime,
     end: datetime,
 ) -> ChatAggregateSnapshot:
-    outcomes = [item.outcome for item in observations]
-    turn_outcomes = [item.outcome for item in turns]
+    outcomes = [item.outcome for item in turns]
     return ChatAggregateSnapshot(
         total_requests=len(turns),
-        successful_requests=turn_outcomes.count("success"),
-        provider_errors=max(
-            outcomes.count("provider_error"), turn_outcomes.count("provider_error")
-        ),
-        auth_errors=max(
-            outcomes.count("auth_error"), turn_outcomes.count("auth_error")
-        ),
-        billing_errors=max(
-            outcomes.count("billing_error"), turn_outcomes.count("billing_error")
-        ),
+        successful_requests=outcomes.count("success"),
+        provider_errors=outcomes.count("provider_error"),
+        auth_errors=outcomes.count("auth_error"),
+        billing_errors=outcomes.count("billing_error"),
         ttft_ms=tuple(item.ttft_ms for item in turns if item.ttft_ms is not None),
         completion_ms=tuple(
             item.duration_ms for item in turns if item.duration_ms is not None
@@ -265,7 +383,7 @@ def _snapshot(
                 "executor_lost_rate",
             )
         )
-        + turn_outcomes.count("interrupted"),
+        + outcomes.count("interrupted"),
         persistence_failures=sum(
             operational_counts.get(name, 0)
             for name in (
@@ -273,7 +391,8 @@ def _snapshot(
                 "transcript_mirror_failure",
                 "transcript_reconciliation_failure",
             )
-        ),
+        )
+        + outcomes.count("persistence_error"),
         capacity_failures=sum(
             operational_counts.get(name, 0)
             for name in (
@@ -285,6 +404,7 @@ def _snapshot(
         collection_complete=complete,
         window_start=start,
         window_end=end,
+        provider_failovers=provider_failovers,
     )
 
 
@@ -292,25 +412,26 @@ def probe_chat_aggregates(
     window: timedelta,
     *,
     settings: Settings,
+    db: Session,
     now: datetime | None = None,
     operational_counts: Mapping[str, int] | None = None,
 ) -> tuple[HealthFinding, ...]:
-    """Probe one aggregate window using sanitized Langfuse and alert evidence."""
+    """Probe one aggregate window from terminal chat turns in the database."""
 
     observed_at = (now or datetime.now(UTC)).astimezone(UTC)
     start = observed_at - window
-    page = fetch_provider_request_observations(settings, start, observed_at)
-    turns = fetch_chat_turn_observations(settings, start, observed_at)
+    try:
+        turns = database_turn_observations(db, start, observed_at)
+        failovers = database_provider_failovers(db, settings, start, observed_at)
+        complete = True
+    except SQLAlchemyError:
+        db.rollback()
+        turns, failovers, complete = (), 0, False
     return classify_chat_aggregates(
         _snapshot(
-            page.observations if page is not None else (),
-            turns.observations if turns is not None else (),
-            complete=(
-                page is not None
-                and page.complete
-                and turns is not None
-                and turns.complete
-            ),
+            turns,
+            complete=complete,
+            provider_failovers=failovers,
             operational_counts=operational_counts or {},
             start=start,
             end=observed_at,

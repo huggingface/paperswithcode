@@ -201,12 +201,14 @@ def collect_reliability_events(
     due = previous is None or now - previous >= timedelta(minutes=15)
     if not (due or force or critical_trigger):
         return []
-    findings = probe_chat_aggregates(
-        timedelta(minutes=15),
-        settings=settings,
-        now=now,
-        operational_counts=operational_counts,
-    )
+    with db_manager.session_local() as db:
+        findings = probe_chat_aggregates(
+            timedelta(minutes=15),
+            settings=settings,
+            db=db,
+            now=now,
+            operational_counts=operational_counts,
+        )
     state["last_reliability_probe_at"] = now.isoformat()
     source_unknown = any(
         finding.state == FindingState.UNKNOWN

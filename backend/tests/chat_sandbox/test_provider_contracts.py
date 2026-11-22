@@ -223,3 +223,37 @@ def test_sandbox_migration_is_environment_scoped():
     assert "OWNER TO pwc_staging_owner" in migration
     assert "TO pwc_staging;" in migration
     assert "FROM paperswithcode_user;" in migration
+
+
+def test_session_store_reports_a_deleted_chat_as_not_found():
+    class Result:
+        def scalar_one_or_none(self):
+            return None
+
+    class DB:
+        def execute(self, _statement):
+            return Result()
+
+    gateway = ChatSessionStoreGateway(
+        DB(),
+        type(
+            "Settings",
+            (),
+            {
+                "chat_session_byte_limit": 1024,
+                "chat_user_byte_limit": 4096,
+            },
+        )(),
+    )
+    with pytest.raises(SessionStoreGatewayError) as error:
+        gateway.execute(
+            ChatTurnCapability(chat_session_id=uuid.uuid4()),
+            SessionStoreCommand(
+                action="load",
+                key={"project_key": "x", "session_id": str(uuid.uuid4())},
+                entries=None,
+                project_key=None,
+            ),
+        )
+
+    assert error.value.status_code == 404
