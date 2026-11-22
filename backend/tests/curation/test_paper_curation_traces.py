@@ -36,6 +36,26 @@ def test_trace_redaction_removes_planted_credentials():
     assert redacted.count("<redacted>") >= 3
 
 
+def test_trace_redaction_keeps_every_jsonl_line_parseable():
+    hf_token = "hf_" + "A1b2C3d4E5" * 4
+    lines = [
+        {"cmd": 'token = os.environ["PWC_CURATION_JOB_TOKEN"]'},
+        {"token": hf_token, "max_tokens": 32768},
+        {"output": json.dumps({"api_key": "plain-secret-value"})},
+        {"path": "backend/services/hf_artifact_service.py"},
+    ]
+    raw = "\n".join(json.dumps(line) for line in lines).encode()
+
+    redacted = redact_trace(raw).decode()
+
+    parsed = [json.loads(line) for line in redacted.splitlines()]
+    assert hf_token not in redacted
+    assert "plain-secret-value" not in redacted
+    assert parsed[0]["cmd"].endswith('"PWC_CURATION_JOB_TOKEN"]')
+    assert parsed[1] == {"token": "<redacted>", "max_tokens": 32768}
+    assert parsed[3] == lines[3]
+
+
 def test_checked_in_proposal_schema_requires_benchmark_gaps():
     schema = json.loads(Path("jobs/schemas/curation_proposal.schema.json").read_text())
     Draft202012Validator.check_schema(schema)
