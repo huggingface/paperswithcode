@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from backend.database.connection import db_manager, get_database_session
 from backend.models.database import (
+    TaskDataset,
     Paper,
     Task,
     Method,
@@ -850,31 +851,42 @@ def test_webhook_body_limit_refuses_declared_and_streamed_oversize():
         assert error.value.status_code == 413
 
 
-def test_popular_benchmarks_rank_by_recent_reporting_papers(db, now):
-    task = Task(name="Task")
-    busy, quiet, stale = (Dataset(name=name) for name in ("Busy", "Quiet", "Stale"))
-    db.add_all([task, busy, quiet, stale])
+def test_popular_benchmarks_take_turns_between_flagship_tasks(db, now):
+    coding = Task(name="Coding agents", slug="coding-agents")
+    robotics = Task(name="Robotics", slug="robotics")
+    db.add_all([coding, robotics])
     db.flush()
-    rows = [
-        (paper(db, now, "1"), busy),
-        (paper(db, now, "2"), busy),
-        (paper(db, now, "3"), quiet),
-        (paper(db, now, "4", days=200), stale),
-        (paper(db, now, "5", days=200), stale),
-        (paper(db, now, "6", days=200), stale),
-    ]
-    for p, dataset in rows:
-        for model in ("A", "B"):
-            db.add(
-                Evaluation(
-                    paper_id=p.id,
-                    task_id=task.id,
-                    dataset_id=dataset.id,
-                    metrics={"Accuracy": 1},
-                    model_name=model,
+    names = {
+        coding: ["Terminal-Bench 4.0", "Terminal Bench 2.1", "DeepSWE"],
+        robotics: ["RoboTwin 2.0 Easy", "RoboTwin 2.0 Hard", "LIBERO"],
+    }
+    datasets = {}
+    for task, task_names in names.items():
+        for rank, name in enumerate(task_names):
+            dataset = Dataset(name=name)
+            db.add(dataset)
+            db.flush()
+            datasets[name] = dataset
+            db.add(TaskDataset(task_id=task.id, dataset_id=dataset.id))
+            for n in range(len(task_names) - rank):
+                p = paper(db, now, f"{dataset.id}{n}")
+                db.add(
+                    Evaluation(
+                        paper_id=p.id,
+                        task_id=task.id,
+                        dataset_id=dataset.id,
+                        metrics={"Accuracy": 1},
+                        model_name="M",
+                    )
                 )
-            )
+    variant = Dataset(name="LIBERO-Plus", parent_dataset_id=datasets["LIBERO"].id)
+    db.add(variant)
     db.flush()
-    ranked = [d.id for d in follows.popular_benchmarks(db, now.date())]
-    assert ranked.index(busy.id) < ranked.index(quiet.id)
-    assert stale.id not in ranked
+    db.add(TaskDataset(task_id=robotics.id, dataset_id=variant.id))
+    db.flush()
+    assert [d.name for d in follows.popular_benchmarks(db)] == [
+        "Terminal-Bench 4.0",
+        "RoboTwin 2.0 Easy",
+        "DeepSWE",
+        "LIBERO",
+    ]
