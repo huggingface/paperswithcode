@@ -2,13 +2,14 @@ import FollowingIntro from "@/components/FollowingIntro";
 import HomeFollowCard from "@/components/HomeFollowCard";
 import HomePopularTopics from "@/components/HomePopularTopics";
 import TopicDialog from "@/components/TopicDialog";
+import { clearTopicDialog, readTopicDialog } from "@/lib/topicDialogSnapshot";
 import FollowBubbles, { type FeedFilter } from "@/components/FollowBubbles";
 import { isAuthDisabled } from "@/lib/apiUrl";
 import { clearPendingTopic, isConflict, isTopicBuilding, readPendingFollows, readPendingTopic, readPendingTopicFollows, topicTitle, useFollowTopics, useResearchFollows, useResearchTopics, useSaveFollows, useSaveTopic } from "@/lib/researchTopic";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { PaperFeedList, type PaperFeedCard } from "@/components/PaperFeed";
 import { McpShowcase } from "@/components/McpShowcase";
@@ -476,8 +477,12 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     ? topics.data?.find(topic => topic.id === activeFilter.topicIds[0]) : undefined;
   // The pop-up edits one topic (its id) or the whole feed (null); undefined while closed.
   // `?edit=1` (linked from Settings) opens it on arrival.
+  // Back from a page a link in the pop-up opened reopens it as it was.
+  const location = useLocation();
+  const [restoredDialog, setRestoredDialog] = useState(() => readTopicDialog(location.key));
   const [editingTopic, setEditingTopic] = useState<number | null | undefined>(
-    () => following && searchParams.get("edit") === "1" ? null : undefined,
+    () => restoredDialog ? restoredDialog.topicId
+      : following && searchParams.get("edit") === "1" ? null : undefined,
   );
   // Refresh the feed each time a topic's backfill finishes, even while others still run.
   const queryClient = useQueryClient();
@@ -738,8 +743,11 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
                 open={editingTopic !== undefined}
                 topicId={editingTopic ?? null}
                 afterSavePath={following ? undefined : "/following"}
+                restore={restoredDialog}
                 onOpenChange={(open) => {
                   if (open) return;
+                  clearTopicDialog(location.key);
+                  setRestoredDialog(null);
                   setEditingTopic(undefined);
                   if (searchParams.has("edit")) {
                     const next = new URLSearchParams(searchParams);

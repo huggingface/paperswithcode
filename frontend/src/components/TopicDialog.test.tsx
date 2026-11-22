@@ -122,20 +122,20 @@ describe("TopicDialog feed management", () => {
     ]);
   });
 
-  it("links every chip to its page in a new tab, beside its toggle", async () => {
+  it("links every chip and card to its page, beside its toggle", async () => {
     renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
-    const expectNewTab = async (name: string, href: string) => {
+    const expectPageLink = async (name: string, href: string) => {
       const link = await screen.findByRole("link", { name });
       expect(link).toHaveAttribute("href", href);
-      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).not.toHaveAttribute("target");
       expect(link.closest("button")).toBeNull();
     };
     // Your topics and popular topics are cards whose title links out.
-    await expectNewTab("Real-time video generation", "/topics/1-real-time-video-generation");
-    await expectNewTab("OCR releases", "/topics/23-ocr-releases");
+    await expectPageLink("Real-time video generation", "/topics/1-real-time-video-generation");
+    await expectPageLink("OCR releases", "/topics/23-ocr-releases");
     await userEvent.click(screen.getByRole("tab", { name: /Tasks, methods/ }));
-    await expectNewTab("Open the Robotics page", "/tasks/robotics");
-    await expectNewTab("Open the SWE-bench Verified page", "/benchmark/swe-bench-verified");
+    await expectPageLink("Open the Robotics page", "/tasks/robotics");
+    await expectPageLink("Open the SWE-bench Verified page", "/benchmark/swe-bench-verified");
   });
 
   it("lists popular benchmarks below trending methods, after the ones already followed", async () => {
@@ -165,11 +165,10 @@ describe("TopicDialog feed management", () => {
     expect(await screen.findByText("Following feed", { selector: "div" })).toBeInTheDocument();
   });
 
-  it("offers no feed link to guests", async () => {
+  it("links guests to the Following feed too", async () => {
     auth.value = { user: null, isLoading: false };
     renderWithProviders(<TopicDialog open onOpenChange={() => {}} />);
-    await screen.findByRole("heading", { name: /research feed/ });
-    expect(screen.queryByRole("link", { name: "Following feed" })).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: "Following feed" })).toHaveAttribute("href", "/following");
   });
 
   it("names the creator of a followed topic someone else made, not your own", async () => {
