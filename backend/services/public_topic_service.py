@@ -28,8 +28,11 @@ from backend.models.research import (
     PublicTopicView,
     TopicBubble,
     TopicPerson,
+    TopicView,
 )
 from backend.services.research_topic_service import THRESHOLD
+
+TopicCard = TopicBubble | TopicView
 
 BUBBLE_LIMIT = 20
 BUBBLE_MIN_RECENT_PAPERS = 5
@@ -70,6 +73,7 @@ LIMIT :limit
 
 FEATURED_SQL = """
 SELECT t.id, count(w.id) week_papers,
+ (SELECT count(*) FROM research_topic_follows f WHERE f.topic_id=t.id) followers,
  (array_agg(w.id ORDER BY w.score DESC, w.date_published DESC, w.id DESC))[1] top_paper_id,
  ARRAY(SELECT u.current_username FROM research_topic_follows f
   JOIN user_profiles u ON u.hf_subject=f.hf_subject
@@ -230,9 +234,9 @@ def bubbles(db: Session, now: datetime) -> list[TopicBubble]:
 
 
 def with_featured_stats(
-    db: Session, topics: list[TopicBubble], now: datetime
-) -> list[TopicBubble]:
-    """Add this week's papers, the top paper and a few followers' faces to each topic."""
+    db: Session, topics: list[TopicCard], now: datetime
+) -> list[TopicCard]:
+    """Add followers, this week's papers, the top paper and a few followers' faces to each topic."""
     if not topics:
         return topics
     week = (now - timedelta(days=FEATURED_DAYS)).date()
@@ -264,6 +268,7 @@ def with_featured_stats(
     }
     for topic in topics:
         row = stats[topic.id]
+        topic.followers = row["followers"]
         topic.week_papers = row["week_papers"]
         topic.follower_avatars = [person(name) for name in row["avatars"]]
         if row["top_paper_id"] is not None:

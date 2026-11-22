@@ -26,7 +26,7 @@ import hashlib
 import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Protocol
 
 import httpx
@@ -618,8 +618,8 @@ def suggestions(db: Session, value: str) -> list[TopicSuggestion]:
 
 
 def topic_views(db: Session, subject: str) -> list[TopicView]:
-    """The account's topics in its own order, then oldest first."""
-    from backend.services.public_topic_service import person
+    """The account's topics in its own order, then oldest first, with the stats their cards show."""
+    from backend.services.public_topic_service import person, with_featured_stats
 
     rows = db.execute(
         select(
@@ -636,7 +636,7 @@ def topic_views(db: Session, subject: str) -> list[TopicView]:
             ResearchTopic.id,
         )
     ).all()
-    return [
+    views = [
         TopicView(
             id=topic.id,
             text=topic.text,
@@ -654,6 +654,7 @@ def topic_views(db: Session, subject: str) -> list[TopicView]:
         )
         for topic, set_at, creator in rows
     ]
+    return with_featured_stats(db, views, datetime.now(timezone.utc))
 
 
 def topic_view(db: Session, subject: str, topic_id: int) -> TopicView | None:

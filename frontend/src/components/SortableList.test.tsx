@@ -105,4 +105,28 @@ describe('SortableList', () => {
     expect(seen).toEqual(['translateY(32px)', '']);
     vi.restoreAllMocks();
   });
+
+  it('orders a grid in reading order, by row and then by column', () => {
+    const onReorder = vi.fn();
+    const cells = ['alpha', 'beta', 'gamma', 'delta'];
+    const grid = () => <SortableList grid items={cells} itemKey={item => item} itemLabel={item => item}
+      onReorder={onReorder} renderItem={(item, handle) => <div>{handle}<span>{item}</span></div>} />;
+    const { rerender } = render(grid());
+    // Two 100px columns of 20px rows.
+    screen.getAllByRole('listitem').forEach(cell => {
+      const index = () => Array.from(cell.parentElement!.children).indexOf(cell);
+      Object.defineProperty(cell, 'offsetTop', { get: () => Math.floor(index() / 2) * 20 });
+      Object.defineProperty(cell, 'offsetLeft', { get: () => (index() % 2) * 100 });
+      Object.defineProperty(cell, 'offsetHeight', { get: () => 20 });
+      Object.defineProperty(cell, 'offsetWidth', { get: () => 100 });
+    });
+    rerender(grid());
+    fireEvent.pointerDown(screen.getByRole('button', { name: /^Reorder alpha/ }), { button: 0, clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 30 });
+    expect(screen.getAllByRole('listitem').map(cell => cell.textContent)).toEqual(['beta', 'gamma', 'alpha', 'delta']);
+    fireEvent.pointerUp(window, { clientX: 60, clientY: 30 });
+    expect(onReorder).toHaveBeenCalledWith(['beta', 'gamma', 'alpha', 'delta']);
+    fireEvent.keyDown(screen.getByRole('button', { name: /^Reorder delta/ }), { key: 'ArrowLeft' });
+    expect(onReorder).toHaveBeenLastCalledWith(['alpha', 'beta', 'delta', 'gamma']);
+  });
 });
