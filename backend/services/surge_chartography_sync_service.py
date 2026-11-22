@@ -1,4 +1,4 @@
-"""Live board for the official Surge AI Chartography (no tools) leaderboard.
+"""Live board for the official Surge AI Chartography (with tools) leaderboard.
 
 The parser reads Surge's server-rendered block into ``LeaderboardEntry`` rows,
 and the shared ``LiveLeaderboardSyncService`` publishes them.
@@ -21,10 +21,12 @@ from backend.services.live_leaderboard_sync import (
 
 SURGE_CHARTOGRAPHY_URL = "https://surgehq.ai/benchmarks/chartography"
 TASK_SLUG = "image-understanding"
-DATASET_SLUG = "chartography-no-tools"
+DATASET_SLUG = "chartography"
 METRIC_NAME = "Pass@1"
-MODEL_NAME_SUFFIX = " (no tools)"
+MODEL_NAME_SUFFIX = " (with tools)"
 LEADERBOARD_TITLE = "Chartography Leaderboard"
+HARBOR_DATASET_URL = "https://huggingface.co/datasets/surgeai/Chartography-harbor"
+PROTOCOL = "Tool-assisted: Surge's containerized Harbor harness."
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/130.0 Safari/537.36 paperswithcode-surge-chartography-sync/1.0"
@@ -37,6 +39,7 @@ MIN_SELECTED_ENTRIES = 30
 _GEMINI_BLOG = "https://blog.google/innovation-and-ai/models-and-research/gemini-models"
 _GPT_5_6 = "https://openai.com/index/gpt-5-6/"
 _GPT_6 = "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
+_GPT_6_2 = "https://openai.com/index/introducing-gpt-6-2-astra-sol/"
 
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Gemini 4 Argon": ModelIdentity(
@@ -180,6 +183,93 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         source_url="https://docs.mistral.ai/models/model-cards/mistral-large-3-25-12",
         is_open=True,
     ),
+    "GPT 6.2 Astra": ModelIdentity("GPT-6.2 Astra", source_url=_GPT_6_2),
+    "GPT 6.2 Sol": ModelIdentity("GPT-6.2 Sol", source_url=_GPT_6_2),
+    "Gemini 4 Hydrogen": ModelIdentity(
+        "Gemini 4 Hydrogen", source_url=f"{_GEMINI_BLOG}/introducing-gemini-4-hydrogen/"
+    ),
+    "Gemini 4 Neon": ModelIdentity(
+        "Gemini 4 Neon", source_url=f"{_GEMINI_BLOG}/introducing-gemini-4-neon/"
+    ),
+    "Gemini 4 Carbon": ModelIdentity(
+        "Gemini 4 Carbon",
+        source_url="https://deepmind.google/blog/gemini-4-carbon-our-next-frontier-model/",
+    ),
+    "Claude Fable 5.2": ModelIdentity(
+        "Claude Fable 5.2",
+        source_url="https://www.anthropic.com/claude-fable-and-mythos-5-2",
+    ),
+    "Muse Ember 1.0": ModelIdentity(
+        "Muse Ember 1.0", source_url="https://research.meta.ai/blog/muse-ember"
+    ),
+    "DeepSeek V4 Flash": ModelIdentity(
+        "DeepSeek-V4-Flash",
+        arxiv_id="2606.19348",
+        is_open=True,
+        hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
+    ),
+    "DeepSeek V4 Pro": ModelIdentity(
+        "DeepSeek-V4-Pro",
+        arxiv_id="2606.19348",
+        is_open=True,
+        hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro",
+    ),
+    "Inkling 2 Small": ModelIdentity(
+        "Inkling 2 Small",
+        source_url="https://thinkingmachines.ai/news/inkling-2-small",
+        is_open=True,
+        hf_model_url="https://huggingface.co/thinkingmachines/Inkling-2-Small",
+    ),
+    "Qwen 4 Max": ModelIdentity(
+        "Qwen4-Max", source_url="https://qwen.ai/blog?id=qwen4-max"
+    ),
+    "GLM 5.3": ModelIdentity(
+        "GLM-5.3",
+        source_url="https://z.ai/blog/glm-5.3",
+        is_open=True,
+        hf_model_url="https://huggingface.co/zai-org/GLM-5.3",
+    ),
+    "Hy Hy4 Preview": ModelIdentity(
+        "Hy4 preview",
+        source_url=(
+            "https://github.com/Tencent-Hunyuan/Hy4-preview/blob/"
+            "1296fab2674cb5a645ccfe53e9a8dc225dbe69f2/README.md"
+        ),
+        is_open=True,
+        hf_model_url="https://huggingface.co/tencent/Hy4-preview",
+    ),
+    "Hy Hy4": ModelIdentity(
+        "Hy4",
+        source_url=(
+            "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-"
+            "the-worlds-leading-open-source-ai-models/"
+        ),
+        is_open=True,
+    ),
+    "Hy Hy3": ModelIdentity(
+        "Hy3",
+        source_url="https://huggingface.co/tencent/Hy3",
+        is_open=True,
+        hf_model_url="https://huggingface.co/tencent/Hy3",
+    ),
+    "MiniMax M3.1 Flash": ModelIdentity(
+        "MiniMax-M3.1-Flash",
+        source_url="https://www.minimax.io/blog/minimax-m31f",
+        is_open=True,
+        hf_model_url="https://huggingface.co/MiniMaxAI/MiniMax-M3.1-Flash",
+    ),
+    "Kimi K2.7 Code": ModelIdentity(
+        "Kimi K2.7 Code",
+        source_url="https://huggingface.co/moonshotai/Kimi-K2.7-Code",
+        is_open=True,
+        hf_model_url="https://huggingface.co/moonshotai/Kimi-K2.7-Code",
+    ),
+    "Nemotron 3 Ultra": ModelIdentity(
+        "Nemotron 3 Ultra",
+        arxiv_id="2606.15007",
+        is_open=True,
+        hf_model_url="https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Ultra-550B-A55B-BF16",
+    ),
 }
 
 EXCLUDED_LABELS: dict[str, str] = {
@@ -220,6 +310,11 @@ def parse_surge_chartography(html: str) -> list[LeaderboardEntry]:
     if not isinstance(html, str) or not html.strip():
         raise TypeError("Surge AI response must be non-empty HTML")
     soup = BeautifulSoup(html, "html.parser")
+    if soup.select_one(f'a[href^="{HARBOR_DATASET_URL}"]') is None:
+        raise ValueError(
+            "Surge AI page no longer links the Chartography Harbor harness; "
+            "the leaderboard protocol may have changed"
+        )
     titles = [
         node
         for node in soup.select(".lead-rank-table-title")
@@ -291,6 +386,7 @@ BOARD = LiveLeaderboard(
     metric=METRIC_NAME,
     identities=MODEL_IDENTITIES,
     min_selected=MIN_SELECTED_ENTRIES,
+    protocol=PROTOCOL,
     model_name_suffix=MODEL_NAME_SUFFIX,
     excluded=EXCLUDED_LABELS,
 )

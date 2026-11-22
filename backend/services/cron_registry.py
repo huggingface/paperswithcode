@@ -1325,7 +1325,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                    count(*) AS matched_evaluations
             FROM evaluations e
             JOIN datasets d ON d.id = e.dataset_id
-            WHERE d.slug = 'chartography-no-tools'
+            WHERE d.slug = 'chartography'
               AND e.methodology LIKE
                   'Managed by the Papers with Code Surge AI Chartography live sync.%'
         """,

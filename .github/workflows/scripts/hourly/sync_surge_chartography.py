@@ -1,4 +1,4 @@
-"""Refresh reviewed Chartography (no tools) evaluations from Surge AI."""
+"""Refresh reviewed Chartography (with tools) evaluations from Surge AI."""
 
 from scripts.utils.live_leaderboard_job import main
 
