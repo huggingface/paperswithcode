@@ -304,3 +304,30 @@ def test_save_skips_non_repository_github_url_and_marks_paper(monkeypatch, githu
     assert db.executed == [{"paper_id": 7}]
     assert db.committed
     assert extractor.stats["papers_with_project_page"] == 1
+
+
+def test_save_accepts_github_url_without_scheme(monkeypatch):
+    from backend.services.repository_service import RepositoryService
+
+    created = []
+    monkeypatch.setattr(
+        RepositoryService,
+        "create_repository_for_paper",
+        lambda self, **kwargs: created.append(kwargs) or object(),
+    )
+
+    class FakeDB:
+        def execute(self, statement, params):
+            pass
+
+        def commit(self):
+            pass
+
+    extractor = batch_extract.BatchURLExtractor.__new__(batch_extract.BatchURLExtractor)
+    extractor.dry_run = False
+    extractor.stats = {"papers_with_github": 0}
+
+    extractor.save_results_to_db(FakeDB(), 7, "github.com/Owner/Repo", "")
+
+    assert [call["url"] for call in created] == ["https://github.com/owner/repo"]
+    assert extractor.stats["papers_with_github"] == 1
