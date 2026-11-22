@@ -40,6 +40,11 @@ _GEMINI_BLOG = "https://blog.google/innovation-and-ai/models-and-research/gemini
 _GPT_5_6 = "https://openai.com/index/gpt-5-6/"
 _GPT_6 = "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
 _GPT_6_2 = "https://openai.com/index/introducing-gpt-6-2-astra-sol/"
+_DEEPSEEK_V4 = "2606.19348"
+_HY4 = (
+    "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-the-worlds-"
+    "leading-open-source-ai-models/"
+)
 
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Gemini 4 Argon": ModelIdentity(
@@ -186,7 +191,8 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "GPT 6.2 Astra": ModelIdentity("GPT-6.2 Astra", source_url=_GPT_6_2),
     "GPT 6.2 Sol": ModelIdentity("GPT-6.2 Sol", source_url=_GPT_6_2),
     "Gemini 4 Hydrogen": ModelIdentity(
-        "Gemini 4 Hydrogen", source_url=f"{_GEMINI_BLOG}/introducing-gemini-4-hydrogen/"
+        "Gemini 4 Hydrogen",
+        source_url=f"{_GEMINI_BLOG}/introducing-gemini-4-hydrogen/",
     ),
     "Gemini 4 Neon": ModelIdentity(
         "Gemini 4 Neon", source_url=f"{_GEMINI_BLOG}/introducing-gemini-4-neon/"
@@ -200,22 +206,22 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         source_url="https://www.anthropic.com/claude-fable-and-mythos-5-2",
     ),
     "Muse Ember 1.0": ModelIdentity(
-        "Muse Ember 1.0", source_url="https://research.meta.ai/blog/muse-ember"
+        "Muse Ember", source_url="https://research.meta.ai/blog/muse-ember"
     ),
     "DeepSeek V4 Flash": ModelIdentity(
         "DeepSeek-V4-Flash",
-        arxiv_id="2606.19348",
+        arxiv_id=_DEEPSEEK_V4,
         is_open=True,
         hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash",
     ),
     "DeepSeek V4 Pro": ModelIdentity(
         "DeepSeek-V4-Pro",
-        arxiv_id="2606.19348",
+        arxiv_id=_DEEPSEEK_V4,
         is_open=True,
         hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro",
     ),
     "Inkling 2 Small": ModelIdentity(
-        "Inkling 2 Small",
+        "Inkling-2-Small",
         source_url="https://thinkingmachines.ai/news/inkling-2-small",
         is_open=True,
         hf_model_url="https://huggingface.co/thinkingmachines/Inkling-2-Small",
@@ -230,7 +236,7 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         hf_model_url="https://huggingface.co/zai-org/GLM-5.3",
     ),
     "Hy Hy4 Preview": ModelIdentity(
-        "Hy4 preview",
+        "Hy4 Preview",
         source_url=(
             "https://github.com/Tencent-Hunyuan/Hy4-preview/blob/"
             "1296fab2674cb5a645ccfe53e9a8dc225dbe69f2/README.md"
@@ -240,11 +246,9 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     ),
     "Hy Hy4": ModelIdentity(
         "Hy4",
-        source_url=(
-            "https://www.tencent.com/tencent-launches-hy4-joining-the-ranks-of-"
-            "the-worlds-leading-open-source-ai-models/"
-        ),
+        source_url=_HY4,
         is_open=True,
+        hf_model_url="https://huggingface.co/tencent/Hy4",
     ),
     "Hy Hy3": ModelIdentity(
         "Hy3",

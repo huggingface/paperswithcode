@@ -62,7 +62,7 @@ HAND_IMPORTED_ROWS = {
     "Claude Fable 5.1 (with tools)": 88.4,
     "Claude Opus 5 (with tools)": 83.4,
     "Claude Fable 5.2 (with tools)": 91.6,
-    "Inkling 2 Small (with tools)": 82.1,
+    "Inkling-2-Small (with tools)": 82.1,
 }
 NO_TOOLS_ROWS = {
     "Claude Opus 5.5 (no tools)": 66.3,
@@ -277,7 +277,7 @@ def test_first_run_publishes_to_the_with_tools_board_only():
     assert opus.methodology.endswith(
         f"{service.PROTOCOL} Hand-reviewed notes for Claude Opus 5.5 (with tools)."
     )
-    assert rows["Inkling 2 Small (with tools)"].num_parameters == 123
+    assert rows["Inkling-2-Small (with tools)"].num_parameters == 123
     assert rows["DeepSeek-V4-Flash (with tools)"].is_open
 
     assert {
