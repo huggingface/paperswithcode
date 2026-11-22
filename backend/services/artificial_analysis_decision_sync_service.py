@@ -115,14 +115,17 @@ class DecisionIndexSyncStats:
 
 
 def _index_version(payload: str) -> str:
-    match = re.search(
-        r'"slug":"artificial-analysis-decision-index","name":'
-        r'"Artificial Analysis Decision Index (v[\w.]+)"',
-        payload,
+    versions = set(
+        re.findall(r"Artificial Analysis Decision Index (v\d+(?:\.\d+)*)\b", payload)
     )
-    if match is None:
+    if not versions:
         raise ValueError("Artificial Analysis Decision Index version is missing")
-    return match.group(1)
+    if len(versions) > 1:
+        raise ValueError(
+            "Artificial Analysis Decision Index names several versions: "
+            + ",".join(sorted(versions))
+        )
+    return versions.pop()
 
 
 def _contestants(payload: str) -> list[Any]:

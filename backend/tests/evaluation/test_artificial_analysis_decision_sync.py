@@ -98,6 +98,41 @@ def test_parse_refuses_another_index_version():
         decision.parse_decision_index_leaderboard(_page(_contestants(), version="v2.2"))
 
 
+def _heading_page(contestants: list[dict], *headings: str) -> str:
+    chunks = [
+        "0:"
+        + json.dumps([["$", "h1", None, {"children": heading}] for heading in headings])
+        + "\n",
+        "1:" + json.dumps({"contestants": contestants}),
+    ]
+    scripts = "".join(
+        f"<script>self.__next_f.push({json.dumps([1, chunk])})</script>"
+        for chunk in chunks
+    )
+    return f"<html><body>{scripts}</body></html>"
+
+
+def test_parse_reads_version_from_heading_without_slug_object():
+    page = _heading_page(
+        _contestants(),
+        "Artificial Analysis Decision Index v2.1",
+        "The Artificial Analysis Decision Index v2.1. measures decisions",
+    )
+
+    assert decision.parse_decision_index_leaderboard(page).version == "v2.1"
+
+
+def test_parse_refuses_conflicting_versions():
+    page = _heading_page(
+        _contestants(),
+        "Artificial Analysis Decision Index v2.1",
+        "Artificial Analysis Decision Index v2.2",
+    )
+
+    with pytest.raises(ValueError, match="several versions: v2.1,v2.2"):
+        decision.parse_decision_index_leaderboard(page)
+
+
 def test_parse_refuses_missing_reviewed_model():
     contestants = [c for c in _contestants() if c["slug"] != "lab_model-a"]
     contestants.append(_contestant("lab_spare", "Spare", 50.0))

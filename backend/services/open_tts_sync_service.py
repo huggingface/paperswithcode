@@ -85,6 +85,8 @@ ALL_LANGUAGE_DATASET_SLUG = "open-tts-leaderboard-all-languages"
 TASK_SLUG = "text-to-speech"
 WER_METRIC = "WER"
 RTFX_METRIC = "RTFx"
+ERROR_RATE_COLUMN = "Average ER ⬇️"
+RTFX_COLUMN = "Average RTFx ⬆️"
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Open TTS")
 DATASET_LABEL = "Seed-TTS, CV3-Eval, and MiniMax Multilingual"
 
@@ -290,8 +292,8 @@ def parse_open_tts_leaderboard(
     required = {
         "Rank",
         "Model",
-        "Average WER ⬇️",
-        "Average RTFx ⬆️",
+        ERROR_RATE_COLUMN,
+        RTFX_COLUMN,
         "License",
     }
     if not required.issubset(headers):
@@ -320,8 +322,8 @@ def parse_open_tts_leaderboard(
             raise ValueError("Open TTS row has an invalid model identity")
         rank_value = _number(row[indexes["Rank"]], field="rank", model_id=model_id)
         rank = int(rank_value)
-        wer = _number(row[indexes["Average WER ⬇️"]], field="WER", model_id=model_id)
-        rtfx = _number(row[indexes["Average RTFx ⬆️"]], field="RTFx", model_id=model_id)
+        wer = _number(row[indexes[ERROR_RATE_COLUMN]], field="WER", model_id=model_id)
+        rtfx = _number(row[indexes[RTFX_COLUMN]], field="RTFx", model_id=model_id)
         if (
             rank_value != rank
             or rank < 1
