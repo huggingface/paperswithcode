@@ -430,7 +430,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_surge_chartography",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Chartography (no tools) evaluation rows "
+            "create or revise reviewed Chartography (with tools) evaluation rows "
             "from the validated Surge AI leaderboard; never creates papers"
         ),
     ),

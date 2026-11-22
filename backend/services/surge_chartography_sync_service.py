@@ -1,4 +1,4 @@
-"""Live board for the official Surge AI Chartography (no tools) leaderboard.
+"""Live board for the official Surge AI Chartography (with tools) leaderboard.
 
 The parser reads Surge's server-rendered block into ``LeaderboardEntry`` rows,
 and the shared ``LiveLeaderboardSyncService`` publishes them.
@@ -21,10 +21,12 @@ from backend.services.live_leaderboard_sync import (
 
 SURGE_CHARTOGRAPHY_URL = "https://surgehq.ai/benchmarks/chartography"
 TASK_SLUG = "image-understanding"
-DATASET_SLUG = "chartography-no-tools"
+DATASET_SLUG = "chartography"
 METRIC_NAME = "Pass@1"
-MODEL_NAME_SUFFIX = " (no tools)"
+MODEL_NAME_SUFFIX = " (with tools)"
 LEADERBOARD_TITLE = "Chartography Leaderboard"
+HARBOR_DATASET_URL = "https://huggingface.co/datasets/surgeai/Chartography-harbor"
+PROTOCOL = "Tool-assisted: Surge's containerized Harbor harness."
 USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/130.0 Safari/537.36 paperswithcode-surge-chartography-sync/1.0"
@@ -312,6 +314,11 @@ def parse_surge_chartography(html: str) -> list[LeaderboardEntry]:
     if not isinstance(html, str) or not html.strip():
         raise TypeError("Surge AI response must be non-empty HTML")
     soup = BeautifulSoup(html, "html.parser")
+    if soup.select_one(f'a[href^="{HARBOR_DATASET_URL}"]') is None:
+        raise ValueError(
+            "Surge AI page no longer links the Chartography Harbor harness; "
+            "the leaderboard protocol may have changed"
+        )
     titles = [
         node
         for node in soup.select(".lead-rank-table-title")
@@ -383,6 +390,7 @@ BOARD = LiveLeaderboard(
     metric=METRIC_NAME,
     identities=MODEL_IDENTITIES,
     min_selected=MIN_SELECTED_ENTRIES,
+    protocol=PROTOCOL,
     model_name_suffix=MODEL_NAME_SUFFIX,
     excluded=EXCLUDED_LABELS,
 )
