@@ -1635,8 +1635,8 @@ def production_codex_values(
 def production_codex_image_values() -> dict[str, str]:
     return {
         "PWC_CODEX_JOBS_IMAGE": (
-            f"{OPERATOR.curator_image_repository}:runner-f165a0e4c56a"
-            "@sha256:3c4c6b16737946f69a0390f3c014ffea5a46be8b7e63633e804c21d3e0046496"
+            f"{OPERATOR.curator_image_repository}:runner-395e4434f4fa"
+            "@sha256:11bec45f755a071b1d9c02308c415bfb2388b483171db85a07cc3a4bc9f6196d"
         ),
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",
     }
@@ -1651,8 +1651,8 @@ def production_pi_shadow_values() -> dict[str, str]:
     """
     return {
         "PWC_CURATION_PI_JOBS_IMAGE": (
-            f"{OPERATOR.curator_image_repository}:pi-runner-1d2d6f1fda61"
-            "@sha256:383882d977ba6c17fd0d6d18cf5c1f031bdf36b2c55f519130cd41fffaae08d0"
+            f"{OPERATOR.curator_image_repository}:pi-runner-c1a2d4c9bbff"
+            "@sha256:bd3a959beb9a19db5b67c3cc70a5fe3de2c1b36b2bb9e863aebc824ba9cfe4c2"
         ),
         "PWC_CURATION_PI_SHADOW_SAMPLE_RATE": "0.2",
         "PWC_CURATION_PI_SHADOW_MAX_ACTIVE": "2",
