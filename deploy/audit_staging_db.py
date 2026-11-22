@@ -75,16 +75,20 @@ def main() -> int:
 
             cursor.execute(
                 """
-                SELECT p.table_name || '.' || p.column_name
-                FROM information_schema.columns p
-                JOIN information_schema.tables t
-                    ON t.table_schema = 'staging' AND t.table_name = p.table_name
-                WHERE p.table_schema = 'public'
+                SELECT pc.relname || '.' || pa.attname
+                FROM pg_class pc
+                JOIN pg_attribute pa ON pa.attrelid = pc.oid
+                    AND pa.attnum > 0 AND NOT pa.attisdropped
+                JOIN pg_class sc ON sc.relname = pc.relname
+                    AND sc.relnamespace = 'staging'::regnamespace
+                    AND sc.relkind IN ('r', 'p')
+                WHERE pc.relnamespace = 'public'::regnamespace
+                  AND pc.relkind IN ('r', 'p')
                   AND NOT EXISTS (
-                      SELECT 1 FROM information_schema.columns s
-                      WHERE s.table_schema = 'staging'
-                        AND s.table_name = p.table_name
-                        AND s.column_name = p.column_name
+                      SELECT 1 FROM pg_attribute sa
+                      WHERE sa.attrelid = sc.oid
+                        AND sa.attname = pa.attname
+                        AND NOT sa.attisdropped
                   )
                 ORDER BY 1
                 """
