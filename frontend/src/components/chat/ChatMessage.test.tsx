@@ -681,7 +681,10 @@ describe("AssistantMessage", () => {
       blocks: [{ kind: "reasoning", text: "", active: false, open: true, startedAt: 1_000, endedAt: 4_000 }],
     });
 
-    expect(screen.getByText("Thought for 3 seconds")).toBeInTheDocument();
+    expect(screen.getByText("Thought for 3 seconds").parentElement).toHaveAttribute(
+      "title",
+      "The model returned no reasoning summary for this step.",
+    );
     expect(screen.queryByRole("button", { name: "Thought for 3 seconds" })).not.toBeInTheDocument();
   });
 
