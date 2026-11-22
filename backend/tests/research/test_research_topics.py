@@ -25,6 +25,7 @@ from backend.models.database.research import (
     ResearchTopicVerdict,
 )
 from backend.models.research import ResearchEntry
+from backend.services import public_topic_service as public
 from backend.services import research_delivery_service as delivery
 from backend.services import research_follow_service as follows
 from backend.routers import research
@@ -147,6 +148,86 @@ def test_summarize_labels_only_long_descriptions(monkeypatch):
     long = "I'm very interested in AI-driven audio generation, fast enough for realtime use."
     assert topics.summarize(long) == "Real-time neural audio synthesis"
     assert requests == [long]
+
+
+def summary_client(
+    requests, content="papers on speculative decoding for LLM inference."
+):
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": content}}]}
+        )
+
+    return httpx.Client(transport=httpx.MockTransport(handler))
+
+
+def test_describe_asks_deepseek_on_hf_for_one_sentence(monkeypatch):
+    monkeypatch.setattr(
+        topics, "get_settings", lambda: type("S", (), {"hf_token": "hf_x"})()
+    )
+    requests = []
+    summary = topics.describe("speculative decoding", summary_client(requests))
+    assert summary == "Papers on speculative decoding for LLM inference."
+    request = requests[0]
+    assert str(request.url) == topics.SUMMARY_URL
+    assert request.headers["Authorization"] == "Bearer hf_x"
+    assert request.headers["X-HF-Bill-To"] == "huggingface"
+    body = json.loads(request.content)
+    assert body["model"] == "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+    assert "speculative decoding" in body["messages"][1]["content"]
+
+
+def test_describe_tells_an_outage_from_an_unusable_reply(monkeypatch):
+    monkeypatch.setattr(
+        topics, "get_settings", lambda: type("S", (), {"hf_token": ""})()
+    )
+    with pytest.raises(topics.SummaryUnavailable):
+        topics.describe("x", summary_client([]))
+    monkeypatch.setattr(
+        topics, "get_settings", lambda: type("S", (), {"hf_token": "hf_x"})()
+    )
+    assert topics.describe("x", summary_client([], content="")) is None
+    assert topics.describe("x", summary_client([], content="word " * 80)) is None
+
+    def down(request):
+        raise httpx.ConnectError("down")
+
+    with pytest.raises(topics.SummaryUnavailable):
+        topics.describe("x", httpx.Client(transport=httpx.MockTransport(down)))
+
+
+def test_fill_summaries_writes_followed_topics_without_one(db, now, monkeypatch):
+    first = topics.follow_topic(db, "alice", "speculative decoding", now)
+    second = topics.follow_topic(db, "bob", "video world models", now)
+    db.get(ResearchTopic, second).summary = "Already written."
+    db.flush()
+    monkeypatch.setattr(topics, "describe", lambda value, client: f"Papers on {value}.")
+    assert topics.fill_summaries(db, None) == 1
+    assert db.get(ResearchTopic, first).summary == "Papers on speculative decoding."
+    assert db.get(ResearchTopic, second).summary == "Already written."
+    assert topics.fill_summaries(db, None) == 0
+
+
+def test_fill_summaries_skips_unusable_replies_and_stops_on_outages(
+    db, now, monkeypatch
+):
+    old = topics.follow_topic(db, "alice", "speculative decoding", now)
+    new = topics.follow_topic(db, "bob", "video world models", now)
+    calls = []
+
+    def outage(value, client):
+        calls.append(value)
+        raise topics.SummaryUnavailable("down")
+
+    monkeypatch.setattr(topics, "describe", outage)
+    assert topics.fill_summaries(db, None) == 0
+    assert calls == ["video world models"]
+    monkeypatch.setattr(topics, "describe", lambda value, client: None)
+    assert topics.fill_summaries(db, None) == 0
+    assert db.get(ResearchTopic, new).summary == ""
+    assert db.get(ResearchTopic, old).summary == ""
+    assert public.topic_view(db, new, "bob").summary is None
 
 
 def entry(key, interests, published="2026-10-10"):
