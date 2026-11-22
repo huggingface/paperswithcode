@@ -27,10 +27,11 @@ class FollowSuggestion(BaseModel):
 
 
 class FollowSuggestions(BaseModel):
-    """Popular authors and organizations offered when building a research feed."""
+    """Popular authors, organizations, and benchmarks offered when building a research feed."""
 
     authors: list[FollowSuggestion]
     organizations: list[FollowSuggestion]
+    benchmarks: list[FollowSuggestion] = []
 
 
 class TopicUpdate(BaseModel):

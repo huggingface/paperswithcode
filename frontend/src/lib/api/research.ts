@@ -22,6 +22,7 @@ export interface FollowSuggestion {
 export interface FollowSuggestions {
   authors: FollowSuggestion[];
   organizations: FollowSuggestion[];
+  benchmarks?: FollowSuggestion[];
 }
 export interface ResearchTopicSuggestion {
   kind: FollowKind;

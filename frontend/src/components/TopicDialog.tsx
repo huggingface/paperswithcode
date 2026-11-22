@@ -67,7 +67,7 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
   const follows = useResearchFollows();
   const tasks = useQuery(catalogQueries.trendingTasks({ limit: SUGGESTIONS_PER_GROUP, level: 0 }));
   const methods = useQuery(catalogQueries.trendingMethods({ limit: SUGGESTIONS_PER_GROUP }));
-  // Popular authors and the directory's top organizations, with faces and logos.
+  // Popular authors, the directory's top organizations, and the benchmarks most reported on lately.
   const suggestions = useQuery(researchQueries.followSuggestions());
   const featured = useQuery(researchQueries.featuredTopics());
   const suggested = (items: FollowSuggestion[] = []) =>
@@ -358,7 +358,8 @@ function TopicDialogForm({ topicId, afterSavePath, onDone }: {
       <TabsContent value="catalog" className="topic-dialog-panel">
         {chips('Trending tasks', 'task', tasks.data?.results ?? [], { to: '/tasks', label: 'Browse tasks' })}
         {chips('Trending methods', 'method', methods.data?.results ?? [], { to: '/methods', label: 'Browse methods' })}
-        {chips('Benchmarks', 'benchmark', [], { to: '/tasks', label: 'Browse benchmarks' })}
+        {chips('Popular benchmarks', 'benchmark', suggested(suggestions.data?.benchmarks),
+          { to: '/tasks', label: 'Browse benchmarks' })}
         {chips('Popular authors', 'author', suggested(suggestions.data?.authors))}
         {chips('Popular organizations', 'organization', suggested(suggestions.data?.organizations),
           { to: '/organizations', label: 'Browse organizations' })}

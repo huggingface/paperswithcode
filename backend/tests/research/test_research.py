@@ -848,3 +848,33 @@ def test_webhook_body_limit_refuses_declared_and_streamed_oversize():
         with pytest.raises(HTTPException) as error:
             read(request)
         assert error.value.status_code == 413
+
+
+def test_popular_benchmarks_rank_by_recent_reporting_papers(db, now):
+    task = Task(name="Task")
+    busy, quiet, stale = (Dataset(name=name) for name in ("Busy", "Quiet", "Stale"))
+    db.add_all([task, busy, quiet, stale])
+    db.flush()
+    rows = [
+        (paper(db, now, "1"), busy),
+        (paper(db, now, "2"), busy),
+        (paper(db, now, "3"), quiet),
+        (paper(db, now, "4", days=200), stale),
+        (paper(db, now, "5", days=200), stale),
+        (paper(db, now, "6", days=200), stale),
+    ]
+    for p, dataset in rows:
+        for model in ("A", "B"):
+            db.add(
+                Evaluation(
+                    paper_id=p.id,
+                    task_id=task.id,
+                    dataset_id=dataset.id,
+                    metrics={"Accuracy": 1},
+                    model_name=model,
+                )
+            )
+    db.flush()
+    ranked = [d.id for d in follows.popular_benchmarks(db, now.date())]
+    assert ranked.index(busy.id) < ranked.index(quiet.id)
+    assert stale.id not in ranked

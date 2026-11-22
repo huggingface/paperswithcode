@@ -15,6 +15,7 @@ from backend.models.database import (
     Author,
     AuthorPhoto,
     Dataset,
+    Evaluation,
     Method,
     Organization,
     Task,
@@ -48,6 +49,8 @@ ENTITIES = {
 
 POPULAR_AUTHOR_IDS = (266, 4049, 13379, 25, 264)
 POPULAR_ORGANIZATION_LIMIT = 10
+POPULAR_BENCHMARK_LIMIT = 10
+POPULAR_BENCHMARK_DAYS = 90
 
 
 def _image_urls(db: Session, kind: str, entities: list) -> dict[int, str | None]:
@@ -70,6 +73,21 @@ def _entity_url(kind: str, entity) -> str:
     return f"/{ENTITIES[kind][1]}/{getattr(entity, 'slug', None) or entity.id}"
 
 
+def popular_benchmarks(db: Session, today: date | None = None) -> list[Dataset]:
+    """Benchmarks the most papers published in the last 90 days report results on."""
+    since = (today or date.today()) - timedelta(days=POPULAR_BENCHMARK_DAYS)
+    papers = func.count(func.distinct(Evaluation.paper_id))
+    return db.scalars(
+        select(Dataset)
+        .join(Evaluation, Evaluation.dataset_id == Dataset.id)
+        .join(DBPaper, DBPaper.id == Evaluation.paper_id)
+        .where(DBPaper.date_published > since)
+        .group_by(Dataset.id)
+        .order_by(papers.desc(), Dataset.id)
+        .limit(POPULAR_BENCHMARK_LIMIT)
+    ).all()
+
+
 def suggestions(db: Session) -> FollowSuggestions:
     authors = {
         a.id: a
@@ -86,6 +104,7 @@ def suggestions(db: Session) -> FollowSuggestions:
     for kind, entities in (
         ("author", ordered_authors),
         ("organization", organizations),
+        ("benchmark", popular_benchmarks(db)),
     ):
         images = _image_urls(db, kind, entities)
         groups[kind] = [
@@ -98,7 +117,9 @@ def suggestions(db: Session) -> FollowSuggestions:
             for entity in entities
         ]
     return FollowSuggestions(
-        authors=groups["author"], organizations=groups["organization"]
+        authors=groups["author"],
+        organizations=groups["organization"],
+        benchmarks=groups["benchmark"],
     )
 
 
