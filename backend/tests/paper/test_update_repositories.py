@@ -19,6 +19,7 @@ from backend.models.database import (
 )
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.repository_service import RepositoryService
+from backend.services.catalog_errors import CatalogValidationError
 from backend.utils.exceptions import PaperNotFoundError
 
 
@@ -269,3 +270,51 @@ def test_date_order_index_keeps_sqlite_schema_creation_compatible(db_session):
         f"CREATE INDEX {index_name} ON papers (date_published DESC NULLS LAST)"
         in statements
     )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://huggingface.co/thinkingmachines/Inkling-2-Mini",
+        "https://gist.github.com/user/1dd288e6e31a6d0b8dc4085d4afcc6f0",
+        "https://gitlab.com/group/project",
+        "https://github.com",
+        "arsh-6626 (Arsh Abbas)",
+    ],
+)
+def test_update_paper_repositories_rejects_non_github_urls(
+    db_session, paper_with_duplicate_repo_urls, url
+):
+    with pytest.raises(CatalogValidationError):
+        PaperAssociationService(
+            db_session, lambda *_args, **_kw: None
+        ).update_repositories(1, [{"url": url, "is_official": True}])
+
+    repository_ids = {
+        link.repository_id
+        for link in db_session.query(PaperRepository).filter(
+            PaperRepository.paper_id == 1
+        )
+    }
+    assert repository_ids == {10, 11}
+
+
+def test_update_paper_repositories_accepts_www_github_url(
+    db_session, paper_with_duplicate_repo_urls
+):
+    PaperAssociationService(db_session, lambda *_args, **_kw: None).update_repositories(
+        1, [{"url": "https://www.github.com/HuggingFace/Transformers"}]
+    )
+
+    link = db_session.query(PaperRepository).filter(PaperRepository.paper_id == 1).one()
+    assert link.repository_id == 12
+
+
+def test_create_repository_for_paper_rejects_non_github_url(
+    db_session, paper_with_duplicate_repo_urls
+):
+    with pytest.raises(CatalogValidationError):
+        RepositoryService(db_session).create_repository_for_paper(
+            "1", "https://huggingface.co/org/model", source="manual"
+        )
+    assert db_session.query(DBRepository).count() == 3

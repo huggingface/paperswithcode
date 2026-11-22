@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Protocol
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -24,7 +23,10 @@ from backend.services.hf_artifact_service import (
     unlink_replaced_hf_artifact_links,
 )
 from backend.services.paper_method_link_service import replace_manual_links
-from backend.services.repository_service import find_repository_by_url
+from backend.services.repository_service import (
+    find_repository_by_url,
+    require_github_repository_url,
+)
 from backend.services import x_thread_service
 from backend.services.x_thread_service import (
     MAX_X_THREADS_PER_PAPER,
@@ -32,7 +34,7 @@ from backend.services.x_thread_service import (
     parse_x_post_id,
 )
 from backend.utils.exceptions import DatabaseError, PaperNotFoundError
-from backend.utils.github_utils import normalize_github_url, parse_github_url
+from backend.utils.github_utils import parse_github_url
 from backend.utils.hf_utils import normalize_hf_artifact_payload
 
 
@@ -201,22 +203,12 @@ class PaperAssociationService:
                 if not url:
                     continue
 
-                normalized = normalize_github_url(url)
-                if normalized:
-                    url = normalized
+                url = require_github_repository_url(url)
                 repository = find_repository_by_url(self.db, url)
                 if repository is not None:
                     repository_id = repository.id
                 else:
-                    owner, name = parse_github_url(url) if normalized else (None, None)
-                    if not owner or not name:
-                        github_match = re.match(
-                            r"https?://github\.com/([^/]+)/([^/]+)(?:/.*)?", url
-                        )
-                        if github_match:
-                            owner = github_match.group(1)
-                            name = github_match.group(2)
-                            name = name.removesuffix(".git")
+                    owner, name = parse_github_url(url)
                     repository = DBRepository(
                         url=url,
                         owner=owner,
