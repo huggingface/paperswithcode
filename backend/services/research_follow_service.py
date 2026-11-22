@@ -3,7 +3,9 @@
 from datetime import date, datetime, timedelta
 import re
 import secrets
+import time
 from collections.abc import Sequence
+from itertools import zip_longest
 from typing import NamedTuple
 
 from fastapi import HTTPException
@@ -33,6 +35,7 @@ from backend.models.research import (
     ResearchFeedEntry,
 )
 from backend.models.database.research import ResearchTopic, ResearchTopicFollow
+from backend.services.benchmark_trend_service import BenchmarkTrendService
 from backend.services.organization_service import OrganizationService
 from backend.services.research_topic_service import THRESHOLD as TOPIC_THRESHOLD
 from backend.services.research_topic_service import capitalized
@@ -48,6 +51,10 @@ ENTITIES = {
 
 POPULAR_AUTHOR_IDS = (266, 4049, 13379, 25, 264)
 POPULAR_ORGANIZATION_LIMIT = 10
+POPULAR_BENCHMARK_TASKS = ("coding-agents", "image-understanding", "robotics")
+POPULAR_BENCHMARKS_PER_TASK = 4
+POPULAR_BENCHMARK_SECONDS = 3600
+_popular_benchmarks: tuple[float, list[int]] = (0.0, [])
 
 
 def _image_urls(db: Session, kind: str, entities: list) -> dict[int, str | None]:
@@ -70,6 +77,71 @@ def _entity_url(kind: str, entity) -> str:
     return f"/{ENTITIES[kind][1]}/{getattr(entity, 'slug', None) or entity.id}"
 
 
+def _family(name: str) -> str:
+    return re.split(r"[^a-z0-9]+", name.lower().strip())[0]
+
+
+def popular_benchmarks(db: Session) -> list[Dataset]:
+    """`rank_popular_benchmarks`, re-ranked at most hourly since every Edit feed pop-up asks for it."""
+    global _popular_benchmarks
+    expires, ids = _popular_benchmarks
+    if time.monotonic() >= expires:
+        ids = [dataset.id for dataset in rank_popular_benchmarks(db)]
+        _popular_benchmarks = (time.monotonic() + POPULAR_BENCHMARK_SECONDS, ids)
+    datasets = {
+        dataset.id: dataset
+        for dataset in db.scalars(select(Dataset).where(Dataset.id.in_(ids)))
+    }
+    return [datasets[i] for i in ids if i in datasets]
+
+
+def rank_popular_benchmarks(db: Session) -> list[Dataset]:
+    """The top benchmarks of a few flagship tasks, ranked as their task pages rank them.
+
+    Takes turns between the tasks and keeps one benchmark per family, so RoboTwin Easy and Hard or a
+    LIBERO variant do not crowd out other benchmarks.
+    """
+    present = set(
+        db.scalars(select(Task.slug).where(Task.slug.in_(POPULAR_BENCHMARK_TASKS)))
+    )
+    trends = BenchmarkTrendService(db)
+    ranked = [
+        [
+            int(row.id)
+            for row in trends.get_trending_benchmarks(
+                slug, limit=20, min_recent_papers=0
+            ).results
+        ]
+        for slug in POPULAR_BENCHMARK_TASKS
+        if slug in present
+    ]
+    datasets = {
+        dataset.id: dataset
+        for dataset in db.scalars(
+            select(Dataset).where(Dataset.id.in_([i for ids in ranked for i in ids]))
+        )
+    }
+    picks = [[] for _ in ranked]
+    seen = set()
+    for task_picks, ids in zip(picks, ranked):
+        families = set()
+        for dataset in (datasets[i] for i in ids if i in datasets):
+            if len(task_picks) == POPULAR_BENCHMARKS_PER_TASK:
+                break
+            if (
+                dataset.parent_dataset_id
+                or dataset.id in seen
+                or _family(dataset.name) in families
+            ):
+                continue
+            task_picks.append(dataset)
+            seen.add(dataset.id)
+            families.add(_family(dataset.name))
+    return [
+        dataset for row in zip_longest(*picks) for dataset in row if dataset is not None
+    ]
+
+
 def suggestions(db: Session) -> FollowSuggestions:
     authors = {
         a.id: a
@@ -86,6 +158,7 @@ def suggestions(db: Session) -> FollowSuggestions:
     for kind, entities in (
         ("author", ordered_authors),
         ("organization", organizations),
+        ("benchmark", popular_benchmarks(db)),
     ):
         images = _image_urls(db, kind, entities)
         groups[kind] = [
@@ -98,7 +171,9 @@ def suggestions(db: Session) -> FollowSuggestions:
             for entity in entities
         ]
     return FollowSuggestions(
-        authors=groups["author"], organizations=groups["organization"]
+        authors=groups["author"],
+        organizations=groups["organization"],
+        benchmarks=groups["benchmark"],
     )
 
 

@@ -9,7 +9,7 @@ import { usePaperFeedQuery } from '@/hooks/usePapers';
 import { researchApi, TOPIC_PAPERS_PAGE_SIZE, type PublicTopic, type TopicPaperOrder, type TopicPerson } from '@/lib/api/research';
 import { readHomepagePaperDateRange, withHomepagePaperDateRange } from '@/lib/paperDateRange';
 import { researchKeys, researchQueries } from '@/lib/api/queries';
-import { hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
+import { assetUrl, hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
 import { ApiError, isNotFound } from '@/lib/apiTransport';
 import {
@@ -81,6 +81,7 @@ export default function TopicView() {
       <div>
         <span className="topic-kicker">Topic</span>
         <h1 className="feed-title">{title}</h1>
+        {data.summary && <p className="topic-summary">{data.summary}</p>}
         {data.text.toLowerCase() !== title.toLowerCase() && <p className="topic-description">{data.text}</p>}
       </div>
     </div>
@@ -140,9 +141,15 @@ function FollowerGrid({ people, total }: { people: TopicPerson[]; total: number 
   </ul>;
 }
 
+/** A face, or the username's initial when the image does not load. */
 function Avatar({ person, size }: { person: TopicPerson; size: number }) {
-  return <img className="topic-avatar" src={person.avatar_url} alt="" title={`@${person.username}`}
-    width={size} height={size} loading="lazy" />;
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return <span className="topic-avatar home-topic-avatar-initial" title={`@${person.username}`}
+      style={{ width: size, height: size, fontSize: size * 0.45 }}>{person.username.charAt(0).toUpperCase()}</span>;
+  }
+  return <img className="topic-avatar" src={assetUrl(person.avatar_url) ?? undefined} alt="" title={`@${person.username}`}
+    width={size} height={size} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 /** Sets the tab title and keeps thin or hidden topics out of search engines. */
