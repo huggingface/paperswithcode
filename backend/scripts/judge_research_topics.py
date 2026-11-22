@@ -7,6 +7,9 @@ unjudged for the next run.
 Every minute (`--backfill`): claim topics awaiting their first judgement (new
 topics, retries, or claims whose worker died) and judge the last 90 days plus
 older papers by dense + lexical recall, in batches while they still match.
+Then it writes a one-sentence summary, with DeepSeek on Hugging Face
+Inference Providers (PWC_HF_TOKEN), for followed topics that have none, so a
+slow provider never holds up judging.
 
 Needs PWC_OPENROUTER_API_KEY.
 
@@ -28,6 +31,7 @@ from backend.services.research_topic_service import (
     JevTopicJudge,
     backfill,
     claim_backfill,
+    fill_summaries,
     judge_recent,
 )
 
@@ -59,6 +63,9 @@ def main() -> int:
                         topic.backfill_done,
                         topic.backfill_total,
                     )
+                summarized = fill_summaries(db, client)
+                if summarized:
+                    logger.info("topics summarized: %d", summarized)
                 return 0
             judged, failed = judge_recent(db, judge, datetime.now(UTC))
     finally:
