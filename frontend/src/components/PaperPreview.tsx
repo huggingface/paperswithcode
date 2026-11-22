@@ -165,7 +165,9 @@ export const PaperPreview: React.FC<{ paperId: string; title: string; thumbnailU
   const [errored, setErrored] = React.useState(false);
   const [imgAttempt, setImgAttempt] = React.useState(0);
   const [shouldLoad, setShouldLoad] = React.useState(priority);
-  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  // State, not a ref: the observer must re-attach when the frame mounts late,
+  // e.g. when a feed refetch adds a thumbnail URL after the first render.
+  const [container, setContainer] = React.useState<HTMLDivElement | null>(null);
 
   React.useEffect(() => {
     setErrored(false);
@@ -180,9 +182,7 @@ export const PaperPreview: React.FC<{ paperId: string; title: string; thumbnailU
   }, [thumbnailUrl, imgAttempt]);
 
   React.useEffect(() => {
-    if (priority || shouldLoad) return;
-    const node = containerRef.current;
-    if (!node) return;
+    if (priority || shouldLoad || !container) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -193,14 +193,14 @@ export const PaperPreview: React.FC<{ paperId: string; title: string; thumbnailU
       },
       { rootMargin: "250px" },
     );
-    observer.observe(node);
+    observer.observe(container);
     return () => observer.disconnect();
-  }, [priority, shouldLoad]);
+  }, [priority, shouldLoad, container]);
 
   if (thumbnailUrl && !errored) {
     return (
       <div
-        ref={containerRef}
+        ref={setContainer}
         style={{
           width: 160,
           height: 220,
