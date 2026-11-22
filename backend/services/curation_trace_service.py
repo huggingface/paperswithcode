@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 SECRET_PATTERNS = (
     re.compile(
         r"(?i)(authorization|api[-_]?key|token|secret|password)"
-        r"((?:\\*\")?\s*[:=]\s*(?:\\*\")?)([^\s\"'\\]+)"
+        r"(\\*\"\s*[:=]\s*\\*\"|\s*[:=]\s*)([^\s\"'\\]+)"
     ),
     re.compile(r"\b(?:hf|sk)-[A-Za-z0-9_-]{12,}\b"),
     re.compile(r"\bhf_[A-Za-z0-9]{30,}\b"),
