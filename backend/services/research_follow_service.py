@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 import re
 import secrets
 from collections.abc import Sequence
+from itertools import zip_longest
 from typing import NamedTuple
 
 from fastapi import HTTPException
@@ -15,7 +16,6 @@ from backend.models.database import (
     Author,
     AuthorPhoto,
     Dataset,
-    Evaluation,
     Method,
     Organization,
     Task,
@@ -34,6 +34,7 @@ from backend.models.research import (
     ResearchFeedEntry,
 )
 from backend.models.database.research import ResearchTopic, ResearchTopicFollow
+from backend.services.benchmark_trend_service import BenchmarkTrendService
 from backend.services.organization_service import OrganizationService
 from backend.services.research_topic_service import THRESHOLD as TOPIC_THRESHOLD
 from backend.services.research_topic_service import capitalized
@@ -49,8 +50,8 @@ ENTITIES = {
 
 POPULAR_AUTHOR_IDS = (266, 4049, 13379, 25, 264)
 POPULAR_ORGANIZATION_LIMIT = 10
-POPULAR_BENCHMARK_LIMIT = 10
-POPULAR_BENCHMARK_DAYS = 90
+POPULAR_BENCHMARK_TASKS = ("coding-agents", "image-understanding", "robotics")
+POPULAR_BENCHMARKS_PER_TASK = 4
 
 
 def _image_urls(db: Session, kind: str, entities: list) -> dict[int, str | None]:
@@ -73,19 +74,55 @@ def _entity_url(kind: str, entity) -> str:
     return f"/{ENTITIES[kind][1]}/{getattr(entity, 'slug', None) or entity.id}"
 
 
-def popular_benchmarks(db: Session, today: date | None = None) -> list[Dataset]:
-    """Benchmarks the most papers published in the last 90 days report results on."""
-    since = (today or date.today()) - timedelta(days=POPULAR_BENCHMARK_DAYS)
-    papers = func.count(func.distinct(Evaluation.paper_id))
-    return db.scalars(
-        select(Dataset)
-        .join(Evaluation, Evaluation.dataset_id == Dataset.id)
-        .join(DBPaper, DBPaper.id == Evaluation.paper_id)
-        .where(DBPaper.date_published > since)
-        .group_by(Dataset.id)
-        .order_by(papers.desc(), Dataset.id)
-        .limit(POPULAR_BENCHMARK_LIMIT)
-    ).all()
+def _family(name: str) -> str:
+    return re.split(r"[^a-z0-9]+", name.lower().strip())[0]
+
+
+def popular_benchmarks(db: Session) -> list[Dataset]:
+    """The top benchmarks of a few flagship tasks, ranked as their task pages rank them.
+
+    Takes turns between the tasks and keeps one benchmark per family, so RoboTwin Easy and Hard or a
+    LIBERO variant do not crowd out other benchmarks.
+    """
+    present = set(
+        db.scalars(select(Task.slug).where(Task.slug.in_(POPULAR_BENCHMARK_TASKS)))
+    )
+    trends = BenchmarkTrendService(db)
+    ranked = [
+        [
+            int(row.id)
+            for row in trends.get_trending_benchmarks(
+                slug, limit=20, min_recent_papers=0
+            ).results
+        ]
+        for slug in POPULAR_BENCHMARK_TASKS
+        if slug in present
+    ]
+    datasets = {
+        dataset.id: dataset
+        for dataset in db.scalars(
+            select(Dataset).where(Dataset.id.in_([i for ids in ranked for i in ids]))
+        )
+    }
+    picks = [[] for _ in ranked]
+    seen = set()
+    for task_picks, ids in zip(picks, ranked):
+        families = set()
+        for dataset in (datasets[i] for i in ids if i in datasets):
+            if len(task_picks) == POPULAR_BENCHMARKS_PER_TASK:
+                break
+            if (
+                dataset.parent_dataset_id
+                or dataset.id in seen
+                or _family(dataset.name) in families
+            ):
+                continue
+            task_picks.append(dataset)
+            seen.add(dataset.id)
+            families.add(_family(dataset.name))
+    return [
+        dataset for row in zip_longest(*picks) for dataset in row if dataset is not None
+    ]
 
 
 def suggestions(db: Session) -> FollowSuggestions:
