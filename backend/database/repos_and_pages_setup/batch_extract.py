@@ -212,9 +212,10 @@ class BatchURLExtractor:
             repo_service = RepositoryService(db)
             project_service = ProjectPageService(db)
 
-            if github_url and github_url.strip():
-                owner, name = parse_github_url(github_url.strip())
-
+            owner, name = parse_github_url((github_url or "").strip())
+            if github_url and not (owner and name):
+                logger.info(f"⏭️  Skipped non-repository GitHub URL: {github_url}")
+            if owner and name:
                 repository = repo_service.create_repository_for_paper(
                     paper_id=str(paper_id),
                     url=github_url.strip(),

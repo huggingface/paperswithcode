@@ -258,3 +258,49 @@ def test_temp_pdf_download_does_not_swallow_body_errors(monkeypatch):
 
     with pytest.raises(ValueError):
         asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "github_url",
+    ["https://github.com", "https://github.com/someuser", "https://gitlab.com/a/b"],
+)
+def test_save_skips_non_repository_github_url_and_marks_paper(monkeypatch, github_url):
+    from backend.services.project_page_service import ProjectPageService
+    from backend.services.repository_service import RepositoryService
+
+    created = []
+    monkeypatch.setattr(
+        RepositoryService,
+        "create_repository_for_paper",
+        lambda self, **kwargs: created.append(kwargs),
+    )
+    monkeypatch.setattr(
+        ProjectPageService,
+        "create_project_page_for_paper",
+        lambda self, **kwargs: object(),
+    )
+
+    class FakeDB:
+        executed = []
+        committed = False
+
+        def execute(self, statement, params):
+            self.executed.append(params)
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            raise AssertionError("save must not roll back")
+
+    extractor = batch_extract.BatchURLExtractor.__new__(batch_extract.BatchURLExtractor)
+    extractor.dry_run = False
+    extractor.stats = {"papers_with_project_page": 0}
+    db = FakeDB()
+
+    extractor.save_results_to_db(db, 7, github_url, "https://example.org/project")
+
+    assert created == []
+    assert db.executed == [{"paper_id": 7}]
+    assert db.committed
+    assert extractor.stats["papers_with_project_page"] == 1
