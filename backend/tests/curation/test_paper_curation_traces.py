@@ -36,6 +36,47 @@ def test_trace_redaction_removes_planted_credentials():
     assert redacted.count("<redacted>") >= 3
 
 
+def test_trace_redaction_keeps_every_jsonl_line_parseable():
+    hf_token = "hf_" + "A1b2C3d4E5" * 4
+    lines = [
+        {"cmd": 'token = os.environ["PWC_CURATION_JOB_TOKEN"]'},
+        {"token": hf_token, "max_tokens": 32768},
+        {"output": json.dumps({"api_key": "plain-secret-value"})},
+        {"path": "backend/services/hf_artifact_service.py"},
+        {"id_token": None, "password": 1234, "secret": True, "api_key": {"v": 1}},
+        {"output": json.dumps({"refresh_token": None, "token": "nested-secret"})},
+        {"cmd": 'export HF_TOKEN="quoted-assignment-secret" PASSWORD=bare-secret'},
+        {"msg": "token=", "x": 1},
+        {"a": "token=", "b": "c"},
+        {"output": json.dumps({"a": "token=", "b": "c", "token=": "v", "n": 1})},
+    ]
+    raw = "\n".join(json.dumps(line) for line in lines).encode()
+
+    redacted = redact_trace(raw).decode()
+
+    parsed = [json.loads(line) for line in redacted.splitlines()]
+    assert hf_token not in redacted
+    assert "plain-secret-value" not in redacted
+    assert parsed[0]["cmd"].endswith('"PWC_CURATION_JOB_TOKEN"]')
+    assert parsed[1] == {"token": "<redacted>", "max_tokens": 32768}
+    assert parsed[3] == lines[3]
+    assert parsed[4] == lines[4]
+    assert "nested-secret" not in redacted
+    assert json.loads(parsed[5]["output"])["refresh_token"] is None
+    assert parsed[6]["cmd"] == 'export HF_TOKEN="<redacted>" PASSWORD=<redacted>'
+    assert parsed[7:] == lines[7:]
+    assert json.loads(parsed[9]["output"]) == json.loads(lines[9]["output"])
+
+
+def test_unparseable_trace_lines_still_redact_escaped_secrets():
+    truncated = b'{"output": "{\\"api_key\\": \\"escaped-secret\\", \\"token\\": \\"other-secret'
+
+    redacted = redact_trace(truncated).decode()
+
+    assert "escaped-secret" not in redacted
+    assert "other-secret" not in redacted
+
+
 def test_checked_in_proposal_schema_requires_benchmark_gaps():
     schema = json.loads(Path("jobs/schemas/curation_proposal.schema.json").read_text())
     Draft202012Validator.check_schema(schema)
