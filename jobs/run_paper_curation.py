@@ -29,6 +29,11 @@ EVENTS = Path("/tmp/codex-events.jsonl")
 FINAL = Path("/tmp/codex-final.txt")
 CONTEXT = Path("/tmp/context.json")
 URL_CANDIDATES = Path("/tmp/url_candidates.json")
+CODEX_SESSIONS = (
+    Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex") / "sessions"
+)
+MAX_SESSION_BYTES = 32_000_000
+MAX_SESSION_GZIP_BYTES = 8_000_000
 USER_AGENT = "PapersWithCode-Curation/1.0 (+https://paperswithcode.co)"
 BOOTSTRAP_PATHS = {
     ".agents/skills/add-evals/SKILL.md",
@@ -165,7 +170,30 @@ def _skill_hashes() -> dict[str, str]:
     }
 
 
-def _trace_payload(report: str, duration_ms: int) -> dict:
+def codex_session_file() -> Path | None:
+    """Find the Codex rollout for this run; the Hub trace viewer reads it natively."""
+    raw = EVENTS.read_bytes() if EVENTS.exists() else b""
+    for line in raw.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "thread.started" and event.get("thread_id"):
+            pattern = f"*/*/*/rollout-*-{event['thread_id']}.jsonl"
+            return next(CODEX_SESSIONS.glob(pattern), None)
+    return None
+
+
+def _session_field(session: Path | None) -> dict:
+    if session is None or session.stat().st_size > MAX_SESSION_BYTES:
+        return {}
+    compressed = gzip.compress(session.read_bytes(), compresslevel=6)
+    if len(compressed) > MAX_SESSION_GZIP_BYTES:
+        return {}
+    return {"session_gzip_b64": base64.b64encode(compressed).decode()}
+
+
+def _trace_payload(report: str, duration_ms: int, session: Path | None = None) -> dict:
     raw = EVENTS.read_bytes() if EVENTS.exists() else b""
     usage = {"input_tokens": 0, "output_tokens": 0}
     for line in raw.splitlines():
@@ -199,6 +227,7 @@ def _trace_payload(report: str, duration_ms: int) -> dict:
         "report": report,
         "usage": usage,
         "duration_ms": duration_ms,
+        **_session_field(session),
     }
 
 
@@ -423,7 +452,10 @@ def main() -> int:
         report = FINAL.read_text(encoding="utf-8").strip() if FINAL.exists() else ""
         trace_error = None
         try:
-            trace_callback("trace/finalize", _trace_payload(report, duration_ms))
+            trace_callback(
+                "trace/finalize",
+                _trace_payload(report, duration_ms, codex_session_file()),
+            )
         except Exception as exc:
             trace_error = f"Trace finalization failed ({type(exc).__name__}); catalog mutation, if accepted, was not rolled back."
         error = (

@@ -24,6 +24,7 @@ import run_paper_curation as base
 PROVIDER = os.environ.get("PWC_CURATION_PI_PROVIDER", "")
 BILL_TO = os.environ.get("PWC_CURATION_PI_BILL_TO", "huggingface")
 AGENT_DIR = Path("/tmp/pi-agent")
+SESSION_DIR = Path("/tmp/pi-sessions")
 PROVIDER_NAME = "pwc-hf"
 TOOLS = "read,bash,edit,write,grep,find,ls"
 
@@ -128,7 +129,8 @@ def run_pi(model_id: str, prompt: str, env: dict, timeout: float) -> int:
         "--mode",
         "json",
         "--print",
-        "--no-session",
+        "--session-dir",
+        str(SESSION_DIR),
         "--no-context-files",
         "--no-skills",
         "--no-extensions",
@@ -155,6 +157,14 @@ def run_pi(model_id: str, prompt: str, env: dict, timeout: float) -> int:
             timeout=timeout,
             check=False,
         ).returncode
+
+
+def latest_session() -> Path | None:
+    return max(
+        SESSION_DIR.rglob("*.jsonl"),
+        key=lambda path: path.stat().st_mtime,
+        default=None,
+    )
 
 
 def _submitted() -> bool:
@@ -245,7 +255,7 @@ def main() -> int:
         report = final_report(events)
         trace_error = None
         try:
-            payload = base._trace_payload(report, duration_ms)
+            payload = base._trace_payload(report, duration_ms, latest_session())
             payload["usage"] = usage_totals(events)
             base.trace_callback("trace/finalize", payload)
         except Exception as exc:

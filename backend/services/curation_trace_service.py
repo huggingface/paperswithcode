@@ -35,6 +35,8 @@ MAX_TRACE_BYTES = 8_000_000
 MAX_EXPANDED_TRACE_BYTES = 32_000_000
 UPLOAD_TIMEOUT_SECONDS = 180
 UPLOAD_WORKER = Path(__file__).with_name("curation_trace_upload_worker.py")
+SESSION_OBJECT = "session.jsonl"
+HUB_BUCKET_URI_PREFIX = "hf://buckets/"
 
 
 def redact_trace(raw: bytes) -> bytes:
@@ -49,6 +51,20 @@ def redact_trace(raw: bytes) -> bytes:
 
 def sha256(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def trace_folder_url(trace_uri: str | None) -> str | None:
+    """Hub page listing a job's trace objects, from its ``hf://buckets`` manifest URI."""
+    if not trace_uri or not trace_uri.startswith(HUB_BUCKET_URI_PREFIX):
+        return None
+    bucket_path, _, _ = trace_uri.removeprefix(HUB_BUCKET_URI_PREFIX).rpartition("/")
+    owner, name, folder = bucket_path.split("/", 2)
+    return f"https://huggingface.co/buckets/{owner}/{name}/tree/{folder}"
+
+
+def agent_trace_url(trace_uri: str | None, session_sha256: str | None) -> str | None:
+    folder = trace_folder_url(trace_uri)
+    return f"{folder}/{SESSION_OBJECT}" if folder and session_sha256 else None
 
 
 def _ordered_trace_value(value: Any) -> Any:
@@ -243,6 +259,10 @@ class CurationTraceService:
                 row.url_candidates or [], sort_keys=True
             ).encode(),
         }
+        if payload.get("session_gzip_b64"):
+            object_values[SESSION_OBJECT] = self.decode_events(
+                payload["session_gzip_b64"]
+            )
         manifest["objects"] = {
             name: sha256(data) for name, data in object_values.items()
         }
@@ -260,6 +280,8 @@ class CurationTraceService:
         )
         row.trace_uri = result.get("uri") or row.trace_uri
         row.trace_sha256 = sha256(manifest_bytes)
+        if result["status"] == "stored" and SESSION_OBJECT in object_values:
+            row.trace_session_sha256 = sha256(object_values[SESSION_OBJECT])
         if row.mutation_result is None:
             row.mutation_result = payload.get("result")
         usage = payload.get("usage") or {}

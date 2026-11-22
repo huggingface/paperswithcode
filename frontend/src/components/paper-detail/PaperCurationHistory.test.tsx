@@ -30,7 +30,13 @@ it("lists the paper's jobs and explains a paused queue", async () => {
     paper_id: 133629,
     jobs: [
       job("queued-job", "queued"),
-      job("done-job", "completed", { kind: "add-evals", report: "Added 3 rows.", trace_status: "complete" }),
+      job("done-job", "completed", {
+        kind: "add-evals",
+        report: "Added 3 rows.",
+        trace_status: "complete",
+        agent_trace_url: "https://huggingface.co/buckets/o/b/tree/traces/done-job/session.jsonl",
+        trace_files_url: "https://huggingface.co/buckets/o/b/tree/traces/done-job",
+      }),
     ],
     scheduler_pause: {
       dispatch_enabled: true,
@@ -55,6 +61,14 @@ it("lists the paper's jobs and explains a paused queue", async () => {
   expect(screen.getByRole("link", { name: "trace manifest" })).toHaveAttribute(
     "href",
     expect.stringContaining("/admin/codex-curation/jobs/done-job/trace"),
+  );
+  expect(screen.getByRole("link", { name: "agent trace" })).toHaveAttribute(
+    "href",
+    "https://huggingface.co/buckets/o/b/tree/traces/done-job/session.jsonl",
+  );
+  expect(screen.getByRole("link", { name: "trace files" })).toHaveAttribute(
+    "href",
+    "https://huggingface.co/buckets/o/b/tree/traces/done-job",
   );
   client.clear();
 });

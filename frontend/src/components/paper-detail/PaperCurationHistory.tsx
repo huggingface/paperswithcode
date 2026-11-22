@@ -73,6 +73,16 @@ function CurationJob({ job, pause }: { job: CodexPaperJob; pause: CodexScheduler
               trace manifest
             </a>
           )}
+          {job.agent_trace_url && (
+            <a className="underline" href={job.agent_trace_url} target="_blank" rel="noreferrer">
+              agent trace
+            </a>
+          )}
+          {job.trace_files_url && (
+            <a className="underline" href={job.trace_files_url} target="_blank" rel="noreferrer">
+              trace files
+            </a>
+          )}
           {job.hf_job_url && (
             <a className="underline" href={job.hf_job_url} target="_blank" rel="noreferrer">
               Hugging Face Job

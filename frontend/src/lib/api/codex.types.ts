@@ -54,6 +54,8 @@ export interface CodexPaperJob {
   codex_cli_version: string | null;
   trace_status: string;
   trace_uri: string | null;
+  trace_files_url?: string | null;
+  agent_trace_url?: string | null;
   proposal: Record<string, unknown> | null;
   validation_summary: Record<string, unknown> | null;
   mutation_result: Record<string, unknown> | null;
