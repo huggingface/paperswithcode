@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, fireEvent, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, MemoryRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { researchApi, TOPIC_LIMIT } from '@/lib/api/research';
 import { ApiError } from '@/lib/apiTransport';
@@ -570,14 +570,13 @@ it('keeps popular topics out of the bubble row and offers them in Edit feed', as
   await screen.findByText('A paper');
   expect(within(row).queryByText(/OCR releases/)).not.toBeInTheDocument();
   fireEvent.click(within(row).getByRole('button', { name: 'Edit feed' }));
-  // Popular topics show as cards on the pop-up's first tab, linking out in a new tab.
+  // Popular topics show as cards on the pop-up's first tab, linking to their page.
   const follow = await screen.findByRole('button', { name: 'Follow OCR releases' });
   expect(follow).toHaveAttribute('aria-pressed', 'false');
   const card = follow.closest('li')!;
   expect(card).toHaveTextContent('5 followers');
   const link = within(card).getByRole('link', { name: 'OCR releases' });
   expect(link).toHaveAttribute('href', '/topics/23-ocr-releases');
-  expect(link).toHaveAttribute('target', '_blank');
   fireEvent.click(follow);
   expect(follow).toHaveAttribute('aria-pressed', 'true');
   expect(follow).toHaveTextContent('Following');
@@ -810,4 +809,32 @@ it('starts counting from the first homepage visit', async () => {
   await screen.findByText('No papers in this window.');
   await waitFor(() => expect(localStorage.getItem('pwc:following-last-seen')).not.toBeNull());
   expect(researchApi.followingNewCount).not.toHaveBeenCalled();
+});
+
+it('reopens Edit feed as it was on Back from a page a link in it opened', async () => {
+  function TaskPage() {
+    const navigate = useNavigate();
+    return <button type="button" onClick={() => navigate(-1)}>Back</button>;
+  }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  window.history.pushState(null, '', '/following');
+  render(<QueryClientProvider client={client}><BrowserRouter><Routes>
+    <Route path="/following" element={<FollowingView />} /><Route path="/tasks/:slug" element={<TaskPage />} />
+  </Routes></BrowserRouter></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: 'Edit feed' }));
+  fireEvent.mouseDown(await screen.findByRole('tab', { name: /Tasks, methods/ }));
+  const chip = await screen.findByRole('button', { name: 'Task' });
+  fireEvent.click(chip);
+  expect(chip).toHaveAttribute('aria-pressed', 'false');
+  fireEvent.click(screen.getByRole('link', { name: 'Open the Task page' }));
+  expect(await screen.findByRole('button', { name: 'Back' })).toBeInTheDocument();
+  expect(window.location.pathname).toBe('/tasks/task');
+  fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+  expect(await screen.findByRole('dialog')).toBeInTheDocument();
+  expect(screen.getByRole('tab', { name: /Tasks, methods/ })).toHaveAttribute('aria-selected', 'true');
+  expect(await screen.findByRole('button', { name: 'Task' })).toHaveAttribute('aria-pressed', 'false');
+  // Closing it forgets that state, so the next Back to this page leaves it closed.
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(window.history.state.pwcTopicDialog).toBeUndefined();
 });
