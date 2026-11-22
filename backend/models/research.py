@@ -27,10 +27,11 @@ class FollowSuggestion(BaseModel):
 
 
 class FollowSuggestions(BaseModel):
-    """Popular authors and organizations offered when building a research feed."""
+    """Popular authors, organizations, and benchmarks offered when building a research feed."""
 
     authors: list[FollowSuggestion]
     organizations: list[FollowSuggestion]
+    benchmarks: list[FollowSuggestion] = []
 
 
 class TopicUpdate(BaseModel):
@@ -83,6 +84,7 @@ class PublicTopicView(BaseModel):
     id: int
     text: str
     label: str | None = None
+    summary: str | None = None
     status: Literal["pending", "running", "done", "failed"]
     creator: TopicPerson | None
     is_public: bool
@@ -93,6 +95,14 @@ class PublicTopicView(BaseModel):
     is_creator: bool = False
 
 
+class FeaturedTopicPaper(BaseModel):
+    """This week's best match for a featured topic."""
+
+    id: int
+    arxiv_id: str | None = None
+    title: str
+
+
 class TopicBubble(BaseModel):
     """A popular public topic offered on the homepage."""
 
@@ -101,6 +111,9 @@ class TopicBubble(BaseModel):
     label: str | None = None
     creator: TopicPerson | None
     followers: int
+    week_papers: int | None = None
+    follower_avatars: list[TopicPerson] = []
+    top_paper: FeaturedTopicPaper | None = None
 
 
 class FollowerVisibilityUpdate(BaseModel):

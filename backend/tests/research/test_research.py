@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from backend.database.connection import db_manager, get_database_session
 from backend.models.database import (
+    TaskDataset,
     Paper,
     Task,
     Method,
@@ -848,3 +849,44 @@ def test_webhook_body_limit_refuses_declared_and_streamed_oversize():
         with pytest.raises(HTTPException) as error:
             read(request)
         assert error.value.status_code == 413
+
+
+def test_popular_benchmarks_take_turns_between_flagship_tasks(db, now):
+    coding = Task(name="Coding agents", slug="coding-agents")
+    robotics = Task(name="Robotics", slug="robotics")
+    db.add_all([coding, robotics])
+    db.flush()
+    names = {
+        coding: ["Terminal-Bench 4.0", "Terminal Bench 2.1", "DeepSWE"],
+        robotics: ["RoboTwin 2.0 Easy", "RoboTwin 2.0 Hard", "LIBERO"],
+    }
+    datasets = {}
+    for task, task_names in names.items():
+        for rank, name in enumerate(task_names):
+            dataset = Dataset(name=name)
+            db.add(dataset)
+            db.flush()
+            datasets[name] = dataset
+            db.add(TaskDataset(task_id=task.id, dataset_id=dataset.id))
+            for n in range(len(task_names) - rank):
+                p = paper(db, now, f"{dataset.id}{n}")
+                db.add(
+                    Evaluation(
+                        paper_id=p.id,
+                        task_id=task.id,
+                        dataset_id=dataset.id,
+                        metrics={"Accuracy": 1},
+                        model_name="M",
+                    )
+                )
+    variant = Dataset(name="LIBERO-Plus", parent_dataset_id=datasets["LIBERO"].id)
+    db.add(variant)
+    db.flush()
+    db.add(TaskDataset(task_id=robotics.id, dataset_id=variant.id))
+    db.flush()
+    assert [d.name for d in follows.rank_popular_benchmarks(db)] == [
+        "Terminal-Bench 4.0",
+        "RoboTwin 2.0 Easy",
+        "DeepSWE",
+        "LIBERO",
+    ]
