@@ -369,6 +369,16 @@ export function CodexJobQueue({ autoRefresh }: { autoRefresh: boolean }) {
                               Authenticated trace manifest <ExternalLink className="h-3.5 w-3.5" />
                             </a>
                           )}
+                          {stage.agent_trace_url && (
+                            <a className="mt-2 ml-3 inline-flex items-center gap-1 hover:underline" href={stage.agent_trace_url} target="_blank" rel="noreferrer">
+                              Agent trace <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          )}
+                          {stage.trace_files_url && (
+                            <a className="mt-2 ml-3 inline-flex items-center gap-1 hover:underline" href={stage.trace_files_url} target="_blank" rel="noreferrer">
+                              Trace files <ExternalLink className="h-3.5 w-3.5" />
+                            </a>
+                          )}
                         </div>
                       ))}
                     </div>

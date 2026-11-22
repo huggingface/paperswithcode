@@ -220,6 +220,9 @@ class PaperCurationJob(Base):
     )
     trace_uri: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     trace_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    trace_session_sha256: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
     trace_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     proposal: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     bootstrap_bundle_sha256: Mapped[Optional[str]] = mapped_column(

@@ -12,6 +12,6 @@ WORKDIR /runner
 COPY jobs/run_paper_curation.py /runner/run_paper_curation.py
 COPY jobs/run_pi_curation.py /runner/run_pi_curation.py
 RUN test "$(sha256sum /runner/run_paper_curation.py | cut -d' ' -f1)" = \
-    "f165a0e4c56a82c9ac80ce8cd29bce7e6e3cf2100ca519de2fe835f105c34271" \
+    "395e4434f4fa0f5895b35aa5fa85ffdcfc88cc5541131fab942a38598d424706" \
     && test "$(sha256sum /runner/run_pi_curation.py | cut -d' ' -f1)" = \
-    "e0bb26500b0cf9f43b5090955c4ae34674bb906299c6a136335fa6e1cd148205"
+    "421bd6699f74fef8f6bfdf3768380417d5e0b0500cc5f166fcfc10a84e243b9c"

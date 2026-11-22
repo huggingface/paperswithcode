@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import base64
+import gzip
 import hashlib
 import importlib
 import json
+import os
 import re
+import subprocess
 import sys
 import uuid
 from datetime import date
@@ -861,3 +865,66 @@ def test_pi_shadow_row_inserts_beside_its_running_codex_stage():
         )
         db.flush()
         assert db.query(PaperCurationJob).count() == 2
+
+
+def test_pi_saves_its_session_and_traces_the_latest_one(
+    pi_runner, tmp_path, monkeypatch
+):
+    sessions = tmp_path / "sessions"
+    monkeypatch.setattr(pi_runner, "SESSION_DIR", sessions)
+    first = sessions / "--tmp-paperswithcode--" / "first.jsonl"
+    first.parent.mkdir(parents=True)
+    first.write_text('{"type":"session"}\n')
+    retry = first.with_name("retry.jsonl")
+    retry.write_text('{"type":"session","id":"retry"}\n')
+    os.utime(first, (1, 1))
+    commands = []
+    monkeypatch.setattr(
+        pi_runner.subprocess,
+        "run",
+        lambda command, **_kwargs: commands.append(command)
+        or subprocess.CompletedProcess(command, 0),
+    )
+    monkeypatch.setattr(pi_runner.base, "EVENTS", tmp_path / "events.jsonl")
+
+    pi_runner.run_pi("model", "prompt", {}, 60)
+
+    assert "--no-session" not in commands[0]
+    assert commands[0][commands[0].index("--session-dir") + 1] == str(sessions)
+    assert pi_runner.latest_session() == retry
+
+
+def test_codex_trace_carries_the_rollout_of_its_own_thread(
+    pi_runner, tmp_path, monkeypatch
+):
+    codex = pi_runner.base
+    sessions = tmp_path / "sessions" / "2026" / "11" / "22"
+    sessions.mkdir(parents=True)
+    rollout = sessions / "rollout-2026-11-22T10-00-00-thread-b.jsonl"
+    rollout.write_text('{"type":"session_meta"}\n')
+    (sessions / "rollout-2026-11-22T09-00-00-thread-a.jsonl").write_text("{}\n")
+    events = tmp_path / "events.jsonl"
+    events.write_text('noise\n{"type":"thread.started","thread_id":"thread-b"}\n')
+    monkeypatch.setattr(codex, "CODEX_SESSIONS", tmp_path / "sessions")
+    monkeypatch.setattr(codex, "EVENTS", events)
+    monkeypatch.setattr(codex, "api_request", lambda _path: {"job": {}})
+
+    payload = codex._trace_payload("done", 5, codex.codex_session_file())
+
+    assert gzip.decompress(base64.b64decode(payload["session_gzip_b64"])) == (
+        b'{"type":"session_meta"}\n'
+    )
+
+
+def test_oversized_or_missing_sessions_are_left_out_of_the_trace(
+    pi_runner, tmp_path, monkeypatch
+):
+    codex = pi_runner.base
+    session = tmp_path / "session.jsonl"
+    session.write_bytes(b"x" * 11)
+    monkeypatch.setattr(codex, "MAX_SESSION_BYTES", 10)
+
+    assert codex._session_field(session) == {}
+    assert codex._session_field(None) == {}
+    monkeypatch.setattr(codex, "EVENTS", tmp_path / "missing.jsonl")
+    assert codex.codex_session_file() is None

@@ -349,6 +349,7 @@ class CurationTracePreapplyRequest(BaseModel):
 
 class CurationTraceFinalizeRequest(BaseModel):
     events_gzip_b64: str = Field(max_length=12_000_000)
+    session_gzip_b64: str | None = Field(default=None, max_length=12_000_000)
     result: dict = Field(default_factory=dict)
     benchmark_gaps: dict | list = Field(default_factory=dict)
     report: str = Field(default="", max_length=40_000)

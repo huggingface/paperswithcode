@@ -44,6 +44,7 @@ from backend.models.database import (
     TrendingModelCandidate,
 )
 from backend.services.curation_pair_diff import curation_pair_diff
+from backend.services.curation_trace_service import agent_trace_url, trace_folder_url
 from backend.services.curation_priority_service import is_priority_paper
 from backend.services.curation_thumbnail_queue_service import (
     queue_missing_paper_thumbnail,
@@ -181,6 +182,8 @@ class CodexPaperJob(BaseModel):
     trace_status: str = "pending"
     trace_uri: str | None = None
     trace_sha256: str | None = None
+    trace_files_url: str | None = None
+    agent_trace_url: str | None = None
     proposal: dict | None = None
     validation_summary: dict | None = None
     mutation_result: dict | None = None
@@ -486,6 +489,11 @@ class CodexPaperJobService:
             trace_status=getattr(row, "trace_status", "pending"),
             trace_uri=getattr(row, "trace_uri", None),
             trace_sha256=getattr(row, "trace_sha256", None),
+            trace_files_url=trace_folder_url(getattr(row, "trace_uri", None)),
+            agent_trace_url=agent_trace_url(
+                getattr(row, "trace_uri", None),
+                getattr(row, "trace_session_sha256", None),
+            ),
             proposal=getattr(row, "proposal", None),
             validation_summary=getattr(row, "validation_summary", None),
             mutation_result=getattr(row, "mutation_result", None),
