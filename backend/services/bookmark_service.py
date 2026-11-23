@@ -19,6 +19,7 @@ from backend.services.paper_service import PaperService
 from backend.services.saved_papers_bucket_service import (
     SavedPaperRef,
     SavedPapersBucket,
+    namespace_supports_bucket,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ class BookmarkRefListing:
     refs: tuple[SavedPaperRef, ...]
     bucket_connected: bool
     bucket_error: str | None = None
+    bucket_available: bool = True
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class SavedPapersProjection:
     bucket_connected: bool
     bucket_migrated: bool
     bucket_error: str | None = None
+    bucket_available: bool = True
 
 
 @dataclass(frozen=True)
@@ -173,6 +176,8 @@ class BookmarkService:
         hub_username: str | None = None,
     ) -> BookmarkRefListing:
         legacy = self.load_legacy_refs(username)
+        if not namespace_supports_bucket(hub_username or username):
+            return BookmarkRefListing(tuple(legacy), False, bucket_available=False)
         try:
             store = self.initialize_bucket(
                 encrypted_credential=encrypted_credential,
@@ -217,6 +222,7 @@ class BookmarkService:
                 bucket_connected=listing.bucket_connected,
                 bucket_migrated=bucket_migrated,
                 bucket_error=listing.bucket_error,
+                bucket_available=listing.bucket_available,
             )
 
         db_papers = self.db.query(DBPaper).filter(DBPaper.id.in_(paper_ids)).all()
@@ -320,6 +326,7 @@ class BookmarkService:
             bucket_connected=listing.bucket_connected,
             bucket_migrated=bucket_migrated,
             bucket_error=listing.bucket_error,
+            bucket_available=listing.bucket_available,
         )
 
     def _require_bucket(
@@ -331,6 +338,8 @@ class BookmarkService:
         hub_username: str | None = None,
     ) -> SavedPapersBucket | None:
         """Return the Bucket, or None while an unmigrated account cannot set one up."""
+        if not namespace_supports_bucket(hub_username or username):
+            return None
         try:
             store = self.initialize_bucket(
                 encrypted_credential=encrypted_credential,

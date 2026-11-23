@@ -663,3 +663,33 @@ def test_bucket_uses_the_hub_username_casing(monkeypatch):
     )
 
     assert namespaces == ["Andrex14"]
+
+
+def test_managed_accounts_keep_saved_papers_in_the_database(monkeypatch):
+    monkeypatch.setattr(
+        BookmarkService,
+        "initialize_bucket",
+        lambda *_args, **_kwargs: pytest.fail("managed accounts cannot own a Bucket"),
+    )
+    user = {
+        "username": "entrust-org:00uol46ez0ybnco9l417",
+        "hub_username": "entrust-org:00uol46ez0YBncO9l417",
+        "hf_user_id": "hf-managed",
+    }
+    db = MutationDb()
+
+    bookmarks.add_bookmark(_request(), 42, user, db)
+    assert [item.paper_id for item in db.added] == [42]
+
+    bookmarks.remove_bookmark(_request(), 42, user, db)
+    assert db.bookmark_query.deleted is True
+
+    listing = BookmarkService(LegacyBookmarkDb([])).list_refs(
+        encrypted_credential="encrypted",
+        hf_user_id=user["hf_user_id"],
+        username=user["username"],
+        hub_username=user["hub_username"],
+    )
+    assert listing.bucket_connected is False
+    assert listing.bucket_available is False
+    assert listing.bucket_error is None

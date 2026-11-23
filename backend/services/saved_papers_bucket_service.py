@@ -26,6 +26,11 @@ class SavedPaperRef:
     source_url: str | None = None
 
 
+def namespace_supports_bucket(username: str) -> bool:
+    """Whether a Hub account can own a Bucket; Enterprise managed users (`org:id`) cannot."""
+    return ":" not in username
+
+
 def bucket_id_for(username: str) -> str:
     return f"{username}/{BUCKET_NAME}"
 

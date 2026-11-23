@@ -75,6 +75,13 @@ class SavedPapersResponse(BaseModel):
             "read from Papers With Code instead"
         ),
     )
+    bucket_available: bool = Field(
+        True,
+        description=(
+            "Whether the account can own an HF Bucket; Enterprise managed "
+            "accounts keep saved papers in Papers With Code"
+        ),
+    )
 
 
 def _bucket_error(error: PaperBucketError) -> HTTPException:
@@ -155,6 +162,7 @@ def get_my_bookmarks(
         bucket_connected=projection.bucket_connected,
         bucket_migrated=projection.bucket_migrated,
         bucket_error=projection.bucket_error,
+        bucket_available=projection.bucket_available,
     )
 
 
