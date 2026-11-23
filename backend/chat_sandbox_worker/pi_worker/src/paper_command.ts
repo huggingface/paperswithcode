@@ -111,6 +111,7 @@ export function parsePwcPaperCommand(command: string): PwcPaperCommand | undefin
       ])
         ? { receiptOperation: "repair" }
         : undefined;
+    case "edit-context":
     case "repair-context":
       return hasExactArguments(arguments_, ["--directory"]) ? {} : undefined;
     default:
