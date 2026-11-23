@@ -67,6 +67,10 @@ class LiveLeaderboard:
     Several boards may share a benchmark when each publishes its own metric
     (Physics-IQ Verified's I2V and V2V tracks): a board only reads and writes
     rows that carry its metric.
+
+    An auto-matched entry is named after its catalog model, so the settings of
+    one model share a row; ``effort_in_model_name`` keeps the upstream name
+    with its effort setting instead, for boards whose reviewed names do.
     """
 
     source: str
@@ -81,6 +85,7 @@ class LiveLeaderboard:
     model_name_suffix: str = ""
     excluded: dict[str, str] = field(default_factory=dict)
     adopt_unmanaged: bool = True
+    effort_in_model_name: bool = False
     retire_missing: bool = True
 
     @property
@@ -113,6 +118,7 @@ class LiveSyncStats:
     created: int = 0
     changed: int = 0
     adopted: int = 0
+    renamed: int = 0
     auto_matched: list[str] = field(default_factory=list)
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
@@ -283,10 +289,13 @@ class LiveLeaderboardSyncService:
                 if (match := matched.get(entry.name)) is None:
                     stats.unreviewed.append(entry.label)
                     continue
+                model_name = (
+                    entry.name if board.effort_in_model_name else match.model_name
+                )
                 selected.append(
                     (
                         match.paper_id,
-                        match.model_name + board.model_name_suffix,
+                        model_name + board.model_name_suffix,
                         match.is_open,
                         match.hf_model_url,
                         entry,
@@ -323,11 +332,14 @@ class LiveLeaderboardSyncService:
             ]
             rows_by_identity: dict[tuple[int, str, str | None], Evaluation] = {}
             unmanaged_by_model: dict[tuple[int, str], Evaluation] = {}
+            managed_by_label: dict[tuple[int, str], Evaluation] = {}
             for row in rows:
                 rows_by_identity.setdefault(
                     (row.paper_id, row.model_name, row.harness), row
                 )
-                if not (row.methodology or "").startswith(board.managed_prefix):
+                if label := board.managed_label.match(row.methodology or ""):
+                    managed_by_label.setdefault((row.paper_id, label["label"]), row)
+                elif not (row.methodology or "").startswith(board.managed_prefix):
                     unmanaged_by_model.setdefault((row.paper_id, row.model_name), row)
             linked_paper_ids = {
                 paper_id
@@ -345,6 +357,13 @@ class LiveLeaderboardSyncService:
                 entry,
             ) in best.items():
                 row = rows_by_identity.get(key)
+                if row is None:
+                    renamed = managed_by_label.get((paper_id, entry.label))
+                    if renamed is not None and id(renamed) not in published:
+                        row = renamed
+                        row.model_name = model_name
+                        rows_by_identity[key] = row
+                        stats.renamed += 1
                 if row is None and board.adopt_unmanaged:
                     fallback = unmanaged_by_model.get((paper_id, model_name))
                     if fallback is not None and id(fallback) not in published:

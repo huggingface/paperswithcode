@@ -54,6 +54,15 @@ _EFFORT_SUFFIX = re.compile(
 )
 
 
+def catalog_name(name: str) -> str:
+    """The catalog model a leaderboard name denotes, without its effort setting.
+
+    A matched model gets this name whether the full leaderboard name or only
+    its base resolved, so an alias recorded later never renames it.
+    """
+    return _EFFORT_SUFFIX.sub("", name)
+
+
 _FAMILY_LABS = (
     (re.compile(r"(?:claude|opus|sonnet|haiku)\b", re.I), "Anthropic"),
     (re.compile(r"(?:gpt|chatgpt|codex)\b|o\d+(?:\b|-)", re.I), "OpenAI"),
@@ -161,19 +170,19 @@ class LeaderboardModelMatcher:
             self._alias_matches([name for name in names if name not in releases])
         )
         matched = {
-            name: MatchedModel(release.paper_id, name, release.is_open)
+            name: MatchedModel(release.paper_id, catalog_name(name), release.is_open)
             for name, release in releases.items()
         }
         for name in names:
             if name not in matched and (paper_id := announcing_paper_id(self.db, name)):
                 hf_model_url = self._weights_url(paper_id, name)
                 matched[name] = MatchedModel(
-                    paper_id, name, hf_model_url is not None, hf_model_url
+                    paper_id, catalog_name(name), hf_model_url is not None, hf_model_url
                 )
         bases = {
             name: base
             for name in names
-            if name not in matched and (base := _EFFORT_SUFFIX.sub("", name)) != name
+            if name not in matched and (base := catalog_name(name)) != name
         }
         if bases:
             base_matches = self.match(
