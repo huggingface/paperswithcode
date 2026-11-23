@@ -482,7 +482,9 @@ entry's agent harness is stored in `harness`, so one model may appear once per
 harness (Gemini 4 Argon in Pi and Antigravity). The job never creates papers,
 so unreviewed names and unresolved papers are logged as warnings. It creates
 missing mapped rows and rewrites managed rows' scores and methodology every
-run; managed rows that drop off the leaderboard are reported, never deleted.
+run. Managed rows whose model and harness drop off the leaderboard are deleted
+and logged as `frontiercs_2_deleted`; rows added by hand and rows whose entry is
+still listed but unresolved are kept.
 
 `sync_vals_index.py`, `sync_swe_sweep.py`, `sync_vending_bench_2.py`,
 `sync_blueprint_bench_2.py`, `sync_riemann_bench.py`, `sync_cwe_bench.py`, and

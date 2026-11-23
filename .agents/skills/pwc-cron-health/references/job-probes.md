@@ -152,7 +152,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `sync_frontiercs_2`
 
 - **Contract:** `frontiercs-2` on task `coding-agents`; Pass Rate (%) 0–100 (best metric) and FCI (unbounded, Kimi K2.7 = 0); the `MODELS`/`PASS`/`ECI` constants in https://frontier-cs.org/assets/js/fcs2-data.js behind https://frontier-cs.org/#leaderboard; typically 8–200 entries, one per model and harness (14 on 2026-10-26, all reviewed).
-- **Proof:** Diff the data file against managed rows (model, harness, pass rate, FCI); confirm `frontiercs_2_unreviewed` names get an identity (index the model's paper first), `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on Pass Rate.
+- **Proof:** Diff the data file against managed rows (model, harness, pass rate, FCI); confirm `frontiercs_2_unreviewed` names get an identity (index the model's paper first), `missing_papers` is empty, and every `frontiercs_2_deleted` row really left the upstream board (the sync deletes managed rows whose model and harness are no longer listed); verify ranks on Pass Rate.
 
 ## `sync_vals_index`
 

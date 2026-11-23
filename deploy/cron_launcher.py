@@ -476,8 +476,9 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_frontiercs_2",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed FrontierCS 2 evaluation rows from the "
-            "validated frontier-cs.org leaderboard data; never creates papers"
+            "create, revise, or delete managed FrontierCS 2 evaluation rows to "
+            "match the validated frontier-cs.org leaderboard data; never "
+            "creates papers"
         ),
     ),
     "sync_vals_index": job(

@@ -37,6 +37,10 @@ PASS_RATE = "Pass Rate"
 FCI = "FCI"
 METRIC_NAMES = (PASS_RATE, FCI)
 MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("FrontierCS 2")
+MANAGED_ENTRY_PATTERN = re.compile(
+    re.escape(MANAGED_METHODOLOGY_PREFIX)
+    + r' Official leaderboard entry "(?P<name>[^"]+)" \((?P<harness>[^)]+)\):'
+)
 MIN_EXPECTED_ENTRIES = 8
 MAX_EXPECTED_ENTRIES = 200
 MIN_SELECTED_ENTRIES = 8
@@ -151,7 +155,7 @@ class FrontierCSSyncStats:
     auto_matched: list[str] = field(default_factory=list)
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
-    missing_upstream: list[str] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -263,8 +267,13 @@ def _methodology(entry: FrontierCSEntry) -> str:
     )
 
 
+def _managed_entry_key(methodology: str | None) -> tuple[str, str] | None:
+    match = MANAGED_ENTRY_PATTERN.match(methodology or "")
+    return (match["name"], match["harness"]) if match else None
+
+
 class FrontierCS2SyncService:
-    """Create and revise FrontierCS 2 rows; never create papers."""
+    """Create, revise, and retire FrontierCS 2 rows; never create papers."""
 
     def __init__(self, db: Session):
         self.db = db
@@ -399,12 +408,14 @@ class FrontierCS2SyncService:
                 published.add(id(row))
                 stats.matched += 1
 
-            stats.missing_upstream = sorted(
-                f"{row.model_name} ({row.harness})"
-                for row in rows
-                if id(row) not in published
-                and (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
-            )
+            upstream_keys = {(entry.name, entry.harness) for entry in entries}
+            for row in rows:
+                key = _managed_entry_key(row.methodology)
+                if id(row) in published or key is None or key in upstream_keys:
+                    continue
+                self.db.delete(row)
+                stats.deleted.append(f"{row.model_name} ({row.harness})")
+            stats.deleted.sort()
             self.db.flush()
             EvaluationService(self.db).recalculate_ranks(
                 task.id, dataset.id, metric_name=PASS_RATE, commit=False

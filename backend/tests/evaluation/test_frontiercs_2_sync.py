@@ -59,7 +59,8 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-SOURCE = (Path(__file__).parent / "fixtures" / "frontiercs_2_data.js").read_text()
+SOURCE_PATH = Path(__file__).parent / "fixtures" / "frontiercs_2_data.js"
+SOURCE = SOURCE_PATH.read_text()
 TASK_ID = 15
 DATASET_ID = 3096
 
@@ -209,7 +210,7 @@ def test_first_run_creates_every_entry_and_second_run_is_a_no_op():
         16,
         0,
     )
-    assert stats.unreviewed == stats.missing_papers == stats.missing_upstream == []
+    assert stats.unreviewed == stats.missing_papers == stats.deleted == []
     rows = _rows(session)
     assert len(rows) == 16
     opus = rows["Claude Opus 5.5 (Claude Code)"]
@@ -249,7 +250,7 @@ def test_score_updates_revise_the_row_and_unknown_models_are_reported():
     assert (stats.changed, stats.created) == (1, 0)
     assert stats.auto_matched == []
     assert stats.unreviewed == ["Step 6 (Step Code)"]
-    assert stats.missing_upstream == ["Step-5-Preview (Step Code)"]
+    assert stats.deleted == ["Step-5-Preview (Step Code)"]
     signal = session.query(ModelReleaseSignal).one()
     assert (signal.signal_key, signal.lab, signal.model_name) == (
         "stepfun/step6",
@@ -269,7 +270,33 @@ def test_score_updates_revise_the_row_and_unknown_models_are_reported():
         PASS_RATE: 60.4,
         FCI: 55.1,
     }
-    assert "Step-5-Preview (Step Code)" in rows
+    assert "Step-5-Preview (Step Code)" not in rows
+
+
+def test_only_managed_rows_missing_upstream_are_deleted():
+    session = _session()
+    FrontierCS2SyncService(session).sync(parse_frontiercs_2(SOURCE))
+    opus = _rows(session)["Claude Opus 5.5 (Claude Code)"]
+    session.add(
+        Evaluation(
+            paper_id=opus.paper_id,
+            task_id=opus.task_id,
+            dataset_id=DATASET_ID,
+            model_name="Claude Opus 5.5",
+            harness="Reviewer Harness",
+            methodology="Added by hand from the paper.",
+            metrics={PASS_RATE: 50.0},
+        )
+    )
+    session.commit()
+    later = (SOURCE_PATH.parent / "frontiercs_2_data_2026-11-06.js").read_text()
+    stats = FrontierCS2SyncService(session).sync(parse_frontiercs_2(later))
+    rows = _rows(session)
+    assert "Gemini 4 Argon (Pi)" in stats.deleted
+    assert "Gemini 4 Argon (Pi)" not in rows
+    assert "Gemini 4 Argon (Antigravity)" in rows
+    assert "Claude Opus 5.5 (Reviewer Harness)" in rows
+    assert sorted(row.best_rank for row in rows.values() if row.best_rank)[0] == 1
 
 
 def test_dry_run_rolls_back_and_collapsed_selection_is_refused():
