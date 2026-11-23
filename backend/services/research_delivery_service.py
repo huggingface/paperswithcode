@@ -52,17 +52,108 @@ def weekly_window(now: datetime) -> tuple[datetime, datetime]:
     return end - timedelta(days=7), end
 
 
-INK, SOFT, FAINT, ACCENT, HAIRLINE, PAPER = (
-    "#1a1a1a",
-    "#555555",
-    "#8a8a8a",
-    "#2f4f7a",
-    "#e6e2da",
+INK, SOFT, FAINT, ACCENT, HAIRLINE, PAPER, ELEVATED, SUBTLE = (
+    "#1a1814",
+    "#5a554c",
+    "#8e8678",
+    "#305880",
+    "#e4dfd4",
     "#faf8f4",
+    "#ffffff",
+    "#f2efe8",
 )
-SERIF = "Georgia,'Times New Roman',serif"
-SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
-MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+SERIF = "Newsreader,Georgia,'Times New Roman',serif"
+SANS = "Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+MONO = "'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+FONTS = (
+    "https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@"
+    "0,6..72,500;0,6..72,600;1,6..72,400&family=Inter:wght@400;600"
+    "&family=JetBrains+Mono:wght@400;500&display=swap"
+)
+HEAD = (
+    '<meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    '<meta name="color-scheme" content="light only">'
+    f'<link href="{FONTS}" rel="stylesheet">'
+    "<style>@media (max-width:520px){"
+    ".pwc-pad{padding-left:20px!important;padding-right:20px!important}"
+    ".pwc-thumb{width:72px!important;height:102px!important}"
+    ".pwc-thumb-cell{width:72px!important;padding-right:14px!important}"
+    ".pwc-title{font-size:26px!important}}</style>"
+)
+EYEBROW = (
+    f"font-family:{MONO};font-size:11px;font-weight:500;letter-spacing:.12em;"
+    f"text-transform:uppercase;color:{FAINT};"
+)
+TABLE = 'role="presentation" cellpadding="0" cellspacing="0" border="0"'
+MARK = (
+    f'<table {TABLE} width="24" style="width:24px;border-collapse:collapse;">'
+    f'<tr><td style="padding:4px;background:{INK};line-height:0;">'
+    f'<table {TABLE} width="16" style="width:16px;border-collapse:collapse;">'
+    f'<tr><td style="padding:5px;background:{PAPER};line-height:0;">'
+    f'<table {TABLE} width="6" style="width:6px;border-collapse:collapse;">'
+    f'<tr><td height="6" style="height:6px;background:{INK};line-height:0;'
+    f'font-size:0;">&nbsp;</td></tr></table></td></tr></table></td></tr></table>'
+)
+
+
+def _wordmark(size: int) -> str:
+    return (
+        f'<table {TABLE}><tr><td valign="middle" style="padding-right:10px;">{MARK}</td>'
+        f'<td valign="middle" style="font-family:{SERIF};font-size:{size}px;'
+        f'line-height:1;color:{INK};font-weight:600;white-space:nowrap;">Papers '
+        f'<span style="font-style:italic;font-weight:400;color:{SOFT};">with Code</span>'
+        f"</td></tr></table>"
+    )
+
+
+def _absolute(url: str | None) -> str | None:
+    if not url:
+        return None
+    if url.startswith("/"):
+        return ORIGIN + url
+    if url.startswith("https://"):
+        return url
+    return None
+
+
+def _card(e, url: str, reasons: str, scores: list[str]) -> str:
+    esc = html.escape
+    href = esc(url, quote=True)
+    thumbnail = _absolute(e.thumbnail_url)
+    thumb_html = (
+        f'<td class="pwc-thumb-cell" width="96" valign="top" '
+        f'style="width:96px;padding-right:20px;"><a href="{href}">'
+        f'<img class="pwc-thumb" src="{esc(thumbnail, quote=True)}" width="96" '
+        f'height="136" alt="" style="display:block;width:96px;height:136px;'
+        f"object-fit:cover;object-position:top;border:1px solid {HAIRLINE};"
+        f'border-radius:4px;background:{SUBTLE};"></a></td>'
+        if thumbnail
+        else ""
+    )
+    reason_html = (
+        f'<div style="font-family:{SANS};font-size:12px;line-height:1.5;color:{FAINT};">'
+        f"Because you follow {esc(reasons)}</div>"
+        if reasons
+        else ""
+    )
+    score_html = "".join(
+        f'<div style="margin-top:8px;"><span style="display:inline-block;padding:3px 8px;'
+        f"background:{SUBTLE};border-radius:4px;font-family:{MONO};font-size:12px;"
+        f'line-height:1.5;color:{INK};">{esc(text)}</span></div>'
+        for text in scores
+    )
+    return (
+        f'<tr><td style="padding:24px 0;border-top:1px solid {HAIRLINE};">'
+        f'<table {TABLE} width="100%"><tr>{thumb_html}<td valign="top">{reason_html}'
+        f'<a href="{href}" style="display:block;margin-top:4px;font-family:{SERIF};'
+        f"font-size:20px;font-weight:500;line-height:1.25;letter-spacing:-.01em;"
+        f'color:{INK};text-decoration:none;">{esc(e.title)}</a>'
+        f'<div style="margin-top:6px;font-family:{MONO};font-size:12px;color:{FAINT};">'
+        f"{esc(_published(e.published))}</div>"
+        f'<div style="margin-top:10px;font-family:{SANS};font-size:14px;line-height:1.6;'
+        f'color:{SOFT};">{esc(e.summary)}</div>{score_html}</td></tr></table></td></tr>'
+    )
 
 
 def _score_text(score: dict) -> str:
@@ -115,9 +206,8 @@ def render_digest(
     count = len(entries) + len(topic_entries)
     noun = "paper" if count == 1 else "papers"
     period = _period(start, end)
-    intro = f"{count} new {noun} from what you follow" + (
-        f", {period}." if period else "."
-    )
+    headline = f"{count} new {noun} from what you follow"
+    intro = headline + (f", {period}." if period else ".")
     lines = ["Papers with Code · Weekly research digest", intro, ""]
     rows = []
     sections = [
@@ -132,28 +222,15 @@ def render_digest(
         if labelled and heading:
             lines.extend([heading.upper(), ""])
             rows.append(
-                f'<tr><td style="padding:22px 0 0;font-family:{SANS};font-size:12px;'
-                f'letter-spacing:.08em;text-transform:uppercase;color:{FAINT};">'
-                f"{esc(heading)}</td></tr>"
+                f'<tr><td style="padding:28px 0 12px;{EYEBROW}">{esc(heading)}</td></tr>'
             )
         url = ORIGIN + e.url
         reasons = ", ".join(e.reasons)
         scores = [_score_text(s) for s in e.scores]
-        lines.extend([e.title, url, e.summary, f"Matched: {reasons}", *scores, ""])
-        score_html = "".join(
-            f'<div style="margin-top:4px;font-family:{MONO};font-size:12px;color:{ACCENT};">'
-            f"{esc(text)}</div>"
-            for text in scores
+        lines.extend(
+            [e.title, url, e.summary, f"Because you follow {reasons}", *scores, ""]
         )
-        rows.append(
-            f'<tr><td style="padding:22px 0;border-top:1px solid {HAIRLINE};">'
-            f'<a href="{esc(url, quote=True)}" style="font-family:{SERIF};font-size:19px;'
-            f'line-height:1.3;color:{INK};text-decoration:none;">{esc(e.title)}</a>'
-            f'<div style="margin-top:6px;font-family:{SANS};font-size:12px;color:{FAINT};">'
-            f"{esc(_published(e.published))} · Matched: {esc(reasons)}</div>"
-            f'<div style="margin-top:8px;font-family:{SANS};font-size:14px;line-height:1.55;'
-            f'color:{SOFT};">{esc(e.summary)}</div>{score_html}</td></tr>'
-        )
+        rows.append(_card(e, url, reasons, scores))
     lines.extend(
         [
             f"See more matches: {ORIGIN}/following",
@@ -161,38 +238,50 @@ def render_digest(
             f"Unsubscribe: {unsubscribe}",
         ]
     )
-    link = f"color:{ACCENT};text-decoration:none;font-weight:600;"
+    period_html = (
+        f'<div style="margin-top:8px;font-family:{SANS};font-size:15px;line-height:1.5;'
+        f'color:{SOFT};">{esc(period)}</div>'
+        if period
+        else ""
+    )
+    footer_link = f"color:{SOFT};text-decoration:underline;"
     body = (
         f'<body style="margin:0;padding:0;background:{PAPER};">'
-        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        f'style="background:{PAPER};"><tr><td align="center" style="padding:32px 16px;">'
-        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        f'style="max-width:600px;background:#ffffff;border:1px solid {HAIRLINE};'
-        f'border-radius:10px;"><tr><td style="padding:28px 32px 8px;">'
-        f'<div style="font-family:{SERIF};font-size:20px;color:{INK};">Papers '
-        f'<span style="font-style:italic;color:{ACCENT};">with Code</span></div>'
-        f'<div style="margin-top:18px;font-family:{SANS};font-size:12px;letter-spacing:.08em;'
-        f'text-transform:uppercase;color:{FAINT};">Weekly research digest</div>'
-        f'<div style="margin-top:6px;font-family:{SANS};font-size:15px;color:{SOFT};">'
-        f"{esc(intro)}</div></td></tr>"
-        f'<tr><td style="padding:0 32px;"><table role="presentation" width="100%" '
-        f'cellpadding="0" cellspacing="0">{"".join(rows)}</table></td></tr>'
-        f'<tr><td style="padding:20px 32px 28px;border-top:1px solid {HAIRLINE};'
-        f'font-family:{SANS};font-size:14px;">'
-        f'<a href="{ORIGIN}/following" style="{link}">See more in your Following feed →</a>'
-        f"</td></tr></table>"
-        f'<div style="max-width:600px;margin-top:16px;font-family:{SANS};font-size:12px;'
-        f'line-height:1.6;color:{FAINT};">You receive this because you turned on the weekly '
-        f"email on Papers with Code. "
-        f'<a href="{ORIGIN}/settings" style="color:{FAINT};">Manage follows and email</a> · '
-        f'<a href="{esc(unsubscribe, quote=True)}" style="color:{FAINT};">Unsubscribe</a>'
-        f"</div></td></tr></table></body>"
+        f'<div style="display:none;max-height:0;overflow:hidden;">{esc(intro)}</div>'
+        f'<table {TABLE} width="100%" style="background:{PAPER};">'
+        f'<tr><td align="center" style="padding:32px 16px;">'
+        f'<table {TABLE} width="100%" style="max-width:640px;background:{ELEVATED};'
+        f'border:1px solid {HAIRLINE};border-radius:8px;">'
+        f'<tr><td class="pwc-pad" style="padding:22px 36px;border-bottom:1px solid '
+        f'{HAIRLINE};"><a href="{ORIGIN}" style="text-decoration:none;">{_wordmark(20)}'
+        f"</a></td></tr>"
+        f'<tr><td class="pwc-pad" style="padding:32px 36px 4px;">'
+        f'<div style="{EYEBROW}">Weekly research digest</div>'
+        f'<div class="pwc-title" style="margin-top:10px;font-family:{SERIF};font-size:30px;'
+        f'font-weight:500;line-height:1.15;letter-spacing:-.02em;color:{INK};">'
+        f"{esc(headline)}</div>{period_html}</td></tr>"
+        f'<tr><td class="pwc-pad" style="padding:16px 36px 8px;">'
+        f'<table {TABLE} width="100%">{"".join(rows)}</table></td></tr>'
+        f'<tr><td class="pwc-pad" style="padding:28px 36px 32px;border-top:1px solid '
+        f'{HAIRLINE};"><table {TABLE}><tr><td style="background:{ACCENT};'
+        f'border-radius:6px;"><a href="{ORIGIN}/following" style="display:inline-block;'
+        f"padding:12px 20px;font-family:{SANS};font-size:14px;font-weight:600;"
+        f'color:#ffffff;text-decoration:none;">See more in your Following feed →</a>'
+        f"</td></tr></table></td></tr></table>"
+        f'<table {TABLE} width="100%" style="max-width:640px;">'
+        f'<tr><td class="pwc-pad" style="padding:24px 36px 0;font-family:{SANS};'
+        f'font-size:12px;line-height:1.6;color:{FAINT};">'
+        f"You receive this because you turned on the weekly email on Papers with Code. "
+        f'<a href="{ORIGIN}/settings" style="{footer_link}">Manage follows and email</a>'
+        f' · <a href="{esc(unsubscribe, quote=True)}" style="{footer_link}">Unsubscribe</a>'
+        f'<div style="margin-top:12px;font-family:{MONO};font-size:11px;color:{FAINT};">'
+        f'<a href="{ORIGIN}" style="color:{FAINT};text-decoration:none;">'
+        f"paperswithcode.co</a></div></td></tr></table></td></tr></table></body>"
     )
     return {
         "subject": f"Your weekly research digest: {count} new {noun}",
         "text": "\n".join(lines),
-        "html": f'<!doctype html><html><head><meta charset="utf-8">'
-        f'<meta name="viewport" content="width=device-width,initial-scale=1"></head>{body}</html>',
+        "html": f"<!doctype html><html><head>{HEAD}</head>{body}</html>",
         "headers": {
             "List-Unsubscribe": f"<{unsubscribe}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
