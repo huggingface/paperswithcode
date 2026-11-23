@@ -3,7 +3,7 @@
 Paper pages generate their questions on first view, which makes the first
 visitor wait and drops them when the API is busy. This fills the cache ahead
 of time for the first pages of the default (trending) feeds: the home feed's
-past week, then every task and method page, busiest pages first.
+past week, then every task and method page over all time, busiest pages first.
 """
 
 import logging
@@ -31,7 +31,6 @@ HOME_PAGES = 3
 HOME_PAGE_SIZE = 30
 HOME_WINDOW_DAYS = 6
 ENTITY_PAGE_SIZE = 20
-ENTITY_WINDOW_DAYS = 29
 
 
 def visible_paper_ids(db: Session, today: date) -> list[int]:
@@ -52,11 +51,7 @@ def visible_paper_ids(db: Session, today: date) -> list[int]:
     feeds = {"task": tasks.get_task_papers, "method": methods.get_method_papers}
     for kind, entity_id in _entities_by_paper_count(db):
         feed = feeds[kind](
-            str(entity_id),
-            page_size=ENTITY_PAGE_SIZE,
-            order_by="trending",
-            start_date=today - timedelta(days=ENTITY_WINDOW_DAYS),
-            end_date=today,
+            str(entity_id), page_size=ENTITY_PAGE_SIZE, order_by="trending"
         )
         ordered.update((int(paper.id), None) for paper in feed.results)
     return list(ordered)

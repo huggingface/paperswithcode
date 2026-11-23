@@ -51,8 +51,7 @@ const PapersListView: React.FC = () => {
   const urlSearch = searchParams.get("search") || "";
   const mode = papersListMode(searchParams);
   const isSearchMode = mode === "search";
-  // Browsing defaults to the last month like other paper feeds; search results stay all time.
-  const feed = usePaperFeedParams({ defaultToLastMonth: !isSearchMode });
+  const feed = usePaperFeedParams();
   const { setSearchParams } = feed;
   const [searchInput, setSearchInput] = useState(urlSearch);
   const debouncedSearch = useDebounce(searchInput, 300);
