@@ -590,6 +590,76 @@ def test_sync_skips_excluded_names_and_reports_rows_that_leave_upstream():
     assert len(rows) == 2
 
 
+def test_sync_deletes_unannotated_rows_that_leave_upstream():
+    session = _session()
+    LiveLeaderboardSyncService(session, _board()).sync(
+        [_entry("Opus 5.5 (xhigh)", 3.61), _entry("Sol 5.6 (xhigh)", 4.7)]
+    )
+    annotated = _rows(session)["Claude Opus 5.5 (mini-SWE-agent)"]
+    annotated.methodology += " Reviewer checked the run logs."
+    session.commit()
+
+    stats = LiveLeaderboardSyncService(session, _board()).sync(
+        [_entry("Sol 5.6 (high)", 3.1), _entry("Opus 5.5 (xhigh)", 3.7, "Codex")]
+    )
+
+    assert stats.deleted == []
+    assert stats.missing_upstream == ["Claude Opus 5.5 (mini-SWE-agent)"]
+    assert "Claude Opus 5.5 (mini-SWE-agent)" in _rows(session)
+
+    gone = LiveLeaderboardSyncService(session, _board(min_selected=1)).sync(
+        [_entry("Sol 5.6 (high)", 3.1)]
+    )
+    assert gone.deleted == ["Claude Opus 5.5 (Codex)"]
+    assert gone.missing_upstream == ["Claude Opus 5.5 (mini-SWE-agent)"]
+    assert set(_rows(session)) == {
+        "Claude Opus 5.5 (mini-SWE-agent)",
+        "GPT-5.6 Sol (mini-SWE-agent)",
+    }
+
+
+def test_boards_that_trim_old_models_report_instead_of_deleting():
+    session = _session()
+    LiveLeaderboardSyncService(session, _board()).sync(
+        [_entry("Opus 5.5 (xhigh)", 3.61), _entry("Sol 5.6 (xhigh)", 4.7)]
+    )
+    stats = LiveLeaderboardSyncService(
+        session, _board(min_selected=1, retire_missing=False)
+    ).sync([_entry("Sol 5.6 (high)", 3.1)])
+    assert stats.deleted == []
+    assert stats.missing_upstream == ["Claude Opus 5.5 (mini-SWE-agent)"]
+    assert "Claude Opus 5.5 (mini-SWE-agent)" in _rows(session)
+
+
+def test_aa_boards_keep_models_they_stop_listing():
+    assert {
+        job for job, sync in boards.BOARD_SYNCS.items() if not sync.board.retire_missing
+    } == {"sync_critpt", "sync_critpt_v2", "sync_terminal_bench_science"}
+
+
+def test_rows_carrying_another_boards_metric_only_lose_this_metric():
+    session = _session()
+    LiveLeaderboardSyncService(session, _board()).sync(
+        [_entry("Opus 5.5 (xhigh)", 5.0), _entry("Sol 5.6 (xhigh)", 4.7)]
+    )
+    sol = _rows(session)["GPT-5.6 Sol (mini-SWE-agent)"]
+    sol.metrics = {**sol.metrics, "Other": 1.0}
+    session.commit()
+    assert sol.best_rank == 2
+
+    stats = LiveLeaderboardSyncService(session, _board()).sync(
+        [_entry("Opus 5.5 (xhigh)", 5.0), _entry("Sol 5.6 (high)", 3.1, "Codex")]
+    )
+
+    assert stats.deleted == ["GPT-5.6 Sol (mini-SWE-agent)"]
+    sol = _rows(session)["GPT-5.6 Sol (mini-SWE-agent)"]
+    assert (sol.metrics, sol.best_metric, sol.best_rank) == (
+        {"Other": 1.0},
+        "Other",
+        1,
+    )
+
+
 def test_sync_reports_unknown_models_to_the_release_radar():
     session = _session()
     stats = LiveLeaderboardSyncService(session, _board()).sync(

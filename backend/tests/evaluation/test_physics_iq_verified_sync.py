@@ -464,7 +464,7 @@ def test_unreviewed_models_and_missing_papers_are_reported_not_created():
     assert len(_rows(session)) == 32
 
 
-def test_managed_rows_dropped_upstream_are_reported_not_deleted():
+def test_annotated_rows_dropped_upstream_are_reported_not_deleted():
     session = _session()
     _seed_production(session)
     _sync(session, parse_physics_iq_leaderboard(README))
@@ -473,6 +473,7 @@ def test_managed_rows_dropped_upstream_are_reported_not_deleted():
     stats = _sync(session, parse_physics_iq_leaderboard("\n".join(lines)))
 
     assert stats.missing_upstream == ["Sora 2"]
+    assert stats.deleted == []
     assert ("Sora 2", "i2v") in _rows(session)
 
 

@@ -194,6 +194,12 @@ The FrontierCS leaderboard page renders client-side from constants in assets/js/
 
 Code: `backend/services/frontiercs_2_sync_service.py::FRONTIERCS_2_DATA_URL`
 
+## Live leaderboard syncs delete managed rows that left the board
+
+A validated upstream board is authoritative for which entries it lists. The shared live leaderboard engine deletes a managed row once its upstream entry label, recorded in the methodology head, is no longer listed (excluded names still count as listed). A row with reviewer notes beneath the head is kept and reported, because the notes may carry provenance worth a human look. A row that also carries another board's metric on a shared benchmark (Physics-IQ's two tracks) loses only this board's metric. Boards that stop charting older models without restating their scores (the Artificial Analysis CritPt, CritPt v2 and Terminal-Bench-Science pages) set retire_missing=False and keep those rows, matching the main Artificial Analysis sync's policy for unlisted models on the current index version.
+
+Code: `backend/services/live_leaderboard_sync.py::LiveLeaderboardSyncService.sync`, `backend/services/carbon_board_syncs.py::BOARD_SYNCS`
+
 ## FrontierCS sync deletes managed rows that left the board
 
 FCI is refitted on every FrontierCS update, so a row the board no longer lists keeps a score from an older fit that no longer compares with current rows. A validated response is therefore authoritative: the sync deletes managed rows whose upstream model name and harness, recorded in the methodology, are no longer listed. Rows for entries still listed but unresolved, and rows not written by the sync, are kept.

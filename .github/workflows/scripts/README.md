@@ -470,8 +470,9 @@ creates papers, so unreviewed labels and unresolved papers are logged as
 warnings. It creates missing mapped rows, revises a row's accuracy when Vals
 changes it (values that round to the published precision are unchanged),
 adopts matching hand-imported rows, and renames a mislabelled hand-imported
-row once (`renamed_from`, only when its score matches). Managed rows that drop
-off the leaderboard are reported, never deleted.
+row once (`renamed_from`, only when its score matches). Managed rows whose entry drops
+off the leaderboard are deleted (logged as `<job>_deleted`); rows carrying
+reviewer notes are kept and reported as `missing_upstream`.
 
 `sync_frontiercs_2.py` reads the `MODELS`, `PASS`, `ECI`, and `UPDATED`
 constants from https://frontier-cs.org/assets/js/fcs2-data.js (the
@@ -511,8 +512,12 @@ Analysis boards set `effort_in_model_name` and keep one row per upstream name
 with its effort setting, as their reviewed names do. A managed row whose model
 name changes is renamed in place, found by the entry label in its methodology.
 The engine adopts hand-imported
-rows for the same model, never creates papers, and reports managed rows that
-leave the leaderboard instead of deleting them.
+rows for the same model, and never creates papers. A managed row whose upstream
+entry leaves the leaderboard is deleted (`<job>_deleted`); a row carrying
+reviewer notes is kept and reported as `missing_upstream`. The three Artificial
+Analysis boards (CritPt, CritPt v2, Terminal-Bench-Science) set
+`retire_missing=False`: AA stops charting older models without restating their
+scores, so their rows are reported, never deleted.
 
 `sync_surge_chartography.py` parses the server-rendered "Chartography
 Leaderboard" block on https://surgehq.ai/benchmarks/chartography (provider,
@@ -527,8 +532,9 @@ papers, so unreviewed labels and unresolved papers are logged as warnings;
 Vision (experimental)). It creates missing mapped rows, revises a row's score
 when Surge changes it (values that round to the published precision are
 unchanged), and adopts matching hand-imported rows, keeping their notes,
-`is_open`, `hf_model_url`, and `num_parameters`. Managed rows that drop off the
-leaderboard are reported, never deleted. The with-tools `chartography`
+`is_open`, `hf_model_url`, and `num_parameters`. Managed rows whose entry drops
+off the leaderboard are deleted (logged as `<job>_deleted`); rows carrying
+reviewer notes are kept and reported as `missing_upstream`. The with-tools `chartography`
 benchmark is curated by hand and never touched.
 
 `sync_swe_marathon.py` keeps the `swe-marathon` benchmark on task
@@ -623,8 +629,11 @@ job never creates papers, so unreviewed labels and unresolved papers are
 logged as warnings. It creates missing mapped rows, revises a row's score and
 methodology when the leaderboard changes (a stored value that rounds to the
 published precision is unchanged), and adopts matching hand-imported rows by
-prefixing their methodology. Managed rows that drop off the leaderboard are
-reported, never deleted, and rows outside the managed set are never touched.
+prefixing their methodology. Managed rows whose entry drops
+off the leaderboard are deleted (logged as `<job>_deleted`); rows carrying
+reviewer notes are kept and reported as `missing_upstream`. A row
+that also carries the other track's metric loses only this track's score, and
+rows outside the managed set are never touched.
 
 `sync_hf_organizations.py` runs daily as an append-only reconciliation backstop
 for the strict 21-organization manifest. It validates HF organization pages,

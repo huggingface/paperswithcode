@@ -365,7 +365,7 @@ def test_dated_deepseek_checkpoint_attaches_to_its_release_paper():
     assert row.metrics == {METRIC_NAME: 54.1}
 
 
-def test_managed_rows_dropped_upstream_are_reported_not_deleted():
+def test_annotated_rows_dropped_upstream_are_reported_not_deleted():
     session = _session()
     _seed_production(session)
     entries = parse_vals_finance_agent(HTML)
@@ -373,6 +373,7 @@ def test_managed_rows_dropped_upstream_are_reported_not_deleted():
     remaining = [entry for entry in entries if entry.label != "Command A+"]
     stats = _sync(session, remaining)
     assert stats.missing_upstream == ["Command A+"]
+    assert stats.deleted == []
     assert "Command A+" in _rows(session)
 
 

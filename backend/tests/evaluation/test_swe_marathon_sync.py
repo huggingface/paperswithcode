@@ -449,13 +449,14 @@ def test_new_models_are_auto_matched_or_handed_to_the_radar():
     assert signal.lead_url == SWE_MARATHON_URL
 
 
-def test_managed_rows_dropped_upstream_are_reported_not_deleted():
+def test_annotated_rows_dropped_upstream_are_reported_not_deleted():
     session = _session()
     _seed_production(session)
     entries = parse_swe_marathon_bundle(BUNDLE)
     _sync(session, entries)
     stats = _sync(session, [e for e in entries if e.name != "GLM 5.2"])
     assert stats.missing_upstream == ["GLM-5.2 (Claude Code)"]
+    assert stats.deleted == []
     assert "GLM-5.2" in _rows(session)
 
 
