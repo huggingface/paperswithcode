@@ -177,7 +177,12 @@ def top_papers(db: Session, *, period: str, now: datetime) -> Insight | None:
             [" ".join(paper.title.split()) for paper in papers],
             eyebrow=f"Top papers · {'weekly' if period == 'week' else 'monthly'}",
         ),
-        facts={"papers": [paper.title for paper in papers], "period": span},
+        facts={
+            "papers": [paper.title for paper in papers],
+            "paper_ids": [paper.id for paper in papers],
+            "heading": heading,
+            "period": span,
+        },
     )
 
 

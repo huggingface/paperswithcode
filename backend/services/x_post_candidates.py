@@ -12,10 +12,12 @@ This module only finds what is worth saying, from the catalog:
   explainer illustrated by a screenshot of its method page;
 * ``lab_league`` (weekly): which organizations hold the most first places on
   active leaderboards;
-* ``top_papers_week`` / ``top_papers_month``: the trending roundups.
+* ``top_papers_week`` / ``top_papers_month``: the trending roundups, with
+  one 2:3 card per arXiv paper showing page one of its PDF (X takes four).
 
 Each candidate carries a draft, the facts the agent may use, the page link,
-and a chart card (PNG bytes) or a page to screenshot. Posted subjects are
+and a chart card (PNG bytes, plus extra images for multi-image posts) or a
+page to screenshot. Posted subjects are
 recorded in `x_insight_posts`, as for the scheduled insight posts, so no
 subject is offered twice.
 
@@ -32,6 +34,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
+import fitz
+import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -56,7 +60,12 @@ from backend.models.database import (
 from backend.models.database import Method as DBMethod
 from backend.services.method_service import MethodService
 from backend.services.paper_service import PaperService
-from backend.services.x_insight_cards import Bar, render_bar_card
+from backend.services.paper_pdf_text_service import _download_arxiv_pdf
+from backend.services.x_insight_cards import (
+    Bar,
+    render_bar_card,
+    render_paper_page_card,
+)
 from backend.services.x_insight_post_service import (
     ROUNDUP_CATCH_UP_DAYS,
     SITE,
@@ -89,6 +98,7 @@ KINDS = (
     "top_papers_week",
     "top_papers_month",
 )
+ROUNDUP_PAGE_CARDS = 4
 PAPER_POST_KINDS = ("new_sota", "open_sota", "open_release", "trending_paper")
 SOTA_LIMIT = 20
 SOTA_WINDOW = timedelta(days=7)
@@ -141,6 +151,10 @@ LEAGUE_ACTIVE_DAYS = 90
 LEAGUE_SIZE = 8
 
 
+def _arxiv_pdf(paper: Paper) -> bytes:
+    return _download_arxiv_pdf(paper.arxiv_id, paper.version)
+
+
 @dataclass
 class Candidate:
     kind: str
@@ -151,6 +165,7 @@ class Candidate:
     image: bytes | None = None
     screenshot_url: str | None = None
     score: float = 0.0
+    extra_images: list[bytes] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -780,7 +795,7 @@ def paper_candidate(
         "leaderboard_results": paper_results(db, paper.id),
         "paper_url": paper_url(paper),
     }
-    lead = organizations[0] if organizations else (authors[0] if authors else None)
+    lead = paper_lead(organizations, authors)
     draft = f"{lead} just released a new paper!" if lead else "New paper!"
     draft += f'\n\n"{paper.title}"'
     if paper.tldr:
@@ -794,6 +809,45 @@ def paper_candidate(
         screenshot_url=paper_url(paper),
         score=TRENDING_FEED_DEPTH + 2.0 - rank if rank else 0.0,
     )
+
+
+def paper_lead(organizations: list[str], authors: list[str]) -> str | None:
+    return organizations[0] if organizations else (authors[0] if authors else None)
+
+
+def paper_page_card(
+    db: Session,
+    paper: Paper,
+    *,
+    rank: int | None,
+    fetch_pdf: Callable[[Paper], bytes] = _arxiv_pdf,
+) -> bytes | None:
+    """The 2:3 page-one card for a single-paper post, or None without an arXiv PDF."""
+    if paper.source != "arxiv" or not paper.arxiv_id:
+        return None
+    authors = list(
+        db.scalars(
+            select(Author.name)
+            .join(PaperAuthor, PaperAuthor.author_id == Author.id)
+            .where(PaperAuthor.paper_id == paper.id)
+            .order_by(PaperAuthor.author_order)
+        )
+    )
+    lead = paper_lead([o.name for o in paper.organizations], authors)
+    try:
+        return render_paper_page_card(
+            fetch_pdf(paper),
+            title=f"New from {lead}" if lead else "New paper",
+            subtitle=f"Published {paper.date_published:%b %-d, %Y}"
+            if paper.date_published
+            else "",
+            eyebrow="Trending paper" if rank else "Paper",
+            counter=f"#{rank} this week" if rank else "",
+            source=f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF",
+            summary=paper.tldr or paper.abstract or "",
+        )
+    except (httpx.HTTPError, ValueError, fitz.FileDataError):
+        return None
 
 
 def x_threads(db: Session, paper_id: int) -> list[dict[str, Any]]:
@@ -967,18 +1021,69 @@ def gather(
     return [candidate for candidate in candidates if candidate is not None]
 
 
-def _roundup(db: Session, period: str, now: datetime) -> Candidate | None:
+def roundup_page_cards(
+    papers: list[Paper],
+    *,
+    heading: str,
+    span: str,
+    eyebrow: str,
+    fetch_pdf: Callable[[Paper], bytes] = _arxiv_pdf,
+) -> list[bytes]:
+    """Page-one cards for the roundup's arXiv papers, numbered as in the post.
+
+    A paper whose PDF cannot be fetched or read is left out."""
+    cards = []
+    for rank, paper in enumerate(papers, 1):
+        if paper.source != "arxiv" or not paper.arxiv_id:
+            continue
+        try:
+            pdf = fetch_pdf(paper)
+            card = render_paper_page_card(
+                pdf,
+                title=heading,
+                subtitle=span,
+                eyebrow=eyebrow,
+                counter=f"{rank:02d} / {len(papers):02d}",
+                source=f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF",
+                summary=paper.tldr or paper.abstract or "",
+            )
+        except (httpx.HTTPError, ValueError, fitz.FileDataError):
+            continue
+        cards.append(card)
+        if len(cards) == ROUNDUP_PAGE_CARDS:
+            break
+    return cards
+
+
+def _roundup(
+    db: Session,
+    period: str,
+    now: datetime,
+    fetch_pdf: Callable[[Paper], bytes] = _arxiv_pdf,
+) -> Candidate | None:
     insight = top_papers(db, period=period, now=now)
     if insight is None:
         return None
+    ids = insight.facts["paper_ids"]
+    found = {
+        paper.id: paper for paper in db.scalars(select(Paper).where(Paper.id.in_(ids)))
+    }
+    cards = roundup_page_cards(
+        [found[paper_id] for paper_id in ids],
+        heading=insight.facts["heading"],
+        span=insight.facts["period"],
+        eyebrow=f"Top papers · {'weekly' if period == 'week' else 'monthly'}",
+        fetch_pdf=fetch_pdf,
+    )
     return Candidate(
         insight.kind,
         insight.subject_key,
         insight.text,
         insight.link,
         insight.facts,
-        insight.image,
+        cards[0] if cards else insight.image,
         score=40,
+        extra_images=cards[1:],
     )
 
 

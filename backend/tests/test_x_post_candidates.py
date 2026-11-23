@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import io
 from datetime import UTC, datetime
 
+import fitz
 import pytest
+from PIL import Image
 
 from backend.models.database import Dataset, Paper
 from backend.services import x_post_candidates as service
+from backend.services.x_insight_cards import _first_page_hero
 from backend.services.x_post_candidates import (
     Board,
     Candidate,
@@ -433,3 +437,87 @@ def test_best_per_paper_keeps_each_papers_top_win():
     found = [item(1, 9), item(2, 30), item(1, 12), item(3, 5), item(2, 8)]
     kept = service.best_per_paper(found)
     assert [(paper.id, c.score) for c, paper in kept] == [(2, 30), (1, 12), (3, 5)]
+
+
+def _pdf(title: str) -> bytes:
+    with fitz.open() as document:
+        page = document.new_page()
+        page.insert_text((72, 90), title, fontsize=20)
+        page.insert_text((72, 130), "Ada Lovelace, Alan Turing", fontsize=10)
+        page.insert_text((72, 170), "Abstract. We study a thing.", fontsize=10)
+        page.insert_text((72, 260), "1", fontsize=12)
+        page.insert_text((72, 275), "Introduction", fontsize=12)
+        page.insert_text((72, 290), "Body text that should be faded.", fontsize=10)
+        return document.tobytes()
+
+
+def test_roundup_page_cards_number_arxiv_papers_as_in_the_post():
+    papers = [
+        Paper(id=1, source="external", source_url="https://x.test", title="Ext"),
+        Paper(
+            id=2,
+            source="arxiv",
+            arxiv_id="2611.00002",
+            title="Two",
+            tldr="Two is good.",
+        ),
+        Paper(
+            id=3, source="arxiv", arxiv_id="2611.00003", title="Three", tldr="Three."
+        ),
+        Paper(
+            id=4, source="arxiv", arxiv_id="2611.00004", title="Four", abstract="Four."
+        ),
+    ]
+    fetched = []
+
+    def fetch(paper):
+        fetched.append(paper.id)
+        if paper.id == 3:
+            raise ValueError("arXiv PDF is too large")
+        return _pdf(paper.title)
+
+    cards = service.roundup_page_cards(
+        papers, heading="Top", span="Published", eyebrow="Top papers", fetch_pdf=fetch
+    )
+
+    assert fetched == [2, 3, 4]
+    assert len(cards) == 2
+    assert Image.open(io.BytesIO(cards[0])).size == (1600, 2400)
+
+
+def test_roundup_page_cards_stop_at_four():
+    papers = [
+        Paper(id=i, source="arxiv", arxiv_id=f"2611.0000{i}", title=f"P{i}", tldr="T.")
+        for i in range(1, 7)
+    ]
+    cards = service.roundup_page_cards(
+        papers, heading="Top", span="", eyebrow="", fetch_pdf=lambda p: _pdf(p.title)
+    )
+    assert len(cards) == service.ROUNDUP_PAGE_CARDS
+
+
+class _NoAuthors:
+    def scalars(self, query):
+        return []
+
+
+def test_paper_page_card_needs_an_arxiv_pdf():
+    external = Paper(id=1, source="external", source_url="https://x.test", title="Ext")
+    assert service.paper_page_card(_NoAuthors(), external, rank=1) is None
+
+
+def test_paper_page_card_renders_and_tolerates_a_bad_pdf():
+    paper = Paper(id=2, source="arxiv", arxiv_id="2611.00002", title="Two", tldr="T.")
+    card = service.paper_page_card(
+        _NoAuthors(), paper, rank=3, fetch_pdf=lambda p: _pdf(p.title)
+    )
+    assert card.startswith(b"\x89PNG")
+    broken = service.paper_page_card(
+        _NoAuthors(), paper, rank=3, fetch_pdf=lambda p: b"not a pdf"
+    )
+    assert broken is None
+
+
+def test_page_hero_stops_at_a_split_introduction_heading():
+    hero = _first_page_hero(_pdf("Title"), 1000, 1)
+    assert hero.height > 300
