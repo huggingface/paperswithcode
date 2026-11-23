@@ -506,7 +506,11 @@ implausible row count) and hands the rows to the shared single-metric engine in
 identities in `backend/services/carbon_board_identities.py`; other names are
 auto-matched or handed to the release radar, and a board's `excluded` names
 (partial runs, non-standard setups) are skipped. The engine keeps one row per
-catalog model and harness (the best upstream setting), adopts hand-imported
+catalog model and harness (the best upstream setting); the three Artificial
+Analysis boards set `effort_in_model_name` and keep one row per upstream name
+with its effort setting, as their reviewed names do. A managed row whose model
+name changes is renamed in place, found by the entry label in its methodology.
+The engine adopts hand-imported
 rows for the same model, never creates papers, and reports managed rows that
 leave the leaderboard instead of deleting them.
 
