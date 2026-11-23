@@ -119,6 +119,8 @@ def _first_page_hero(pdf: bytes, width: int, height: int) -> Image.Image:
 
     A short hero runs on into the page, up to `height`, and fades out."""
     with fitz.open(stream=pdf, filetype="pdf") as document:
+        if document.page_count == 0:
+            raise ValueError("PDF has no pages")
         page = document[0]
         blocks = [b for b in page.get_text("blocks") if b[2] > page.rect.width * 0.1]
         body = [

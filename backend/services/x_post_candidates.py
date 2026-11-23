@@ -34,7 +34,6 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
 
-import fitz
 import httpx
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -845,7 +844,7 @@ def paper_page_card(
             source=f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF",
             summary=paper.tldr or paper.abstract or "",
         )
-    except (httpx.HTTPError, ValueError, fitz.FileDataError):
+    except (httpx.HTTPError, ValueError, RuntimeError):
         return None
 
 
@@ -1046,7 +1045,7 @@ def roundup_page_cards(
                 source=f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF",
                 summary=paper.tldr or paper.abstract or "",
             )
-        except (httpx.HTTPError, ValueError, fitz.FileDataError):
+        except (httpx.HTTPError, ValueError, RuntimeError):
             continue
         cards.append(card)
         if len(cards) == ROUNDUP_PAGE_CARDS:

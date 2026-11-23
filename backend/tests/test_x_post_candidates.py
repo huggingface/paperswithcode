@@ -521,3 +521,13 @@ def test_paper_page_card_renders_and_tolerates_a_bad_pdf():
 def test_page_hero_stops_at_a_split_introduction_heading():
     hero = _first_page_hero(_pdf("Title"), 1000, 1)
     assert hero.height > 300
+
+
+def test_roundup_page_cards_skip_a_pdf_with_no_pages():
+    paper = Paper(id=1, source="arxiv", arxiv_id="2611.00001", title="P", tldr="T.")
+    with fitz.open() as empty:
+        pdf = empty.tobytes() if empty.page_count else b"%PDF-1.7\n%%EOF"
+    cards = service.roundup_page_cards(
+        [paper], heading="Top", span="", eyebrow="", fetch_pdf=lambda p: pdf
+    )
+    assert cards == []
