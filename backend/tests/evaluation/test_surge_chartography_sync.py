@@ -347,15 +347,16 @@ def test_new_labels_are_auto_matched_or_handed_to_the_radar():
     assert session.query(ModelReleaseSignal).one().sightings == 2
 
 
-def test_managed_rows_dropped_upstream_are_reported_not_deleted():
+def test_managed_rows_dropped_upstream_are_deleted():
     session = _session()
     _seed_production(session)
     entries = parse_surge_chartography(HTML)
     _sync(session, entries)
     remaining = [entry for entry in entries if entry.label != "Mistral Large 3"]
     stats = _sync(session, remaining)
-    assert stats.missing_upstream == ["Mistral Large 3 (with tools)"]
-    assert "Mistral Large 3 (with tools)" in _rows(session)
+    assert stats.deleted == ["Mistral Large 3 (with tools)"]
+    assert stats.missing_upstream == []
+    assert "Mistral Large 3 (with tools)" not in _rows(session)
 
 
 def test_dry_run_rolls_back_and_collapsed_selection_is_refused():

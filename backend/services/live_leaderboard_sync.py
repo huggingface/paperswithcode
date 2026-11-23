@@ -2,9 +2,11 @@
 
 A board module parses its official leaderboard into ``LeaderboardEntry`` rows
 and declares a reviewed ``ModelIdentity`` map; this engine resolves papers,
-hands unreviewed names to the release radar, and creates or revises the rows
-it owns. Like every live sync it never creates papers and never deletes rows:
-a managed row that leaves the upstream board is only reported.
+hands unreviewed names to the release radar, and creates, revises, and
+retires the rows it owns. It never creates papers. A managed row whose entry
+leaves the upstream board is deleted, or loses only this board's metric when
+it carries another. A row with reviewer notes, or on a board that trims old
+models without restating them (``retire_missing=False``), is kept and reported.
 
 A managed methodology is the sync's head followed by any reviewer notes. The
 engine rewrites the head on every run and keeps the notes; adopting a
@@ -79,6 +81,7 @@ class LiveLeaderboard:
     model_name_suffix: str = ""
     excluded: dict[str, str] = field(default_factory=dict)
     adopt_unmanaged: bool = True
+    retire_missing: bool = True
 
     @property
     def managed_prefix(self) -> str:
@@ -94,6 +97,13 @@ class LiveLeaderboard:
             re.DOTALL,
         )
 
+    @property
+    def managed_label(self) -> re.Pattern[str]:
+        """Match a managed methodology, capturing the upstream entry label."""
+        return re.compile(
+            f'{re.escape(self.managed_prefix)} Official leaderboard entry "(?P<label>.*?)": '
+        )
+
 
 @dataclass
 class LiveSyncStats:
@@ -107,6 +117,7 @@ class LiveSyncStats:
     unreviewed: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
     missing_upstream: list[str] = field(default_factory=list)
+    deleted: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
@@ -191,7 +202,7 @@ def check_entry_count(entries: list, what: str, low: int, high: int) -> None:
 
 
 class LiveLeaderboardSyncService:
-    """Create and revise one board's managed rows; never create papers."""
+    """Create, revise, and retire one board's managed rows; never create papers."""
 
     def __init__(self, db: Session, board: LiveLeaderboard):
         self.db = db
@@ -220,6 +231,7 @@ class LiveLeaderboardSyncService:
     ) -> LiveSyncStats:
         board = self.board
         fetched = len(entries)
+        upstream_labels = {e.label for e in entries}
         entries = [e for e in entries if e.name not in board.excluded]
         reviewed = [e for e in entries if e.name in board.identities]
         reviewed_models = {
@@ -389,16 +401,44 @@ class LiveLeaderboardSyncService:
                 published.add(id(row))
                 stats.matched += 1
 
-            stats.missing_upstream = sorted(
-                f"{row.model_name} ({row.harness})" if row.harness else row.model_name
-                for row in rows
-                if id(row) not in published
-                and (row.methodology or "").startswith(board.managed_prefix)
-            )
+            reranked = {board.metric}
+            for row in rows:
+                label = board.managed_label.match(row.methodology or "")
+                if (
+                    id(row) in published
+                    or label is None
+                    or label["label"] in upstream_labels
+                ):
+                    continue
+                name = (
+                    f"{row.model_name} ({row.harness})"
+                    if row.harness
+                    else row.model_name
+                )
+                if not board.retire_missing or self._managed_notes(row):
+                    stats.missing_upstream.append(name)
+                    continue
+                remaining = {
+                    metric: value
+                    for metric, value in row.metrics.items()
+                    if metric != board.metric
+                }
+                if remaining:
+                    row.metrics = remaining
+                    if row.best_metric == board.metric:
+                        row.best_metric = next(iter(remaining))
+                    reranked.add(row.best_metric)
+                    row.updated_at = now
+                else:
+                    self.db.delete(row)
+                stats.deleted.append(name)
+            stats.missing_upstream.sort()
+            stats.deleted.sort()
             self.db.flush()
-            EvaluationService(self.db).recalculate_ranks(
-                task.id, dataset.id, metric_name=board.metric, commit=False
-            )
+            for metric in sorted(reranked):
+                EvaluationService(self.db).recalculate_ranks(
+                    task.id, dataset.id, metric_name=metric, commit=False
+                )
             if commit:
                 self.db.commit()
             else:
