@@ -879,6 +879,11 @@ sandbox credentials (`APP_ONLY_SECRET_KEYS` in `deploy/cron_launcher.py`).
 `production.env` directly. systemd loads the environment files as root, and a
 `user:pwc-cron:--x` ACL lets jobs traverse `/var/lib/paperswithcode/production`
 to their own directories (`install_host_layout.restrict_cron_access`).
+The only production app state they share is the curation trace spool
+(`recovery-spool/curation-traces`), so `pwc-cron enqueue_hf_daily_paper_curation
+--retry-trace` can re-upload traces the backend spooled
+(`install_host_layout.share_curation_trace_spool`). Rerun
+`sudo python3 deploy/install_host_layout.py` after changing these grants.
 
 ```bash
 sudo pwc-cron status
