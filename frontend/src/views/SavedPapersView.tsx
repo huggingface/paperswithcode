@@ -32,7 +32,8 @@ const SavedPapersView: React.FC = () => {
   const bucketAuthorizationRequired =
     query.error instanceof ApiError &&
     query.error.code === "saved_papers_bucket_authorization_required";
-  const showBucketMigration = !!query.data && !query.data.bucket_connected;
+  const showBucketMigration =
+    !!query.data && !query.data.bucket_connected && query.data.bucket_available !== false;
 
   const authorizeBucket = () => {
     window.location.assign(savedPapersAuthorizationUrl());
