@@ -819,7 +819,6 @@ def paper_page_card(
     db: Session,
     paper: Paper,
     *,
-    rank: int | None,
     fetch_pdf: Callable[[Paper], bytes] = _arxiv_pdf,
 ) -> bytes | None:
     """The 2:3 page-one card for a single-paper post, or None without an arXiv PDF."""
@@ -841,8 +840,8 @@ def paper_page_card(
             subtitle=f"Published {paper.date_published:%b %-d, %Y}"
             if paper.date_published
             else "",
-            eyebrow="Trending paper" if rank else "Paper",
-            counter=f"#{rank} this week" if rank else "",
+            eyebrow="New paper",
+            counter="",
             source=f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF",
             summary=paper.tldr or paper.abstract or "",
         )

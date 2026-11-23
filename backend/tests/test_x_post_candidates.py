@@ -503,17 +503,17 @@ class _NoAuthors:
 
 def test_paper_page_card_needs_an_arxiv_pdf():
     external = Paper(id=1, source="external", source_url="https://x.test", title="Ext")
-    assert service.paper_page_card(_NoAuthors(), external, rank=1) is None
+    assert service.paper_page_card(_NoAuthors(), external) is None
 
 
 def test_paper_page_card_renders_and_tolerates_a_bad_pdf():
     paper = Paper(id=2, source="arxiv", arxiv_id="2611.00002", title="Two", tldr="T.")
     card = service.paper_page_card(
-        _NoAuthors(), paper, rank=3, fetch_pdf=lambda p: _pdf(p.title)
+        _NoAuthors(), paper, fetch_pdf=lambda p: _pdf(p.title)
     )
     assert card.startswith(b"\x89PNG")
     broken = service.paper_page_card(
-        _NoAuthors(), paper, rank=3, fetch_pdf=lambda p: b"not a pdf"
+        _NoAuthors(), paper, fetch_pdf=lambda p: b"not a pdf"
     )
     assert broken is None
 

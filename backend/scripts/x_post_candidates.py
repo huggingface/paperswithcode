@@ -10,7 +10,7 @@ release tree and calls this through `pwc-cron x_post_candidates`:
         extra_images_png_base64 (more images for the same post; the
         roundups carry one page-one card per paper).
 
-    pwc-cron x_post_candidates card --paper-id 1 2 [--rank 3 7]
+    pwc-cron x_post_candidates card --paper-id 1 2
         {"cards": {paper_id: base64 PNG or null}}: the 2:3 page-one card
         for single-paper posts; null without an arXiv PDF.
 
@@ -76,7 +76,6 @@ def main() -> int:
         "card", help="Print page-one PNG cards for single-paper posts as JSON"
     )
     card_parser.add_argument("--paper-id", type=int, nargs="+", required=True)
-    card_parser.add_argument("--rank", type=int, nargs="*", default=[])
     resolve_parser = commands.add_parser("resolve-request", help="Close a request")
     resolve_parser.add_argument("--paper-id", type=int, required=True)
     resolve_parser.add_argument("--resolution", choices=RESOLUTIONS, required=True)
@@ -101,12 +100,8 @@ def main() -> int:
                 candidates.append(item)
             output = {"generated_at": now.isoformat(), "candidates": candidates}
         elif args.command == "card":
-            ranks = dict(zip(args.paper_id, args.rank))
             papers = db.scalars(select(Paper).where(Paper.id.in_(args.paper_id)))
-            cards = {
-                str(paper.id): paper_page_card(db, paper, rank=ranks.get(paper.id))
-                for paper in papers
-            }
+            cards = {str(paper.id): paper_page_card(db, paper) for paper in papers}
             output = {
                 "cards": {
                     paper_id: base64.b64encode(card).decode() if card else None
