@@ -283,6 +283,21 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync RSI-Exam leaderboard from rsi-exam.ai hourly",
     ),
     TimerSpec(
+        job="sync_frontier_rsi",
+        on_calendar=("*-*-* *:19:00",),
+        description="Sync FrontierRSI leaderboard from frontier-rsi.org hourly",
+    ),
+    TimerSpec(
+        job="sync_rsi_inference",
+        on_calendar=("*-*-* *:29:00",),
+        description="Sync RSI-Inference Bench leaderboards from the Apple ml-rsi-inference-bench repository hourly",
+    ),
+    TimerSpec(
+        job="sync_rsi_infra",
+        on_calendar=("*-*-* *:44:00",),
+        description="Sync RSI-Infra Bench leaderboard from ai4ai-for-anything.github.io hourly",
+    ),
+    TimerSpec(
         job="sync_frontiercs_2",
         on_calendar=("*-*-* *:43:00",),
         description="Sync FrontierCS 2 leaderboard hourly",

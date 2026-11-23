@@ -61,7 +61,7 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
 
 SOURCE_PATH = Path(__file__).parent / "fixtures" / "frontiercs_2_data.js"
 SOURCE = SOURCE_PATH.read_text()
-TASK_ID = 15
+TASK_ID = 862
 DATASET_ID = 3096
 
 
@@ -95,7 +95,7 @@ def _session() -> Session:
         ],
     )
     session = Session(engine)
-    session.add(Task(id=TASK_ID, name="Coding Agents", slug="coding-agents"))
+    session.add(Task(id=TASK_ID, name="Auto-Research", slug="auto-research"))
     session.add(Dataset(id=DATASET_ID, name="FrontierCS 2", slug="frontiercs-2"))
     session.add(Metric(id=250, name=PASS_RATE, direction="higher_is_better"))
     session.add(Metric(id=251, name=FCI, direction="higher_is_better"))

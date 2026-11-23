@@ -54,6 +54,9 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-jevbench.timer` | `*-*-* *:37:00` | `sync_jevbench` | `.github/workflows/scripts/hourly/sync_jevbench.py` |
 | `pwc-cron-sync-sle.timer` | `*-*-* *:41:00` | `sync_sle` | `.github/workflows/scripts/hourly/sync_sle.py` |
 | `pwc-cron-sync-rsi-exam.timer` | `*-*-* *:49:00` | `sync_rsi_exam` | `.github/workflows/scripts/hourly/sync_rsi_exam.py` |
+| `pwc-cron-sync-frontier-rsi.timer` | `*-*-* *:19:00` | `sync_frontier_rsi` | `.github/workflows/scripts/hourly/sync_frontier_rsi.py` |
+| `pwc-cron-sync-rsi-inference.timer` | `*-*-* *:29:00` | `sync_rsi_inference` | `.github/workflows/scripts/hourly/sync_rsi_inference.py` |
+| `pwc-cron-sync-rsi-infra.timer` | `*-*-* *:44:00` | `sync_rsi_infra` | `.github/workflows/scripts/hourly/sync_rsi_infra.py` |
 | `pwc-cron-sync-frontiercs-2.timer` | `*-*-* *:43:00` | `sync_frontiercs_2` | `.github/workflows/scripts/hourly/sync_frontiercs_2.py` |
 | `pwc-cron-sync-vals-index.timer` | `*-*-* *:03:00` | `sync_vals_index` | `.github/workflows/scripts/hourly/sync_vals_index.py` |
 | `pwc-cron-sync-swe-sweep.timer` | `*-*-* *:08:00` | `sync_swe_sweep` | `.github/workflows/scripts/hourly/sync_swe_sweep.py` |
@@ -473,7 +476,7 @@ off the leaderboard are reported, never deleted.
 `sync_frontiercs_2.py` reads the `MODELS`, `PASS`, `ECI`, and `UPDATED`
 constants from https://frontier-cs.org/assets/js/fcs2-data.js (the
 https://frontier-cs.org/#leaderboard page renders from them client-side) into
-the `frontiercs-2` benchmark on task `coding-agents`: Pass Rate (percent of the
+the `frontiercs-2` benchmark on task `auto-research`: Pass Rate (percent of the
 48 tasks whose run beats the human reference, checked against the pass count)
 and FCI (FrontierCS Capabilities Index, refitted upstream with Kimi K2.7 at 0).
 It fails on any layout change or an entry count outside 8–200. Exact model
@@ -573,6 +576,36 @@ set, so the job fails when the page stops naming `RSI-Exam 0.1`, when the Full
 board covers other than 88 tasks, on an unreviewed harness label, broken
 ranks, a score out of rank order, or a board outside 10–100 rows. Models
 without a catalog paper become release-radar signals.
+
+`sync_frontier_rsi.py` keeps the `frontier-rsi` benchmark on task
+`auto-research` equal to the leaderboard on https://frontier-rsi.org/
+(Abundant AI). It reads the `window.FRSI` JSON in `data.js` and ranks models as
+the site does: the mean over all 27 tasks of each model's avg@4 (mean reward
+of four trials), published as Score in percent with the harness (Claude Code,
+Codex, Antigravity CLI, ...) and reasoning effort. The job fails when the four
+categories or the 27-task count change, on an unreviewed harness label, a model
+run in two setups, or a board outside 5–100 rows.
+
+`sync_rsi_inference.py` keeps three benchmarks on task `auto-research` equal to
+Apple's RSI-Inference Bench leaderboard (`docs/leaderboard.html` in
+`apple-aiml-research/ml-rsi-inference-bench`, read from
+raw.githubusercontent.com): `rsi-inference-bench` (joint Bradley-Terry rating
+on the Elo scale, metric Elo), `rsi-inference-bench-model-support` (Day-0
+Model Support pass@1 in percent) and `rsi-inference-bench-optimization`
+(geometric-mean Speedup over the optimization and regression tasks). Rows the
+board marks incomplete are skipped. The job fails when the data schema, rating
+method (`weighted-bt-elo-v2`), the 37-task release or the per-track task counts
+change, on broken ranks or scores out of rank order.
+
+`sync_rsi_infra.py` keeps the `rsi-infra-bench` benchmark on task
+`auto-research` equal to the RSI-Infra Bench leaderboard table at
+https://ai4ai-for-anything.github.io/blog/rsi-infra-bench/leaderboard/: the
+ECI-style overall Score (anchored at Claude Opus 5.5 = 40 and Kimi K3.1 Pro =
+10) with the harness, and the eight per-task speed-ups in the methodology.
+Rows the board marks (GPT-6 Astra's "suspected nerf") or judged on other
+machines keep that note. The job fails when the eight tasks or the anchors
+change, on an unreviewed harness, broken ranks, a score out of rank order, or a
+board outside 5–100 rows.
 
 `sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
 official `google-deepmind/physics-IQ-benchmark` README (the

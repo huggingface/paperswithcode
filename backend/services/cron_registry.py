@@ -1487,6 +1487,118 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_frontier_rsi",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=19),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-frontier-rsi.timer",
+        systemd_service="pwc-cron-sync-frontier-rsi.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync FrontierRSI Leaderboard",
+        category="hourly",
+        schedule="19 * * * * (hourly)",
+        script_path="hourly/sync_frontier_rsi.py",
+        log_name="sync_frontier_rsi",
+        process_patterns=("scripts.hourly.sync_frontier_rsi",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_frontier_rsi.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'frontier-rsi'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code FrontierRSI%'
+        """,
+        workflow_file="cron-sync-frontier-rsi.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_rsi_inference",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=29),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-rsi-inference.timer",
+        systemd_service="pwc-cron-sync-rsi-inference.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync RSI-Inference Bench Leaderboards",
+        category="hourly",
+        schedule="29 * * * * (hourly)",
+        script_path="hourly/sync_rsi_inference.py",
+        log_name="sync_rsi_inference",
+        process_patterns=("scripts.hourly.sync_rsi_inference",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_rsi_inference.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug IN ('rsi-inference-bench', 'rsi-inference-bench-model-support', 'rsi-inference-bench-optimization')
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code RSI-Inference Bench%'
+        """,
+        workflow_file="cron-sync-rsi-inference.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_rsi_infra",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=44),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-rsi-infra.timer",
+        systemd_service="pwc-cron-sync-rsi-infra.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync RSI-Infra Bench Leaderboard",
+        category="hourly",
+        schedule="44 * * * * (hourly)",
+        script_path="hourly/sync_rsi_infra.py",
+        log_name="sync_rsi_infra",
+        process_patterns=("scripts.hourly.sync_rsi_infra",),
+        lock_file=("/var/lib/paperswithcode/production/cron-locks/sync_rsi_infra.lock"),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'rsi-infra-bench'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code RSI-Infra Bench%'
+        """,
+        workflow_file="cron-sync-rsi-infra.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_frontiercs_2",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=43),),

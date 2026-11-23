@@ -31,7 +31,7 @@ from backend.services.live_leaderboard_sync import (
 
 FRONTIERCS_2_URL = "https://frontier-cs.org/#leaderboard"
 FRONTIERCS_2_DATA_URL = "https://frontier-cs.org/assets/js/fcs2-data.js"
-TASK_SLUG = "coding-agents"
+TASK_SLUG = "auto-research"
 DATASET_SLUG = "frontiercs-2"
 PASS_RATE = "Pass Rate"
 FCI = "FCI"

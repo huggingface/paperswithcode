@@ -471,6 +471,34 @@ COMMANDS: dict[str, Job] = {
             "validated rsi-exam.ai Full board; never creates papers"
         ),
     ),
+    "sync_frontier_rsi": job(
+        "-m",
+        "scripts.hourly.sync_frontier_rsi",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed FrontierRSI evaluation rows from "
+            "the validated frontier-rsi.org data.js; never creates papers"
+        ),
+    ),
+    "sync_rsi_inference": job(
+        "-m",
+        "scripts.hourly.sync_rsi_inference",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed RSI-Inference Bench evaluation "
+            "rows on three boards from the validated "
+            "docs/leaderboard.html data; never creates papers"
+        ),
+    ),
+    "sync_rsi_infra": job(
+        "-m",
+        "scripts.hourly.sync_rsi_infra",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed RSI-Infra Bench evaluation rows "
+            "from the validated leaderboard table; never creates papers"
+        ),
+    ),
     "sync_frontiercs_2": job(
         "-m",
         "scripts.hourly.sync_frontiercs_2",
