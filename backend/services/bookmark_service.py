@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 class BookmarkRefListing:
     refs: tuple[SavedPaperRef, ...]
     bucket_connected: bool
+    bucket_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ class SavedPapersProjection:
     areas: tuple[SavedAreaProjection, ...]
     bucket_connected: bool
     bucket_migrated: bool
+    bucket_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -178,11 +180,12 @@ class BookmarkService:
             refs = tuple(store.list())
         except PaperBucketError as error:
             logger.warning(
-                "Falling back to database bookmarks for %s: %s",
+                "Falling back to database bookmarks for %s: %s (%r)",
                 username,
                 error,
+                error.__cause__,
             )
-            return BookmarkRefListing(tuple(legacy), False)
+            return BookmarkRefListing(tuple(legacy), False, str(error))
         self.record_bucket_migration(username)
         return BookmarkRefListing(refs, True)
 
@@ -206,6 +209,7 @@ class BookmarkService:
                 areas=(),
                 bucket_connected=listing.bucket_connected,
                 bucket_migrated=bucket_migrated,
+                bucket_error=listing.bucket_error,
             )
 
         db_papers = self.db.query(DBPaper).filter(DBPaper.id.in_(paper_ids)).all()
@@ -308,6 +312,7 @@ class BookmarkService:
             ),
             bucket_connected=listing.bucket_connected,
             bucket_migrated=bucket_migrated,
+            bucket_error=listing.bucket_error,
         )
 
     def _require_bucket(
@@ -316,12 +321,24 @@ class BookmarkService:
         encrypted_credential: str | None,
         hf_user_id: str,
         username: str,
-    ) -> SavedPapersBucket:
-        store = self.initialize_bucket(
-            encrypted_credential=encrypted_credential,
-            hf_user_id=hf_user_id,
-            username=username,
-        )
+    ) -> SavedPapersBucket | None:
+        """Return the Bucket, or None while an unmigrated account cannot set one up."""
+        try:
+            store = self.initialize_bucket(
+                encrypted_credential=encrypted_credential,
+                hf_user_id=hf_user_id,
+                username=username,
+            )
+        except PaperBucketError as error:
+            if self.bucket_migrated(username):
+                raise
+            logger.warning(
+                "Saving bookmarks for %s in the database: %s (%r)",
+                username,
+                error,
+                error.__cause__,
+            )
+            return None
         if store is None:
             raise PaperBucketError(
                 "Authorize Papers With Code to manage your saved-papers Bucket.",
@@ -337,7 +354,11 @@ class BookmarkService:
         hf_user_id: str,
         username: str,
     ) -> None:
-        """Add a Bucket bookmark, then create its database compatibility mirror."""
+        """Add a Bucket bookmark, then create its database compatibility mirror.
+
+        An unmigrated account whose Bucket cannot be set up keeps saving to the
+        database, which stays its bookmark source until a migration succeeds.
+        """
         paper = self.db.query(DBPaper).filter(DBPaper.id == paper_id).first()
         if paper is None:
             raise BookmarkPaperNotFoundError
@@ -347,12 +368,13 @@ class BookmarkService:
             hf_user_id=hf_user_id,
             username=username,
         )
-        store.add(
-            paper_id,
-            title=paper.title,
-            arxiv_id=paper.arxiv_id,
-            source_url=paper.source_url,
-        )
+        if store is not None:
+            store.add(
+                paper_id,
+                title=paper.title,
+                arxiv_id=paper.arxiv_id,
+                source_url=paper.source_url,
+            )
 
         existing = (
             self.db.query(UserBookmark)
@@ -380,7 +402,8 @@ class BookmarkService:
             hf_user_id=hf_user_id,
             username=username,
         )
-        store.remove(paper_id)
+        if store is not None:
+            store.remove(paper_id)
         self.db.query(UserBookmark).filter(
             UserBookmark.hf_username == username,
             UserBookmark.paper_id == paper_id,

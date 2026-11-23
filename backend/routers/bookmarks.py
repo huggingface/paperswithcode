@@ -68,6 +68,13 @@ class SavedPapersResponse(BaseModel):
             "only needs to reconnect"
         ),
     )
+    bucket_error: str | None = Field(
+        None,
+        description=(
+            "Why the authorized HF Bucket could not be used; saved papers were "
+            "read from Papers With Code instead"
+        ),
+    )
 
 
 def _bucket_error(error: PaperBucketError) -> HTTPException:
@@ -145,6 +152,7 @@ def get_my_bookmarks(
         areas=areas,
         bucket_connected=projection.bucket_connected,
         bucket_migrated=projection.bucket_migrated,
+        bucket_error=projection.bucket_error,
     )
 
 
