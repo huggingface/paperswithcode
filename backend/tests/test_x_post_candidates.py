@@ -8,6 +8,7 @@ import pytest
 from PIL import Image
 
 from backend.models.database import Dataset, Paper
+from backend.services import x_insight_cards as cards_module
 from backend.services import x_post_candidates as service
 from backend.services.x_insight_cards import _first_page_hero
 from backend.services.x_post_candidates import (
@@ -523,11 +524,21 @@ def test_page_hero_stops_at_a_split_introduction_heading():
     assert hero.height > 300
 
 
-def test_roundup_page_cards_skip_a_pdf_with_no_pages():
+def test_roundup_page_cards_skip_a_pdf_with_no_pages(monkeypatch):
+    empty = fitz.open
+    monkeypatch.setattr(cards_module.fitz, "open", lambda **kwargs: empty())
     paper = Paper(id=1, source="arxiv", arxiv_id="2611.00001", title="P", tldr="T.")
-    with fitz.open() as empty:
-        pdf = empty.tobytes() if empty.page_count else b"%PDF-1.7\n%%EOF"
     cards = service.roundup_page_cards(
-        [paper], heading="Top", span="", eyebrow="", fetch_pdf=lambda p: pdf
+        [paper], heading="Top", span="", eyebrow="", fetch_pdf=lambda p: b"%PDF-"
+    )
+    assert cards == []
+    with pytest.raises(ValueError, match="no pages"):
+        _first_page_hero(b"%PDF-", 100, 100)
+
+
+def test_roundup_page_cards_skip_a_malformed_pdf():
+    paper = Paper(id=1, source="arxiv", arxiv_id="2611.00001", title="P", tldr="T.")
+    cards = service.roundup_page_cards(
+        [paper], heading="Top", span="", eyebrow="", fetch_pdf=lambda p: b"not a pdf"
     )
     assert cards == []
