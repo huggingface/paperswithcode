@@ -269,7 +269,7 @@ def test_digest_groups_papers_under_their_most_shared_topic():
     slm, rl, swarms = "\u201cSLM\u201d", "\u201cRL\u201d", "\u201cSwarms\u201d"
     topic_entries = [
         topical("a", [("topic:1", rl)]),
-        topical("b", [("task:9", "Agents"), ("topic:2", slm), ("topic:1", rl)]),
+        topical("b", [("task:9", "Agents"), ("topic:1", rl), ("topic:2", slm)]),
         topical("c", [("topic:2", slm)]),
         topical("d", [("topic:1", rl), ("topic:3", swarms)]),
     ]
@@ -279,6 +279,17 @@ def test_digest_groups_papers_under_their_most_shared_topic():
         (rl, ["a", "b", "d"]),
         (slm, ["c"]),
         ("Agents", ["e"]),
+    ]
+    overflow = [topical("f", [("topic:2", slm)])]
+    subtasks = [
+        topical("g", [("task:9", "Agents (subtask)")]),
+        topical("h", [("task:9", "Agents"), ("task:8", "Robots (subtask)")]),
+    ]
+    merged = delivery.digest_groups(rest + overflow + subtasks, topic_entries)
+    assert [(label, [e.paper_key for e in group]) for label, group in merged] == [
+        (rl, ["a", "b", "d"]),
+        (slm, ["c", "f"]),
+        ("Agents", ["e", "g", "h"]),
     ]
     html = delivery.render_digest(rest, "token", topic_entries=topic_entries)["html"]
     assert ">RL</td>" in html and "3 papers" in html

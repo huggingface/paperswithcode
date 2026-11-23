@@ -190,29 +190,35 @@ def digest_sections(entries, rotation: int | None = None) -> tuple[list, list]:
     return topic_entries, rest
 
 
+def _follow(reason: str) -> str:
+    return reason.removesuffix(" (subtask)")
+
+
 def digest_groups(entries, topic_entries=()) -> list[tuple[str, list]]:
     """One heading per follow, topics first and larger groups earlier.
 
     A paper sits under its most shared topic, or its most shared follow when it
-    matched no topic, so it appears once.
+    matched no topic, so it appears once. Subtask matches join their follow.
     """
+    batch = [*topic_entries, *entries]
+    options = {}
+    topics = set()
+    for e in batch:
+        matched = [
+            _follow(reason)
+            for interest, reason in zip(e.interests, e.reasons)
+            if interest.startswith("topic:")
+        ]
+        topics.update(matched)
+        options[id(e)] = matched or [_follow(reason) for reason in e.reasons]
+    counts = Counter(label for e in batch for label in options[id(e)])
     groups = {}
-    for batch, topical in ((list(topic_entries), True), (list(entries), False)):
-        options = {
-            id(e): [
-                reason
-                for interest, reason in zip(e.interests, e.reasons)
-                if not topical or interest.startswith("topic:")
-            ]
-            or e.reasons
-            for e in batch
-        }
-        counts = Counter(reason for e in batch for reason in options[id(e)])
-        for e in batch:
-            label = max(options[id(e)], key=counts.__getitem__, default="")
-            groups.setdefault((topical, label), []).append(e)
-    ordered = sorted(groups.items(), key=lambda item: (not item[0][0], -len(item[1])))
-    return [(label, group) for (_, label), group in ordered]
+    for e in batch:
+        label = max(options[id(e)], key=counts.__getitem__, default="")
+        groups.setdefault(label, []).append(e)
+    return sorted(
+        groups.items(), key=lambda item: (item[0] not in topics, -len(item[1]))
+    )
 
 
 def render_digest(
@@ -251,7 +257,7 @@ def render_digest(
         )
         for e in group:
             url = ORIGIN + e.url
-            also = ", ".join(r for r in e.reasons if r != label)
+            also = ", ".join(r for r in e.reasons if _follow(r) != label)
             scores = [_score_text(s) for s in e.scores]
             lines.extend([e.title, url, e.summary])
             if also:
