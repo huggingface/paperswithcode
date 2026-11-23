@@ -245,3 +245,93 @@ def test_quota_rejected_repair_candidate_keeps_the_failed_head_ephemeral(db, set
         )
         == 2
     )
+
+
+def test_paper_heads_point_only_at_versions_already_inserted(db, settings):
+    """PostgreSQL checks head foreign keys per statement; SQLite does not."""
+    from sqlalchemy import event
+
+    statements: list[str] = []
+
+    def record(_connection, _cursor, statement, *_args):
+        statements.append(" ".join(statement.split()).lower())
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        compiler = _Compiler()
+        service = LatexPaperService(
+            db,
+            settings,
+            storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+            compiler=compiler,
+        )
+        initial = service.create_neutral_scaffold(
+            owner_id="owner-1", session_id=_session(db)
+        )
+        assert initial.source_head is not None
+        service.save_human_version(
+            owner_id="owner-1",
+            artifact_id=initial.artifact_id,
+            expected_parent_version_id=initial.source_head.version_id,
+            files={
+                "main.tex": b"\\documentclass{article}\\begin{document}x\\end{document}"
+            },
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    inserted = 0
+    for statement in statements:
+        if statement.startswith("insert into chat_latex_paper_versions"):
+            inserted += 1
+        elif statement.startswith("update chat_artifacts") and (
+            "source_head_version_id" in statement
+            or "preview_head_version_id" in statement
+        ):
+            assert inserted, "a head pointer was written before its version row"
+    assert inserted == 2
+
+
+def test_scaffold_preloads_the_packages_authors_cannot_add():
+    from backend.services.latex_paper_service import _neutral_scaffold
+
+    source = _neutral_scaffold("Survey")["main.tex"].decode()
+    preamble = source.split("\\begin{document}", 1)[0]
+    for package in ("amsmath", "amssymb", "graphicx", "booktabs", "url", "natbib"):
+        assert f"\\usepackage{{{package}}}" in preamble, package
+    # hyperref must load after natbib to patch its citation links.
+    assert preamble.index("{natbib}") < preamble.index("{hyperref}")
+
+
+def test_draft_settles_a_scaffold_compile_it_supersedes(db, settings):
+    """Owner polls follow only the head, so a replaced compile must not pend forever."""
+    compiler = _Compiler(CompilerJobState.COMPILING)
+    service = LatexPaperService(
+        db,
+        settings,
+        storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+        compiler=compiler,
+    )
+    scaffold = service.create_neutral_scaffold(
+        owner_id="owner-1", session_id=_session(db)
+    )
+    assert scaffold.source_head is not None
+    assert scaffold.source_head.compile_status == "compiling"
+
+    compiler.state = CompilerJobState.SUCCEEDED
+    draft = service.save_ai_version(
+        owner_id="owner-1",
+        artifact_id=scaffold.artifact_id,
+        expected_parent_version_id=scaffold.source_head.version_id,
+        files={
+            "main.tex": b"\\documentclass{article}\\begin{document}Draft\\end{document}"
+        },
+        model_identity="selected-model",
+    )
+
+    superseded = db.get(ChatLatexPaperVersion, scaffold.source_head.version_id)
+    assert superseded.compile_status == "failed"
+    assert superseded.compile_diagnostics["failure_category"] == "superseded"
+    assert draft.source_head is not None
+    assert draft.preview_head == draft.source_head
