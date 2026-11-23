@@ -401,6 +401,7 @@ class LiveLeaderboardSyncService:
                 published.add(id(row))
                 stats.matched += 1
 
+            reranked = {board.metric}
             for row in rows:
                 label = board.managed_label.match(row.methodology or "")
                 if (
@@ -426,6 +427,7 @@ class LiveLeaderboardSyncService:
                     row.metrics = remaining
                     if row.best_metric == board.metric:
                         row.best_metric = next(iter(remaining))
+                    reranked.add(row.best_metric)
                     row.updated_at = now
                 else:
                     self.db.delete(row)
@@ -433,9 +435,10 @@ class LiveLeaderboardSyncService:
             stats.missing_upstream.sort()
             stats.deleted.sort()
             self.db.flush()
-            EvaluationService(self.db).recalculate_ranks(
-                task.id, dataset.id, metric_name=board.metric, commit=False
-            )
+            for metric in sorted(reranked):
+                EvaluationService(self.db).recalculate_ranks(
+                    task.id, dataset.id, metric_name=metric, commit=False
+                )
             if commit:
                 self.db.commit()
             else:
