@@ -338,7 +338,8 @@ def require_user(request: Request) -> dict:
 
     Mirrors :func:`require_hf_admin` without the admin-allowlist check; used by
     user-scoped endpoints such as the bookmark API. Returns a small dict with
-    the canonical HF ``username`` (lowercased) pulled from the session JWT.
+    the canonical HF ``username`` (lowercased) pulled from the session JWT,
+    plus ``hub_username`` with the Hub's exact casing for Hub namespaces.
     """
 
     from backend.routers.auth import decode_request_session
@@ -355,6 +356,7 @@ def require_user(request: Request) -> dict:
     actor = {
         "source": "cookie",
         "username": username.lower(),
+        "hub_username": username,
         "hf_user_id": hf_user_id,
         "hf_subject": hf_user_id,
         "role": role,

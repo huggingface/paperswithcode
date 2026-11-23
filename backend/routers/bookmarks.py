@@ -105,6 +105,7 @@ def get_my_bookmark_ids(
         encrypted_credential=request.cookies.get(BUCKET_MANAGE_OAUTH_COOKIE_NAME),
         hf_user_id=user["hf_user_id"],
         username=user["username"],
+        hub_username=user.get("hub_username"),
     )
     return BookmarkIdsResponse(paper_ids=[item.paper_id for item in listing.refs])
 
@@ -130,6 +131,7 @@ def get_my_bookmarks(
         encrypted_credential=request.cookies.get(BUCKET_MANAGE_OAUTH_COOKIE_NAME),
         hf_user_id=user["hf_user_id"],
         username=user["username"],
+        hub_username=user.get("hub_username"),
     )
     areas = [
         SavedAreaGroup(
@@ -173,6 +175,7 @@ def add_bookmark(
             encrypted_credential=request.cookies.get(BUCKET_MANAGE_OAUTH_COOKIE_NAME),
             hf_user_id=user["hf_user_id"],
             username=user["username"],
+            hub_username=user.get("hub_username"),
         )
     except BookmarkPaperNotFoundError:
         raise HTTPException(
@@ -199,6 +202,7 @@ def remove_bookmark(
             encrypted_credential=request.cookies.get(BUCKET_MANAGE_OAUTH_COOKIE_NAME),
             hf_user_id=user["hf_user_id"],
             username=user["username"],
+            hub_username=user.get("hub_username"),
         )
     except PaperBucketError as error:
         raise _bucket_error(error) from error
