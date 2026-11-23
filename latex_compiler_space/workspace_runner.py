@@ -111,7 +111,7 @@ def _compiler_environment(workspace_root: Path) -> dict[str, str]:
     return {
         "HOME": str(home),
         "LANG": "C.UTF-8",
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "PATH": "/opt/texlive/bin:/usr/local/bin:/usr/bin:/bin",
         "TEXMFOUTPUT": str(workspace_root),
         "openin_any": "p",
         "openout_any": "p",
