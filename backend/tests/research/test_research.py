@@ -201,7 +201,7 @@ def test_digest_template_summarizes_the_week_and_links_settings():
     rendered = delivery.render_digest([e], "tok", start, start + timedelta(days=7))
     assert rendered["subject"] == "Your weekly research digest: 1 new paper"
     assert "1 new paper from what you follow, Oct 5 – Oct 11, 2026." in rendered["text"]
-    assert "Because you follow Agents" in rendered["text"]
+    assert "AGENTS (1 paper)" in rendered["text"]
     assert "SWE-bench · M: Accuracy 71.2" in rendered["html"]
     assert 'href="https://paperswithcode.co/settings"' in rendered["html"]
     assert "/api/v1/research/unsubscribe/tok" in rendered["html"]
