@@ -201,10 +201,25 @@ def test_digest_template_summarizes_the_week_and_links_settings():
     rendered = delivery.render_digest([e], "tok", start, start + timedelta(days=7))
     assert rendered["subject"] == "Your weekly research digest: 1 new paper"
     assert "1 new paper from what you follow, Oct 5 – Oct 11, 2026." in rendered["text"]
-    assert "Matched: Agents" in rendered["text"]
+    assert "Because you follow Agents" in rendered["text"]
     assert "SWE-bench · M: Accuracy 71.2" in rendered["html"]
     assert 'href="https://paperswithcode.co/settings"' in rendered["html"]
     assert "/api/v1/research/unsubscribe/tok" in rendered["html"]
+
+
+def test_digest_cards_show_absolute_thumbnails_when_present():
+    with_thumb, without = entry("x", ["a"]), entry("y", ["a"])
+    with_thumb.title, with_thumb.url = "Thumbed", "/paper/1"
+    with_thumb.thumbnail_url = "/api/thumbnails/2611_1_v1.jpg?fit=fit9&v=2"
+    without.title, without.url = "Bare", "/paper/2"
+    without.thumbnail_url = "javascript:alert(1)"
+    rendered = delivery.render_digest([with_thumb, without], "tok")["html"]
+    assert (
+        'src="https://paperswithcode.co/api/thumbnails/2611_1_v1.jpg?fit=fit9&amp;v=2"'
+        in rendered
+    )
+    assert rendered.count("<img") == 1
+    assert "javascript:" not in rendered
 
 
 def test_descendants_privacy_methods_and_canonical_versions(db, now):

@@ -410,7 +410,7 @@ WITH RECURSIVE interests AS (
 SELECT DISTINCT h.kind,h.entity_id,h.strength,i.created_at followed_at,
  p.id,p.arxiv_id,p.title,p.abstract,p.tldr,
  COALESCE((SELECT min(v.date_published) FROM papers v WHERE v.arxiv_id=p.arxiv_id),p.date_published) date_published,
- p.trending_score,
+ p.trending_score,p.thumbnail_url,
  CASE WHEN p.arxiv_id IS NULL THEN 'paper:' || p.id ELSE 'arxiv:' || p.arxiv_id END paper_key
 FROM hits h JOIN interests i USING(kind,entity_id)
 JOIN papers source ON source.id=h.paper_id
@@ -525,6 +525,7 @@ def matching_entries(
                 summary=short_summary(row["tldr"], row["abstract"]),
                 published=row["date_published"].isoformat(),
                 popularity=float(row["trending_score"] or 0),
+                thumbnail_url=row["thumbnail_url"],
             ),
         )
         interest_key = f"{interest.kind}:{interest.entity_id}"

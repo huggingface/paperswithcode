@@ -143,6 +143,7 @@ class ResearchEntry(BaseModel):
     summary: str
     published: str
     popularity: float = 0
+    thumbnail_url: str | None = None
     reasons: list[str] = Field(default_factory=list)
     interests: list[str] = Field(default_factory=list)
     strength: int = 0
