@@ -231,6 +231,27 @@ class ChatCapabilityService:
             row.hf_recursive_list_calls += 1
         self.db.flush()
 
+    def revoked(
+        self,
+        token: str,
+        *,
+        scope: str,
+        chat_session_id: uuid.UUID,
+        turn_id: uuid.UUID,
+    ) -> bool:
+        row = self.db.execute(
+            select(ChatTurnCapability).where(
+                ChatTurnCapability.token_hash == _digest(token)
+            )
+        ).scalar_one_or_none()
+        return (
+            row is not None
+            and row.revoked_at is not None
+            and row.chat_session_id == chat_session_id
+            and row.turn_id == turn_id
+            and scope in row.scopes
+        )
+
     def revoke(self, capability_id: uuid.UUID) -> bool:
         row = self.db.get(ChatTurnCapability, capability_id)
         if row is None or row.revoked_at is not None:

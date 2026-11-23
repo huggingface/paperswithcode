@@ -102,9 +102,10 @@ outage. The latency rule
 fired in 4 of 1,222 windows. Existing sanitized operational counters still
 supply persistence and capacity failures.
 
-A session-store call for a chat the user deleted mid-turn returns 404, not 403,
-so the `session_store_forbidden` runtime alert counts only real capability
-rejections.
+A session-store call for a chat the user deleted mid-turn returns 404, and one
+whose turn already ended (the user pressed stop, which revokes the turn's
+capability) returns 410, not 403. The `session_store_forbidden` runtime alert
+therefore counts only real capability rejections.
 
 A separately allowlisted synthetic job (`run_chat_synthetic_probe`,
 `pwc-cron-run-chat-synthetic-probe.timer`) polls its due/trigger state every minute

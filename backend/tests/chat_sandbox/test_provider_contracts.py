@@ -90,6 +90,45 @@ def test_capability_is_exactly_scoped_and_metered():
         )
 
 
+def test_capability_reports_revocation_only_for_its_own_turn_and_scope():
+    session_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+    token = "revoked-test-token"
+    row = ChatTurnCapability(
+        id=uuid.uuid4(),
+        token_hash=_digest(token),
+        chat_session_id=session_id,
+        turn_id=turn_id,
+        scopes=["session_store"],
+        expires_at=datetime.now(UTC) + timedelta(minutes=1),
+    )
+
+    class Result:
+        def scalar_one_or_none(self):
+            return row
+
+    class DB:
+        def execute(self, _query):
+            return Result()
+
+    service = ChatCapabilityService(DB())
+
+    def revoked(**overrides):
+        arguments = {
+            "scope": "session_store",
+            "chat_session_id": session_id,
+            "turn_id": turn_id,
+        } | overrides
+        return service.revoked(token, **arguments)
+
+    assert not revoked()
+    row.revoked_at = datetime.now(UTC)
+    assert revoked()
+    assert not revoked(scope="model")
+    assert not revoked(turn_id=uuid.uuid4())
+    assert not revoked(chat_session_id=uuid.uuid4())
+
+
 def test_workspace_snapshot_provider_only_snapshots_workspace():
     calls: list[tuple[str, int, int]] = []
 
