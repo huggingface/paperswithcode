@@ -255,10 +255,45 @@ def test_digest_leads_with_topic_section():
     payload = delivery.render_digest(rest, "token", topic_entries=topic_entries)
     assert payload["subject"].endswith("3 new papers")
     body = payload["text"]
-    assert body.index("NEW ON YOUR TOPIC") < body.index("b")
-    assert body.index("FROM WHAT YOU FOLLOW") < body.index("\na\n")
-    alone = delivery.render_digest([], "token", topic_entries=topic_entries)
-    assert "NEW ON YOUR TOPIC" not in alone["text"]
+    assert body.index("VIDEO (2 papers)") < body.index("\nb\n")
+    assert body.index("\nc\n") < body.index("AGENTS (1 paper)") < body.index("\na\n")
+    assert body.count("VIDEO (") == 1
+
+
+def test_digest_groups_papers_under_their_most_shared_topic():
+    def topical(key, pairs):
+        e = entry(key, [i for i, _ in pairs])
+        e.reasons = [r for _, r in pairs]
+        return e
+
+    slm, rl, swarms = "\u201cSLM\u201d", "\u201cRL\u201d", "\u201cSwarms\u201d"
+    topic_entries = [
+        topical("a", [("topic:1", rl)]),
+        topical("b", [("task:9", "Agents"), ("topic:1", rl), ("topic:2", slm)]),
+        topical("c", [("topic:2", slm)]),
+        topical("d", [("topic:1", rl), ("topic:3", swarms)]),
+    ]
+    rest = [topical("e", [("task:9", "Agents")])]
+    groups = delivery.digest_groups(rest, topic_entries)
+    assert [(label, [e.paper_key for e in group]) for label, group in groups] == [
+        (rl, ["a", "b", "d"]),
+        (slm, ["c"]),
+        ("Agents", ["e"]),
+    ]
+    overflow = [topical("f", [("topic:2", slm)])]
+    subtasks = [
+        topical("g", [("task:9", "Agents (subtask)")]),
+        topical("h", [("task:9", "Agents"), ("task:8", "Robots (subtask)")]),
+    ]
+    merged = delivery.digest_groups(rest + overflow + subtasks, topic_entries)
+    assert [(label, [e.paper_key for e in group]) for label, group in merged] == [
+        (rl, ["a", "b", "d"]),
+        (slm, ["c", "f"]),
+        ("Agents", ["e", "g", "h"]),
+    ]
+    html = delivery.render_digest(rest, "token", topic_entries=topic_entries)["html"]
+    assert ">RL</td>" in html and "3 papers" in html
+    assert "Also matches Agents, \u201cSLM\u201d" in html
 
 
 def test_follow_topic_shares_rows_by_normalized_text(db, now):

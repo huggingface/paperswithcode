@@ -6,6 +6,7 @@ import hmac
 import html
 import json
 import time
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -117,7 +118,7 @@ def _absolute(url: str | None) -> str | None:
     return None
 
 
-def _card(e, url: str, reasons: str, scores: list[str]) -> str:
+def _card(e, url: str, also: str, scores: list[str]) -> str:
     esc = html.escape
     href = esc(url, quote=True)
     thumbnail = _absolute(e.thumbnail_url)
@@ -131,10 +132,10 @@ def _card(e, url: str, reasons: str, scores: list[str]) -> str:
         if thumbnail
         else ""
     )
-    reason_html = (
+    also_html = (
         f'<div style="font-family:{SANS};font-size:12px;line-height:1.5;color:{FAINT};">'
-        f"Because you follow {esc(reasons)}</div>"
-        if reasons
+        f"Also matches {esc(also)}</div>"
+        if also
         else ""
     )
     score_html = "".join(
@@ -145,7 +146,7 @@ def _card(e, url: str, reasons: str, scores: list[str]) -> str:
     )
     return (
         f'<tr><td style="padding:24px 0;border-top:1px solid {HAIRLINE};">'
-        f'<table {TABLE} width="100%"><tr>{thumb_html}<td valign="top">{reason_html}'
+        f'<table {TABLE} width="100%"><tr>{thumb_html}<td valign="top">{also_html}'
         f'<a href="{href}" style="display:block;margin-top:4px;font-family:{SERIF};'
         f"font-size:20px;font-weight:500;line-height:1.25;letter-spacing:-.01em;"
         f'color:{INK};text-decoration:none;">{esc(e.title)}</a>'
@@ -189,6 +190,37 @@ def digest_sections(entries, rotation: int | None = None) -> tuple[list, list]:
     return topic_entries, rest
 
 
+def _follow(reason: str) -> str:
+    return reason.removesuffix(" (subtask)")
+
+
+def digest_groups(entries, topic_entries=()) -> list[tuple[str, list]]:
+    """One heading per follow, topics first and larger groups earlier.
+
+    A paper sits under its most shared topic, or its most shared follow when it
+    matched no topic, so it appears once. Subtask matches join their follow.
+    """
+    batch = [*topic_entries, *entries]
+    options = {}
+    topics = set()
+    for e in batch:
+        matched = [
+            _follow(reason)
+            for interest, reason in zip(e.interests, e.reasons)
+            if interest.startswith("topic:")
+        ]
+        topics.update(matched)
+        options[id(e)] = matched or [_follow(reason) for reason in e.reasons]
+    counts = Counter(label for e in batch for label in options[id(e)])
+    groups = {}
+    for e in batch:
+        label = max(options[id(e)], key=counts.__getitem__, default="")
+        groups.setdefault(label, []).append(e)
+    return sorted(
+        groups.items(), key=lambda item: (item[0] not in topics, -len(item[1]))
+    )
+
+
 def render_digest(
     entries,
     token: str,
@@ -198,8 +230,8 @@ def render_digest(
 ) -> dict:
     """Email-safe digest: table layout and inline styles only; all catalog text escaped.
 
-    ``topic_entries`` lead under "New on your topics"; ``entries`` follow under
-    "From what you follow" when both are present.
+    Papers are grouped under the follow they matched (``digest_groups``), with
+    ``topic_entries`` grouped by topic ahead of ``entries``.
     """
     esc = html.escape
     unsubscribe = f"{ORIGIN}/api/v1/research/unsubscribe/{token}"
@@ -210,27 +242,28 @@ def render_digest(
     intro = headline + (f", {period}." if period else ".")
     lines = ["Papers with Code · Weekly research digest", intro, ""]
     rows = []
-    sections = [
-        ("New on your topics", list(topic_entries)),
-        ("From what you follow", list(entries)),
-    ]
-    labelled = all(section for _, section in sections)
-    for e in [e for _, section in sections for e in section]:
-        heading = next(
-            (name for name, section in sections if section and section[0] is e), None
+    for index, (label, group) in enumerate(digest_groups(entries, topic_entries)):
+        heading = label.strip("\u201c\u201d") or "From what you follow"
+        size = f"{len(group)} {'paper' if len(group) == 1 else 'papers'}"
+        lines.extend([f"{heading.upper()} ({size})", ""])
+        rows.append(
+            f'<tr><td style="padding:{16 if index == 0 else 40}px 0 12px;">'
+            f'<table {TABLE} width="100%"><tr><td valign="bottom" style="font-family:'
+            f"{SERIF};font-size:22px;font-weight:500;line-height:1.2;"
+            f'letter-spacing:-.01em;color:{INK};">{esc(heading)}</td>'
+            f'<td valign="bottom" align="right" style="padding-left:12px;white-space:nowrap;'
+            f'font-family:{MONO};font-size:12px;color:{FAINT};">{size}</td></tr></table>'
+            f"</td></tr>"
         )
-        if labelled and heading:
-            lines.extend([heading.upper(), ""])
-            rows.append(
-                f'<tr><td style="padding:28px 0 12px;{EYEBROW}">{esc(heading)}</td></tr>'
-            )
-        url = ORIGIN + e.url
-        reasons = ", ".join(e.reasons)
-        scores = [_score_text(s) for s in e.scores]
-        lines.extend(
-            [e.title, url, e.summary, f"Because you follow {reasons}", *scores, ""]
-        )
-        rows.append(_card(e, url, reasons, scores))
+        for e in group:
+            url = ORIGIN + e.url
+            also = ", ".join(r for r in e.reasons if _follow(r) != label)
+            scores = [_score_text(s) for s in e.scores]
+            lines.extend([e.title, url, e.summary])
+            if also:
+                lines.append(f"Also matches {also}")
+            lines.extend([*scores, ""])
+            rows.append(_card(e, url, also, scores))
     lines.extend(
         [
             f"See more matches: {ORIGIN}/following",

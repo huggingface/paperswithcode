@@ -533,10 +533,11 @@ def matching_entries(
         previous = strengths.get((key, interest_key), 0)
         if row["strength"] > previous:
             if previous:
-                entry.reasons.remove(interest.name + " (subtask)")
+                index = entry.reasons.index(interest.name + " (subtask)")
+                entry.reasons[index] = reason
             else:
                 entry.interests.append(interest_key)
-            entry.reasons.append(reason)
+                entry.reasons.append(reason)
             entry.strength += row["strength"] - previous
             strengths[key, interest_key] = row["strength"]
         for event in eligible:
