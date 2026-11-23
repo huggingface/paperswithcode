@@ -234,12 +234,24 @@ TurnFenceDependency = Annotated[
 ]
 
 
-def _chat_session_deleted(db: Session, session_id: str) -> bool:
+def _session_store_rejection(
+    db: Session, token: str, session_id: str, turn_id: str
+) -> HTTPException:
     try:
         chat_session_id = uuid.UUID(session_id)
+        chat_turn_id = uuid.UUID(turn_id)
     except ValueError:
-        return False
-    return db.get(ChatSession, chat_session_id) is None
+        return HTTPException(status_code=403, detail="Capability rejected")
+    if db.get(ChatSession, chat_session_id) is None:
+        return HTTPException(status_code=404, detail="Chat session not found")
+    if ChatCapabilityService(db).revoked(
+        token,
+        scope="session_store",
+        chat_session_id=chat_session_id,
+        turn_id=chat_turn_id,
+    ):
+        return HTTPException(status_code=410, detail="Chat turn has ended")
+    return HTTPException(status_code=403, detail="Capability rejected")
 
 
 def _scope(
@@ -262,10 +274,8 @@ def _scope(
         )
     except (CapabilityError, ValueError):
         db.rollback()
-        if scope == "session_store" and _chat_session_deleted(db, session_id):
-            raise HTTPException(
-                status_code=404, detail="Chat session not found"
-            ) from None
+        if scope == "session_store":
+            raise _session_store_rejection(db, token, session_id, turn_id) from None
         raise HTTPException(status_code=403, detail="Capability rejected") from None
     if "external_turn" not in row.scopes:
         return row

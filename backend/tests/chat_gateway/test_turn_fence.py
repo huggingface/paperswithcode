@@ -578,17 +578,22 @@ def _reject_capability(*_args, **_kwargs):
 
 
 @pytest.mark.parametrize(
-    ("scope", "chat_exists", "status_code"),
+    ("scope", "chat_exists", "revoked", "status_code"),
     [
-        ("session_store", False, 404),
-        ("session_store", True, 403),
-        ("model", False, 403),
+        ("session_store", False, False, 404),
+        ("session_store", True, True, 410),
+        ("session_store", True, False, 403),
+        ("model", False, False, 403),
+        ("model", True, True, 403),
     ],
 )
-def test_rejected_capability_is_404_only_for_a_deleted_chat_session_store(
-    monkeypatch, scope, chat_exists, status_code
+def test_rejected_session_store_capability_reports_a_deleted_chat_or_ended_turn(
+    monkeypatch, scope, chat_exists, revoked, status_code
 ):
     monkeypatch.setattr(gateway.ChatCapabilityService, "validate", _reject_capability)
+    monkeypatch.setattr(
+        gateway.ChatCapabilityService, "revoked", lambda *_args, **_kwargs: revoked
+    )
     db = FenceDB(on_get=lambda *_args: object() if chat_exists else None)
 
     with pytest.raises(HTTPException) as error:
