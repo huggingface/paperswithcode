@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync FrontierRSI leaderboard from frontier-rsi.org hourly
+After=network-online.target postgresql@16-main.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pwc-cron-throttled sync_frontier_rsi
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/paperswithcode/cron-slots

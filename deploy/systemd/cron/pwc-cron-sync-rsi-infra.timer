@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync RSI-Infra Bench leaderboard from ai4ai-for-anything.github.io hourly
+
+[Timer]
+OnCalendar=*-*-* *:44:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-rsi-infra.service
+
+[Install]
+WantedBy=timers.target

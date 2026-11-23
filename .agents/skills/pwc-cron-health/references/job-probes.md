@@ -139,6 +139,21 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `rsi-exam` on task `auto-research`; Normalized Score (0–1, four decimals) of every row on the Full board (release RSI-Exam 0.1, 88 tasks) at https://rsi-exam.ai/, harness per row (Claude Code, Codex, Antigravity, Grok, Kimi Code, Qwen Code, Muse Code); typically 10–100 rows (21 on 2026-11-16, 20 on catalog papers).
 - **Proof:** Compare managed rows' order and values with the Full tab; confirm `sync_rsi_exam_unreviewed` names become radar signals or get an identity in `rsi_exam_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated; a failure naming the release or task count means RSI-Exam rescaled the board, which needs a reviewer decision before bumping `RELEASE`/`FULL_TASKS`, not a parser patch. An unreviewed harness label needs a `HARNESSES` entry.
 
+## `sync_frontier_rsi`
+
+- **Contract:** `frontier-rsi` on task `auto-research`; Score (%) 0–100 to two decimals: the mean over 27 tasks of each model's avg@4, recomputed from the `window.FRSI` JSON in https://frontier-rsi.org/data.js exactly as the site's leaderboard does; harness per row (Claude Code, Codex, Antigravity CLI, Grok Build, Muse Code, mini-SWE-agent); typically 5–100 rows (13 on 2026-11-23, all reviewed).
+- **Proof:** Compare managed rows' order and values with the site's Leaderboard section; confirm `sync_frontier_rsi_unreviewed` names become radar signals or get an identity in `frontier_rsi_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated; a failure naming the categories or task count means FrontierRSI changed its task set, which needs a reviewer decision before bumping `CATEGORIES`/`TASK_COUNT`, not a parser patch.
+
+## `sync_rsi_inference`
+
+- **Contract:** three benchmarks on task `auto-research` from the `window.RSI_LEADERBOARD` object in `docs/leaderboard.html` of `apple-aiml-research/ml-rsi-inference-bench`: `rsi-inference-bench` (Elo, joint rating), `rsi-inference-bench-model-support` (Pass@1 0–100) and `rsi-inference-bench-optimization` (Speedup); no harness; incomplete rows skipped; typically 5–100 rows per board (15 on 2026-11-23, all reviewed).
+- **Proof:** Compare managed rows with the rendered leaderboard (htmlpreview link); confirm `sync_rsi_inference_unreviewed` names become radar signals or get an identity in `rsi_inference_sync_service.py`, and `missing_papers` is empty; a failure naming the schema, rating method, release or track task counts means the board was rescaled, which needs a reviewer decision, not a parser patch.
+
+## `sync_rsi_infra`
+
+- **Contract:** `rsi-infra-bench` on task `auto-research`; Score (ECI-style, anchored Claude Opus 5.5 = 40, Kimi K3.1 Pro = 10, two decimals) from the table on https://ai4ai-for-anything.github.io/blog/rsi-infra-bench/leaderboard/index.html; harness per row (Claude Code, Codex, Antigravity CLI, Qwen Code, DeepSeek Harness); per-task speed-ups in the methodology; typically 5–100 rows (16 on 2026-11-23, all reviewed).
+- **Proof:** Compare managed rows' order and values with the table; confirm `sync_rsi_infra_unreviewed` names become radar signals or get an identity in `rsi_infra_sync_service.py`, `missing_papers` is empty; scores are refit on every update, so small shifts are expected; a failure naming the tasks or anchors needs a reviewer decision, not a parser patch.
+
 ## `sync_jevbench`
 
 - **Contract:** `jevbench` on task `decision-making`; Composite Score 0–100 (two decimals) of every ranked row on Benchmark Heaven's official API board (`api_board_rank` set, method v1.7), from https://benchmarkheaven.com/api/jevbench/latest; ranks match https://benchmarkheaven.com/jev-models/api; typically 20–300 ranked API rows (48 on 2026-11-12, 6 on catalog papers).
@@ -151,7 +166,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 ## `sync_frontiercs_2`
 
-- **Contract:** `frontiercs-2` on task `coding-agents`; Pass Rate (%) 0–100 (best metric) and FCI (unbounded, Kimi K2.7 = 0); the `MODELS`/`PASS`/`ECI` constants in https://frontier-cs.org/assets/js/fcs2-data.js behind https://frontier-cs.org/#leaderboard; typically 8–200 entries, one per model and harness (14 on 2026-10-26, all reviewed).
+- **Contract:** `frontiercs-2` on task `auto-research` (moved from `coding-agents` on 2026-11-23); Pass Rate (%) 0–100 (best metric) and FCI (unbounded, Kimi K2.7 = 0); the `MODELS`/`PASS`/`ECI` constants in https://frontier-cs.org/assets/js/fcs2-data.js behind https://frontier-cs.org/#leaderboard; typically 8–200 entries, one per model and harness (14 on 2026-10-26, all reviewed).
 - **Proof:** Diff the data file against managed rows (model, harness, pass rate, FCI); confirm `frontiercs_2_unreviewed` names get an identity (index the model's paper first), `missing_papers` is empty, and every `frontiercs_2_deleted` row really left the upstream board (the sync deletes managed rows whose model and harness are no longer listed); verify ranks on Pass Rate.
 
 ## `sync_vals_index`

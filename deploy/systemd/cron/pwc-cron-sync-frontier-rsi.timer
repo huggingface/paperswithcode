@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync FrontierRSI leaderboard from frontier-rsi.org hourly
+
+[Timer]
+OnCalendar=*-*-* *:19:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-frontier-rsi.service
+
+[Install]
+WantedBy=timers.target

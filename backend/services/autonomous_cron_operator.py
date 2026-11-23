@@ -125,6 +125,20 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
         "backend/services/carbon_board_syncs.py",
         "backend/services/live_leaderboard_sync.py",
     ),
+    "sync_frontier_rsi": (
+        "backend/services/frontier_rsi_sync_service.py",
+        "backend/services/carbon_board_syncs.py",
+        "backend/services/live_leaderboard_sync.py",
+    ),
+    "sync_rsi_inference": (
+        "backend/services/rsi_inference_sync_service.py",
+        "backend/services/live_leaderboard_sync.py",
+    ),
+    "sync_rsi_infra": (
+        "backend/services/rsi_infra_sync_service.py",
+        "backend/services/carbon_board_syncs.py",
+        "backend/services/live_leaderboard_sync.py",
+    ),
     "sync_vals_index": (
         "backend/services/carbon_board_syncs.py",
         "backend/services/live_leaderboard_sync.py",
@@ -285,6 +299,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "sync_jevbench": ("backend/tests/evaluation/test_jevbench_sync.py",),
     "sync_sle": ("backend/tests/evaluation/test_sle_sync.py",),
     "sync_rsi_exam": ("backend/tests/evaluation/test_rsi_exam_sync.py",),
+    "sync_frontier_rsi": ("backend/tests/evaluation/test_frontier_rsi_sync.py",),
+    "sync_rsi_inference": ("backend/tests/evaluation/test_rsi_inference_sync.py",),
+    "sync_rsi_infra": ("backend/tests/evaluation/test_rsi_infra_sync.py",),
     "sync_vals_index": ("backend/tests/evaluation/test_carbon_board_syncs.py",),
     "sync_swe_sweep": ("backend/tests/evaluation/test_carbon_board_syncs.py",),
     "sync_vending_bench_2": ("backend/tests/evaluation/test_carbon_board_syncs.py",),
