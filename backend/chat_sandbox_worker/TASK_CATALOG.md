@@ -124,6 +124,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `agents` — Agents
 - `ai-weather-forecasting` — AI Weather Forecasting
 - `ai-generated-text-detection` — AI-Generated Text Detection
+- `air-pollution-forecasting` — Air Pollution Forecasting
 - `animal-re-identification` — Animal Re-Identification
 - `anomaly-detection` — Anomaly Detection
 - `aspect-based-sentiment-analysis` — Aspect-Based Sentiment Analysis
@@ -219,6 +220,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `healthcare` — Healthcare & Medical AI
 - `human-mesh-recovery` — Human Mesh Recovery
 - `human-object-interaction-detection` — Human-Object Interaction Detection
+- `humanoid-robotics` — Humanoid Robotics
 - `hyperspectral-image-classification` — Hyperspectral Image Classification
 - `image-anomaly-detection` — Image Anomaly Detection
 - `image-captioning` — Image Captioning
@@ -228,6 +230,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `image-dehazing` — Image Dehazing
 - `image-denoising` — Image Denoising
 - `image-editing` — Image editing
+- `image-enhancement` — Image Enhancement
 - `image-forgery-detection` — Image Forgery Detection
 - `image-fusion` — Image Fusion
 - `image-generation` — Image generation
@@ -279,6 +282,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `motion-sensing` — Motion Sensing
 - `multi-agent-reinforcement-learning` — Multi-Agent Reinforcement Learning
 - `multi-agent-systems` — Multi-Agent Systems
+- `multi-hop-question-answering` — Multi-Hop Question Answering
 - `multi-label-image-classification` — Multi-label Image Classification
 - `multi-view-clustering` — Multi-View Clustering
 - `multimodal-sentiment-analysis` — Multimodal Sentiment Analysis
@@ -339,6 +343,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `sleep-stage-classification` — Sleep Stage Classification
 - `small-object-detection` — Small Object Detection
 - `sound-event-detection` — Sound Event Detection
+- `spam-detection` — Spam Detection
 - `spatial-understanding` — Spatial Understanding
 - `speaker-diarization` — Speaker Diarization
 - `speaker-verification` — Speaker Verification
@@ -373,6 +378,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `traffic-sign-recognition` — Traffic Sign Recognition
 - `trajectory-prediction` — Trajectory Prediction
 - `unsupervised-domain-adaptation` — Unsupervised Domain Adaptation
+- `vehicle-routing-problem` — Vehicle Routing Problem
 - `video-anomaly-detection` — Video Anomaly Detection
 - `video-captioning` — Video Captioning
 - `video-classification` — Video classification
