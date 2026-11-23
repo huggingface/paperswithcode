@@ -579,6 +579,40 @@ def test_host_layout_grants_cron_traversal_and_drops_production_group(monkeypatc
     ]
 
 
+def test_host_layout_shares_only_the_trace_spool_with_cron(monkeypatch):
+    import deploy.install_host_layout as host_layout
+
+    calls: list[list[str]] = []
+    directories: list[tuple[str, str, str, int]] = []
+    monkeypatch.setattr(
+        host_layout.subprocess, "run", lambda command, check: calls.append(command)
+    )
+    monkeypatch.setattr(
+        host_layout,
+        "ensure_dir",
+        lambda path, user, group, mode: directories.append(
+            (str(path), user, group, mode)
+        ),
+    )
+
+    host_layout.share_curation_trace_spool()
+
+    spool = "/var/lib/paperswithcode/production/recovery-spool"
+    assert directories == [
+        (f"{spool}/curation-traces", "pwc-production", "pwc-production", 0o700)
+    ]
+    assert calls == [
+        ["setfacl", "--modify", "user:pwc-cron:--x", spool],
+        [
+            "setfacl",
+            "--modify",
+            "user:pwc-cron:rwx,default:user:pwc-cron:rw-,"
+            "default:user:pwc-production:rw-",
+            f"{spool}/curation-traces",
+        ],
+    ]
+
+
 def test_launcher_hides_its_environment_from_same_user_jobs(tmp_path: Path):
     script = tmp_path / "probe.py"
     script.write_text(

@@ -189,6 +189,31 @@ def restrict_cron_access() -> None:
         )
 
 
+def share_curation_trace_spool() -> None:
+    """Let the CRON operator re-finalize curation traces the backend spooled.
+
+    `pwc-cron enqueue_hf_daily_paper_curation --retry-trace` runs as pwc-cron,
+    but the backend writes trace-finalization payloads as pwc-production. Grant
+    pwc-cron traversal of the recovery spool and access to its trace directory
+    only; the rest of the spool and production state stay private.
+    """
+
+    spool = STATE_ROOT / "production" / "recovery-spool"
+    traces = spool / "curation-traces"
+    ensure_dir(traces, "pwc-production", "pwc-production", 0o700)
+    subprocess.run(["setfacl", "--modify", "user:pwc-cron:--x", str(spool)], check=True)
+    subprocess.run(
+        [
+            "setfacl",
+            "--modify",
+            "user:pwc-cron:rwx,default:user:pwc-cron:rw-,"
+            "default:user:pwc-production:rw-",
+            str(traces),
+        ],
+        check=True,
+    )
+
+
 def main() -> int:
     if os.geteuid() != 0:
         raise SystemExit("run through sudo")
@@ -371,6 +396,7 @@ def main() -> int:
         STATE_ROOT / "production" / "chat-recovery-spool",
     ):
         ensure_dir(path, "pwc-production", "pwc-production", 0o700)
+    share_curation_trace_spool()
 
     repository = APP_ROOT / "repository.git"
     if not repository.exists():
