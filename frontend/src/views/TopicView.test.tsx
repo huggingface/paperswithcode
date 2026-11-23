@@ -85,18 +85,18 @@ describe('TopicView', () => {
     expect(await screen.findByRole('heading', { name: 'Topic not found' })).toBeInTheDocument();
   });
 
-  it('shows the last month by default and all time on request', async () => {
+  it('shows all time by default and the last month on request', async () => {
     vi.spyOn(researchApi, 'publicTopic').mockResolvedValue(topic);
     const papers = vi.mocked(researchApi.topicPapers);
     renderAt('/topics/23');
     await screen.findByRole('heading', { name: 'OCR releases' });
-    await waitFor(() => expect(papers).toHaveBeenCalledWith(23, 'trending', 0, expect.objectContaining({ startDate: expect.any(String), endDate: expect.any(String) })));
-    expect(screen.getByRole('button', { name: 'Last Month' })).toHaveClass('active');
-    fireEvent.click(screen.getByRole('button', { name: 'All Time' }));
-    await waitFor(() => expect(papers).toHaveBeenLastCalledWith(23, 'trending', 0, { startDate: undefined, endDate: undefined }));
+    await waitFor(() => expect(papers).toHaveBeenCalledWith(23, 'trending', 0, { startDate: undefined, endDate: undefined }));
+    expect(screen.getByRole('button', { name: 'All Time' })).toHaveClass('active');
+    fireEvent.click(screen.getByRole('button', { name: 'Last Month' }));
+    await waitFor(() => expect(papers).toHaveBeenLastCalledWith(23, 'trending', 0, expect.objectContaining({ startDate: expect.any(String), endDate: expect.any(String) })));
   });
 
-  it('filters by the homepage date range and sorts newest first through the URL', async () => {
+  it('filters by a date range and sorts newest first through the URL', async () => {
     vi.spyOn(researchApi, 'publicTopic').mockResolvedValue(topic);
     const papers = vi.mocked(researchApi.topicPapers);
     renderAt('/topics/23?order=newest&start_date=2026-11-01&end_date=2026-11-07');

@@ -4,13 +4,12 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import { usePaperFeedParams } from "@/hooks/usePaperFeedParams";
-import { paperDatePresetRange } from "@/lib/paperDateRange";
 
-const renderParams = (entry: string, options?: Parameters<typeof usePaperFeedParams>[0]) => {
+const renderParams = (entry: string) => {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <MemoryRouter initialEntries={[entry]}>{children}</MemoryRouter>
   );
-  return renderHook(() => ({ feed: usePaperFeedParams(options), search: useLocation().search }), { wrapper });
+  return renderHook(() => ({ feed: usePaperFeedParams(), search: useLocation().search }), { wrapper });
 };
 
 describe("usePaperFeedParams", () => {
@@ -44,12 +43,10 @@ describe("usePaperFeedParams", () => {
     expect(result.current.search).toBe("?framework=lerobot&has_hf_artifacts=true");
   });
 
-  it("defaults to all time unless asked for the last month", () => {
-    expect(renderParams("/x").result.current.feed.dateRange).toEqual({});
-    const { result } = renderParams("/x", { defaultToLastMonth: true });
-    expect(result.current.feed.dateRange).toEqual(paperDatePresetRange("month", new Date(new Date().toISOString().slice(0, 10))));
+  it("defaults to all time and drops the dates when All Time is picked", () => {
+    const { result } = renderParams("/x?start_date=2026-01-01&end_date=2026-02-01&time=all_time");
     act(() => result.current.feed.setDateRange({}));
-    expect(result.current.search).toBe("?time=all_time");
+    expect(result.current.search).toBe("");
     expect(result.current.feed.dateRange).toEqual({});
   });
 });

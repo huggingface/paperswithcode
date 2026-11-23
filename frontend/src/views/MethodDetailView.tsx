@@ -33,7 +33,7 @@ const WIDE_FIGURE_METHODS: ReadonlySet<string | undefined> = new Set([
 
 const MethodDetailView: React.FC = () => {
   const { methodSlug } = useParams<{ methodSlug: string }>();
-  const feed = usePaperFeedParams({ defaultToLastMonth: true });
+  const feed = usePaperFeedParams();
 
   const methodQ = useQuery(catalogQueries.method(methodSlug));
   useDocumentTitle(methodQ.data && entityPageTitle(methodQ.data.name));

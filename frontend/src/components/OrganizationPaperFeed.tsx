@@ -29,7 +29,7 @@ export const OrganizationPaperFeed: React.FC<{
   taskSlug?: string;
 }> = ({ organizationSlug, taskSlug }) => {
   const navigate = useNavigate();
-  const feed = usePaperFeedParams({ defaultToLastMonth: true });
+  const feed = usePaperFeedParams();
   const { searchParams } = feed;
   const [logoFailed, setLogoFailed] = useState(false);
   const organizationQ = useQuery(catalogQueries.organization(organizationSlug));
