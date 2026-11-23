@@ -108,7 +108,7 @@ def test_figure_upload_rejects_mismatched_signature_and_owner_quota_before_publi
     db, settings
 ):
     """Bad media and over-quota bytes must not advance the immutable source head."""
-    constrained = settings.model_copy(update={"chat_artifact_owner_quota_bytes": 6_000})
+    constrained = settings.model_copy(update={"chat_artifact_owner_quota_bytes": 6_600})
     session_id = _session(db)
     service = LatexPaperService(
         db,
