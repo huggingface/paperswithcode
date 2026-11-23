@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from datetime import UTC, datetime
@@ -2004,7 +2005,9 @@ class CodexCurationCallbackService:
                 audit["field_diff"] = supplied_diff
                 if audit.get("field_diff") != changes or not audit.get("evidence"):
                     raise ValueError(
-                        "Evaluation update requires the exact field diff and primary evidence"
+                        "Evaluation update requires the exact field diff and primary "
+                        f"evidence; expected field_diff for evaluation {canonical.id}: "
+                        f"{json.dumps(changes, sort_keys=True, default=str)}"
                     )
                 if len(matches) > 1:
                     duplicate_ids = sorted(
