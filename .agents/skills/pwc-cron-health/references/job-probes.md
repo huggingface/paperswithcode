@@ -122,32 +122,32 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `sync_vals_finance_agent`
 
 - **Contract:** `finance-agent-v2` on task `agents`; Accuracy (%) 0–100; the single table on https://www.vals.ai/benchmarks/fabv2; typically 40–400 upstream rows, of which only reviewed labels are published (all 78 on 2026-10-16).
-- **Proof:** Diff the Vals table against managed rows (label, accuracy at two decimals); confirm `sync_vals_finance_agent_unreviewed` labels become radar signals or get an identity in `vals_finance_agent_sync_service.py`, reviewer notes beneath each managed head survived, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on Accuracy.
+- **Proof:** Diff the Vals table against managed rows (label, accuracy at two decimals); confirm `sync_vals_finance_agent_unreviewed` labels become radar signals or get an identity in `vals_finance_agent_sync_service.py`, reviewer notes beneath each managed head survived, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on Accuracy.
 
 ## `sync_surge_chartography`
 
 - **Contract:** `chartography` (the with-tools board) on task `image-understanding`; Pass@1 percent; the "Chartography Leaderboard" block on https://surgehq.ai/benchmarks/chartography (fetch with a browser User-Agent). Since about 2026-11-18 Surge scores the board with its containerized Harbor harness (tools allowed), so the parser refuses any page that no longer links `huggingface.co/datasets/surgeai/Chartography-harbor`. Typically 25–400 upstream rows; 42 of 42 reviewed on 2026-11-22. Rows are named `<model> (with tools)`.
-- **Proof:** Diff the Surge block against managed rows (label, percent at one decimal); confirm `sync_surge_chartography_unreviewed` labels become radar signals or get an identity in `surge_chartography_sync_service.py`, reviewer notes beneath each managed head survived, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically). Confirm the `chartography-no-tools` benchmark was not touched: its Surge rows are a frozen snapshot of the no-tools board (2026-11-18) and must never receive Surge's current tool-assisted scores. If upstream values drop back into the no-tools range or the Harbor link disappears, stop and re-check the protocol before mapping labels.
+- **Proof:** Diff the Surge block against managed rows (label, percent at one decimal); confirm `sync_surge_chartography_unreviewed` labels become radar signals or get an identity in `surge_chartography_sync_service.py`, reviewer notes beneath each managed head survived, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated. Confirm the `chartography-no-tools` benchmark was not touched: its Surge rows are a frozen snapshot of the no-tools board (2026-11-18) and must never receive Surge's current tool-assisted scores. If upstream values drop back into the no-tools range or the Harbor link disappears, stop and re-check the protocol before mapping labels.
 
 ## `sync_swe_marathon`
 
 - **Contract:** `swe-marathon` on task `long-horizon-agents`; Resolution Rate (%) 0–100 = trials with reward 1 / all trials of a complete v1.1 run (20 tasks x 8 trials), best reasoning effort per model and agent, from the `{version:`v1.1`,tasks:JSON.parse(...)}` block in the `/assets/index-*.js` bundle that https://www.swe-marathon.org/ loads; typically 10–300 complete runs (29 on 2026-11-10).
-- **Proof:** Recompute a few rows from the bundle (the tweet/site rounds to one decimal: 53.75 shows as 53.8); confirm `sync_swe_marathon_unreviewed` names become radar signals or get an identity in `swe_marathon_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated; a failure naming result versions means Abundant published a new benchmark version, which needs a reviewer decision (new benchmark row), not a parser patch.
+- **Proof:** Recompute a few rows from the bundle (the tweet/site rounds to one decimal: 53.75 shows as 53.8); confirm `sync_swe_marathon_unreviewed` names become radar signals or get an identity in `swe_marathon_sync_service.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; a failure naming result versions means Abundant published a new benchmark version, which needs a reviewer decision (new benchmark row), not a parser patch.
 
 ## `sync_rsi_exam`
 
 - **Contract:** `rsi-exam` on task `auto-research`; Normalized Score (0–1, four decimals) of every row on the Full board (release RSI-Exam 0.1, 88 tasks) at https://rsi-exam.ai/, harness per row (Claude Code, Codex, Antigravity, Grok, Kimi Code, Qwen Code, Muse Code); typically 10–100 rows (21 on 2026-11-16, 20 on catalog papers).
-- **Proof:** Compare managed rows' order and values with the Full tab; confirm `sync_rsi_exam_unreviewed` names become radar signals or get an identity in `rsi_exam_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated; a failure naming the release or task count means RSI-Exam rescaled the board, which needs a reviewer decision before bumping `RELEASE`/`FULL_TASKS`, not a parser patch. An unreviewed harness label needs a `HARNESSES` entry.
+- **Proof:** Compare managed rows' order and values with the Full tab; confirm `sync_rsi_exam_unreviewed` names become radar signals or get an identity in `rsi_exam_sync_service.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; a failure naming the release or task count means RSI-Exam rescaled the board, which needs a reviewer decision before bumping `RELEASE`/`FULL_TASKS`, not a parser patch. An unreviewed harness label needs a `HARNESSES` entry.
 
 ## `sync_jevbench`
 
 - **Contract:** `jevbench` on task `decision-making`; Composite Score 0–100 (two decimals) of every ranked row on Benchmark Heaven's official API board (`api_board_rank` set, method v1.7), from https://benchmarkheaven.com/api/jevbench/latest; ranks match https://benchmarkheaven.com/jev-models/api; typically 20–300 ranked API rows (48 on 2026-11-12, 6 on catalog papers).
-- **Proof:** Compare managed rows' relative order and values with the API board; confirm `sync_jevbench_unreviewed` names become radar signals (vendor from the source host) or get an identity in `jevbench_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated; a failure naming the method means Benchmark Heaven restated scores on a new method, which needs a reviewer decision before bumping `METHOD`, not a parser patch.
+- **Proof:** Compare managed rows' relative order and values with the API board; confirm `sync_jevbench_unreviewed` names become radar signals (vendor from the source host) or get an identity in `jevbench_sync_service.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; a failure naming the method means Benchmark Heaven restated scores on a new method, which needs a reviewer decision before bumping `METHOD`, not a parser patch.
 
 ## `sync_sle`
 
 - **Contract:** six benchmarks on task `scientific-reasoning`: `science-s-last-exam-sle` (Composite Score), `sle-hypothesis-discovery` (Inspire Rate, harness DiscoveryRSI), `sle-protocol-planning` (Mean score), `sle-scientific-computing`, `sle-scientific-software-operation` and `sle-experiment-observation` (Pass Rate), all 0–100 to two decimals, from the `leaderboard` object in the `assets/data.<hash>.js` bundle that https://sciences-last-exam.org/leaderboard loads; rows carry the model's harness (Codex, Claude Code); scores with a `status` and the composites of those models are skipped; typically 3–60 models (9 on 2026-11-16, all reviewed).
-- **Proof:** Compare a few managed rows with the site's leaderboard tabs; confirm `sync_sle_unreviewed` names become radar signals or get an identity in `sle_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (a model whose assessment turned provisional drops off that board); a failure naming the composite members or an assessment metric means SLE redefined a score, which needs a reviewer decision, not a parser patch.
+- **Proof:** Compare a few managed rows with the site's leaderboard tabs; confirm `sync_sle_unreviewed` names become radar signals or get an identity in `sle_sync_service.py`, `missing_papers` is empty, every `deleted` row really left the upstream board (a model whose assessment turned provisional drops off it), and annotated `missing_upstream` rows were investigated; a failure naming the composite members or an assessment metric means SLE redefined a score, which needs a reviewer decision, not a parser patch.
 
 ## `sync_frontiercs_2`
 
@@ -157,43 +157,43 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `sync_vals_index`
 
 - **Contract:** `vals-index-v2-2` on task `agents`; Accuracy (%) 0–100; the single ranked table at https://www.vals.ai/benchmarks/vals_index; typically 15–400 rows (29 on 2026-10-29).
-- **Proof:** Diff the upstream rows against managed rows; confirm `sync_vals_index_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_vals_index_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on the board metric.
 
 ## `sync_swe_sweep`
 
 - **Contract:** `swe-sweep` on task `coding-agents`; Resolved (%) 0–100 from the site's 0–1 score, harness mini-SWE-agent; the inline results array behind https://swesweep.com/; typically 5–200 rows (13 on 2026-10-29, `Astra 6` excluded as a partial run).
-- **Proof:** Diff the upstream rows against managed rows; confirm `sync_swe_sweep_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_swe_sweep_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on the board metric.
 
 ## `sync_vending_bench_2`
 
 - **Contract:** `vending-bench-2` on task `long-horizon-agents`; Bank Balance ($) unbounded (mean final balance); `runs.vb2[*].final_value` in the hashed SvelteKit data chunk imported by https://andonlabs.com/evals/vending-bench-2 (the page table shows only the top 10); typically 20–400 models (73 on 2026-10-29).
-- **Proof:** Diff the upstream rows against managed rows; confirm `sync_vending_bench_2_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_vending_bench_2_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on the board metric.
 
 ## `sync_blueprint_bench_2`
 
 - **Contract:** `blueprint-bench-2` on task `spatial-understanding`; Similarity Score 0–1 (random = 0); the score table at https://andonlabs.com/evals/blueprint-bench-2, skipping `Human*` and `0.000**` floor rows; typically 10–300 rows (30 on 2026-10-29).
-- **Proof:** Diff the upstream rows against managed rows; confirm `sync_blueprint_bench_2_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_blueprint_bench_2_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on the board metric.
 
 ## `sync_riemann_bench`
 
 - **Contract:** `riemann-bench` on task `math`; Pass@1 0–1 from the visible percentage; the "Riemann-bench Leaderboard" block at https://surgehq.ai/benchmarks/riemann-bench (Chartography layout, empty `data-score`); typically 15–400 rows (44 on 2026-10-29; 21 since the v1.1 answer-key re-run on 2026-11-02, after which the 32 v1.0-only rows were deleted).
-- **Proof:** Diff the upstream rows against managed rows; confirm `sync_riemann_bench_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_riemann_bench_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on the board metric.
 
 ## `sync_cwe_bench`
 
 - **Contract:** `cwe-bench-v2` on task `cybersecurity`; Pass@1 over all 250 tasks (programmatic verifier), harness from "run in …"; the `CWE-bench v2 leaderboard` JSON-LD ItemList on https://cwe-bench.com/; typically 5–200 items (11 on 2026-11-06). Since 2026-11-02 `cwe-bench-v1` is a frozen snapshot (archive at https://cwe-bench.com/v1) and is not synced.
-- **Proof:** Diff the upstream rows against managed rows; confirm `sync_cwe_bench_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_cwe_bench_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on the board metric.
 
 ## `sync_exploitgym`
 
 - **Contract:** `exploitgym` on task `cybersecurity`; Success Rate (%) 0–100 = on_target / instances.total, harness from `agent`; https://www.cybergym.io/assets/data/exploitgym.json, keeping only full-set `6h timeout` / `rescaled 6h timeout` rows (v1 or unversioned); typically 4–200 rows (9 on 2026-10-29).
-- **Proof:** Diff the upstream rows against managed rows; confirm `sync_exploitgym_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_exploitgym_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on the board metric.
 
 
 ## `sync_cybergym`
 
 - **Contract:** `cybergym` on task `cybersecurity`; Success Rate (%) 0–100 = `score_10` × 100, harness from `agent`; https://www.cybergym.io/assets/data/cybergym.json `level1`, keeping the site's default view (single trial, not hidden or held back by `visible_after`, `focus` model, no `dynamic` / `test-time mem.` features); typically 20–300 rows (44 on 2026-10-29, 32 reviewed).
-- **Proof:** Diff the upstream rows against managed rows; confirm `sync_cybergym_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on the board metric.
+- **Proof:** Diff the upstream rows against managed rows; confirm `sync_cybergym_unreviewed` names become radar signals or get an identity in `carbon_board_identities.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on the board metric.
 
 ## `sync_patcheval_verified`
 
@@ -213,7 +213,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `sync_physics_iq_verified`
 
 - **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.
-- **Proof:** Diff the README table against managed rows (label, track, score at README precision, ± SD, date added); confirm `sync_physics_iq_verified_unreviewed` warnings become radar signals, get an identity, or are covered by the exclusion rules; reviewer notes beneath each managed head survived, `missing_papers` is empty, and `missing_upstream` rows were investigated (they are never deleted automatically); verify ranks on both metrics.
+- **Proof:** Diff the README table against managed rows (label, track, score at README precision, ± SD, date added); confirm `sync_physics_iq_verified_unreviewed` warnings become radar signals, get an identity, or are covered by the exclusion rules; reviewer notes beneath each managed head survived, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; verify ranks on both metrics.
 
 ## `sync_frontiercode`
 

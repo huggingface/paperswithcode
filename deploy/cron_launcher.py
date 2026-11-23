@@ -421,7 +421,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_vals_finance_agent",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Finance Agent v2 evaluation rows from the "
+            "create, revise, or retire reviewed Finance Agent v2 evaluation rows from the "
             "validated Vals AI leaderboard table; never creates papers"
         ),
     ),
@@ -430,7 +430,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_surge_chartography",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Chartography (with tools) evaluation rows "
+            "create, revise, or retire reviewed Chartography (with tools) evaluation rows "
             "from the validated Surge AI leaderboard; never creates papers"
         ),
     ),
@@ -439,7 +439,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_swe_marathon",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed SWE-Marathon v1.1 evaluation rows from the "
+            "create, revise, or retire reviewed SWE-Marathon v1.1 evaluation rows from the "
             "validated swe-marathon.org results bundle; never creates papers"
         ),
     ),
@@ -448,7 +448,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_jevbench",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed JevBench evaluation rows from Benchmark "
+            "create, revise, or retire reviewed JevBench evaluation rows from Benchmark "
             "Heaven's validated API board; never creates papers"
         ),
     ),
@@ -457,7 +457,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_sle",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Science's Last Exam evaluation rows on "
+            "create, revise, or retire reviewed Science's Last Exam evaluation rows on "
             "six boards from the validated sciences-last-exam.org leaderboard "
             "bundle; never creates papers"
         ),
@@ -467,7 +467,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_rsi_exam",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed RSI-Exam evaluation rows from the "
+            "create, revise, or retire reviewed RSI-Exam evaluation rows from the "
             "validated rsi-exam.ai Full board; never creates papers"
         ),
     ),
@@ -486,7 +486,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_vals_index",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Vals Index evaluation rows from the "
+            "create, revise, or retire reviewed Vals Index evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -495,7 +495,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_swe_sweep",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed SWE-sweep evaluation rows from the "
+            "create, revise, or retire reviewed SWE-sweep evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -504,7 +504,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_vending_bench_2",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Vending-Bench 2 evaluation rows from the "
+            "create, revise, or retire reviewed Vending-Bench 2 evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -513,7 +513,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_blueprint_bench_2",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Blueprint-Bench 2 evaluation rows from the "
+            "create, revise, or retire reviewed Blueprint-Bench 2 evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -522,7 +522,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_riemann_bench",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Riemann-Bench evaluation rows from the "
+            "create, revise, or retire reviewed Riemann-Bench evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -531,7 +531,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_cwe_bench",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed CWE-bench evaluation rows from the "
+            "create, revise, or retire reviewed CWE-bench evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -540,7 +540,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_exploitgym",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed ExploitGym evaluation rows from the "
+            "create, revise, or retire reviewed ExploitGym evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -549,7 +549,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_cybergym",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed CyberGym evaluation rows from the "
+            "create, revise, or retire reviewed CyberGym evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -558,7 +558,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_patcheval_verified",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed PatchEval-Verified evaluation rows from the "
+            "create, revise, or retire reviewed PatchEval-Verified evaluation rows from the "
             "validated official leaderboard; never creates papers"
         ),
     ),
@@ -594,7 +594,7 @@ COMMANDS: dict[str, Job] = {
         "scripts.hourly.sync_physics_iq_verified",
         timeout="30m",
         idempotency=(
-            "create or revise reviewed Physics-IQ Verified evaluation rows from "
+            "create, revise, or retire reviewed Physics-IQ Verified evaluation rows from "
             "the validated README table; never creates papers"
         ),
     ),
