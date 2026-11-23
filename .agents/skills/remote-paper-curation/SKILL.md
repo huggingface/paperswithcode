@@ -216,7 +216,24 @@ write a JSON payload containing `evaluations` (each has this job's
 `paper_id`) and submit it with `python3 jobs/curation_api.py apply payload.json`.
 Always include `evaluation_removals`, `validation_evidence`, and
 `benchmark_gaps` arrays. Updating an existing row requires its exact context
-`before_state`, a field-level diff, and primary-paper evidence. Duplicate
+`before_state`, a field-level diff, and primary-paper evidence. The server
+recomputes the diff between the stored row and the row you submit in
+`evaluations`, and `field_diff` must equal it exactly: one key per changed
+top-level field, each `{"before": <stored value>, "after": <submitted value>}`,
+with whole values (all of `metrics`, not one metric). Fields you leave
+unchanged must be copied verbatim from `before_state`, or they become part of
+the diff. To correct one score:
+
+```json
+{"evaluation_id": 38506, "before_state": {...},
+ "field_diff": {"metrics": {"before": {"Dice": 0.95}, "after": {"Dice": 0.948}}},
+ "evidence": [{"source_url": "...", "table": "Table 2", "snippet": "..."}]}
+```
+
+If the apply is rejected with `expected field_diff for evaluation <id>`, the
+message contains the diff the server computed. Either use it as `field_diff`
+or fix the submitted row so it no longer changes fields you did not mean to
+change. Duplicate
 consolidation additionally requires every matched row ID and the canonical-row
 selection reason. Remove an invalid row only with its full before-state and
 unambiguous primary-paper evidence.
