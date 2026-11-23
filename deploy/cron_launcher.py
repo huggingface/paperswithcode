@@ -709,7 +709,7 @@ COMMANDS: dict[str, Job] = {
         "backend.scripts.x_post_candidates",
         timeout="30m",
         idempotency=(
-            "list is read-only; record inserts one x_insight_posts row per "
+            "list and card are read-only; record inserts one x_insight_posts row per "
             "posted subject, called once by the X agent after each post; "
             "requests closes requests for already-posted papers; "
             "resolve-request closes one x_post_requests row"

@@ -6,7 +6,13 @@ release tree and calls this through `pwc-cron x_post_candidates`:
     pwc-cron x_post_candidates list
         One JSON object on stdout: {"generated_at", "candidates": [...]}.
         Each candidate has kind, subject_key, draft, link, facts, score,
-        screenshot_url, and image_png_base64 (a chart card, or null).
+        screenshot_url, image_png_base64 (a chart card, or null) and
+        extra_images_png_base64 (more images for the same post; the
+        roundups carry one page-one card per paper).
+
+    pwc-cron x_post_candidates card --paper-id 1 2
+        {"cards": {paper_id: base64 PNG or null}}: the 2:3 page-one card
+        for single-paper posts; null without an arXiv PDF.
 
     pwc-cron x_post_candidates record --kind new_sota --subject-key K \
         --post-id 123 [--reply-id 456]
@@ -32,8 +38,16 @@ import base64
 import json
 from datetime import UTC, datetime
 
+from sqlalchemy import select
+
 from backend.database.connection import get_database_session
-from backend.services.x_post_candidates import KINDS, gather, record
+from backend.models.database import Paper
+from backend.services.x_post_candidates import (
+    KINDS,
+    gather,
+    paper_page_card,
+    record,
+)
 from backend.services.x_post_requests import (
     RESOLUTIONS,
     requested_candidates,
@@ -58,6 +72,10 @@ def main() -> int:
     record_parser.add_argument("--post-id", required=True)
     record_parser.add_argument("--reply-id")
     commands.add_parser("requests", help="Print open Tweet it requests as JSON")
+    card_parser = commands.add_parser(
+        "card", help="Print page-one PNG cards for single-paper posts as JSON"
+    )
+    card_parser.add_argument("--paper-id", type=int, nargs="+", required=True)
     resolve_parser = commands.add_parser("resolve-request", help="Close a request")
     resolve_parser.add_argument("--paper-id", type=int, required=True)
     resolve_parser.add_argument("--resolution", choices=RESOLUTIONS, required=True)
@@ -76,8 +94,20 @@ def main() -> int:
                     if candidate.image
                     else None
                 )
+                item["extra_images_png_base64"] = [
+                    base64.b64encode(image).decode() for image in candidate.extra_images
+                ]
                 candidates.append(item)
             output = {"generated_at": now.isoformat(), "candidates": candidates}
+        elif args.command == "card":
+            papers = db.scalars(select(Paper).where(Paper.id.in_(args.paper_id)))
+            cards = {str(paper.id): paper_page_card(db, paper) for paper in papers}
+            output = {
+                "cards": {
+                    paper_id: base64.b64encode(card).decode() if card else None
+                    for paper_id, card in cards.items()
+                }
+            }
         elif args.command == "requests":
             output = {"requests": requested_candidates(db)}
         elif args.command == "resolve-request":

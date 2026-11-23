@@ -327,3 +327,21 @@ def test_sota_posted_escapes_like_wildcards_in_metric_names():
 
     assert not service.sota_posted(CaptureDb(), "191:Pass_1%:7")
     assert "/_" in captured["sql"] and "/%" in captured["sql"]
+
+
+def test_top_papers_ids_match_the_listed_entries(monkeypatch):
+    papers = [
+        SimpleNamespace(
+            id=i,
+            title=f"A rather long paper title about topic number {i} without colon",
+        )
+        for i in range(1, 6)
+    ]
+    db = SimpleNamespace(scalars=lambda query: papers)
+    monkeypatch.setattr(service, "recently_posted", lambda *args, **kwargs: False)
+    insight = service.top_papers(
+        db, period="week", now=datetime(2026, 11, 23, 12, tzinfo=UTC)
+    )
+    listed = insight.text.count("\n\n")
+    assert listed < len(papers)
+    assert insight.facts["paper_ids"] == [p.id for p in papers[:listed]]
