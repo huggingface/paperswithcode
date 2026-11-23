@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import httpx
 import pytest
@@ -226,6 +226,37 @@ def test_make_x_search_uses_full_archive_window(monkeypatch):
     assert archive_url == X_ARCHIVE_SEARCH_URL
     assert archive["start_time"] == "2026-05-13T00:00:00Z"
     assert archive["sort_order"] == "relevancy"
+
+
+def test_make_x_search_asks_for_the_minimum_results(monkeypatch):
+    calls = []
+
+    def fake_get(url, *, params, headers, timeout):
+        calls.append(params)
+        return httpx.Response(200, json={}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    make_x_search("token")("q", date(2026, 5, 20))
+    assert calls[0]["max_results"] == 10
+
+
+def test_make_x_search_rescans_only_posts_since_the_last_scan(monkeypatch):
+    calls = []
+
+    def fake_get(url, *, params, headers, timeout):
+        calls.append(params)
+        return httpx.Response(200, json={}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    now = datetime.now(UTC)
+    recent = now - timedelta(days=1)
+    make_x_search("token")("q", None, recent)
+    make_x_search("token")("q", None, now - timedelta(days=8))
+    make_x_search("token")("q", None, None)
+
+    assert calls[0]["start_time"] == recent.strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert "start_time" not in calls[1]
+    assert "start_time" not in calls[2]
 
 
 def test_build_query_keeps_project_path_on_shared_hosts():

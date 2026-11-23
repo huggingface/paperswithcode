@@ -11,6 +11,8 @@ When a reviewer is configured, each match is linked only after it approves
 that the post introduces this paper (see `x_thread_review_service`).
 
 The scheduled run uses recent search (last 7 days) on newly trending papers.
+X bills every post a search returns, so each search asks for X's minimum of
+10 posts and a rescan asks only for posts made since the previous scan.
 A backfill run uses full-archive search, bounded to the weeks around each
 paper's publication, on older papers that were never scanned.
 """
@@ -46,6 +48,8 @@ from backend.services.x_thread_review_service import ReviewVerdict
 X_SEARCH_URL = "https://api.x.com/2/tweets/search/recent"
 X_ARCHIVE_SEARCH_URL = "https://api.x.com/2/tweets/search/all"
 ARCHIVE_REQUEST_INTERVAL = 1.1
+RESULTS_PER_SEARCH = 10
+RECENT_SEARCH_WINDOW = timedelta(days=7)
 MAX_QUERY_LENGTH = 512
 MAX_SCANS_PER_PAPER = 3
 RESCAN_AFTER = timedelta(hours=20)
@@ -60,7 +64,7 @@ ACTOR = {
     "role": "admin",
 }
 
-Search = Callable[[str, date | None], dict]
+Search = Callable[[str, date | None, datetime | None], dict]
 Review = Callable[[Paper, dict], ReviewVerdict]
 
 
@@ -129,16 +133,20 @@ def make_x_search(
 ) -> Search:
     """Return a search function bound to an X API bearer token.
 
-    Recent search ignores the publication date; full-archive search uses it to
-    bound the window and returns the most relevant posts in it.
+    Recent search ignores the publication date and starts after `since`, the
+    previous scan, while that lies inside its seven-day window; full-archive
+    search uses the publication date to bound the window and returns the most
+    relevant posts in it.
     """
     last_request = 0.0
 
-    def search(query: str, published: date | None) -> dict:
+    def search(
+        query: str, published: date | None, since: datetime | None = None
+    ) -> dict:
         nonlocal last_request
         params = {
             "query": query,
-            "max_results": 25,
+            "max_results": RESULTS_PER_SEARCH,
             "tweet.fields": (
                 "author_id,created_at,public_metrics,conversation_id,entities,note_tweet"
             ),
@@ -157,6 +165,10 @@ def make_x_search(
                 max(0.0, last_request + ARCHIVE_REQUEST_INTERVAL - time.monotonic())
             )
             last_request = time.monotonic()
+        elif since and since > datetime.now(UTC) - RECENT_SEARCH_WINDOW + timedelta(
+            minutes=5
+        ):
+            params["start_time"] = since.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         response = httpx.get(
             url,
             params=params,
@@ -438,8 +450,11 @@ def discover_x_threads(
         query = build_query(paper.arxiv_id, paper.title, project_urls, repo_urls)
         result = PaperScanResult(paper.id, paper.arxiv_id, paper.title, query)
         report.papers.append(result)
+        scan = db.get(PaperXThreadScan, paper.id)
         try:
-            response = search(query, paper.date_published)
+            response = search(
+                query, paper.date_published, scan.last_scanned_at if scan else None
+            )
         except httpx.HTTPStatusError as error:
             result.error = f"X search HTTP {error.response.status_code}"
             if error.response.status_code in {401, 403, 429}:
