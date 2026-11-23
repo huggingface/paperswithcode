@@ -194,6 +194,12 @@ The FrontierCS leaderboard page renders client-side from constants in assets/js/
 
 Code: `backend/services/frontiercs_2_sync_service.py::FRONTIERCS_2_DATA_URL`
 
+## FrontierCS sync deletes managed rows that left the board
+
+FCI is refitted on every FrontierCS update, so a row the board no longer lists keeps a score from an older fit that no longer compares with current rows. A validated response is therefore authoritative: the sync deletes managed rows whose upstream model name and harness, recorded in the methodology, are no longer listed. Rows for entries still listed but unresolved, and rows not written by the sync, are kept.
+
+Code: `backend/services/frontiercs_2_sync_service.py::FrontierCS2SyncService.sync`
+
 ## FrontierCS effort variants collapse to one best row per model
 
 Different reasoning-effort settings of one model map to the same catalog model name. The FrontierCS board keeps only the best row per (paper, model name, harness), consistent with the rule that a leaderboard shows each model's best eval per paper.

@@ -30,7 +30,7 @@ class SyncFrontierCS2Job(CronJobBase):
                 ("auto_matched", stats.auto_matched),
                 ("unreviewed", stats.unreviewed),
                 ("missing_papers", stats.missing_papers),
-                ("missing_upstream", stats.missing_upstream),
+                ("deleted", stats.deleted),
             ):
                 if values:
                     self.logger.warning(
