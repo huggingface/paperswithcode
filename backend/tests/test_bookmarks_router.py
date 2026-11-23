@@ -631,3 +631,35 @@ def test_bucket_setup_failure_is_reported_on_the_listing(monkeypatch):
     assert listing.bucket_error == (
         "Hugging Face could not write the saved-papers Bucket."
     )
+
+
+def test_bucket_uses_the_hub_username_casing(monkeypatch):
+    namespaces = []
+
+    class RecordingBucket:
+        def __init__(self, *, token, username):
+            namespaces.append(username)
+
+        def initialize(self, _load_legacy):
+            pass
+
+        def list(self):
+            return []
+
+    monkeypatch.setattr(
+        bookmark_service,
+        "decrypt_oauth_credential",
+        lambda *_args: SimpleNamespace(token="bucket-token"),
+    )
+    monkeypatch.setattr(bookmark_service, "SavedPapersBucket", RecordingBucket)
+    monkeypatch.setattr(BookmarkService, "record_bucket_migration", lambda *_args: None)
+    db = LegacyBookmarkDb([])
+
+    BookmarkService(db).list_refs(
+        encrypted_credential="encrypted",
+        hf_user_id="hf-andrex",
+        username="andrex14",
+        hub_username="Andrex14",
+    )
+
+    assert namespaces == ["Andrex14"]
