@@ -39,8 +39,6 @@ from backend.loadtests.external_pi_fleet_core import (
     classify_external_pi_fleet_response,
     route_ordinal,
     resolve_durable_profile,
-    modal_lifecycle_delta,
-    ModalLifecycleSnapshot,
     ModalRateEvidence,
     DurableQualificationEvidence,
 )
@@ -102,10 +100,6 @@ class DurableProfileMeasurement:
 
 class DurableStreamTransport(Protocol):
     def open_durable_stream(self, spec: DurableUserSpec) -> Mapping[str, object]: ...
-
-
-class ModalLifecycleEvidenceSource(Protocol):
-    def snapshot(self, profile_name: str) -> ModalLifecycleSnapshot: ...
 
 
 class DurableQualificationEvidenceSource(Protocol):
@@ -345,14 +339,14 @@ def run_local_durable_profile(
     profile_name: str,
     transport: DurableStreamTransport,
     resources: DurableRunResources,
-    lifecycle_source: ModalLifecycleEvidenceSource,
+    evidence_source: DurableQualificationEvidenceSource,
     modal_rate: ModalRateEvidence,
     timeout_seconds: float = DURABLE_QUALIFICATION_RUN_TIMEOUT_SECONDS,
     barrier_timeout_seconds: float = 5.0,
     monotonic: Callable[[], float] = time.monotonic,
 ):
     """Execute the exact Locust profile through an injected durable transport."""
-    lifecycle_before = lifecycle_source.snapshot(profile_name)
+    started_at = datetime.now(UTC)
     observations = _run_durable_observations(
         profile_name=profile_name,
         transport=transport,
@@ -360,18 +354,15 @@ def run_local_durable_profile(
         barrier_timeout_seconds=barrier_timeout_seconds,
         monotonic=monotonic,
     )
-    lifecycle_after = lifecycle_source.snapshot(profile_name)
-    profile = resolve_durable_profile(profile_name)
-    return aggregate_durable_profile(
-        profile=profile,
-        observations=observations,
-        peak_memory_bytes=resources.peak_memory_bytes,
-        minimum_host_mem_available_bytes=resources.minimum_host_mem_available_bytes,
-        peak_cpu_percent=resources.peak_cpu_percent,
-        peak_active_backend_turns=resources.peak_active_backend_turns,
-        peak_active_external_workers=resources.peak_active_external_workers,
-        peak_active_sandboxes=resources.peak_active_sandboxes,
-        modal_lifecycle=modal_lifecycle_delta(lifecycle_before, lifecycle_after),
+    return finalize_live_durable_profile(
+        DurableProfileMeasurement(
+            profile_name=profile_name,
+            observations=observations,
+            resources=resources,
+            window_started_at=started_at,
+            qualification_scope_id=uuid.uuid4(),
+        ),
+        evidence_source=evidence_source,
         modal_rate=modal_rate,
     )
 
