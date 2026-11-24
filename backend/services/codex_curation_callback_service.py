@@ -132,6 +132,12 @@ def _proposal_identity(values: dict[str, Any]) -> _ProposalIdentity:
     )
 
 
+def _row_identity(evaluation) -> _ProposalIdentity:
+    return _ProposalIdentity(
+        *(getattr(evaluation, field) for field in _ProposalIdentity._fields)
+    )
+
+
 def promoted_dataset_id(row) -> int | None:
     """The one benchmark a new-benchmark re-check may write, else None."""
     version = getattr(row, "policy_version", None) or ""
@@ -1268,13 +1274,31 @@ class CodexCurationCallbackService:
                 and item.best_metric == best_metric
             ]
             if len(leaderboard_rows) > 1:
+                proposed = {
+                    identity
+                    for item in body.evaluations
+                    if (identity := _proposal_identity(item.model_dump()))
+                    not in skipped
+                }
+                submitted = [
+                    item.model_name
+                    for item in leaderboard_rows
+                    if _row_identity(item) in proposed
+                ]
+                stored = [
+                    (item.id, item.model_name)
+                    for item in leaderboard_rows
+                    if _row_identity(item) not in proposed
+                ]
                 raise ValueError(
                     "Scheduled curation must keep one paper-native result per leaderboard; "
                     f"paper {row.paper_id}, task {task_id}, dataset {dataset_id}, "
-                    f"metric {best_metric!r} already contains "
-                    f"{[(item.id, item.model_name) for item in leaderboard_rows]}. "
-                    "Omit a weaker/equal variant; replacing the current best requires "
-                    "evidence-backed removal of the superseded row."
+                    f"metric {best_metric!r} would hold {len(leaderboard_rows)} rows. "
+                    f"Already stored before this proposal: {stored or 'none'}. "
+                    f"Submitted by this proposal: {submitted or 'none'}. "
+                    "Submit only the paper's best result there; to replace a stored "
+                    "row with a better one, include an evidence-backed removal of "
+                    "that stored row's id."
                 )
 
     def _validate_mutation(self, row, body: ApplyMutationRequest) -> None:
