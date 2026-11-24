@@ -8,7 +8,9 @@ this rule, and neither is PEP 723 ``# /// script`` metadata, which uv reads.
 Subcommands:
 
 * ``check`` fails when a file has more comments than ``backend/comment-baseline.json``
-  allows. Files missing from the baseline allow none.
+  allows. Files missing from the baseline allow none. During a merge, a file
+  may also keep as many comments as the merged-in commit already had, so
+  merging an older line adds nothing the ratchet has not seen.
 * ``update`` rewrites the baseline to the current counts. It refuses to raise a
   count unless ``--allow-increase`` is passed.
 * ``inventory`` writes every comment block as JSON lines for the
@@ -21,6 +23,7 @@ import argparse
 import io
 import json
 import re
+import subprocess
 import sys
 import tokenize
 from pathlib import Path
@@ -65,7 +68,10 @@ def script_metadata_lines(source: str) -> set[int]:
 
 
 def comments(path: Path) -> list[dict]:
-    source = path.read_text()
+    return source_comments(path.read_text())
+
+
+def source_comments(source: str) -> list[dict]:
     lines = source.splitlines()
     metadata = script_metadata_lines(source)
     found = []
@@ -105,6 +111,29 @@ def write_baseline(baseline: dict[str, int]) -> None:
     BASELINE.write_text(json.dumps(dict(sorted(baseline.items())), indent=2) + "\n")
 
 
+def merged_in_count(name: str) -> int:
+    shown = subprocess.run(
+        ["git", "show", f"MERGE_HEAD:{name}"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if shown.returncode != 0:
+        return 0
+    return len(source_comments(shown.stdout))
+
+
+def merging() -> bool:
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"],
+            cwd=ROOT,
+            capture_output=True,
+        ).returncode
+        == 0
+    )
+
+
 def check() -> int:
     baseline = load_baseline()
     current = counts()
@@ -113,6 +142,12 @@ def check() -> int:
         for name, number in sorted(current.items())
         if number > baseline.get(name, 0)
     ]
+    if failures and merging():
+        widened = [
+            (name, number, max(allowed, merged_in_count(name)))
+            for name, number, allowed in failures
+        ]
+        failures = [failure for failure in widened if failure[1] > failure[2]]
     for name, number, allowed in failures:
         print(
             f"{name}: {number} comments, baseline allows {allowed}. "

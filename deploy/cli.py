@@ -1679,6 +1679,8 @@ def deploy(args: argparse.Namespace) -> int:
             )
         require_production_chat_monitor(args.environment)
         sha = resolve_sha(args.source, args.environment)
+        if args.environment == "production" and getattr(args, "staging_sync", True):
+            warn_staging_sync_conflict(sha)
         release = prepare_release(sha, args.environment)
         require_chat_config_runway(
             args.environment,
@@ -1831,6 +1833,31 @@ def _live_sha(environment: str) -> str:
     return validate_manifest(release)["git_sha"]
 
 
+def staging_sync_resolution(production: str, staging: str) -> str | None:
+    """Return a pushed hand merge of production and staging, if one exists.
+
+    A conflicting sync is resolved by hand on a ``staging-sync/`` branch. Such a
+    commit qualifies when it contains both live commits and adds nothing but
+    merge commits on top of them, so it carries no unreviewed change.
+    """
+    _repository_git("fetch", "--prune", "origin")
+    refs = _repository_git(
+        "for-each-ref",
+        "--sort=-committerdate",
+        "--format=%(objectname)",
+        "refs/heads/staging-sync/",
+    ).stdout.split()
+    for commit in dict.fromkeys(refs):
+        if not (_is_ancestor(production, commit) and _is_ancestor(staging, commit)):
+            continue
+        extra = _repository_git(
+            "rev-list", "--no-merges", commit, f"^{production}", f"^{staging}"
+        ).stdout.strip()
+        if not extra:
+            return commit
+    return None
+
+
 def staging_sync_source(production: str, staging: str, *, push: bool) -> str | None:
     """Return the commit staging needs to carry production, or None if it does.
 
@@ -1853,10 +1880,15 @@ def staging_sync_source(production: str, staging: str, *, push: bool) -> str | N
         check=False,
     )
     if merge.returncode == 1:
+        resolution = staging_sync_resolution(production, staging)
+        if resolution:
+            return resolution
         conflicts = ", ".join(merge.stdout.split()[1:])
         raise DeployError(
             f"staging {staging[:12]} conflicts with production {production[:12]} "
-            f"in {conflicts}; merge them by hand and deploy staging"
+            f"in {conflicts}; merge them by hand and push the merge as "
+            f"{STAGING_SYNC_BRANCH_PREFIX}{production[:12]}-{staging[:12]}, "
+            "then rerun pwc-sync-staging"
         )
     merge.check_returncode()
     tree = merge.stdout.split()[0]
@@ -1894,6 +1926,19 @@ def staging_sync_source(production: str, staging: str, *, push: bool) -> str | N
         f"-{staging[:12]}",
     )
     return commit
+
+
+def warn_staging_sync_conflict(production: str) -> None:
+    """Warn before a production deploy whose staging sync would need a hand merge."""
+    try:
+        staging_sync_source(production, _live_sha("staging"), push=False)
+    except (DeployError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", None) or exc
+        print(
+            f"warning: the staging sync after this deploy will fail: {detail}. "
+            "Prepare that merge now and the sync will deploy it.",
+            file=sys.stderr,
+        )
 
 
 def sync_staging(args: argparse.Namespace) -> int:

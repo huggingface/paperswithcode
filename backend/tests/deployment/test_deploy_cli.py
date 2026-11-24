@@ -318,6 +318,71 @@ def test_staging_sync_refuses_conflicts_without_pushing(sync_repository):
     assert "staging-sync" not in _git("--git-dir", str(origin), "branch")
 
 
+def _push_resolution(source: Path, origin: Path, production: str, staging: str) -> str:
+    _git("checkout", "--detach", production, cwd=source)
+    subprocess.run(
+        ["git", "merge", "--no-ff", "--no-commit", staging],
+        cwd=source,
+        check=False,
+        capture_output=True,
+    )
+    (source / "chat.txt").write_text("production chat + staging only\n")
+    _git("add", "chat.txt", cwd=source)
+    _git("commit", "-m", "Resolve staging sync", cwd=source)
+    resolution = _git("rev-parse", "HEAD", cwd=source)
+    branch = f"staging-sync/main-{production[:12]}-{staging[:12]}"
+    _git("push", str(origin), f"{resolution}:refs/heads/{branch}", cwd=source)
+    return resolution
+
+
+def test_staging_sync_deploys_a_pushed_hand_merge_of_a_conflict(sync_repository):
+    source, origin, _, staging = sync_repository
+    production = _commit(source, "chat.txt", "production chat\n")
+    _git("push", str(origin), "main", cwd=source)
+    resolution = _push_resolution(source, origin, production, staging)
+
+    assert deploy_cli.staging_sync_source(production, staging, push=True) == (
+        resolution
+    )
+
+
+def test_staging_sync_ignores_a_hand_merge_with_extra_changes(sync_repository):
+    source, origin, _, staging = sync_repository
+    production = _commit(source, "chat.txt", "production chat\n")
+    _git("push", str(origin), "main", cwd=source)
+    resolution = _push_resolution(source, origin, production, staging)
+    _commit(source, "unreviewed.txt", "extra\n")
+    _git(
+        "push",
+        str(origin),
+        f"HEAD:refs/heads/staging-sync/extra-{resolution[:12]}",
+        cwd=source,
+    )
+    _git(
+        "push",
+        str(origin),
+        f":refs/heads/staging-sync/main-{production[:12]}-{staging[:12]}",
+        cwd=source,
+    )
+
+    with pytest.raises(deploy_cli.DeployError, match="push the merge as"):
+        deploy_cli.staging_sync_source(production, staging, push=True)
+
+
+def test_staging_sync_warning_never_aborts_a_production_deploy(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    def failing_fetch(*arguments, **options):
+        raise subprocess.CalledProcessError(1, "git fetch", stderr="network down")
+
+    monkeypatch.setattr(deploy_cli, "_live_sha", lambda environment: "a" * 40)
+    monkeypatch.setattr(deploy_cli, "staging_sync_source", failing_fetch)
+
+    deploy_cli.warn_staging_sync_conflict("b" * 40)
+
+    assert "network down" in capsys.readouterr().err
+
+
 def test_production_deploy_parser_syncs_staging_by_default():
     assert parser_for("pwc-deploy").parse_args(["production", "abc"]).staging_sync
     assert not (

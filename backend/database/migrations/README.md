@@ -142,6 +142,12 @@ Do not run `remove_tasks_is_visible.sql` until visibility-free source is live
 in both the production current and immediate rollback releases. The additive
 entity-search schema and bounded backfill can be applied before that gate.
 
+Staging reads the production database, so every drop waits for staging too.
+Apply a column or table drop only after the release that stops reading it is
+live in production and staging (`pwc-status`; `git merge-base --is-ancestor
+<release sha> <live sha>` for each). If the post-deploy staging sync failed,
+staging still runs the old code and the drop breaks it.
+
 ## Adding new migrations
 
 - **Schema changes**: add idempotent SQL here; add a `run_*.py` wrapper when

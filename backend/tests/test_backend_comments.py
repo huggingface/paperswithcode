@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -82,3 +83,34 @@ def test_delete_refuses_lines_that_are_no_longer_comments(repo):
 
     with pytest.raises(SystemExit):
         backend_comments.delete(selection)
+
+
+def _git(repo, *arguments):
+    return subprocess.run(
+        ["git", *arguments], cwd=repo, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_merge_may_keep_comments_the_merged_in_commit_had(repo):
+    _git(repo, "init", "--initial-branch=main")
+    _git(repo, "config", "user.name", "Ratchet Test")
+    _git(repo, "config", "user.email", "ratchet-test@example.invalid")
+    module = repo / "backend" / "module.py"
+    module.write_text("x = 1\n")
+    (repo / "backend" / "comment-baseline.json").write_text("{}\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "base")
+    _git(repo, "checkout", "-b", "older-line")
+    module.write_text("# kept on the older line\nx = 1\n")
+    _git(repo, "commit", "-am", "older line comment")
+    _git(repo, "checkout", "main")
+    (repo / "backend" / "other.py").write_text("y = 2\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "main change")
+    _git(repo, "merge", "--no-ff", "--no-commit", "older-line")
+
+    assert backend_comments.check() == 0
+
+    module.write_text("# kept on the older line\n# new in the merge\nx = 1\n")
+
+    assert backend_comments.check() == 1
