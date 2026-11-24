@@ -331,9 +331,10 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule="*/15 * * * * (every 15 minutes)",
         script_path="hourly/update_hot_github_trending.py",
         log_name="update_hot_github_trending",
+        log_directory="/var/lib/paperswithcode/production/repair-cron-logs",
         process_patterns=("update_hot_github_trending",),
         lock_file=(
-            "/var/lib/paperswithcode/production/cron-locks/"
+            "/var/lib/paperswithcode/production/repair-cron-locks/"
             "update_hot_github_trending.lock"
         ),
         expected_runtime_minutes=12,
@@ -2461,9 +2462,10 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule="20 5 * * 3 (Wed 05:20 UTC)",
         script_path="backend/scripts/link_google_scholar_profiles.py",
         log_name="link_google_scholar_profiles",
+        log_directory="/var/lib/paperswithcode/production/repair-cron-logs",
         process_patterns=("backend.scripts.link_google_scholar_profiles",),
         lock_file=(
-            "/var/lib/paperswithcode/production/cron-locks/"
+            "/var/lib/paperswithcode/production/repair-cron-locks/"
             "link_google_scholar_profiles.lock"
         ),
         expected_runtime_minutes=60,
@@ -2551,9 +2553,11 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule="35 * * * * (hourly)",
         script_path="backend/scripts/refresh_x_post_likes.py",
         log_name="refresh_x_post_likes",
+        log_directory="/var/lib/paperswithcode/production/repair-cron-logs",
         process_patterns=("backend.scripts.refresh_x_post_likes",),
         lock_file=(
-            "/var/lib/paperswithcode/production/cron-locks/refresh_x_post_likes.lock"
+            "/var/lib/paperswithcode/production/repair-cron-locks/"
+            "refresh_x_post_likes.lock"
         ),
         expected_runtime_minutes=3,
         stale_after_minutes=180,
@@ -2947,8 +2951,12 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule="15 * * * * (hourly)",
         script_path="hourly/refresh_paper_embeddings.py",
         log_name="refresh_paper_embeddings",
+        log_directory="/var/lib/paperswithcode/production/repair-cron-logs",
         process_patterns=("refresh_paper_embeddings",),
-        lock_file="/var/lib/paperswithcode/production/cron-locks/refresh_paper_embeddings.lock",
+        lock_file=(
+            "/var/lib/paperswithcode/production/repair-cron-locks/"
+            "refresh_paper_embeddings.lock"
+        ),
         expected_runtime_minutes=20,
         stale_after_minutes=120,
         failure_alert_after=3,

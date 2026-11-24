@@ -2962,6 +2962,9 @@ def main() -> int:
     trending_db_password = existing_or_random(
         current_trending_cron, "PWC_TRENDING_DB_PASSWORD"
     )
+    repair_db_password = existing_or_random(
+        read_lines(CONFIG_ROOT / "repair-cron.env"), "PWC_CRON_REPAIR_DB_PASSWORD"
+    )
     production_jwt = decoded_value(legacy["PWC_JWT_SECRET"])
     session_private_key, session_public_key = shared_session_keys(
         current_production, current_staging
@@ -3139,6 +3142,11 @@ def main() -> int:
         CONFIG_ROOT / "trending-cron.env",
         trending_cron,
         "pwc-cron-trending",
+    )
+    write_env(
+        CONFIG_ROOT / "repair-cron.env",
+        assign({}, {"PWC_CRON_REPAIR_DB_PASSWORD": repair_db_password}),
+        "pwc-cron-repair",
     )
     # pwc-cron is deliberately not in the pwc-production group: that group can
     # read production.env. install_host_layout.restrict_cron_access() grants the

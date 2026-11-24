@@ -178,7 +178,7 @@ def restrict_cron_access() -> None:
         [
             "setfacl",
             "--modify",
-            "user:pwc-cron:--x,user:pwc-cron-trending:--x",
+            "user:pwc-cron:--x,user:pwc-cron-trending:--x,user:pwc-cron-repair:--x",
             str(STATE_ROOT / "production"),
         ],
         check=True,
@@ -223,6 +223,7 @@ def main() -> int:
         "pwc-staging",
         "pwc-cron",
         "pwc-cron-trending",
+        "pwc-cron-repair",
         "pwc-external-pi",
         "pwc-external-pi-staging",
         "pwc-chat-executor",
@@ -230,16 +231,12 @@ def main() -> int:
         "pwc-build",
     ):
         ensure_user(user)
-    subprocess.run(
-        ["usermod", "--groups", "", "pwc-cron-trending"],
-        check=True,
-    )
-    if any(
-        "pwc-cron-trending" in group.gr_mem
-        for group in grp.getgrall()
-        if group.gr_name != "pwc-cron-trending"
-    ):
-        raise RuntimeError("pwc-cron-trending retains a supplementary group")
+    for user in ("pwc-cron-trending", "pwc-cron-repair"):
+        subprocess.run(["usermod", "--groups", "", user], check=True)
+        if any(
+            user in group.gr_mem for group in grp.getgrall() if group.gr_name != user
+        ):
+            raise RuntimeError(f"{user} retains a supplementary group")
     for path in (
         APP_ROOT,
         APP_ROOT / "environments",
@@ -345,6 +342,22 @@ def main() -> int:
         STATE_ROOT / "production" / "trending-cron-locks",
     ):
         ensure_dir(path, "pwc-cron-trending", "pwc-cron", 0o2770)
+    for path in (
+        STATE_ROOT / "production" / "repair-cron",
+        STATE_ROOT / "production" / "repair-cron-logs",
+        STATE_ROOT / "production" / "repair-cron-locks",
+    ):
+        ensure_dir(path, "pwc-cron-repair", "pwc-cron", 0o2770)
+    for path in (
+        STATE_ROOT / "production" / "trending-cron-logs",
+        STATE_ROOT / "production" / "trending-cron-locks",
+        STATE_ROOT / "production" / "repair-cron-logs",
+        STATE_ROOT / "production" / "repair-cron-locks",
+    ):
+        subprocess.run(
+            ["setfacl", "--modify", "group:pwc-production:r-x", str(path)],
+            check=True,
+        )
     ensure_dir(
         STATE_ROOT / "production" / "backups",
         "pwc-cron",

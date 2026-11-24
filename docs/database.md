@@ -7,6 +7,10 @@
 - Staging role: `pwc_staging` (read-only `public`, owner of writable
   `staging` state through `search_path=staging,public`)
 - Backup role: `pwc_backup` (`pg_read_all_data`, no application writes)
+- Trending CRON role: `pwc_cron_trending` (writes only trending-score columns)
+- CRON repair role: `pwc_cron_repair` (the application role's `public`
+  privileges without taxonomy writes; used by source-repairable CRON jobs, see
+  `backend/database/migrations/add_cron_repair_role.sql`)
 - Superuser (system managed): `postgres`
 - Deployed connection settings are loaded from
   `/etc/paperswithcode/{production,staging}.env`; `backend/keys.env` is for

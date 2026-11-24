@@ -23,12 +23,12 @@ def test_cron_wrapper_grants_journal_access_only_to_chat_monitor():
 
     assert 'if [ "$1" = "monitor_chat_operational_alerts" ]' in wrapper
     assert wrapper.count("SupplementaryGroups=systemd-journal") == 1
-    assert wrapper.count("cron_launcher.py") == 3
+    assert wrapper.count("cron_launcher.py") == 4
 
 
 def test_cron_wrapper_isolates_source_repairable_trending_jobs():
     wrapper = cron_wrapper()
-    restricted_branch = wrapper.split('case "$1" in', 1)[1].split("esac", 1)[0]
+    restricted_branch = wrapper.split('case "$1" in', 1)[1].split(";;", 1)[0]
 
     assert "calculate_trending_scores|calculate_paper_trending_scores)" in wrapper
     assert "--uid=pwc-cron-trending --gid=pwc-cron-trending" in wrapper
@@ -572,7 +572,7 @@ def test_host_layout_grants_cron_traversal_and_drops_production_group(monkeypatc
         [
             "setfacl",
             "--modify",
-            "user:pwc-cron:--x,user:pwc-cron-trending:--x",
+            "user:pwc-cron:--x,user:pwc-cron-trending:--x,user:pwc-cron-repair:--x",
             "/var/lib/paperswithcode/production",
         ],
         ["gpasswd", "--delete", "pwc-cron", "pwc-production"],
