@@ -221,7 +221,6 @@ def test_sync_upserts_resolved_rows_and_deletes_only_stale_managed_rows():
                 methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
                 metrics={METRIC_NAME: 1200},
                 best_metric=METRIC_NAME,
-                external_source_url=TABARENA_SOURCE_URL,
                 source_url=TABARENA_SOURCE_URL,
                 external=True,
             ),
@@ -233,7 +232,6 @@ def test_sync_upserts_resolved_rows_and_deletes_only_stale_managed_rows():
                 methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
                 metrics={METRIC_NAME: 1000},
                 best_metric=METRIC_NAME,
-                external_source_url=TABARENA_SOURCE_URL,
                 source_url=TABARENA_SOURCE_URL,
                 external=True,
             ),
@@ -290,7 +288,6 @@ def test_current_unmatched_model_does_not_delete_previous_row():
             methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
             metrics={METRIC_NAME: 1200},
             best_metric=METRIC_NAME,
-            external_source_url=TABARENA_SOURCE_URL,
             source_url=TABARENA_SOURCE_URL,
             external=True,
         )
@@ -336,7 +333,6 @@ def test_tabfm_refreshes_existing_blog_row_using_canonical_report():
         methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
         metrics={METRIC_NAME: 1771},
         best_metric=METRIC_NAME,
-        external_source_url=TABARENA_SOURCE_URL,
         source_url=TABARENA_SOURCE_URL,
         external=True,
     )

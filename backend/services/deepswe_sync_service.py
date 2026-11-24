@@ -461,7 +461,7 @@ class DeepSweSyncService:
                     Evaluation.task_id == task.id,
                     Evaluation.dataset_id == dataset.id,
                     Evaluation.best_metric == METRIC_NAME,
-                    Evaluation.external_source_url == DEEPSWE_SOURCE_URL,
+                    Evaluation.source_url == DEEPSWE_SOURCE_URL,
                     Evaluation.methodology.like(f"{MANAGED_METHODOLOGY_PREFIX}%"),
                 )
                 .all()
@@ -515,7 +515,7 @@ class DeepSweSyncService:
                                 Evaluation.paper_id == paper_id,
                                 Evaluation.model_name == legacy_name,
                                 Evaluation.best_metric == METRIC_NAME,
-                                Evaluation.external_source_url == DEEPSWE_SOURCE_URL,
+                                Evaluation.source_url == DEEPSWE_SOURCE_URL,
                             )
                             .one_or_none()
                         )
@@ -541,7 +541,6 @@ class DeepSweSyncService:
                     row.hf_model_url = hf_model_url
                 row.best_metric = METRIC_NAME
                 row.evaluated_on = leaderboard.generated_at.date()
-                row.external_source_url = DEEPSWE_SOURCE_URL
                 row.source_url = DEEPSWE_SOURCE_URL
                 row.external = True
                 row.updated_at = datetime.now(UTC)

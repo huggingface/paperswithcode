@@ -376,7 +376,6 @@ class FrontierCS2SyncService:
                         harness=entry.harness,
                         is_open=is_open,
                         hf_model_url=hf_model_url,
-                        external_source_url=FRONTIERCS_2_URL,
                         source_url=FRONTIERCS_2_URL,
                         external=True,
                         uses_additional_data=False,

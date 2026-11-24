@@ -177,7 +177,7 @@ def test_sync_updates_only_managed_rows_and_is_idempotent(monkeypatch):
                 model_name="Old label",
                 metrics={tts.METRIC_NAME: 1.0},
                 best_metric=tts.METRIC_NAME,
-                external_source_url=f"{tts.SOURCE_URL_PREFIX}model-a",
+                source_url=f"{tts.SOURCE_URL_PREFIX}model-a",
                 methodology=tts.MANAGED_METHODOLOGY_PREFIX,
             ),
             Evaluation(
@@ -214,7 +214,7 @@ def test_sync_updates_only_managed_rows_and_is_idempotent(monkeypatch):
 
     managed = (
         session.query(Evaluation)
-        .filter(Evaluation.external_source_url == f"{tts.SOURCE_URL_PREFIX}model-a")
+        .filter(Evaluation.source_url == f"{tts.SOURCE_URL_PREFIX}model-a")
         .one()
     )
     assert (first.created, first.updated, first.matched) == (0, 1, 1)
@@ -324,7 +324,7 @@ def test_sync_retires_only_owned_removed_stepaudio_results(monkeypatch, commit):
                 model_name=name,
                 metrics={tts.METRIC_NAME: 1205.9},
                 best_metric=tts.METRIC_NAME,
-                external_source_url=f"{tts.SOURCE_URL_PREFIX}st260629",
+                source_url=f"{tts.SOURCE_URL_PREFIX}st260629",
                 methodology=methodology,
             )
         )

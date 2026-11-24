@@ -399,7 +399,6 @@ class ProgramBenchSyncService:
                 row.is_open = identity.is_open
                 row.best_metric = PRIMARY_METRIC_NAME
                 row.evaluated_on = entry.evaluated_on
-                row.external_source_url = entry.source_url
                 row.source_url = entry.source_url
                 row.external = True
                 row.updated_at = datetime.now(UTC)

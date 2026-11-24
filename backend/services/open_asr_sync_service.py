@@ -592,13 +592,13 @@ class OpenAsrSyncService:
         resolved_names = {
             self._managed_model_id(row).casefold()
             for row in candidate_rows
-            if row.external_source_url == SPACE_SOURCE_URL
+            if row.source_url == SPACE_SOURCE_URL
             and (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
         }
         resolved_names.update(
             legacy_model_id.casefold()
             for row in candidate_rows
-            if row.external_source_url == LEGACY_SOURCE_URL
+            if row.source_url == LEGACY_SOURCE_URL
             and (row.methodology or "").startswith("Open ASR Leaderboard rank ")
             and (legacy_model_id := self._legacy_model_id(row)) is not None
         )
@@ -659,13 +659,13 @@ class OpenAsrSyncService:
             managed_rows = [
                 row
                 for row in candidate_rows
-                if row.external_source_url == SPACE_SOURCE_URL
+                if row.source_url == SPACE_SOURCE_URL
                 and (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
             ]
             legacy_rows = [
                 row
                 for row in candidate_rows
-                if row.external_source_url == LEGACY_SOURCE_URL
+                if row.source_url == LEGACY_SOURCE_URL
                 and (row.methodology or "").startswith("Open ASR Leaderboard rank ")
                 and self._legacy_model_id(row) is not None
             ]
@@ -777,7 +777,6 @@ class OpenAsrSyncService:
                 row.is_open = entry.is_open
                 row.best_metric = WER_METRIC
                 row.evaluated_on = now.date()
-                row.external_source_url = SPACE_SOURCE_URL
                 row.source_url = SPACE_SOURCE_URL
                 row.external = True
                 row.updated_at = now

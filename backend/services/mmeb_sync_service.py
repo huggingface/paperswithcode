@@ -553,7 +553,6 @@ class MmebSyncService:
                     match.hf_model_url if match is not None else None
                 )
                 row.evaluated_on = entry.reported_on
-                row.external_source_url = MMEB_SPACE_URL
                 row.source_url = MMEB_SPACE_URL
                 row.external = True
                 row.updated_at = now

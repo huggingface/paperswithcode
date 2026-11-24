@@ -135,7 +135,7 @@ def _add_hindi_board(session):
                 is_open=True,
                 hf_model_url=f"https://huggingface.co/{model_id}",
                 num_parameters=600_000_000,
-                external_source_url=SPACE_SOURCE_URL,
+                source_url=SPACE_SOURCE_URL,
                 methodology=(
                     f"{MANAGED_METHODOLOGY_PREFIX} Upstream model {model_id}; "
                     "rank 1; default Average WER; fetched x."
@@ -155,7 +155,7 @@ def test_sync_publishes_only_paper_backed_models_and_is_idempotent():
         model_name="gone",
         metrics={"WER": 50.0},
         best_metric="WER",
-        external_source_url=SPACE_SOURCE_URL,
+        source_url=SPACE_SOURCE_URL,
         methodology=f"{MANAGED_METHODOLOGY_PREFIX} Upstream model org/gone; rank 9;",
     )
     session.add(stale)

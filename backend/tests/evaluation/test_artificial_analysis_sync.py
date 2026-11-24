@@ -362,7 +362,7 @@ def test_sync_adopts_existing_row_and_is_idempotent(monkeypatch):
             model_name="Old label",
             metrics={aa.METRIC_NAME: 1.0},
             best_metric=aa.METRIC_NAME,
-            external_source_url=source_url,
+            source_url=source_url,
         )
     )
     session.commit()
@@ -538,7 +538,7 @@ def test_sync_refreshes_old_managed_rows_and_retires_withdrawn_scores(monkeypatc
                 model_name=slug,
                 metrics={aa.METRIC_NAME: 1.0},
                 best_metric=aa.METRIC_NAME,
-                external_source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
+                source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
                 is_open=True,
                 methodology=aa.MANAGED_METHODOLOGY_PREFIX if managed else "Manual",
             )
@@ -595,7 +595,7 @@ def test_sync_migrates_reviewed_slug_rename_without_losing_paper(
         model_name="Old label",
         metrics={aa.METRIC_NAME: 1.0},
         best_metric=aa.METRIC_NAME,
-        external_source_url=f"{aa.SOURCE_URL_PREFIX}{old_slug}",
+        source_url=f"{aa.SOURCE_URL_PREFIX}{old_slug}",
         methodology=aa.MANAGED_METHODOLOGY_PREFIX,
     )
     session.add(old)
@@ -644,7 +644,7 @@ def test_slug_rename_does_not_adopt_manual_old_row(monkeypatch):
             model_name="Manual",
             metrics={aa.METRIC_NAME: 1.0},
             best_metric=aa.METRIC_NAME,
-            external_source_url=source,
+            source_url=source,
             methodology="Manual",
         )
     )
@@ -709,7 +709,7 @@ def test_slug_rename_retires_only_owned_duplicate_with_same_binding(
                 model_name=slug,
                 metrics={aa.METRIC_NAME: 1.0},
                 best_metric=aa.METRIC_NAME,
-                external_source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
+                source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
                 methodology=methodology,
             )
         )
@@ -905,7 +905,7 @@ def test_new_index_version_retires_unlisted_older_intelligence_rows(monkeypatch)
                 model_name=f"{slug}-{dataset_id}",
                 metrics={aa.METRIC_NAME: 30.0},
                 best_metric=aa.METRIC_NAME,
-                external_source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
+                source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
                 methodology=methodology,
             )
         )

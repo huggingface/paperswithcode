@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from sqlalchemy import text
 
+from backend.models.database import Evaluation
 from backend.services.evaluation_service import EvaluationService
 
 
@@ -109,7 +109,7 @@ def upsert_evaluation(
         db.execute(
             text(
                 """SELECT id, metrics, methodology, is_open, source_url,
-                      external_source_url, num_parameters, hf_model_url
+                      num_parameters, hf_model_url
                FROM evaluations
                WHERE paper_id = :paper_id
                  AND task_id = :task_id
@@ -134,7 +134,6 @@ def upsert_evaluation(
         "methodology": methodology,
         "is_open": True,
         "source_url": source_url,
-        "external_source_url": source_url,
         "num_parameters": num_parameters,
         "hf_model_url": hf_model_url,
     }
@@ -156,25 +155,14 @@ def upsert_evaluation(
     if {key: existing[key] for key in desired} == desired:
         return "unchanged", int(existing["id"])
 
-    db.execute(
-        text(
-            """UPDATE evaluations
-               SET metrics = CAST(:metrics AS jsonb), methodology = :methodology,
-                   is_open = TRUE, source_url = :source_url,
-                   external_source_url = :source_url, external = FALSE,
-                   num_parameters = :num_parameters, hf_model_url = :hf_model_url,
-                   updated_at = NOW()
-               WHERE id = :id"""
-        ),
-        {
-            "id": existing["id"],
-            "metrics": json.dumps(dict(metrics)),
-            "methodology": methodology,
-            "source_url": source_url,
-            "num_parameters": num_parameters,
-            "hf_model_url": hf_model_url,
-        },
-    )
+    row = db.get(Evaluation, existing["id"])
+    row.metrics = dict(metrics)
+    row.methodology = methodology
+    row.is_open = True
+    row.source_url = source_url
+    row.external = False
+    row.num_parameters = num_parameters
+    row.hf_model_url = hf_model_url
     db.commit()
     for metric_name in metrics:
         service.recalculate_ranks(task_id, dataset_id, metric_name=metric_name)

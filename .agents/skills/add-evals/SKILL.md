@@ -52,7 +52,7 @@ For "next N rows" or "lines X-Y of the CSV", process each row independently thro
 
 ### Misattributed or moved evaluations
 
-If the user says existing evals landed on the wrong paper, first create or resolve the correct source row, then move only the matching rows in one transaction. Scope the update by `old_paper_id`, target `model_name` or benchmark set, and optional `external_source_url`; never move all rows from a paper unless the user explicitly asks.
+If the user says existing evals landed on the wrong paper, first create or resolve the correct source row, then move only the matching rows in one transaction. Scope the update by `old_paper_id`, target `model_name` or benchmark set, and optional `source_url`; never move all rows from a paper unless the user explicitly asks.
 
 ```bash
 uv run --env-file backend/keys.env python - <<'PY'
@@ -75,7 +75,7 @@ with get_engine().begin() as conn:
     conn.execute(text("""
         UPDATE evaluations
         SET paper_id = :new_paper_id,
-            external_source_url = COALESCE(:new_source_url, external_source_url)
+            source_url = COALESCE(:new_source_url, source_url)
         WHERE paper_id = :old_paper_id AND model_name ILIKE :model_pattern
     """), {
         "old_paper_id": old_paper_id,
@@ -168,7 +168,7 @@ Sources typically contain several target-model variants and many comparator mode
 
 - Which target-model rows are eligible. Sensible defaults:
   - Include only models/configurations introduced by the source paper or release. Exclude baseline/comparator rows such as Opus, GPT, Gemini, K2, GLM, CLIP, OpenCLIP, or previous versions unless the source itself introduced that model or the user explicitly asks for comparators.
-  - **No external evals by default.** Every imported row must use the **source paper's `paper_id`** for the model that paper introduces. Do **not** scrape comparison-table baseline scores and attach them to other papers' `paper_id` rows, even when the source paper (e.g. a benchmark paper or SOTA comparison table) reports those numbers. That pattern — scores from paper A posted on paper B with `external_source_url` pointing back at A — is an **external eval** and is out of scope unless the user explicitly asks to import comparators or external evals. Phrases like "do the same for this paper" or "import the eval table" still mean **only the introducing model(s) on that paper**, not every column in the table. When skipping comparator columns, say so in the final report (e.g. `skipped external eval: RealBasicVSR scores from comparison table`).
+  - **No external evals by default.** Every imported row must use the **source paper's `paper_id`** for the model that paper introduces. Do **not** scrape comparison-table baseline scores and attach them to other papers' `paper_id` rows, even when the source paper (e.g. a benchmark paper or SOTA comparison table) reports those numbers. That pattern — scores from paper A posted on paper B with `source_url` pointing back at A — is an **external eval** and is out of scope unless the user explicitly asks to import comparators or external evals. Phrases like "do the same for this paper" or "import the eval table" still mean **only the introducing model(s) on that paper**, not every column in the table. When skipping comparator columns, say so in the final report (e.g. `skipped external eval: RealBasicVSR scores from comparison table`).
   - For every source benchmark that survives the DB/metric filter, choose the highest score among eligible target rows using the configured leaderboard metric and direction. Do this per benchmark; do not assume the largest, newest, or most prominently named model is best everywhere.
   - If the best eligible row differs by benchmark because of mode, model size, backbone, compression level, decoding setting, tool use, or runtime setup, preserve that distinction in `model_name` or `harness` as appropriate. The same source paper can therefore produce evaluation rows with different model names across different benchmarks.
   - For multi-mode releases (e.g. Non-Think / High / Max / Thinking), use the best eligible mode per benchmark unless the source marks modes as incomparable for that leaderboard. If the source clearly presents one mode as the only intended comparable leaderboard setting, use that mode and mention the choice in `methodology`.
@@ -343,8 +343,8 @@ If the source paper cannot be confidently identified, leave the dataset alone an
 
 Use `POST /api/v1/evaluations/` with `X-Admin-Token`. Build one row per benchmark using the benchmark-wise best eligible target result selected in step 2. Before posting each row, assert that `best_metric` is in the allowed metric list fetched for that exact `(task_id, dataset_id)` pair and that every key in the outgoing `metrics` object is allowed for that leaderboard. Include `harness` only when the selected leaderboard's `supports_harness` flag is true. The unique key is `(paper_id, task_id, dataset_id, model_name, harness, best_metric)`, so:
 
-- For rows on the introducing paper, set `external_source_url` to that paper's own `source_url` (the PDF for external papers) or leave it unset, so the rows are not shown as external evals. Never point it at a different surface such as the project page.
-- Set `paper_id` to the **introducing paper for the evaluated model** (the source paper from step 3). Do **not** post comparison-table baseline scores onto other papers' `paper_id` values as external evals unless the user explicitly requested comparator import. Use `external_source_url` only for traceability on rows that genuinely belong on that `paper_id` (e.g. a score copied from a linked report), not as a way to attach another paper's comparison column to the wrong paper page.
+- For rows on the introducing paper, set the evaluation `source_url` to that paper's own `source_url` (the PDF for external papers) or leave it unset, so the rows are not shown as external evals. Never point it at a different surface such as the project page.
+- Set `paper_id` to the **introducing paper for the evaluated model** (the source paper from step 3). Do **not** post comparison-table baseline scores onto other papers' `paper_id` values as external evals unless the user explicitly requested comparator import. Use the evaluation `source_url` only for traceability on rows that genuinely belong on that `paper_id` (e.g. a score copied from a linked report), not as a way to attach another paper's comparison column to the wrong paper page.
 - Use the model name as written in the paper/source, keeping it short, readable, and suitable for display. Never use a Hugging Face repo id as `model_name`: drop the organization prefix, so `inclusionAI/Ming-3.0-tts-0.5B` becomes `Ming-3.0-tts-0.5B` (or the paper's own spelling); the repo belongs in `hf_model_url`. Patch-size names such as `ViT-B/16` are fine. Normalize typographic/source formatting into plain title-style text: convert subscripts, all-caps size suffixes, and code-style names such as `LayoutLM_BASE`, `LayoutLM<sub>BASE</sub>`, or `BROS_LARGE` to `LayoutLM Base` and `BROS Large`. Never include author-relative labels like `our`, `ours`, `our model`, or `ours model` in `model_name`; those phrases only identify the authors' own method in context and should be replaced with the actual model name or a neutral setup label such as `(full data mix)`, with the source phrasing noted in `methodology` if needed. Put setup details such as "fine-tuned", parameter count, harness, mode, precision, or training recipe in `methodology` unless they are part of the source's actual model name.
 - For papers that introduce a backbone or representation model, include the task framework, decoder, or head in `model_name` when the benchmark score is for the backbone inside a downstream system. This keeps leaderboard rows comparable and understandable: use names like `ConvNeXt-XL + UperNet` for ADE20K semantic segmentation or `ConvNeXt-XL + Cascade Mask R-CNN` for COCO detection/instance segmentation. Keep the backbone-only name for classification or direct backbone evaluation rows, and put pretraining/fine-tuning schedules in `methodology`.
 - Distinguish variants from the same release with `model_name`, e.g. `DeepSeek-V4-Pro Max` vs `DeepSeek-V4-Flash Max`, `MetaCLIP ViT-B/32 (2.5B data)` vs `MetaCLIP ViT-L/14 (1B data)`, or `ConvNeXt-XL + UperNet` vs `ConvNeXt-XL + Cascade Mask R-CNN`. Do NOT bake harness names or parameter counts into `model_name` — keep `model_name` clean (e.g. `GLM-5.1`, not `GLM-5.1 (Terminus-2)` or `GLM-4.5 (355B)`). Include mode, backbone, data scale, shot count, tool-use suffix, or task framework in `model_name` only when it identifies the benchmark-wise selected setup or affects leaderboard comparability. Parameter counts live in the dedicated `num_parameters` field instead (see below).
@@ -497,7 +497,7 @@ try:
             metrics={best_metric: score},
             best_metric=best_metric,
             harness=harness,
-            external_source_url=source_url,
+            source_url=source_url,
             num_parameters=num_parameters,
             is_open=is_open,
         )

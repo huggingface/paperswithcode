@@ -257,7 +257,7 @@ def test_sync_deletes_only_disappeared_managed_rows():
                 methodology=f"{MANAGED_METHODOLOGY_PREFIX} subset=main; old.",
                 metrics={"Score": 10, "Pass Rate": 10},
                 best_metric="Score",
-                external_source_url=FRONTIERCODE_SOURCE_URL,
+                source_url=FRONTIERCODE_SOURCE_URL,
             ),
             Evaluation(
                 paper_id=98109,
@@ -267,7 +267,7 @@ def test_sync_deletes_only_disappeared_managed_rows():
                 methodology="Human curated.",
                 metrics={"Score": 10, "Pass Rate": 10},
                 best_metric="Score",
-                external_source_url=FRONTIERCODE_SOURCE_URL,
+                source_url=FRONTIERCODE_SOURCE_URL,
             ),
         ]
     )

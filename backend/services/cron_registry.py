@@ -670,7 +670,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             JOIN datasets d ON d.id = e.dataset_id
             WHERE d.slug = '3d-arena-iso3d-living'
               AND e.best_metric = 'Elo (live, external)'
-              AND e.external_source_url =
+              AND e.source_url =
                   'https://huggingface.co/spaces/3d-arena/3d-arena'
         """,
         workflow_file="cron-sync-3d-arena.yml",
@@ -716,7 +716,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
               AND e.methodology LIKE
                   'Managed by the Papers with Code TabArena live sync.%'
               AND e.best_metric = 'Elo'
-              AND e.external_source_url =
+              AND e.source_url =
                   'https://huggingface.co/spaces/TabArena/leaderboard'
         """,
         workflow_file="cron-sync-tabarena.yml",
@@ -753,7 +753,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             JOIN datasets d ON d.id = e.dataset_id
             WHERE d.slug = 'open-asr-leaderboard'
               AND e.best_metric = 'WER'
-              AND e.external_source_url =
+              AND e.source_url =
                   'https://huggingface.co/spaces/hf-audio/open_asr_leaderboard'
               AND e.methodology LIKE
                   'Managed by the Papers with Code Open ASR live sync.%'
@@ -796,7 +796,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                 'open-tts-leaderboard-all-languages'
             )
               AND e.best_metric = 'WER'
-              AND e.external_source_url =
+              AND e.source_url =
                   'https://huggingface.co/spaces/hf-audio/open_tts_leaderboard'
               AND e.methodology LIKE
                   'Managed by the Papers with Code Open TTS live sync.%'
@@ -954,7 +954,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             JOIN datasets d ON d.id = e.dataset_id
             WHERE d.slug = 'deepswe'
               AND e.best_metric = 'Pass@1'
-              AND e.external_source_url = 'https://deepswe.datacurve.ai/'
+              AND e.source_url = 'https://deepswe.datacurve.ai/'
               AND e.methodology LIKE
                   'Managed by the Papers with Code DeepSWE live sync.%'
         """,
@@ -999,7 +999,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                 AND (
                     (
                       e.best_metric = 'Score'
-                      AND e.external_source_url LIKE
+                      AND e.source_url LIKE
                           'https://artificialanalysis.ai/models/%'
                       AND e.methodology LIKE
                           'Managed by the Papers with Code Artificial Analysis live sync.%'
@@ -1007,7 +1007,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                     OR
                     (
                       e.best_metric = 'Quality Elo'
-                      AND e.external_source_url LIKE
+                      AND e.source_url LIKE
                           'https://artificialanalysis.ai/text-to-speech/models/%'
                       AND e.methodology LIKE
                           'Managed by the Papers with Code Artificial Analysis TTS live sync.%'
@@ -1093,7 +1093,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             JOIN datasets d ON d.id = e.dataset_id
             WHERE d.slug = 'programbench'
               AND e.best_metric = 'Resolved'
-              AND e.external_source_url LIKE 'https://programbench.com/run/%'
+              AND e.source_url LIKE 'https://programbench.com/run/%'
               AND e.methodology LIKE
                   'Managed by the Papers with Code ProgramBench live sync.%'
         """,
@@ -2002,7 +2002,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             JOIN datasets d ON d.id = e.dataset_id
             WHERE d.slug IN ('frontiercode-main', 'frontiercode-extended')
               AND e.best_metric = 'Score'
-              AND e.external_source_url = 'https://cognition.com/frontiercode'
+              AND e.source_url = 'https://cognition.com/frontiercode'
               AND e.methodology LIKE
                   'Managed by the Papers with Code FrontierCode live sync.%'
         """,
@@ -2040,7 +2040,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             JOIN datasets d ON d.id = e.dataset_id
             WHERE d.slug = 'coarena'
               AND e.best_metric = 'Elo (live, external)'
-              AND e.external_source_url = 'https://coarena.ai/leaderboard'
+              AND e.source_url = 'https://coarena.ai/leaderboard'
               AND e.methodology LIKE
                   'Managed by the Papers with Code CoArena live sync.%'
         """,

@@ -239,7 +239,7 @@ def _seed_production(session: Session) -> None:
                 methodology=f"Hand-reviewed notes for {model_name}.",
                 best_metric=METRIC_NAME,
                 is_open=identity.is_open,
-                external_source_url=SWE_MARATHON_URL,
+                source_url=SWE_MARATHON_URL,
                 external=True,
             )
         )

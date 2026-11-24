@@ -215,7 +215,7 @@ with get_engine().connect() as conn:
     rows = conn.execute(text("""
         SELECT e.id, e.model_name, e.best_metric, e.metrics, e.methodology,
                e.paper_id, e.harness, e.is_open, e.hf_model_url, e.num_parameters,
-               e.external_source_url, e.best_rank,
+               e.source_url, e.best_rank,
                p.arxiv_id, p.title, p.source
         FROM evaluations e
         JOIN papers p ON p.id = e.paper_id
@@ -295,7 +295,7 @@ For each row, trace: **stored value → cited source → table row/cell**.
 
 Priority order for sources:
 
-1. **`external_source_url`** on the evaluation row, if set
+1. **`source_url`** on the evaluation row, if set
 2. arXiv paper via **`hf-cli`**
 3. GitHub README (`gh api repos/<owner>/<repo>/readme …`)
 4. HF model card (`uv run hf models card <repo_id> --text`)

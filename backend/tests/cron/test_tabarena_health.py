@@ -40,7 +40,7 @@ def test_tabarena_freshness_query_limits_counts_to_owned_rows():
     assert "t.slug = 'tabular-learning'" in query
     assert "d.slug = 'tabarena-v0-1'" in query
     assert "e.best_metric = 'Elo'" in query
-    assert "e.external_source_url =" in query
+    assert "e.source_url =" in query
     assert "https://huggingface.co/spaces/TabArena/leaderboard" in query
     assert "Managed by the Papers with Code TabArena live sync.%" in query
     assert "e.updated_at IS NULL" in query
