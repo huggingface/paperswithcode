@@ -28,16 +28,20 @@ puts them at the front of its queue.
 
 from __future__ import annotations
 
+import asyncio
 import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 import httpx
+from PIL import Image
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.config import get_settings
 from backend.models.database import (
     Author,
     Dataset,
@@ -59,7 +63,10 @@ from backend.models.database import (
 from backend.models.database import Method as DBMethod
 from backend.services.method_service import MethodService
 from backend.services.paper_service import PaperService
+from backend.services.paper_markdown_service import stream_external_paper_pdf
 from backend.services.paper_pdf_text_service import _download_arxiv_pdf
+from backend.services.thumbnail_service import fetch_page_artwork
+from backend.utils.exceptions import ThumbnailGenerationError
 from backend.services.x_insight_cards import (
     Bar,
     render_bar_card,
@@ -97,7 +104,7 @@ KINDS = (
     "top_papers_week",
     "top_papers_month",
 )
-ROUNDUP_PAGE_CARDS = 4
+ROUNDUP_PAGE_CARDS = 5
 PAPER_POST_KINDS = ("new_sota", "open_sota", "open_release", "trending_paper")
 SOTA_LIMIT = 20
 SOTA_WINDOW = timedelta(days=7)
@@ -150,8 +157,41 @@ LEAGUE_ACTIVE_DAYS = 90
 LEAGUE_SIZE = 8
 
 
+PageSource = bytes | Image.Image
+CARD_ERRORS = (httpx.HTTPError, ValueError, RuntimeError, ThumbnailGenerationError)
+
+
 def _arxiv_pdf(paper: Paper) -> bytes:
     return _download_arxiv_pdf(paper.arxiv_id, paper.version)
+
+
+def paper_page_source(paper: Paper) -> PageSource:
+    if paper.source == "arxiv" and paper.arxiv_id:
+        return _arxiv_pdf(paper)
+    settings = get_settings()
+    try:
+        chunks, _size = stream_external_paper_pdf(
+            str(paper.id),
+            bucket_id=settings.paper_markdown_hf_bucket_id,
+            token=settings.hf_token,
+        )
+        return b"".join(chunks)
+    except ValueError:
+        pass
+    artwork = (
+        asyncio.run(fetch_page_artwork(paper.source_url)) if paper.source_url else None
+    )
+    if artwork is None:
+        raise ValueError(f"Paper {paper.id} has no PDF or page artwork")
+    return artwork
+
+
+def page_card_source_line(paper: Paper, page: PageSource) -> str:
+    if paper.source == "arxiv" and paper.arxiv_id:
+        return f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF"
+    host = urlsplit(paper.source_url or "").netloc.removeprefix("www.")
+    detail = "page 1 of the PDF" if isinstance(page, bytes) else "release post"
+    return f"{host}  ·  {detail}" if host else detail
 
 
 @dataclass
@@ -818,11 +858,9 @@ def paper_page_card(
     db: Session,
     paper: Paper,
     *,
-    fetch_pdf: Callable[[Paper], bytes] = _arxiv_pdf,
+    fetch_pdf: Callable[[Paper], PageSource] = paper_page_source,
 ) -> bytes | None:
-    """The 2:3 page-one card for a single-paper post, or None without an arXiv PDF."""
-    if paper.source != "arxiv" or not paper.arxiv_id:
-        return None
+    """The 2:3 page-one card for a single-paper post, or None without a page."""
     authors = list(
         db.scalars(
             select(Author.name)
@@ -833,18 +871,20 @@ def paper_page_card(
     )
     lead = paper_lead([o.name for o in paper.organizations], authors)
     try:
+        page = fetch_pdf(paper)
         return render_paper_page_card(
-            fetch_pdf(paper),
+            page,
             title=f"New from {lead}" if lead else "New paper",
             subtitle=f"Published {paper.date_published:%b %-d, %Y}"
             if paper.date_published
             else "",
             eyebrow="New paper",
             counter="",
-            source=f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF",
+            source=page_card_source_line(paper, page),
             summary=paper.tldr or paper.abstract or "",
+            paper_title=paper.title,
         )
-    except (httpx.HTTPError, ValueError, RuntimeError):
+    except CARD_ERRORS:
         return None
 
 
@@ -1025,27 +1065,27 @@ def roundup_page_cards(
     heading: str,
     span: str,
     eyebrow: str,
-    fetch_pdf: Callable[[Paper], bytes] = _arxiv_pdf,
+    fetch_pdf: Callable[[Paper], PageSource] = paper_page_source,
 ) -> list[bytes]:
-    """Page-one cards for the roundup's arXiv papers, numbered as in the post.
+    """Page-one cards for the roundup's papers, numbered as in the post.
 
-    A paper whose PDF cannot be fetched or read is left out."""
+    A release without a PDF shows its page's social image; a paper with
+    neither is left out."""
     cards = []
     for rank, paper in enumerate(papers, 1):
-        if paper.source != "arxiv" or not paper.arxiv_id:
-            continue
         try:
-            pdf = fetch_pdf(paper)
+            page = fetch_pdf(paper)
             card = render_paper_page_card(
-                pdf,
+                page,
                 title=heading,
                 subtitle=span,
                 eyebrow=eyebrow,
                 counter=f"{rank:02d} / {len(papers):02d}",
-                source=f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF",
+                source=page_card_source_line(paper, page),
                 summary=paper.tldr or paper.abstract or "",
+                paper_title=paper.title,
             )
-        except (httpx.HTTPError, ValueError, RuntimeError):
+        except CARD_ERRORS:
             continue
         cards.append(card)
         if len(cards) == ROUNDUP_PAGE_CARDS:
@@ -1057,7 +1097,7 @@ def _roundup(
     db: Session,
     period: str,
     now: datetime,
-    fetch_pdf: Callable[[Paper], bytes] = _arxiv_pdf,
+    fetch_pdf: Callable[[Paper], PageSource] = paper_page_source,
 ) -> Candidate | None:
     insight = top_papers(db, period=period, now=now)
     if insight is None:
