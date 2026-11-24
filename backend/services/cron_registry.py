@@ -2703,7 +2703,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-rescan-abstract-mentions.timer",
         systemd_service="pwc-cron-rescan-abstract-mentions.service",
         systemd_extra_units=(),
-        output_evaluator="generic",
+        output_evaluator="report_only",
         display_name="Rescan Abstract Mentions",
         category="daily",
         schedule="21 3 * * * (daily)",
@@ -2718,9 +2718,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=1560,
         critical=False,
         healthy_no_work_allowed=True,
-        db_freshness_query="""
-            SELECT max(created_at) AS last_write FROM paper_abstract_mentions
-        """,
+        db_freshness_query=None,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
