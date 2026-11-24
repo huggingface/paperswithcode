@@ -242,7 +242,7 @@ Code: `backend/services/codex_curation_callback_service.py::CodexCurationCallbac
 
 ## Evaluation change detection treats None as omitted
 
-EvaluationService's legacy update fields have no explicit set sentinel: None means omitted, not clear. best_rank is recalculated after writes, and create_evaluation copies a paper-native source_url onto external_source_url. Change detection therefore ignores proposed None values for methodology, best_rank, evaluated_on, source_url and external_source_url so post-write verification accepts the derived catalog values.
+EvaluationService's legacy update fields have no explicit set sentinel: None means omitted, not clear. best_rank is recalculated after writes, and external_source_url is an API alias of source_url (#1106). Change detection therefore ignores proposed None values for methodology, best_rank, evaluated_on, source_url and external_source_url so post-write verification accepts the derived catalog values.
 
 Code: `backend/services/codex_curation_callback_service.py::CodexCurationCallbackService._evaluation_changes`
 

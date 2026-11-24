@@ -15,7 +15,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
-from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func, text
 
 from backend.models.database.base import Base
@@ -140,9 +140,6 @@ class Evaluation(Base):
     best_rank: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     best_metric: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     evaluated_on: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    legacy_external_source_url: Mapped[Optional[str]] = mapped_column(
-        "external_source_url", String(500), nullable=True
-    )
     source_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     external: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false"), default=False
@@ -170,14 +167,9 @@ class Evaluation(Base):
         Index("idx_evaluations_source_url", "source_url"),
     )
 
-    @validates("source_url")
-    def _mirror_source_url(self, _key: str, value: Optional[str]) -> Optional[str]:
-        self.legacy_external_source_url = value
-        return value
-
     @property
     def external_source_url(self) -> Optional[str]:
-        return self.source_url or self.legacy_external_source_url
+        return self.source_url
 
     def __repr__(self) -> str:
         return f"<Evaluation(id={self.id}, paper_id={self.paper_id}, task_id={self.task_id}, dataset_id={self.dataset_id})>"

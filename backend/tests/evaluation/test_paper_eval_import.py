@@ -87,7 +87,6 @@ def test_upsert_evaluation_updates_once_and_recalculates_each_metric():
 
     assert (status, evaluation_id) == ("updated", 9)
     assert row.source_url == "https://arxiv.org/abs/2401.00001"
-    assert row.legacy_external_source_url == row.source_url
     assert row.metrics == {"PSNR": "30", "SSIM": "0.9"}
     db.commit.assert_called_once_with()
     assert service.recalculate_ranks.call_count == 2

@@ -215,19 +215,16 @@ def test_repoint_evaluation_sources_keeps_own_scores_first_party():
     own = SimpleNamespace(
         paper_id=20,
         source_url="https://paperswithcode.co/paper/109743",
-        legacy_external_source_url=None,
         external=True,
     )
     citing = SimpleNamespace(
         paper_id=30,
         source_url="paper:109743",
-        legacy_external_source_url=None,
         external=False,
     )
     unrelated = SimpleNamespace(
         paper_id=20,
         source_url="https://paperswithcode.co/paper/1097430",
-        legacy_external_source_url=None,
         external=True,
     )
     db = Mock()

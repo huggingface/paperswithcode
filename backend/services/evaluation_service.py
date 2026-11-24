@@ -405,9 +405,7 @@ class EvaluationService:
         paper_ids = {row.paper_id for row in db_evaluations}
         source_paper_ids = set()
         for row in db_evaluations:
-            paper_ref = _PAPER_REF.match(
-                (row.source_url or row.legacy_external_source_url or "").strip()
-            )
+            paper_ref = _PAPER_REF.match((row.source_url or "").strip())
             if paper_ref:
                 source_paper_ids.add(int(paper_ref.group(1)))
 
@@ -475,9 +473,7 @@ class EvaluationService:
         related_keys: set[str],
     ) -> Evaluation:
         paper_arxiv_id = paper.arxiv_id if paper else None
-        stored_source_url = (
-            db_evaluation.source_url or db_evaluation.legacy_external_source_url
-        )
+        stored_source_url = db_evaluation.source_url
         public_source_url = evaluation_public_source_url(stored_source_url, self.db)
         result_url = evaluation_result_url(
             stored_source_url,
