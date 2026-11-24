@@ -149,6 +149,24 @@ def test_pdf_upload_stores_both_copies_and_estimates_tokens(db, settings):
     assert owner_storage_bytes(db, OWNER.hf_user_id) == len(data)
 
 
+@pytest.mark.parametrize(
+    ("media_type", "size_bytes", "pages", "measured_p95", "detail"),
+    [
+        ("application/pdf", 50_000, 10, 10 * 3_612, "high"),
+        ("application/pdf", 50_000, 20, 20 * 3_612, "high"),
+        ("application/pdf", 50_000, 30, 30 * 1_368, "low"),
+        ("image/png", 5_800_000, None, 19_767, None),
+    ],
+)
+def test_token_estimates_cover_measured_production_p95(
+    media_type, size_bytes, pages, measured_p95, detail
+):
+    estimate, pdf_detail = estimate_tokens(media_type, size_bytes, pages)
+
+    assert pdf_detail == detail
+    assert measured_p95 <= estimate <= measured_p95 * 1.1
+
+
 def test_upload_refuses_non_luna_sessions(db, settings):
     session_id = _session(db, model="deepseek-ai/DeepSeek-V4.1-Flash-1017")
     service, _, _ = _service(db, settings)
