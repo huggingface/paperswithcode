@@ -84,8 +84,14 @@ it merges the staging commit into production, pushes the merge as
 `staging-sync/main-<production sha12>-<staging sha12>`, and deploys it to
 staging. If staging holds nothing beyond production, staging gets the
 production commit itself. A merge conflict or failed staging deploy leaves
-staging as it was and is reported without failing the production deploy;
-resolve the conflict by hand on a branch from production, then deploy staging.
+staging as it was and is reported without failing the production deploy.
+`pwc-deploy production` warns about a conflict before it starts. Resolve it by
+merging the live staging commit into the production commit on a branch, then
+push it as `staging-sync/main-<production sha12>-<staging sha12>`. The sync
+deploys a pushed `staging-sync/` commit that contains both live commits and
+adds only merge commits, so a resolution prepared during the deploy is picked
+up on its own; rerun `sudo pwc-sync-staging` if production is already live.
+The comment ratchet accepts such a merge as long as it adds no comments.
 Pass `--no-staging-sync` to skip it, and run `sudo pwc-sync-staging
 [--dry-run]` to sync later; a retry rebuilds the same merge commit.
 
