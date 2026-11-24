@@ -1,6 +1,8 @@
 from backend.utils.keyword_matching import (
     apply_task_supersession_rules,
     create_keyword_patterns,
+    create_keyword_patterns_with_metadata,
+    find_matching_items_longest_match,
     find_matching_items_simple,
 )
 
@@ -283,3 +285,42 @@ def test_prefilter_folding_covers_every_ignorecase_variant_of_ascii_letters() ->
         folded = fold_for_keyword_prefilter(char)
         assert folded in string.ascii_lowercase, hex(codepoint)
         assert re.fullmatch(folded, char, re.IGNORECASE), hex(codepoint)
+
+
+METHODS = [
+    {"id": 10, "name": "GPT", "keywords": "GPT"},
+    {"id": 11, "name": "GPT-4", "keywords": "GPT-4"},
+    {"id": 12, "name": "Transformer", "keywords": "transformer"},
+    {"id": 13, "name": "VLM", "keywords": "VLM"},
+    {"id": 14, "name": "Vision Transformer", "keywords": "vision transformer"},
+]
+
+
+def _longest_match(text: str) -> set[int]:
+    sensitive, insensitive = create_keyword_patterns_with_metadata(METHODS)
+    return find_matching_items_longest_match(text, sensitive, insensitive)
+
+
+def test_longest_match_prefers_the_longer_overlapping_keyword() -> None:
+    assert _longest_match("We compare GPT-4 baselines.") == {11}
+    assert _longest_match("A Vision Transformer for detection") == {14}
+    assert _longest_match("GPT and GPT-4 are compared") == {10, 11}
+
+
+def test_longest_match_keeps_plural_and_word_boundary_rules() -> None:
+    assert _longest_match("Stacked Transformers and LVLMs") == {12, 13}
+    assert _longest_match("The data is transformed twice") == set()
+    assert _longest_match("a gpt-4 lowercase mention") == set()
+
+
+def test_longest_match_handles_catalogs_larger_than_the_re_cache() -> None:
+    methods = [
+        {"id": index, "name": f"Method {index}", "keywords": f"method{index}"}
+        for index in range(1, 1201)
+    ]
+    sensitive, insensitive = create_keyword_patterns_with_metadata(methods)
+
+    for _ in range(2):
+        assert find_matching_items_longest_match(
+            "We extend method7 and Method1200s.", sensitive, insensitive
+        ) == {7, 1200}
