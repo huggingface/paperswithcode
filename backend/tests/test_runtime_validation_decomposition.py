@@ -832,17 +832,27 @@ def test_environment_policy_isolated_from_storage(settings_factory):
     )
 
 
-def test_chat_provider_policy_accepts_isolated_production_direct_luna(
+def test_chat_provider_policy_accepts_isolated_production_openrouter(
     settings_factory,
 ):
     settings, _release = settings_factory("production")
-    settings.chat_openai_direct_enabled = True
-    settings.openai_api_key = "test-only"
     settings.chat_gateway_url = (
         "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
     )
 
     runtime_validation.validate_chat_provider_policy(settings)
+
+
+def test_production_chat_without_direct_openai_discovers_deepseek(settings_factory):
+    settings, _release = settings_factory("production")
+    settings.chat_gateway_url = (
+        "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
+    )
+
+    runtime_validation.validate_chat_provider_policy(settings)
+    assert [choice["id"] for choice in settings.chat_model_choices] == [
+        "deepseek-ai/DeepSeek-V4-Flash-0731"
+    ]
 
 
 def test_chat_provider_policy_accepts_one_reviewed_staging_candidate(
@@ -872,8 +882,6 @@ def test_web_search_monthly_budget_is_bounded(
     settings_factory, warning_calls, hard_calls, valid
 ):
     settings, _release = settings_factory("production")
-    settings.chat_openai_direct_enabled = True
-    settings.openai_api_key = "test-only"
     settings.chat_gateway_url = (
         "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
     )
@@ -961,13 +969,8 @@ def test_provider_failover_requires_direct_openai_and_the_sponsored_route(
 
     production.chat_title_bill_to = "huggingface"
     production.chat_openai_direct_enabled = False
-    with pytest.raises(RuntimeError, match="requires direct OpenAI Luna"):
-        runtime_validation.validate_chat_provider_policy(production)
-
-    staging, _release = settings_factory("staging")
-    staging.chat_provider_failover_enabled = True
     with pytest.raises(RuntimeError, match="protects direct OpenAI turns"):
-        runtime_validation.validate_chat_provider_policy(staging)
+        runtime_validation.validate_chat_provider_policy(production)
 
 
 def test_direct_openai_requires_exact_low_reasoning_warm_profile(settings_factory):
@@ -1075,24 +1078,12 @@ def test_chat_provider_policy_rejects_alternative_model_in_production(
     settings_factory,
 ):
     settings, _release = settings_factory("production")
-    settings.chat_openai_direct_enabled = True
-    settings.openai_api_key = "test-only"
     settings.chat_gateway_url = (
         "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
     )
     settings.chat_alternative_model_enabled = True
 
     with pytest.raises(RuntimeError, match="staging-only"):
-        runtime_validation.validate_chat_provider_policy(settings)
-
-
-def test_production_chat_requires_direct_openai_luna(settings_factory):
-    settings, _release = settings_factory("production")
-    settings.chat_gateway_url = (
-        "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
-    )
-
-    with pytest.raises(RuntimeError, match="requires direct OpenAI Luna"):
         runtime_validation.validate_chat_provider_policy(settings)
 
 

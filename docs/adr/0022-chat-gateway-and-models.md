@@ -70,9 +70,9 @@ After a live chat stream ends, the registry keeps it for 30 seconds before remov
 
 Code: `backend/services/chat_live_stream_service.py::LiveChatStreamRegistry._expire`
 
-## GLM-5.3-Flash is retired; production requires direct Luna
+## GLM-5.3-Flash is retired from discovery
 
-Production chat must run direct OpenAI Luna, and production discovery exposes only Luna plus the optional sponsored DeepSeek. GLM-5.3-Flash is no longer a discovery record in any environment. Sessions that selected it resolve to the environment's default model through `DEFAULT_FALLBACK_MODEL_IDS`, and its route stays in the retired-route tables so persisted capabilities still resolve (issue #1115).
+Production with direct OpenAI Luna exposes only Luna plus the optional sponsored DeepSeek; without direct Luna, production discovers DeepSeek V4 Flash like the other environments. GLM-5.3-Flash is no longer a discovery record in any environment. Sessions that selected it resolve to the environment's default model through `DEFAULT_FALLBACK_MODEL_IDS`, and its route stays in the retired-route tables so persisted capabilities still resolve (issue #1115).
 
 Code: `backend/services/runtime_policies/chat_provider.py::validate_chat_provider_policy`
 

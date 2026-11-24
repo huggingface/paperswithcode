@@ -78,8 +78,6 @@ def validate_chat_provider_policy(
     if settings.chat_deepseek_v4_flash_openrouter_route != expected_openrouter_route:
         raise RuntimeError("DeepSeek V4 Flash must use the reviewed OpenRouter route")
     expected_provider = settings.chat_deepseek_v4_flash_provider
-    if settings.environment == "production" and not settings.chat_openai_direct_enabled:
-        raise RuntimeError("production chat requires direct OpenAI Luna")
     expected_discovery = (
         {
             "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
