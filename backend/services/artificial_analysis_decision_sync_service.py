@@ -241,7 +241,7 @@ class DecisionIndexSyncService:
                 .all()
             )
             managed = {
-                row.external_source_url: row
+                row.source_url: row
                 for row in rows
                 if (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
             }
@@ -330,7 +330,6 @@ class DecisionIndexSyncService:
                 row.is_open = is_open
                 row.best_metric = METRIC_NAME
                 row.evaluated_on = now.date()
-                row.external_source_url = source_url
                 row.source_url = source_url
                 row.external = True
                 row.updated_at = now

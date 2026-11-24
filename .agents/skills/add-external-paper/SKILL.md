@@ -344,7 +344,7 @@ Use this when the external row is being created because evaluations were already
 2. Confirm the new external row is the canonical source for those rows.
 3. Move only the matching evaluations to the new `paper_id`.
 4. Preserve `task_id`, `dataset_id`, `metrics`, `best_metric`, `harness`, ranks, and methodology.
-5. Set `external_source_url` to the canonical external source when the old rows have no row-level source or still point at the wrong source.
+5. Set the evaluation `source_url` to the canonical external source when the old rows have no row-level source or still point at the wrong source.
 
 ```bash
 uv run --env-file backend/keys.env python - <<'PY'
@@ -358,7 +358,7 @@ canonical_source_url = "<external source URL>"
 
 with get_engine().begin() as conn:
     rows = conn.execute(text("""
-        SELECT id, model_name, dataset_id, best_metric, external_source_url
+        SELECT id, model_name, dataset_id, best_metric, source_url
         FROM evaluations
         WHERE paper_id = :old_paper_id
           AND model_name ILIKE :model_pattern
@@ -369,7 +369,7 @@ with get_engine().begin() as conn:
     conn.execute(text("""
         UPDATE evaluations
         SET paper_id = :new_paper_id,
-            external_source_url = :canonical_source_url
+            source_url = :canonical_source_url
         WHERE paper_id = :old_paper_id
           AND model_name ILIKE :model_pattern
     """), {

@@ -1036,7 +1036,6 @@ class ParseBenchSyncService:
                 row.is_open = is_open
                 row.best_metric = board.primary_metric
                 row.evaluated_on = now.date()
-                row.external_source_url = board.source_url
                 row.source_url = board.source_url
                 row.external = True
                 row.hf_model_url = hf_model_url

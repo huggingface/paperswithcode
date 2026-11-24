@@ -35,7 +35,7 @@ def main() -> None:
 
         for evaluation, paper in rows:
             checked += 1
-            source_url = evaluation.source_url or evaluation.external_source_url
+            source_url = evaluation.source_url
             derived = evaluation_is_external(
                 source_url,
                 paper.arxiv_id,

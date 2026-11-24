@@ -294,7 +294,7 @@ def test_sync_adopts_legacy_preserves_stronger_manual_and_deletes_only_managed()
                 methodology=f"{LEGACY_METHODOLOGY_PREFIX}: old",
                 metrics={"Accuracy": 80},
                 best_metric="Accuracy",
-                external_source_url=ARC_PRIZE_SOURCE_URL,
+                source_url=ARC_PRIZE_SOURCE_URL,
                 external=True,
             ),
             Evaluation(
@@ -305,7 +305,7 @@ def test_sync_adopts_legacy_preserves_stronger_manual_and_deletes_only_managed()
                 methodology="Human curated stronger result",
                 metrics={"Accuracy": 55},
                 best_metric="Accuracy",
-                external_source_url=ARC_PRIZE_SOURCE_URL,
+                source_url=ARC_PRIZE_SOURCE_URL,
                 external=True,
             ),
             Evaluation(
@@ -319,7 +319,7 @@ def test_sync_adopts_legacy_preserves_stronger_manual_and_deletes_only_managed()
                 ),
                 metrics={"Accuracy": 20},
                 best_metric="Accuracy",
-                external_source_url=ARC_PRIZE_SOURCE_URL,
+                source_url=ARC_PRIZE_SOURCE_URL,
                 external=True,
             ),
         ]

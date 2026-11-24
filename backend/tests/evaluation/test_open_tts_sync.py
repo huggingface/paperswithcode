@@ -375,7 +375,7 @@ def test_sync_is_idempotent_and_only_replaces_managed_rows(monkeypatch):
                 model_name="org/stale",
                 metrics={"WER": 9.0, "RTFx": 1.0},
                 best_metric="WER",
-                external_source_url=SPACE_SOURCE_URL,
+                source_url=SPACE_SOURCE_URL,
                 methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
             ),
             Evaluation(
@@ -386,7 +386,7 @@ def test_sync_is_idempotent_and_only_replaces_managed_rows(monkeypatch):
                 hf_model_url="https://huggingface.co/org/unreviewed",
                 metrics={"WER": 4.0, "RTFx": 4.0},
                 best_metric="WER",
-                external_source_url=SPACE_SOURCE_URL,
+                source_url=SPACE_SOURCE_URL,
                 methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
             ),
             Evaluation(

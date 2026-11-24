@@ -357,7 +357,6 @@ def import_rows(
                 methodology=methodology,
                 metrics={METRIC: _format_score(entry.average_score)},
                 best_metric=METRIC,
-                external_source_url=POSTTRAINBENCH_SOURCE_URL,
                 source_url=POSTTRAINBENCH_SOURCE_URL,
                 external=True,
                 is_open=spec["is_open"],

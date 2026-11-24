@@ -593,7 +593,6 @@ class ExtractBenchSyncService:
                 row.is_open = is_open
                 row.best_metric = PRIMARY_METRIC_NAME
                 row.evaluated_on = now.date()
-                row.external_source_url = EXTRACTBENCH_SOURCE_URL
                 row.source_url = EXTRACTBENCH_SOURCE_URL
                 row.external = True
                 row.hf_model_url = hf_model_url

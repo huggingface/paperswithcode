@@ -344,7 +344,7 @@ def test_sync_replaces_legacy_and_only_deletes_stale_managed_rows(monkeypatch):
                 ),
                 metrics={"WER": 9.0},
                 best_metric="WER",
-                external_source_url=LEGACY_SOURCE_URL,
+                source_url=LEGACY_SOURCE_URL,
             ),
             Evaluation(
                 paper_id=1,
@@ -354,7 +354,7 @@ def test_sync_replaces_legacy_and_only_deletes_stale_managed_rows(monkeypatch):
                 methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
                 metrics={"WER": 10.0},
                 best_metric="WER",
-                external_source_url=SPACE_SOURCE_URL,
+                source_url=SPACE_SOURCE_URL,
             ),
             Evaluation(
                 paper_id=1,
@@ -547,7 +547,7 @@ def test_sync_renames_old_rows_and_supersedes_stale_curated_scores(monkeypatch):
         methodology=f"{MANAGED_METHODOLOGY_PREFIX} Upstream rank 3; old.",
         metrics={"WER": 9.0},
         best_metric="WER",
-        external_source_url=SPACE_SOURCE_URL,
+        source_url=SPACE_SOURCE_URL,
     )
     stale_paper_score = Evaluation(
         paper_id=2,
@@ -624,7 +624,7 @@ def test_sync_drops_models_without_a_paper_and_runtime_duplicates():
                 model_name=model_id,
                 metrics={"WER": 9.0},
                 best_metric="WER",
-                external_source_url=SPACE_SOURCE_URL,
+                source_url=SPACE_SOURCE_URL,
                 methodology=(
                     f"{MANAGED_METHODOLOGY_PREFIX} Upstream model {model_id}; "
                     "rank 1; default Average WER; fetched x."
@@ -669,7 +669,7 @@ def test_new_best_runtime_variant_takes_over_the_existing_row():
             model_name="echo",
             metrics={"WER": 6.0},
             best_metric="WER",
-            external_source_url=SPACE_SOURCE_URL,
+            source_url=SPACE_SOURCE_URL,
             methodology=(
                 f"{MANAGED_METHODOLOGY_PREFIX} Upstream model vendor/echo; "
                 "rank 1; default Average WER; fetched x."

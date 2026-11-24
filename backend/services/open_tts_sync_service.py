@@ -455,7 +455,7 @@ class OpenTtsSyncService:
         managed_rows = [
             row
             for row in candidate_rows
-            if row.external_source_url == SPACE_SOURCE_URL
+            if row.source_url == SPACE_SOURCE_URL
             and (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
         ]
         model_url_prefix = "https://huggingface.co/"
@@ -515,7 +515,6 @@ class OpenTtsSyncService:
             row.is_open = entry.is_open
             row.best_metric = WER_METRIC
             row.evaluated_on = now.date()
-            row.external_source_url = SPACE_SOURCE_URL
             row.source_url = SPACE_SOURCE_URL
             row.external = True
             row.updated_at = now

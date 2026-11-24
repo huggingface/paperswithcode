@@ -217,7 +217,6 @@ def test_sync_upserts_known_rows_and_preserves_unmatched_models():
             metrics={"Pass@1": 60},
             best_metric="Pass@1",
             harness=HARNESS_NAME,
-            external_source_url=DEEPSWE_SOURCE_URL,
             source_url=DEEPSWE_SOURCE_URL,
             external=True,
         )
@@ -351,7 +350,7 @@ def test_sync_deletes_only_disappeared_managed_rows():
                 metrics={"Pass@1": 20},
                 best_metric="Pass@1",
                 harness=HARNESS_NAME,
-                external_source_url=DEEPSWE_SOURCE_URL,
+                source_url=DEEPSWE_SOURCE_URL,
             ),
             Evaluation(
                 paper_id=1,
@@ -362,7 +361,7 @@ def test_sync_deletes_only_disappeared_managed_rows():
                 metrics={"Pass@1": 10},
                 best_metric="Pass@1",
                 harness=HARNESS_NAME,
-                external_source_url=DEEPSWE_SOURCE_URL,
+                source_url=DEEPSWE_SOURCE_URL,
             ),
         ]
     )

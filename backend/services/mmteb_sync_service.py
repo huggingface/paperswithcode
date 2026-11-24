@@ -517,7 +517,6 @@ class MmtebSyncService:
                     match.hf_model_url if match is not None else None
                 )
                 row.evaluated_on = now.date()
-                row.external_source_url = MMTEB_API_URL
                 row.source_url = MMTEB_API_URL
                 row.external = True
                 row.updated_at = now

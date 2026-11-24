@@ -532,7 +532,7 @@ class FrontierCodeSyncService:
                     Evaluation.dataset_id.in_(
                         [dataset.id for dataset in datasets.values()]
                     ),
-                    Evaluation.external_source_url == FRONTIERCODE_SOURCE_URL,
+                    Evaluation.source_url == FRONTIERCODE_SOURCE_URL,
                     Evaluation.methodology.like(f"{MANAGED_METHODOLOGY_PREFIX}%"),
                 )
                 .all()
@@ -615,7 +615,6 @@ class FrontierCodeSyncService:
                     row.hf_model_url = hf_model_url
                 row.best_metric = "Score"
                 row.evaluated_on = datetime.now(UTC).date()
-                row.external_source_url = FRONTIERCODE_SOURCE_URL
                 row.source_url = FRONTIERCODE_SOURCE_URL
                 row.external = True
                 row.updated_at = datetime.now(UTC)

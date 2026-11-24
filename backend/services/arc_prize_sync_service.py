@@ -736,7 +736,6 @@ class ArcPrizeSyncService:
                 managed.is_open = identity.is_open
                 managed.best_metric = metric.name
                 managed.evaluated_on = generated_at.date()
-                managed.external_source_url = ARC_PRIZE_SOURCE_URL
                 managed.source_url = result_url
                 managed.external = True
                 managed.hf_model_url = identity.hf_model_url

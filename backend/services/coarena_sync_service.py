@@ -340,7 +340,7 @@ class CoArenaSyncService:
                     Evaluation.task_id == task.id,
                     Evaluation.dataset_id == dataset.id,
                     Evaluation.best_metric == METRIC_NAME,
-                    Evaluation.external_source_url == COARENA_SOURCE_URL,
+                    Evaluation.source_url == COARENA_SOURCE_URL,
                     Evaluation.methodology.like(f"{MANAGED_METHODOLOGY_PREFIX}%"),
                 )
                 .all()
@@ -414,7 +414,6 @@ class CoArenaSyncService:
                     row.hf_model_url = hf_model_url
                 row.best_metric = METRIC_NAME
                 row.evaluated_on = now.date()
-                row.external_source_url = COARENA_SOURCE_URL
                 row.source_url = COARENA_SOURCE_URL
                 row.external = True
                 row.updated_at = now

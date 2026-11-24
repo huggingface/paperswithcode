@@ -2,6 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from backend.models.database import Evaluation
 from backend.database.evaluations_setup.paper_eval_import import (
     resolve_scope,
     upsert_evaluation,
@@ -62,12 +63,13 @@ def test_upsert_evaluation_updates_once_and_recalculates_each_metric():
         "methodology": "old",
         "is_open": True,
         "source_url": "https://old.example",
-        "external_source_url": "https://old.example",
         "num_parameters": None,
         "hf_model_url": None,
     }
     db = Mock()
-    db.execute.side_effect = [_mapping_result(existing), Mock()]
+    db.execute.return_value = _mapping_result(existing)
+    row = Evaluation(id=9, source_url="https://old.example")
+    db.get.return_value = row
     service = Mock()
 
     status, evaluation_id = upsert_evaluation(
@@ -84,5 +86,8 @@ def test_upsert_evaluation_updates_once_and_recalculates_each_metric():
     )
 
     assert (status, evaluation_id) == ("updated", 9)
+    assert row.source_url == "https://arxiv.org/abs/2401.00001"
+    assert row.legacy_external_source_url == row.source_url
+    assert row.metrics == {"PSNR": "30", "SSIM": "0.9"}
     db.commit.assert_called_once_with()
     assert service.recalculate_ranks.call_count == 2

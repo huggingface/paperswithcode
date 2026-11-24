@@ -303,7 +303,6 @@ class ThreeDArenaSyncService:
                     row.hf_model_url = hf_model_url
                 row.best_metric = METRIC_NAME
                 row.evaluated_on = now.date()
-                row.external_source_url = ARENA_SOURCE_URL
                 row.source_url = ARENA_SOURCE_URL
                 row.external = True
                 row.updated_at = now
@@ -345,8 +344,8 @@ def _preferred_managed_row(
 ) -> tuple[Evaluation, Evaluation]:
     """Keep the canonical Space URL row when two managed copies exist."""
     if (
-        existing.external_source_url != ARENA_SOURCE_URL
-        and candidate.external_source_url == ARENA_SOURCE_URL
+        existing.source_url != ARENA_SOURCE_URL
+        and candidate.source_url == ARENA_SOURCE_URL
     ):
         return candidate, existing
     return existing, candidate

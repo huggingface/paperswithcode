@@ -305,7 +305,7 @@ def test_sync_keeps_only_arxiv_resolved_models_and_is_idempotent():
                 methodology=f"{LEGACY_METHODOLOGY_PREFIX} old snapshot",
                 metrics={overall.metric_name: 75.0},
                 best_metric=overall.metric_name,
-                external_source_url=MMTEB_API_URL,
+                source_url=MMTEB_API_URL,
             ),
             Evaluation(
                 paper_id=1,

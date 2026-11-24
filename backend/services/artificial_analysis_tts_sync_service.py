@@ -237,13 +237,13 @@ class ArtificialAnalysisTtsSyncService:
                 .all()
             )
             rows_by_slug = {
-                row.external_source_url.removeprefix(SOURCE_URL_PREFIX): row
+                row.source_url.removeprefix(SOURCE_URL_PREFIX): row
                 for row in rows
-                if (row.external_source_url or "").startswith(SOURCE_URL_PREFIX)
+                if (row.source_url or "").startswith(SOURCE_URL_PREFIX)
                 and (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
             }
             for row in rows:
-                slug = (row.external_source_url or "").removeprefix(SOURCE_URL_PREFIX)
+                slug = (row.source_url or "").removeprefix(SOURCE_URL_PREFIX)
                 if slug in RETIRED_MODEL_SLUGS and (row.methodology or "").startswith(
                     MANAGED_METHODOLOGY_PREFIX
                 ):
@@ -289,7 +289,6 @@ class ArtificialAnalysisTtsSyncService:
                 row.is_open = entry.is_open
                 row.best_metric = METRIC_NAME
                 row.evaluated_on = now.date()
-                row.external_source_url = source_url
                 row.source_url = source_url
                 row.external = True
                 row.updated_at = now

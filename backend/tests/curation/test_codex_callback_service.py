@@ -496,7 +496,6 @@ def test_evaluation_diff_ignores_omitted_external_source_copied_from_source_url(
         methodology=None,
         metrics={"GenEval Score": 0.9},
         source_url="https://arxiv.org/abs/2601.00001",
-        external_source_url="https://arxiv.org/abs/2601.00001",
     )
     proposal = _evaluation(model_name="Existing Model")
 

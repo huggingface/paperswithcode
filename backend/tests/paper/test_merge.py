@@ -215,19 +215,19 @@ def test_repoint_evaluation_sources_keeps_own_scores_first_party():
     own = SimpleNamespace(
         paper_id=20,
         source_url="https://paperswithcode.co/paper/109743",
-        external_source_url="https://paperswithcode.co/paper/109743/",
+        legacy_external_source_url=None,
         external=True,
     )
     citing = SimpleNamespace(
         paper_id=30,
         source_url="paper:109743",
-        external_source_url=None,
+        legacy_external_source_url=None,
         external=False,
     )
     unrelated = SimpleNamespace(
         paper_id=20,
         source_url="https://paperswithcode.co/paper/1097430",
-        external_source_url=None,
+        legacy_external_source_url=None,
         external=True,
     )
     db = Mock()
@@ -237,7 +237,7 @@ def test_repoint_evaluation_sources_keeps_own_scores_first_party():
     assert _repoint_evaluation_sources(db, 109743, arxiv_paper) == 2
 
     new_url = "https://paperswithcode.co/paper/2608.30320"
-    assert own.source_url == own.external_source_url == new_url
+    assert own.source_url == new_url
     assert own.external is False
     assert citing.source_url == new_url
     assert citing.external is True

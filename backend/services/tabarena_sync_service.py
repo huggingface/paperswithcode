@@ -440,7 +440,7 @@ class TabArenaSyncService:
                     Evaluation.task_id == task.id,
                     Evaluation.dataset_id == dataset.id,
                     Evaluation.best_metric == METRIC_NAME,
-                    Evaluation.external_source_url == TABARENA_SOURCE_URL,
+                    Evaluation.source_url == TABARENA_SOURCE_URL,
                     Evaluation.methodology.like(f"{MANAGED_METHODOLOGY_PREFIX}%"),
                 )
                 .all()
@@ -509,7 +509,6 @@ class TabArenaSyncService:
                 row.is_open = "closed-source-api" not in entry.tags
                 row.best_metric = METRIC_NAME
                 row.evaluated_on = now.date()
-                row.external_source_url = TABARENA_SOURCE_URL
                 row.source_url = TABARENA_SOURCE_URL
                 row.external = True
                 row.hf_model_url = hf_model_url

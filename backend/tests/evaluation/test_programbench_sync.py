@@ -213,7 +213,7 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
                 methodology=(f"{MANAGED_METHODOLOGY_PREFIX} upstream_id=model-a; old"),
                 metrics={"Accuracy": 10},
                 best_metric="Accuracy",
-                external_source_url=f"{PROGRAMBENCH_URL}run/model-a/",
+                source_url=f"{PROGRAMBENCH_URL}run/model-a/",
             ),
             Evaluation(
                 paper_id=1,
@@ -223,7 +223,7 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
                 methodology=(f"{MANAGED_METHODOLOGY_PREFIX} upstream_id=gone; old"),
                 metrics={"Accuracy": 5},
                 best_metric="Accuracy",
-                external_source_url=f"{PROGRAMBENCH_URL}run/gone/",
+                source_url=f"{PROGRAMBENCH_URL}run/gone/",
             ),
             Evaluation(
                 paper_id=1,

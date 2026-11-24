@@ -218,7 +218,7 @@ def test_sync_binds_collapses_retires_and_reports(monkeypatch):
                 model_name="Withdrawn",
                 metrics={"Score": 1.0},
                 best_metric="Score",
-                external_source_url=f"{prefix}decision-models/withdrawn",
+                source_url=f"{prefix}decision-models/withdrawn",
                 methodology=decision.MANAGED_METHODOLOGY_PREFIX,
             ),
             Evaluation(

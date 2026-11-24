@@ -653,16 +653,16 @@ class ArtificialAnalysisSyncService:
             .all()
         )
         rows_by_slug = {
-            row.external_source_url.removeprefix(SOURCE_URL_PREFIX): row
+            row.source_url.removeprefix(SOURCE_URL_PREFIX): row
             for row in candidate_rows
-            if (row.external_source_url or "").startswith(SOURCE_URL_PREFIX)
+            if (row.source_url or "").startswith(SOURCE_URL_PREFIX)
         }
         entries_by_slug = {entry.slug: entry for entry in leaderboard.entries}
         papers = dict(discovery.papers)
         for row in candidate_rows:
             if not (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX):
                 continue
-            slug = (row.external_source_url or "").removeprefix(SOURCE_URL_PREFIX)
+            slug = (row.source_url or "").removeprefix(SOURCE_URL_PREFIX)
             entry = entries_by_slug.get(slug)
             if entry is None and slug in MODEL_SLUG_RENAMES:
                 renamed_slug = MODEL_SLUG_RENAMES[slug]
@@ -751,7 +751,6 @@ class ArtificialAnalysisSyncService:
             )
             row.best_metric = METRIC_NAME
             row.evaluated_on = now.date()
-            row.external_source_url = source_url
             row.source_url = source_url
             row.external = True
             row.updated_at = now

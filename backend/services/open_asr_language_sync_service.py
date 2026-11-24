@@ -203,7 +203,7 @@ class OpenAsrLanguageSyncService:
             .filter(
                 Evaluation.task_id == task.id,
                 Evaluation.dataset_id == dataset.id,
-                Evaluation.external_source_url == SPACE_SOURCE_URL,
+                Evaluation.source_url == SPACE_SOURCE_URL,
                 Evaluation.methodology.startswith(MANAGED_METHODOLOGY_PREFIX),
             )
             .all()
@@ -339,7 +339,7 @@ class OpenAsrLanguageSyncService:
             .filter(
                 Evaluation.task_id == task.id,
                 Evaluation.dataset_id == dataset.id,
-                Evaluation.external_source_url == SPACE_SOURCE_URL,
+                Evaluation.source_url == SPACE_SOURCE_URL,
                 Evaluation.methodology.startswith(MANAGED_METHODOLOGY_PREFIX),
             )
             .all()
@@ -397,7 +397,6 @@ class OpenAsrLanguageSyncService:
             row.is_open = is_open
             row.best_metric = WER_METRIC
             row.evaluated_on = now.date()
-            row.external_source_url = SPACE_SOURCE_URL
             row.source_url = SPACE_SOURCE_URL
             row.external = True
             row.updated_at = now

@@ -378,7 +378,6 @@ class LiveLeaderboardSyncService:
                         harness=entry.harness,
                         is_open=is_open,
                         hf_model_url=hf_model_url,
-                        external_source_url=source_url,
                         source_url=source_url,
                         external=True,
                         uses_additional_data=False,
@@ -390,7 +389,6 @@ class LiveLeaderboardSyncService:
                     notes, managed = "", False
                 elif not (row.methodology or "").startswith(board.managed_prefix):
                     notes, managed = (row.methodology or "").strip(), False
-                    row.external_source_url = source_url
                     row.source_url = source_url
                     row.harness = entry.harness
                     stats.adopted += 1
