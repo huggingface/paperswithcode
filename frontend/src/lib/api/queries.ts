@@ -10,7 +10,7 @@ import { operationsApi } from "@/lib/api/operations";
 import { paperEditsApi } from "@/lib/api/paperEdits";
 import { getPaperLayout, getPaperWebMarkdown, getPaperWebPage, papersApi } from "@/lib/api/papers";
 import { profilesApi } from "@/lib/api/profiles";
-import { researchApi } from "@/lib/api/research";
+import { researchApi, type FollowKind } from "@/lib/api/research";
 import { statsApi } from "@/lib/api/stats";
 import { readFeaturedTopics, readPopularFollows, writeFeaturedTopics, writePopularFollows } from "@/lib/featuredTopicsCache";
 
@@ -366,6 +366,10 @@ export const researchQueries = {
     queryKey: ["research-topics", subject],
     queryFn: researchApi.topics,
   }),
+  entityFollowers: (kind: FollowKind, id: string | number) => queryOptions({
+    queryKey: [...researchKeys.entityFollowers, kind, String(id)],
+    queryFn: () => researchApi.entityFollowers(kind, id),
+  }),
   publicTopic: (id: number, subject: string | undefined) => queryOptions({
     queryKey: ["research-public-topic", id, subject],
     queryFn: () => researchApi.publicTopic(id),
@@ -420,6 +424,8 @@ export const statsQueries = {
 export const researchKeys = {
   /** Prefix of every public topic entry. */
   publicTopics: ["research-public-topic"] as const,
+  /** Prefix of every task, method, benchmark, author and organization follower count. */
+  entityFollowers: ["research-entity-followers"] as const,
   // The topic id leads the key: paper feeds keep placeholder data only within one key[0],
   // so another topic never shows this one's papers while loading.
   topicPapers: (id: number, order: string, range: { startDate?: string; endDate?: string }, subject: string | undefined) =>

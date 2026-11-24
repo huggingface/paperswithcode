@@ -312,6 +312,49 @@ def test_popular_ranks_tasks_and_methods_with_this_weeks_papers(db, now, monkeyp
     assert cards[1].week_papers == 0 and cards[1].top_paper is None
 
 
+def test_entity_followers_count_everyone_and_show_the_earliest_visible(
+    db, now, monkeypatch
+):
+    monkeypatch.setattr(follows, "FOLLOWER_STACK_AVATARS", 2)
+    benchmark = Dataset(name="Followed bench", slug="followed-bench")
+    other = Dataset(name="Unfollowed bench", slug="unfollowed-bench")
+    db.add_all([benchmark, other])
+    db.add_all(
+        UserProfile(hf_subject=name, current_username=name + "-hf")
+        for name in ("alice", "bob", "carol", "dave")
+    )
+    db.flush()
+    db.add(
+        ResearchSubscription(
+            hf_subject="alice", unsubscribe_token="alice-token", show_as_follower=False
+        )
+    )
+    for minutes, subject in enumerate(("alice", "bob", "carol", "dave")):
+        follow(db, "benchmark", benchmark, now + timedelta(minutes=minutes), subject)
+    follow(db, "method", other, now, "bob")
+    app = FastAPI()
+    app.include_router(research.router)
+    app.dependency_overrides[get_database_session] = lambda: db
+    client = TestClient(app)
+    response = client.get(f"/research/follows/benchmark/{benchmark.id}/followers")
+    assert response.headers["cache-control"] == "no-cache"
+    assert response.json() == {
+        "followers": 4,
+        "follower_avatars": [
+            {"username": "bob-hf", "avatar_url": "/api/v1/research/avatars/bob-hf"},
+            {
+                "username": "carol-hf",
+                "avatar_url": "/api/v1/research/avatars/carol-hf",
+            },
+        ],
+    }
+    assert client.get(f"/research/follows/benchmark/{other.id}/followers").json() == {
+        "followers": 0,
+        "follower_avatars": [],
+    }
+    assert client.get("/research/follows/paper/1/followers").status_code == 422
+
+
 def test_all_entity_types_and_feed_backfill_not_email(db, now):
     p = paper(db, now)
     author = Author(name="Author")

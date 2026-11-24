@@ -20,6 +20,7 @@ from backend.models.database import (
     Method,
     Organization,
     Task,
+    UserProfile,
     Paper as DBPaper,
 )
 from backend.models.database.research import (
@@ -28,6 +29,7 @@ from backend.models.database.research import (
     ResearchSuppression,
 )
 from backend.models.research import (
+    EntityFollowers,
     FollowSuggestion,
     FollowSuggestions,
     FeaturedTopicPaper,
@@ -63,6 +65,7 @@ POPULAR_BENCHMARKS_PER_TASK = 4
 POPULAR_BENCHMARK_SECONDS = 3600
 _popular_benchmarks: tuple[float, list[int]] = (0.0, [])
 POPULAR_FOLLOWS_PER_KIND = 4
+FOLLOWER_STACK_AVATARS = 5
 
 POPULAR_FOLLOWS_SQL = """
 WITH RECURSIVE picked AS (
@@ -242,6 +245,26 @@ def popular(db: Session, now: datetime) -> list[PopularFollow]:
             )
         )
     return result
+
+
+def entity_followers(db: Session, kind: str, entity_id: int) -> EntityFollowers:
+    """The follower count of one followable entity and the earliest followers who show their avatar."""
+    match = (ResearchFollow.kind == kind, ResearchFollow.entity_id == entity_id)
+    avatars = db.scalars(
+        select(UserProfile.current_username)
+        .join(ResearchFollow, ResearchFollow.hf_subject == UserProfile.hf_subject)
+        .outerjoin(
+            ResearchSubscription,
+            ResearchSubscription.hf_subject == UserProfile.hf_subject,
+        )
+        .where(*match, func.coalesce(ResearchSubscription.show_as_follower, True))
+        .order_by(ResearchFollow.created_at, ResearchFollow.hf_subject)
+        .limit(FOLLOWER_STACK_AVATARS)
+    ).all()
+    return EntityFollowers(
+        followers=db.scalar(select(func.count()).where(*match)),
+        follower_avatars=[person(name) for name in avatars],
+    )
 
 
 def suggestions(db: Session) -> FollowSuggestions:

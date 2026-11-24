@@ -9,7 +9,8 @@ import { usePaperFeedQuery } from '@/hooks/usePapers';
 import { researchApi, TOPIC_PAPERS_PAGE_SIZE, type PublicTopic, type TopicPaperOrder, type TopicPerson } from '@/lib/api/research';
 import { readPaperDateRange, withPaperDateRange } from '@/lib/paperDateRange';
 import { researchKeys, researchQueries } from '@/lib/api/queries';
-import { assetUrl, hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
+import { hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
+import Avatar from '@/components/FollowerAvatar';
 import { useOptionalAuth } from '@/lib/authContext';
 import { ApiError, isNotFound } from '@/lib/apiTransport';
 import {
@@ -139,17 +140,6 @@ function FollowerGrid({ people, total }: { people: TopicPerson[]; total: number 
     </li>)}
     {rest > 0 && <li className="topic-follower-more" aria-label={`${rest.toLocaleString()} more`}>+{rest.toLocaleString()}</li>}
   </ul>;
-}
-
-/** A face, or the username's initial when the image does not load. */
-function Avatar({ person, size }: { person: TopicPerson; size: number }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) {
-    return <span className="topic-avatar home-topic-avatar-initial" title={`@${person.username}`}
-      style={{ width: size, height: size, fontSize: size * 0.45 }}>{person.username.charAt(0).toUpperCase()}</span>;
-  }
-  return <img className="topic-avatar" src={assetUrl(person.avatar_url) ?? undefined} alt="" title={`@${person.username}`}
-    width={size} height={size} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 /** Sets the tab title and keeps thin or hidden topics out of search engines. */

@@ -404,7 +404,7 @@ const TagBrowseView: React.FC = () => {
             TASK
           </div>
           <h1 className="domain-mega-title">{taskName}</h1>
-          <ResearchFollowButton kind="task" entityId={task.id} />
+          <ResearchFollowButton kind="task" entityId={task.id} showFollowers />
           {task.description && (
             <MarkdownText className="task-explainer" text={task.description} />
           )}

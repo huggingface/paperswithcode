@@ -133,6 +133,13 @@ class PopularFollow(BaseModel):
     top_paper: FeaturedTopicPaper | None = None
 
 
+class EntityFollowers(BaseModel):
+    """How many accounts follow a task, method, benchmark, author, or organization, and a few who show it."""
+
+    followers: int
+    follower_avatars: list[TopicPerson] = Field(default_factory=list)
+
+
 class FollowerVisibilityUpdate(BaseModel):
     show_as_follower: bool
 

@@ -14,6 +14,7 @@ from backend.database.connection import get_database_session
 from backend.models.database.research import ResearchSubscription
 from backend.models.papers import Paper
 from backend.models.research import (
+    EntityFollowers,
     FollowerVisibilityUpdate,
     FollowKind,
     FollowSuggestions,
@@ -55,6 +56,19 @@ def follow_suggestions(response: Response, db: Session = Depends(get_database_se
 def popular_follows(response: Response, db: Session = Depends(get_database_session)):
     response.headers["Cache-Control"] = "public, max-age=600"
     return service.popular(db, datetime.now(timezone.utc))
+
+
+@router.get(
+    "/research/follows/{kind}/{entity_id}/followers", response_model=EntityFollowers
+)
+def entity_followers(
+    kind: FollowKind,
+    entity_id: int,
+    response: Response,
+    db: Session = Depends(get_database_session),
+):
+    response.headers["Cache-Control"] = "no-cache"
+    return service.entity_followers(db, kind, entity_id)
 
 
 @router.get("/me/follows", response_model=list[FollowView])

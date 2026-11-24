@@ -11,6 +11,7 @@ import { useOptionalAuth } from '@/lib/authContext';
 function invalidateResearch(client: QueryClient, subject: string | undefined, { follows }: { follows: boolean }) {
   return Promise.all([
     follows && client.invalidateQueries({ queryKey: researchQueries.follows(subject).queryKey }),
+    follows && client.invalidateQueries({ queryKey: researchKeys.entityFollowers }),
     client.invalidateQueries({ queryKey: paperFeedKeys.following(subject) }),
     // Following something turns the weekly email on by default.
     client.invalidateQueries({ queryKey: researchQueries.email(subject).queryKey }),
