@@ -818,6 +818,9 @@
   color: var(--ink);
   font-weight: 500;
 }
+.research-follow:empty {
+  display: none;
+}
 .research-follow:has(.follower-stack) .research-follow-hint {
   flex-basis: 100%;
 }
