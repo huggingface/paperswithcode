@@ -29,6 +29,42 @@ def test_external_source_url_is_a_read_only_alias():
         Evaluation(external_source_url="https://example.org/b")
 
 
+def test_alias_falls_back_to_unmirrored_legacy_column():
+    row = Evaluation()
+    row.legacy_external_source_url = "https://example.org/legacy"
+
+    assert row.external_source_url == "https://example.org/legacy"
+
+
+def test_snapshot_restore_keeps_legacy_only_source_url(monkeypatch):
+    from unittest.mock import Mock
+
+    from backend.services import evaluation_service
+    from backend.services.evaluation_curation_service import EVALUATION_FIELDS
+
+    row = Evaluation(id=7, paper_id=1, task_id=2, dataset_id=3, metrics={})
+    row.legacy_external_source_url = "https://example.org/legacy"
+    snapshot = {field: getattr(row, field) for field in EVALUATION_FIELDS}
+    row.source_url = "https://example.org/edited"
+
+    db = Mock()
+    db.get.return_value = row
+    service = evaluation_service.EvaluationService(db)
+    monkeypatch.setattr(
+        service, "_validate_dataset_task_consistency", lambda *_: (True, None)
+    )
+    monkeypatch.setattr(
+        evaluation_service.LeaderboardMetricService,
+        "validate_metrics_for_leaderboard",
+        lambda *_: (True, None),
+    )
+
+    service.restore_evaluation_snapshot(snapshot)
+
+    assert row.source_url == "https://example.org/legacy"
+    assert row.legacy_external_source_url == "https://example.org/legacy"
+
+
 def test_legacy_column_maps_to_the_persisted_column_name():
     column = Evaluation.__table__.c["external_source_url"]
 

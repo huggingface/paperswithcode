@@ -177,7 +177,7 @@ class Evaluation(Base):
 
     @property
     def external_source_url(self) -> Optional[str]:
-        return self.source_url
+        return self.source_url or self.legacy_external_source_url
 
     def __repr__(self) -> str:
         return f"<Evaluation(id={self.id}, paper_id={self.paper_id}, task_id={self.task_id}, dataset_id={self.dataset_id})>"
