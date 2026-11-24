@@ -164,7 +164,10 @@ def _artwork_hero(
     lines = wrap_text(probe, title, title_font, width - 2 * pad, 3) if title else []
     line_height = round(title_font.size * 1.2)
     text_height = pad + len(lines) * line_height + pad if lines else 0
-    art = artwork.convert("RGB")
+    rgba = artwork.convert("RGBA")
+    art = Image.alpha_composite(
+        Image.new("RGBA", rgba.size, (255, 255, 255, 255)), rgba
+    ).convert("RGB")
     art_width = width - 2 * pad
     art_height = round(art.height * art_width / art.width)
     room = height - text_height - pad

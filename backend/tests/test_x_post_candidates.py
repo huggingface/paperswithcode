@@ -603,3 +603,9 @@ def test_roundup_page_cards_skip_a_malformed_pdf():
         [paper], heading="Top", span="", eyebrow="", fetch_pdf=lambda p: b"not a pdf"
     )
     assert cards == []
+
+
+def test_artwork_hero_shows_transparent_artwork_on_white():
+    art = Image.new("RGBA", (400, 200), (0, 0, 0, 0))
+    hero = cards_module._artwork_hero(art, "", 500, 400)
+    assert hero.getpixel((250, 200)) == (255, 255, 255)
