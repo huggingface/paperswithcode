@@ -76,11 +76,12 @@ def client():
     Base.metadata.drop_all(bind=engine)
 
 
-def paper(paper_id, title, *, age_days, citations, task_id, latest=True):
+def paper(paper_id, title, *, age_days, citations, task_id, latest=True, arxiv_id=None):
     return [
         DBPaper(
             id=paper_id,
-            arxiv_id=f"2401.{paper_id:05d}",
+            arxiv_id=arxiv_id or f"2401.{paper_id:05d}",
+            version="v2" if latest else "v1",
             title=title,
             abstract="Abstract.",
             date_published=TODAY - timedelta(days=age_days),
@@ -116,7 +117,16 @@ def seed(db):
             latest=False,
         ),
         *paper(20, "Tracker Foundations", age_days=2000, citations=300, task_id=2),
-        *paper(21, "Tracker Classic", age_days=1900, citations=200, task_id=2),
+        *paper(21, "Tracker Classic", age_days=20, citations=200, task_id=2),
+        *paper(
+            23,
+            "Tracker Classic (old version)",
+            age_days=20,
+            citations=200,
+            task_id=2,
+            latest=False,
+            arxiv_id="2401.00021",
+        ),
         *paper(22, "Tracker Now", age_days=10, citations=0, task_id=2),
     ]
     db.add_all(rows)
@@ -124,7 +134,7 @@ def seed(db):
     db.add_all(
         [
             TaskReadingPathPaper(
-                task_id=2, paper_id=21, step="foundations", position=1, note="Second."
+                task_id=2, paper_id=23, step="foundations", position=1, note="Second."
             ),
             TaskReadingPathPaper(
                 task_id=2, paper_id=20, step="foundations", position=0, note="First."
@@ -165,6 +175,7 @@ def test_automatic_path_picks_survey_foundations_and_recent(client):
 
 
 def test_curated_steps_keep_order_and_notes_and_fill_the_rest(client):
+    """Paper 23 is a superseded version of 21: show 21 once, never again in recent."""
     response = client.get("/api/v1/tasks/2/reading-path")
 
     assert response.status_code == 200

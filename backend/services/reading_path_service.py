@@ -6,7 +6,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import desc, func
+from sqlalchemy import desc, func, or_
 from sqlalchemy.orm import Query, Session
 
 from backend.models.database import (
@@ -86,7 +86,7 @@ class ReadingPathService:
 
     def _build(self, task: DBTask, today: date) -> TaskReadingPath:
         curated = self._curated_rows(task.id)
-        chosen: set[int] = {paper.id for _, paper in curated}
+        chosen = {paper for _, paper in curated}
         steps = []
         for spec in STEPS:
             rows = [pair for pair in curated if pair[0].step == spec.kind]
@@ -99,7 +99,7 @@ class ReadingPathService:
                 source = "curated"
             else:
                 picks = self._automatic(spec.kind, task, chosen, today)
-                chosen.update(paper.id for paper in picks)
+                chosen.update(picks)
                 entries = [
                     ReadingPathPaper(paper=paper)
                     for paper in self.papers.hydrate_cards(picks)
@@ -123,26 +123,45 @@ class ReadingPathService:
         )
 
     def _curated_rows(self, task_id: int) -> list[tuple[TaskReadingPathPaper, DBPaper]]:
-        return (
+        rows = (
             self.db.query(TaskReadingPathPaper, DBPaper)
             .join(DBPaper, DBPaper.id == TaskReadingPathPaper.paper_id)
             .filter(TaskReadingPathPaper.task_id == task_id)
             .order_by(TaskReadingPathPaper.position, TaskReadingPathPaper.paper_id)
             .all()
         )
+        stale = {
+            paper.arxiv_id
+            for _, paper in rows
+            if not paper.is_latest_version and paper.arxiv_id
+        }
+        if not stale:
+            return rows
+        latest = {
+            paper.arxiv_id: paper
+            for paper in self.db.query(DBPaper).filter(
+                DBPaper.arxiv_id.in_(stale), DBPaper.is_latest_version
+            )
+        }
+        return [(row, latest.get(paper.arxiv_id, paper)) for row, paper in rows]
 
-    def _task_papers(self, task_id: int, exclude: set[int]) -> Query[DBPaper]:
+    def _task_papers(self, task_id: int, exclude: set[DBPaper]) -> Query[DBPaper]:
         query = (
             self.db.query(DBPaper)
             .join(PaperTask, PaperTask.paper_id == DBPaper.id)
             .filter(PaperTask.task_id == task_id, DBPaper.is_latest_version)
         )
         if exclude:
-            query = query.filter(DBPaper.id.notin_(exclude))
+            query = query.filter(DBPaper.id.notin_({paper.id for paper in exclude}))
+        arxiv_ids = {paper.arxiv_id for paper in exclude if paper.arxiv_id}
+        if arxiv_ids:
+            query = query.filter(
+                or_(DBPaper.arxiv_id.is_(None), DBPaper.arxiv_id.notin_(arxiv_ids))
+            )
         return query
 
     def _automatic(
-        self, kind: str, task: DBTask, exclude: set[int], today: date
+        self, kind: str, task: DBTask, exclude: set[DBPaper], today: date
     ) -> list[DBPaper]:
         query = self._task_papers(task.id, exclude)
         if kind == "overview":
