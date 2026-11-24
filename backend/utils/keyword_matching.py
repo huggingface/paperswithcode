@@ -51,6 +51,16 @@ def _keyword_pattern(keyword: str) -> re.Pattern[str]:
     return re.compile(r"\b" + re.escape(keyword) + r"s?\b", flags)
 
 
+@lru_cache(maxsize=None)
+def _literal_pattern(keyword: str) -> re.Pattern[str]:
+    return re.compile(re.escape(keyword))
+
+
+@lru_cache(maxsize=None)
+def _lowercase_word_pattern(keyword_lower: str) -> re.Pattern[str]:
+    return re.compile(r"\b" + re.escape(keyword_lower) + r"s?\b")
+
+
 _IGNORECASE_ONLY_FOLDS = str.maketrans({"İ": "i", "ı": "i"})
 
 
@@ -532,7 +542,9 @@ def find_matching_items_longest_match(
     all_matches = []
 
     for keyword, item_list in case_sensitive_patterns.items():
-        for match in re.finditer(re.escape(keyword), text):
+        if keyword not in text:
+            continue
+        for match in _literal_pattern(keyword).finditer(text):
             start, end = match.span()
             for item_info in item_list:
                 all_matches.append(
@@ -547,9 +559,9 @@ def find_matching_items_longest_match(
 
     text_lower = text.lower()
     for keyword_lower, item_list in case_insensitive_patterns.items():
-        for match in re.finditer(
-            r"\b" + re.escape(keyword_lower) + r"s?\b", text_lower
-        ):
+        if keyword_lower not in text_lower:
+            continue
+        for match in _lowercase_word_pattern(keyword_lower).finditer(text_lower):
             start, end = match.span()
             for item_info in item_list:
                 all_matches.append(
