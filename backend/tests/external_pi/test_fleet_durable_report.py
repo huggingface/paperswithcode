@@ -19,11 +19,10 @@ from backend.loadtests.external_pi_fleet_core import (
 )
 from backend.tests.external_pi.fleet_harness import (
     _DurableOperator,
-    _FUNCTIONAL_MODAL,
     _MODAL_RATE,
-    _NO_MODAL,
     _SERVER_LATENCY_P95,
-    _live_qualification_evidence,
+    _durable_observation,
+    _qualification_evidence,
 )
 
 
@@ -56,7 +55,7 @@ def test_durable_profile_report_records_required_content_free_measurements():
         peak_active_backend_turns=32,
         peak_active_external_workers=4,
         peak_active_sandboxes=8,
-        qualification_evidence=_live_qualification_evidence(),
+        qualification_evidence=_qualification_evidence(),
         modal_rate=_MODAL_RATE,
     )
 
@@ -166,14 +165,7 @@ def test_live_report_requires_durable_executor_start_and_duplicate_evidence():
 def test_durable_profile_requires_sub_two_second_p95_for_every_workload():
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
-        DurableTurnObservation(
-            workload=workload,
-            outcome="completed",
-            ttft_ms=2_000 if index == 31 else 100,
-            completion_ms=1_000,
-            model_starts=1,
-            terminal_cause="completed",
-        )
+        _durable_observation(workload, ttft_ms=2_000 if index == 31 else 100)
         for index, workload in enumerate(profile.workloads)
     )
 
@@ -186,7 +178,7 @@ def test_durable_profile_requires_sub_two_second_p95_for_every_workload():
         peak_active_backend_turns=32,
         peak_active_external_workers=4,
         peak_active_sandboxes=1,
-        modal_lifecycle=_FUNCTIONAL_MODAL,
+        qualification_evidence=_qualification_evidence(),
         modal_rate=_MODAL_RATE,
     )
 
@@ -196,51 +188,50 @@ def test_durable_profile_requires_sub_two_second_p95_for_every_workload():
 
 def test_durable_profile_report_fails_refusal_queue_duplicate_or_lost_terminal():
     profile = resolve_durable_profile("100-immediate-admission")
-    base = DurableTurnObservation(
-        workload="admission_stream",
-        outcome="completed",
-        ttft_ms=100,
-        completion_ms=1_000,
-        model_starts=1,
-        terminal_cause="completed",
-    )
-    mutations = (
+    base = _durable_observation("admission_stream")
+    observation_mutations = (
         base.model_copy(update={"outcome": "refused", "terminal_cause": "refused"}),
-        base.model_copy(update={"queued_states": 1}),
         base.model_copy(update={"model_starts": 2}),
-        base.model_copy(update={"duplicate_operation_start_count": 1}),
         base.model_copy(update={"terminal_cause": "terminal_lost"}),
-        base.model_copy(update={"stale_mutations": 1}),
         base.model_copy(update={"duplicate_turns": 1}),
         base.model_copy(update={"ttft_ms": None}),
     )
+    evidence_mutations = (
+        {"queued_states": 1},
+        {"stale_fences": 1},
+        {"duplicate_executor_starts": 1},
+        {"executor_starts": 1},
+    )
+    cases = tuple(
+        ((mutation,) + (base,) * 99, _qualification_evidence(profile.name))
+        for mutation in observation_mutations
+    ) + tuple(
+        ((base,) * 100, _qualification_evidence(profile.name, **mutation))
+        for mutation in evidence_mutations
+    )
 
-    for mutation in mutations:
-        report = aggregate_durable_profile(
+    def aggregate(observations, evidence):
+        return aggregate_durable_profile(
             profile=profile,
-            observations=(mutation,) + (base,) * 99,
+            observations=observations,
             peak_memory_bytes=1024**3,
             minimum_host_mem_available_bytes=2 * 1024**3,
             peak_cpu_percent=20.0,
             peak_active_backend_turns=100,
             peak_active_external_workers=8,
             peak_active_sandboxes=0,
-            modal_lifecycle=_NO_MODAL,
+            qualification_evidence=evidence,
             modal_rate=_MODAL_RATE,
         )
-        assert report.passed is False
+
+    assert aggregate((base,) * 100, _qualification_evidence(profile.name)).passed
+    for observations, evidence in cases:
+        assert aggregate(observations, evidence).passed is False
 
 
 def test_durable_profile_retains_slow_completion_as_failing_evidence():
     profile = resolve_durable_profile("32-functional-turns")
-    slow = DurableTurnObservation(
-        workload="no_tool",
-        outcome="completed",
-        ttft_ms=100,
-        completion_ms=60_001,
-        model_starts=1,
-        terminal_cause="completed",
-    )
+    slow = _durable_observation("no_tool", completion_ms=60_001)
     normal = slow.model_copy(update={"completion_ms": 1_000})
 
     report = aggregate_durable_profile(
@@ -256,7 +247,7 @@ def test_durable_profile_retains_slow_completion_as_failing_evidence():
         peak_active_backend_turns=32,
         peak_active_external_workers=4,
         peak_active_sandboxes=1,
-        modal_lifecycle=_FUNCTIONAL_MODAL,
+        qualification_evidence=_qualification_evidence(),
         modal_rate=_MODAL_RATE,
     )
 
@@ -267,15 +258,7 @@ def test_durable_profile_retains_slow_completion_as_failing_evidence():
 def test_durable_report_is_atomic_mode_0600_and_contains_no_payloads(tmp_path: Path):
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
-        DurableTurnObservation(
-            workload=workload,
-            outcome="completed",
-            ttft_ms=100,
-            completion_ms=1_000,
-            model_starts=1,
-            terminal_cause="completed",
-        )
-        for workload in profile.workloads
+        _durable_observation(workload) for workload in profile.workloads
     )
     profile_report = aggregate_durable_profile(
         profile=profile,
@@ -286,7 +269,7 @@ def test_durable_report_is_atomic_mode_0600_and_contains_no_payloads(tmp_path: P
         peak_active_backend_turns=32,
         peak_active_external_workers=4,
         peak_active_sandboxes=1,
-        modal_lifecycle=_FUNCTIONAL_MODAL,
+        qualification_evidence=_qualification_evidence(),
         modal_rate=_MODAL_RATE,
     )
     cleanup = {
@@ -339,15 +322,7 @@ def test_durable_report_is_atomic_mode_0600_and_contains_no_payloads(tmp_path: P
 def test_durable_report_rejects_status_reason_profile_and_cleanup_mismatches():
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
-        DurableTurnObservation(
-            workload=workload,
-            outcome="completed",
-            ttft_ms=100,
-            completion_ms=1_000,
-            model_starts=1,
-            terminal_cause="completed",
-        )
-        for workload in profile.workloads
+        _durable_observation(workload) for workload in profile.workloads
     )
     profile_report = aggregate_durable_profile(
         profile=profile,
@@ -358,7 +333,7 @@ def test_durable_report_rejects_status_reason_profile_and_cleanup_mismatches():
         peak_active_backend_turns=32,
         peak_active_external_workers=4,
         peak_active_sandboxes=1,
-        modal_lifecycle=_FUNCTIONAL_MODAL,
+        qualification_evidence=_qualification_evidence(),
         modal_rate=_MODAL_RATE,
     )
     cleanup = {

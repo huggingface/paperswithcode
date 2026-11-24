@@ -1,4 +1,4 @@
-"""Modal deltas, latency fixtures, and builders shared by fleet qualification tests."""
+"""Durable qualification evidence, latency fixtures, and builders shared by fleet qualification tests."""
 
 from __future__ import annotations
 
@@ -21,8 +21,6 @@ from backend.loadtests.external_pi_fleet_core import (
     resolve_fleet_shape,
     aggregate_durable_profile,
     DurableTurnObservation,
-    ModalLifecycleDelta,
-    ModalLifecycleSnapshot,
     ModalRateEvidence,
     DurableQualificationEvidence,
     PERSISTENT_TRANSPORT_SCENARIOS,
@@ -35,14 +33,6 @@ from deploy.external_pi_qualification_contract import (
     QUALIFICATION_SUPERVISOR_UNITS,
     QUALIFICATION_WORKER_IDS,
     QUALIFICATION_WORKER_UNITS,
-)
-
-
-_NO_MODAL = ModalLifecycleDelta(creates=0, reuses=0, evictions=0, active_duration_ms=0)
-
-
-_FUNCTIONAL_MODAL = ModalLifecycleDelta(
-    creates=1, reuses=15, evictions=0, active_duration_ms=16_000
 )
 
 
@@ -129,43 +119,58 @@ def _persistent_transport_manifest() -> dict[str, object]:
     }
 
 
-def _live_qualification_evidence():
-    return DurableQualificationEvidence(
-        expected_users=32,
-        admitted_turns=32,
-        admission_denominator_events=32,
-        terminal_turns=32,
-        queued_states=0,
-        stale_fences=0,
-        executor_starts=16,
-        duplicate_executor_starts=0,
-        workspace_creates=1,
-        workspace_reuses=15,
-        workspace_evictions=16,
-        billed_duration_ms=16_000,
-        window_started_at_ms=1,
-        window_ended_at_ms=2,
-        p95_server_latency_ms_by_workload=_SERVER_LATENCY_P95,
-        source="durable_qualification_records",
-    )
+def _qualification_evidence(
+    profile_name: str = "32-functional-turns", **updates
+) -> DurableQualificationEvidence:
+    functional = profile_name == "32-functional-turns"
+    users = 32 if functional else 100
+    values = {
+        "expected_users": users,
+        "admitted_turns": users,
+        "admission_denominator_events": users,
+        "terminal_turns": users,
+        "queued_states": 0,
+        "stale_fences": 0,
+        "executor_starts": 16 if functional else 0,
+        "duplicate_executor_starts": 0,
+        "workspace_creates": 1 if functional else 0,
+        "workspace_reuses": 15 if functional else 0,
+        "workspace_evictions": 16 if functional else 0,
+        "billed_duration_ms": 16_000 if functional else 0,
+        "window_started_at_ms": 1,
+        "window_ended_at_ms": 2,
+        "p95_server_latency_ms_by_workload": (
+            _SERVER_LATENCY_P95 if functional else {}
+        ),
+        "source": "durable_qualification_records",
+    }
+    values.update(updates)
+    return DurableQualificationEvidence(**values)
 
 
-class _LifecycleSource:
-    def __init__(self, delta: ModalLifecycleDelta = _NO_MODAL):
-        self.delta = delta
-        self.calls = 0
+def _durable_observation(workload: str, **updates) -> DurableTurnObservation:
+    values = {
+        "workload": workload,
+        "outcome": "completed",
+        "admission_ms": 20,
+        "reconnect_ready_ms": 40,
+        "ttft_ms": 100,
+        "completion_ms": 1_000,
+        "model_starts": 1,
+        "terminal_cause": "completed",
+    }
+    values.update(updates)
+    return DurableTurnObservation(**values)
 
-    def snapshot(self, _profile_name):
-        self.calls += 1
-        before = self.calls % 2 == 1
-        return ModalLifecycleSnapshot(
-            captured_at_ms=self.calls,
-            creates=0 if before else self.delta.creates,
-            reuses=0 if before else self.delta.reuses,
-            evictions=0 if before else self.delta.evictions,
-            active_duration_ms=0 if before else self.delta.active_duration_ms,
-            source="application_modal_lifecycle",
-        )
+
+class _EvidenceSource:
+    def __init__(self, profile_name: str = "32-functional-turns", **updates):
+        self.evidence = _qualification_evidence(profile_name, **updates)
+        self.scopes = []
+
+    def collect(self, scope_id):
+        self.scopes.append(scope_id)
+        return self.evidence
 
 
 class _DurableOperator:
@@ -243,17 +248,7 @@ class _DurableOperator:
         self.events.append(("run", profile.name))
         self._fail("run")
         observations = tuple(
-            DurableTurnObservation(
-                workload=workload,
-                outcome="completed",
-                ttft_ms=100,
-                completion_ms=1_000,
-                model_starts=1,
-                operation_start_count=0,
-                duplicate_operation_start_count=0,
-                terminal_cause="completed",
-            )
-            for workload in profile.workloads
+            _durable_observation(workload) for workload in profile.workloads
         )
         return aggregate_durable_profile(
             profile=profile,
@@ -264,11 +259,7 @@ class _DurableOperator:
             peak_active_backend_turns=profile.expected_users,
             peak_active_external_workers=4,
             peak_active_sandboxes=(1 if profile.name == "32-functional-turns" else 0),
-            modal_lifecycle=(
-                _FUNCTIONAL_MODAL
-                if profile.name == "32-functional-turns"
-                else _NO_MODAL
-            ),
+            qualification_evidence=_qualification_evidence(profile.name),
             modal_rate=_MODAL_RATE,
         )
 

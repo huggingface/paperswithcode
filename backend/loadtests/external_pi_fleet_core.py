@@ -454,28 +454,6 @@ class DurableTurnObservation(BaseModel):
         return self
 
 
-class ModalLifecycleSnapshot(BaseModel):
-    """Cumulative content-free application lifecycle evidence at one boundary."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    captured_at_ms: int = Field(ge=0, le=MAX_REPORT_BYTES)
-    creates: int = Field(ge=0, le=MAX_REPORT_COUNTER)
-    reuses: int = Field(ge=0, le=MAX_REPORT_COUNTER)
-    evictions: int = Field(ge=0, le=MAX_REPORT_COUNTER)
-    active_duration_ms: int = Field(ge=0, le=MAX_REPORT_BYTES)
-    source: Literal["application_modal_lifecycle"]
-
-
-class ModalLifecycleDelta(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-    creates: int = Field(ge=0, le=MAX_REPORT_COUNTER)
-    reuses: int = Field(ge=0, le=MAX_REPORT_COUNTER)
-    evictions: int = Field(ge=0, le=MAX_REPORT_COUNTER)
-    active_duration_ms: int = Field(ge=0, le=MAX_REPORT_BYTES)
-
-
 class ModalRateEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -575,30 +553,11 @@ class DurableLatencyAttributionP95(BaseModel):
     end_to_end_ttft_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
 
 
-def modal_lifecycle_delta(
-    before: ModalLifecycleSnapshot, after: ModalLifecycleSnapshot
-) -> ModalLifecycleDelta:
-    if after.captured_at_ms <= before.captured_at_ms or after.source != before.source:
-        raise FleetRunRefused("Modal lifecycle window evidence is inconsistent")
-    values = {
-        "creates": after.creates - before.creates,
-        "reuses": after.reuses - before.reuses,
-        "evictions": after.evictions - before.evictions,
-        "active_duration_ms": (after.active_duration_ms - before.active_duration_ms),
-    }
-    try:
-        return ModalLifecycleDelta.model_validate(values)
-    except ValueError:
-        raise FleetRunRefused("Modal lifecycle counters are inconsistent") from None
-
-
 class DurableProfileReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     profile: Literal["32-functional-turns", "100-immediate-admission"]
-    qualification_evidence_source: Literal[
-        "durable_qualification_records", "isolated_test_harness"
-    ]
+    qualification_evidence_source: Literal["durable_qualification_records"]
     expected_users: Literal[32, 100]
     observations: int = Field(ge=0, le=EXPECTED_USERS)
     completed: int = Field(ge=0, le=EXPECTED_USERS)
@@ -665,8 +624,7 @@ class DurableProfileReport(BaseModel):
             raise ValueError("durable workload TTFT evidence is inconsistent")
         expected_attribution = (
             {"no_tool", "read", "bash"}
-            if self.qualification_evidence_source == "durable_qualification_records"
-            and self.profile == "32-functional-turns"
+            if self.profile == "32-functional-turns"
             else set()
         )
         if set(self.p95_latency_attribution_ms_by_workload) != expected_attribution:
@@ -708,16 +666,8 @@ class DurableProfileReport(BaseModel):
                 (
                     self.profile == "32-functional-turns"
                     and self.modal_creates + self.modal_reuses == 16
-                    and (
-                        self.qualification_evidence_source == "isolated_test_harness"
-                        or self.operation_start_count == 16
-                    )
-                    and self.modal_evictions
-                    == (
-                        0
-                        if self.qualification_evidence_source == "isolated_test_harness"
-                        else 16
-                    )
+                    and self.operation_start_count == 16
+                    and self.modal_evictions == 16
                     and self.modal_active_ms > 0
                     and self.peak_active_sandboxes > 0
                 )
@@ -727,10 +677,7 @@ class DurableProfileReport(BaseModel):
                     and self.modal_reuses == 0
                     and self.modal_evictions == 0
                     and self.modal_active_ms == 0
-                    and (
-                        self.qualification_evidence_source == "isolated_test_harness"
-                        or self.operation_start_count == 0
-                    )
+                    and self.operation_start_count == 0
                     and self.peak_active_sandboxes == 0
                 )
             )
@@ -897,8 +844,7 @@ def aggregate_durable_profile(
     peak_active_external_workers: int,
     peak_active_sandboxes: int,
     modal_rate: ModalRateEvidence,
-    modal_lifecycle: ModalLifecycleDelta | None = None,
-    qualification_evidence: DurableQualificationEvidence | None = None,
+    qualification_evidence: DurableQualificationEvidence,
 ) -> DurableProfileReport:
     expected = resolve_durable_profile(profile.name)
     if profile != expected or len(observations) != profile.expected_users:
@@ -918,7 +864,7 @@ def aggregate_durable_profile(
         for workload in expected_workloads
     }
     latency_attribution: dict[DurableWorkload, DurableLatencyAttributionP95] = {}
-    if qualification_evidence is not None and profile.name == "32-functional-turns":
+    if profile.name == "32-functional-turns":
         if any(
             item.admission_ms is None
             or item.reconnect_ready_ms is None
@@ -963,45 +909,16 @@ def aggregate_durable_profile(
     typed_failure_counts = Counter(
         item.failure_code for item in observations if item.failure_code is not None
     )
-    if qualification_evidence is not None:
-        if (
-            qualification_evidence.expected_users != profile.expected_users
-            or qualification_evidence.admitted_turns != profile.expected_users
-            or qualification_evidence.admission_denominator_events
-            != profile.expected_users
-            or qualification_evidence.terminal_turns != profile.expected_users
-        ):
-            raise FleetRunRefused("durable qualification evidence is incomplete")
-        queued_states = qualification_evidence.queued_states
-        stale_mutations = qualification_evidence.stale_fences
-        operation_start_count = qualification_evidence.executor_starts
-        duplicate_operation_start_count = (
-            qualification_evidence.duplicate_executor_starts
-        )
-        modal_creates = qualification_evidence.workspace_creates
-        modal_reuses = qualification_evidence.workspace_reuses
-        modal_evictions = qualification_evidence.workspace_evictions
-        modal_active_ms = qualification_evidence.billed_duration_ms
-    elif modal_lifecycle is not None:
-        queued_states = sum(item.queued_states for item in observations)
-        stale_mutations = sum(item.stale_mutations for item in observations)
-        operation_start_count = sum(item.operation_start_count for item in observations)
-        duplicate_operation_start_count = sum(
-            item.duplicate_operation_start_count for item in observations
-        )
-        modal_creates = modal_lifecycle.creates
-        modal_reuses = modal_lifecycle.reuses
-        modal_evictions = modal_lifecycle.evictions
-        modal_active_ms = modal_lifecycle.active_duration_ms
-    else:
-        raise FleetRunRefused("durable qualification evidence is required")
+    if (
+        qualification_evidence.expected_users != profile.expected_users
+        or qualification_evidence.admitted_turns != profile.expected_users
+        or qualification_evidence.admission_denominator_events != profile.expected_users
+        or qualification_evidence.terminal_turns != profile.expected_users
+    ):
+        raise FleetRunRefused("durable qualification evidence is incomplete")
     return DurableProfileReport(
         profile=profile.name,
-        qualification_evidence_source=(
-            "durable_qualification_records"
-            if qualification_evidence is not None
-            else "isolated_test_harness"
-        ),
+        qualification_evidence_source=qualification_evidence.source,
         expected_users=profile.expected_users,
         observations=len(observations),
         completed=sum(item.outcome == "completed" for item in observations),
@@ -1010,13 +927,15 @@ def aggregate_durable_profile(
             item.outcome == "failed" or item.failure_code is not None
             for item in observations
         ),
-        queued_states=queued_states,
+        queued_states=qualification_evidence.queued_states,
         model_starts=sum(item.model_starts for item in observations),
-        operation_start_count=operation_start_count,
+        operation_start_count=qualification_evidence.executor_starts,
         duplicate_model_starts=sum(item.model_starts > 1 for item in observations),
-        duplicate_operation_start_count=duplicate_operation_start_count,
+        duplicate_operation_start_count=(
+            qualification_evidence.duplicate_executor_starts
+        ),
         duplicate_turns=sum(item.duplicate_turns for item in observations),
-        stale_mutations=stale_mutations,
+        stale_mutations=qualification_evidence.stale_fences,
         terminal_outcomes=sum(
             item.terminal_cause == item.outcome for item in observations
         ),
@@ -1039,17 +958,19 @@ def aggregate_durable_profile(
         peak_active_backend_turns=peak_active_backend_turns,
         peak_active_external_workers=peak_active_external_workers,
         peak_active_sandboxes=peak_active_sandboxes,
-        modal_creates=modal_creates,
-        modal_reuses=modal_reuses,
-        modal_evictions=modal_evictions,
-        modal_active_ms=modal_active_ms,
+        modal_creates=qualification_evidence.workspace_creates,
+        modal_reuses=qualification_evidence.workspace_reuses,
+        modal_evictions=qualification_evidence.workspace_evictions,
+        modal_active_ms=qualification_evidence.billed_duration_ms,
         modal_rate_microusd_per_second=modal_rate.microusd_per_second,
         modal_rate_source=modal_rate.source,
         modal_rate_source_id=modal_rate.source_id,
         modal_rate_release_id=modal_rate.release_id,
         modal_rate_attested_at_ms=modal_rate.attested_at_ms,
         modal_estimated_cost_microusd=math.ceil(
-            modal_active_ms * modal_rate.microusd_per_second / 1000
+            qualification_evidence.billed_duration_ms
+            * modal_rate.microusd_per_second
+            / 1000
         ),
     )
 

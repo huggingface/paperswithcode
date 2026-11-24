@@ -499,43 +499,20 @@ def test_live_constructor_refuses_non_staging_hosts_and_injected_fakes():
     assert type(live).__name__ == "HttpSSEDurableChatTransport"
 
 
-def test_modal_lifecycle_delta_and_protected_rate_are_window_bound_not_chat_latency():
+def test_durable_billed_duration_and_protected_rate_drive_cost_not_chat_latency():
     from backend.loadtests.external_pi_fleet_core import (
-        ModalLifecycleSnapshot,
-        ModalRateEvidence,
         aggregate_durable_profile,
-        modal_lifecycle_delta,
         resolve_durable_profile,
-        DurableTurnObservation,
+    )
+    from backend.tests.external_pi.fleet_harness import (
+        _MODAL_RATE,
+        _durable_observation,
+        _qualification_evidence,
     )
 
-    before = ModalLifecycleSnapshot(
-        captured_at_ms=1_000,
-        creates=10,
-        reuses=20,
-        evictions=3,
-        active_duration_ms=50_000,
-        source="application_modal_lifecycle",
-    )
-    after = before.model_copy(
-        update={
-            "captured_at_ms": 2_000,
-            "creates": 11,
-            "reuses": 35,
-            "evictions": 4,
-            "active_duration_ms": 62_345,
-        }
-    )
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
-        DurableTurnObservation(
-            workload=workload,
-            outcome="completed",
-            ttft_ms=10,
-            completion_ms=999,
-            model_starts=1,
-            terminal_cause="completed",
-        )
+        _durable_observation(workload, ttft_ms=50, completion_ms=999)
         for workload in profile.workloads
     )
 
@@ -548,14 +525,10 @@ def test_modal_lifecycle_delta_and_protected_rate_are_window_bound_not_chat_late
         peak_active_backend_turns=32,
         peak_active_external_workers=4,
         peak_active_sandboxes=16,
-        modal_lifecycle=modal_lifecycle_delta(before, after),
-        modal_rate=ModalRateEvidence(
-            microusd_per_second=25,
-            source="protected_runtime",
-            source_id="modal-staging-price-v1",
-            release_id="0123456789ab-staging",
-            attested_at_ms=1,
+        qualification_evidence=_qualification_evidence(
+            workspace_evictions=1, billed_duration_ms=12_345
         ),
+        modal_rate=_MODAL_RATE,
     )
 
     assert report.modal_creates == 1
@@ -565,29 +538,6 @@ def test_modal_lifecycle_delta_and_protected_rate_are_window_bound_not_chat_late
     assert report.modal_active_ms != sum(item.completion_ms for item in observations)
     assert report.modal_rate_source == "protected_runtime"
     assert report.modal_estimated_cost_microusd == 309
-
-
-def test_modal_lifecycle_refuses_missing_or_contradictory_snapshot_evidence():
-    from backend.loadtests.external_pi_fleet_core import (
-        ModalLifecycleSnapshot,
-        modal_lifecycle_delta,
-    )
-
-    before = ModalLifecycleSnapshot(
-        captured_at_ms=1_000,
-        creates=2,
-        reuses=2,
-        evictions=2,
-        active_duration_ms=2,
-        source="application_modal_lifecycle",
-    )
-    for changes in (
-        {"captured_at_ms": 1_000},
-        {"captured_at_ms": 2_000, "creates": 1},
-        {"captured_at_ms": 2_000, "active_duration_ms": 1},
-    ):
-        with pytest.raises(FleetRunRefused):
-            modal_lifecycle_delta(before, before.model_copy(update=changes))
 
 
 def test_http_durable_evidence_source_reads_exact_scoped_content_free_seam():
