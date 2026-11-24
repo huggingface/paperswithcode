@@ -259,3 +259,48 @@ def test_repair_role_cannot_change_taxonomy(repair_role_database, statement):
 )
 def test_repair_role_keeps_catalog_privileges(repair_role_database, statement):
     _as_repair_role(repair_role_database, statement)
+
+
+def test_cron_health_reads_launcher_history_from_each_job_directory(
+    tmp_path: Path, monkeypatch
+):
+    import json
+    from types import SimpleNamespace
+
+    from backend.services import cron_health
+
+    main_dir = tmp_path / "cron-logs"
+    repair_dir = tmp_path / "repair-cron-logs"
+    for directory, job in (
+        (main_dir, "update_citations"),
+        (repair_dir, "refresh_x_post_likes"),
+    ):
+        directory.mkdir()
+        (directory / "launcher.jsonl").write_text(
+            json.dumps(
+                {
+                    "at": "2026-11-24T10:00:00+00:00",
+                    "event": "exit",
+                    "job": job,
+                    "returncode": 1,
+                }
+            )
+            + "\n"
+        )
+    monkeypatch.setattr(
+        cron_health,
+        "get_settings",
+        lambda: SimpleNamespace(environment="production", cron_log_dir=str(main_dir)),
+    )
+    monkeypatch.setattr(
+        cron_health,
+        "list_cron_jobs",
+        lambda: [SimpleNamespace(log_directory=str(repair_dir))],
+    )
+
+    history = cron_health.fetch_launcher_history(
+        now=cron_health._parse_log_timestamp("2026-11-24T11:00:00Z")
+    )
+
+    assert history["update_citations"]["failures"] == 1
+    assert history["refresh_x_post_likes"]["consecutive_failures"] == 1
