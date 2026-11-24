@@ -881,7 +881,7 @@ IDENTITIES: dict[str, dict[str, ModelIdentity]] = {
         ),
         "Feyospace-v1.1 (finetuned from Qwen3.8-27B)": ModelIdentity(
             "Feyospace-v1.1",
-            source_url="https://huggingface.co/feyospace/feyospace-v1.1-small",
+            source_url="https://verapraxis.ai/en/research/feyospace-v1-1",
             is_open=True,
             hf_model_url="https://huggingface.co/feyospace/feyospace-v1.1-small",
         ),
