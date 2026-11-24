@@ -20,6 +20,10 @@ from cron_schedules import TIMERS, TimerSpec  # noqa: E402
 
 UNIT_DIR = Path(__file__).resolve().parent / "systemd" / "cron"
 THROTTLED = "/usr/local/sbin/pwc-cron-throttled"
+DIRECT = "/usr/local/sbin/pwc-cron"
+UNTHROTTLED_UNITS = {
+    "pwc-cron-run-chat-synthetic-probe",
+}
 SHORT_REFRESH_UNITS = {
     "pwc-cron-update-hot-github-trending",
     "pwc-cron-paper-markdown-fresh",
@@ -45,8 +49,9 @@ def render_service(spec: TimerSpec) -> str:
             "# Slot 3 is reserved for short refreshes; bulk jobs use slots 0-2.",
             "Environment=PWC_CRON_THROTTLE_SLOTS=4",
         ]
+    launcher = DIRECT if spec.unit in UNTHROTTLED_UNITS else THROTTLED
     for argv in spec.invocations:
-        lines.append(f"ExecStart={THROTTLED} " + " ".join(argv))
+        lines.append(f"ExecStart={launcher} " + " ".join(argv))
     lines += [
         "NoNewPrivileges=true",
         "PrivateTmp=true",

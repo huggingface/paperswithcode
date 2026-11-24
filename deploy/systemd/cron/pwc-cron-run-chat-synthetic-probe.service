@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/pwc-cron-throttled run_chat_synthetic_probe
+ExecStart=/usr/local/sbin/pwc-cron run_chat_synthetic_probe
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
