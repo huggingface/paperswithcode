@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from sqlalchemy import func, or_, text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
@@ -76,16 +76,8 @@ def _repoint_evaluation_sources(
     )
     pattern = f"%{external_id}%"
     repointed = 0
-    for evaluation in db.query(Evaluation).filter(
-        or_(
-            Evaluation.source_url.like(pattern),
-            Evaluation.legacy_external_source_url.like(pattern),
-        )
-    ):
-        stored_source_url = (
-            evaluation.source_url or evaluation.legacy_external_source_url
-        )
-        if _normalize_url_for_match(stored_source_url) in old_keys:
+    for evaluation in db.query(Evaluation).filter(Evaluation.source_url.like(pattern)):
+        if _normalize_url_for_match(evaluation.source_url) in old_keys:
             evaluation.source_url = new_url
             evaluation.external = evaluation.paper_id != arxiv_paper.id
             repointed += 1
@@ -448,9 +440,7 @@ def merge_external_paper_into_arxiv(
             stats["evaluations_dropped"] += 1
         else:
             evaluation.paper_id = arxiv_paper_id
-            if merged_source_url and not (
-                evaluation.source_url or evaluation.legacy_external_source_url
-            ):
+            if merged_source_url and not evaluation.source_url:
                 evaluation.source_url = merged_source_url
             stats["evaluations_moved"] += 1
             affected_leaderboards.add(

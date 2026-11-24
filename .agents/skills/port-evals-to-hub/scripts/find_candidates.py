@@ -89,7 +89,7 @@ def main():
             evals = db.execute(
                 text("""
                 SELECT e.id, e.model_name, e.hf_model_url, e.metrics->>:m AS value,
-                       COALESCE(e.source_url, e.external_source_url) AS source, e.created_at
+                       e.source_url AS source, e.created_at
                 FROM evaluations e
                 WHERE e.dataset_id = :d AND e.hf_model_url IS NOT NULL AND e.metrics ? :m
             """),
