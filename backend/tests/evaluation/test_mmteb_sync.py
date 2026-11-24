@@ -216,6 +216,24 @@ def test_parser_fails_closed_on_wrong_benchmark_or_truncated_payload():
         parse_mmteb_leaderboard(_payload(5))
 
 
+def test_parser_keeps_one_row_for_a_model_listed_twice():
+    payload = _payload()
+    unscored = {**_api_row(3), "meanTask": None}
+    payload["rows"].insert(3, unscored)
+    payload["rows"].append({**_api_row(7), "meanTask": None})
+
+    entries = parse_mmteb_leaderboard(payload)
+
+    assert len(entries) == 100
+    by_name = {entry.model_name: entry for entry in entries}
+    assert by_name["model-3"].mean_task is not None
+    assert by_name["model-7"].mean_task is not None
+
+    payload["rows"].append(_api_row(9))
+    with pytest.raises(ValueError, match="model-9 twice with scores"):
+        parse_mmteb_leaderboard(payload)
+
+
 def test_sync_fails_closed_when_full_payload_loses_lane_scores():
     session = _session()
     entries = [
