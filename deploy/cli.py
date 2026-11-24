@@ -1932,9 +1932,10 @@ def warn_staging_sync_conflict(production: str) -> None:
     """Warn before a production deploy whose staging sync would need a hand merge."""
     try:
         staging_sync_source(production, _live_sha("staging"), push=False)
-    except DeployError as exc:
+    except (DeployError, subprocess.CalledProcessError) as exc:
+        detail = getattr(exc, "stderr", None) or exc
         print(
-            f"warning: the staging sync after this deploy will fail: {exc}. "
+            f"warning: the staging sync after this deploy will fail: {detail}. "
             "Prepare that merge now and the sync will deploy it.",
             file=sys.stderr,
         )

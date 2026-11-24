@@ -369,6 +369,20 @@ def test_staging_sync_ignores_a_hand_merge_with_extra_changes(sync_repository):
         deploy_cli.staging_sync_source(production, staging, push=True)
 
 
+def test_staging_sync_warning_never_aborts_a_production_deploy(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
+    def failing_fetch(*arguments, **options):
+        raise subprocess.CalledProcessError(1, "git fetch", stderr="network down")
+
+    monkeypatch.setattr(deploy_cli, "_live_sha", lambda environment: "a" * 40)
+    monkeypatch.setattr(deploy_cli, "staging_sync_source", failing_fetch)
+
+    deploy_cli.warn_staging_sync_conflict("b" * 40)
+
+    assert "network down" in capsys.readouterr().err
+
+
 def test_production_deploy_parser_syncs_staging_by_default():
     assert parser_for("pwc-deploy").parse_args(["production", "abc"]).staging_sync
     assert not (
