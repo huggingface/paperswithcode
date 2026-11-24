@@ -261,7 +261,7 @@ def test_repair_role_keeps_catalog_privileges(repair_role_database, statement):
     _as_repair_role(repair_role_database, statement)
 
 
-def test_cron_health_reads_launcher_history_from_each_job_directory(
+def test_cron_health_combines_launcher_history_across_job_directories(
     tmp_path: Path, monkeypatch
 ):
     import json
@@ -271,21 +271,24 @@ def test_cron_health_reads_launcher_history_from_each_job_directory(
 
     main_dir = tmp_path / "cron-logs"
     repair_dir = tmp_path / "repair-cron-logs"
-    for directory, job in (
-        (main_dir, "update_citations"),
-        (repair_dir, "refresh_x_post_likes"),
-    ):
+    records = {
+        main_dir: [
+            ("2026-11-24T08:00:00+00:00", "refresh_paper_embeddings", 0),
+            ("2026-11-24T09:00:00+00:00", "refresh_paper_embeddings", 1),
+            ("2026-11-24T09:30:00+00:00", "update_citations", 1),
+        ],
+        repair_dir: [
+            ("2026-11-24T10:00:00+00:00", "refresh_paper_embeddings", 1),
+        ],
+    }
+    for directory, rows in records.items():
         directory.mkdir()
         (directory / "launcher.jsonl").write_text(
-            json.dumps(
-                {
-                    "at": "2026-11-24T10:00:00+00:00",
-                    "event": "exit",
-                    "job": job,
-                    "returncode": 1,
-                }
+            "".join(
+                json.dumps({"at": at, "event": "exit", "job": job, "returncode": code})
+                + "\n"
+                for at, job, code in rows
             )
-            + "\n"
         )
     monkeypatch.setattr(
         cron_health,
@@ -303,4 +306,7 @@ def test_cron_health_reads_launcher_history_from_each_job_directory(
     )
 
     assert history["update_citations"]["failures"] == 1
-    assert history["refresh_x_post_likes"]["consecutive_failures"] == 1
+    embeddings = history["refresh_paper_embeddings"]
+    assert embeddings["runs"] == 3
+    assert embeddings["failures"] == 2
+    assert embeddings["consecutive_failures"] == 2

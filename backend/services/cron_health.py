@@ -526,30 +526,33 @@ def fetch_launcher_history(
     success, looks fine without this history.
     """
 
-    if launcher_path is None:
-        merged: Dict[str, Dict[str, Any]] = {}
-        for path in _launcher_paths(get_settings()):
-            merged.update(fetch_launcher_history(launcher_path=path, now=now))
-        return merged
-    raw = _read_launcher_tail(launcher_path, MAX_LAUNCHER_HISTORY_BYTES)
-    if raw is None:
-        return {}
+    paths = (
+        _launcher_paths(get_settings()) if launcher_path is None else (launcher_path,)
+    )
     cutoff = (now or _utcnow()) - timedelta(hours=LAUNCHER_HISTORY_HOURS)
+    records: list[tuple[datetime, int, Dict[str, Any]]] = []
+    for path in paths:
+        raw = _read_launcher_tail(path, MAX_LAUNCHER_HISTORY_BYTES)
+        if raw is None:
+            continue
+        for raw_line in raw.splitlines():
+            try:
+                record = json.loads(raw_line)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if not isinstance(record, dict) or record.get("event") not in {
+                "exit",
+                "lock_skipped",
+            }:
+                continue
+            finished = _parse_log_timestamp(record.get("at"))
+            if finished is None or finished < cutoff:
+                continue
+            records.append((finished, len(records), record))
+    records.sort(key=lambda item: item[:2], reverse=True)
     history: Dict[str, Dict[str, Any]] = {}
     streak_closed: set[str] = set()
-    for raw_line in reversed(raw.splitlines()):
-        try:
-            record = json.loads(raw_line)
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            continue
-        if not isinstance(record, dict) or record.get("event") not in {
-            "exit",
-            "lock_skipped",
-        }:
-            continue
-        finished = _parse_log_timestamp(record.get("at"))
-        if finished is None or finished < cutoff:
-            continue
+    for finished, _, record in records:
         job_id = str(record.get("job") or record.get("health_job") or "")
         summary = history.setdefault(
             job_id,

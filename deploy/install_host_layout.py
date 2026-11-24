@@ -324,6 +324,8 @@ def main() -> int:
     ):
         ensure_dir(path, "pwc-cron-repair", "pwc-cron", 0o2770)
     for path in (
+        STATE_ROOT / "production" / "trending-cron-logs",
+        STATE_ROOT / "production" / "trending-cron-locks",
         STATE_ROOT / "production" / "repair-cron-logs",
         STATE_ROOT / "production" / "repair-cron-locks",
     ):
