@@ -843,6 +843,18 @@ def test_chat_provider_policy_accepts_isolated_production_openrouter(
     runtime_validation.validate_chat_provider_policy(settings)
 
 
+def test_production_chat_without_direct_openai_discovers_deepseek(settings_factory):
+    settings, _release = settings_factory("production")
+    settings.chat_gateway_url = (
+        "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
+    )
+
+    runtime_validation.validate_chat_provider_policy(settings)
+    assert [choice["id"] for choice in settings.chat_model_choices] == [
+        "deepseek-ai/DeepSeek-V4-Flash-0731"
+    ]
+
+
 def test_chat_provider_policy_accepts_one_reviewed_staging_candidate(
     settings_factory,
 ):

@@ -8,17 +8,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import TypedDict
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
-from backend.models.database import ChatSandboxPool
-from backend.services.chat_sandbox_capacity_repository import lock_capacity
-from backend.services.chat_sandbox_pool_repository import (
-    MODAL_CPU_USD_PER_CORE_SECOND,
-    MODAL_MEMORY_USD_PER_GIB_SECOND,
-    ChatSandboxPoolRepository,
-)
 from backend.services.chat_sandbox_spend_reporter import ProviderSpendReporter
 from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
 
@@ -53,71 +45,19 @@ class ChatSandboxSpendReconciler:
         *,
         session_factory: SessionFactory,
         reporter: ProviderSpendReporter,
-        pool_repository: ChatSandboxPoolRepository | None = None,
         utcnow: UtcClock | None = None,
     ) -> None:
         if reporter.settings is not settings:
             raise ValueError("Spend reporter settings must be shared")
-        if pool_repository is not None and pool_repository.settings is not settings:
-            raise ValueError("Spend pool repository settings must be shared")
         self.settings = settings
         self.session_factory = session_factory
         self.reporter = reporter
-        self.pool_repository = (
-            pool_repository
-            if pool_repository is not None
-            else ChatSandboxPoolRepository(
-                settings,
-                capacity_locker=lock_capacity,
-            )
-        )
         self.utcnow = utcnow or (lambda: datetime.now(UTC))
 
     def pool_budget_status(self) -> PoolBudgetStatus:
-        """Project the established blank-pool or enforced spend budget status."""
+        """Project the enforced sandbox spend budget status."""
 
         now = self.utcnow()
-        if not getattr(
-            self.settings,
-            "chat_sandbox_spend_enforcement_enabled",
-            False,
-        ):
-            billing_month = self.pool_repository.billing_month(now)
-            with self.session_factory() as db, db.begin():
-                rows = list(
-                    db.execute(
-                        select(ChatSandboxPool).where(
-                            ChatSandboxPool.billing_month == billing_month
-                        )
-                    ).scalars()
-                )
-                accrued = sum(
-                    (
-                        self.pool_repository.finalize_cost(row, now)[1]
-                        if row.state in {"starting", "blank_ready", "draining"}
-                        else float(row.estimated_blank_cost_usd)
-                    )
-                    for row in rows
-                )
-            reported = float(self.settings.chat_blank_pool_reported_month_to_date_usd)
-            effective = max(accrued, reported)
-            projected = (
-                effective
-                + max(0, (self._next_month(now) - now).total_seconds())
-                * self._pool_cost_per_second()
-                * self.settings.chat_blank_pool_min
-            )
-            budget = float(self.settings.chat_blank_pool_monthly_budget_usd)
-            return {
-                "billing_month": billing_month.isoformat(),
-                "accrued_usd": accrued,
-                "reported_usd": reported,
-                "effective_accrued_usd": effective,
-                "projected_usd": projected,
-                "budget_usd": budget,
-                "within_budget": projected <= budget,
-            }
-
         with self.session_factory() as db, db.begin():
             status = ChatSandboxSpendService(db, self.settings).status(now)
         return {
@@ -133,20 +73,6 @@ class ChatSandboxSpendReconciler:
             "budget_usd": status["application_cap_microusd"] / 1_000_000,
             "within_budget": status["circuit_state"] != "tripped",
         }
-
-    @staticmethod
-    def _next_month(now: datetime) -> datetime:
-        if now.month == 12:
-            return datetime(now.year + 1, 1, 1, tzinfo=UTC)
-        return datetime(now.year, now.month + 1, 1, tzinfo=UTC)
-
-    def _pool_cost_per_second(self) -> float:
-        return (
-            float(self.settings.chat_sandbox_cpu) * MODAL_CPU_USD_PER_CORE_SECOND
-            + float(self.settings.chat_sandbox_memory_mib)
-            / 1024
-            * MODAL_MEMORY_USD_PER_GIB_SECOND
-        )
 
     async def reconcile_provider(self) -> ProviderReconciliationOutcome:
         now = self.utcnow()

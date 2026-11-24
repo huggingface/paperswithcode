@@ -626,9 +626,7 @@ def test_staging_chat_latency_rollout_settings_are_preserved():
         "PWC_CHAT_BLANK_POOL_MAX",
         "PWC_CHAT_BLANK_POOL_MIN",
         "PWC_CHAT_BLANK_POOL_MIN_REMAINING_SECONDS",
-        "PWC_CHAT_BLANK_POOL_MONTHLY_BUDGET_USD",
         "PWC_CHAT_BLANK_POOL_REFILL_CONCURRENCY",
-        "PWC_CHAT_BLANK_POOL_REPORTED_MONTH_TO_DATE_USD",
         "PWC_CHAT_BLANK_POOL_ROTATE_BEFORE_SECONDS",
         "PWC_CHAT_CANCEL_GRACE_SECONDS",
         "PWC_CHAT_PERSISTENT_SANDBOX_LIFETIME_SECONDS",
@@ -644,6 +642,11 @@ def test_staging_chat_latency_rollout_settings_are_preserved():
 
     assert rollout_keys <= configure_host_env.STAGING_RUNTIME_PASSTHROUGH_KEYS
     assert configure_host_env.staging_runtime_passthrough(lines) == lines
+    retired = {
+        "PWC_CHAT_BLANK_POOL_MONTHLY_BUDGET_USD": "35",
+        "PWC_CHAT_BLANK_POOL_REPORTED_MONTH_TO_DATE_USD": "1.5",
+    }
+    assert configure_host_env.staging_runtime_passthrough(retired) == {}
 
 
 def test_environment_files_are_never_readable_while_being_written(
