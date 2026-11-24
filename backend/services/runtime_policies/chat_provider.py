@@ -78,31 +78,20 @@ def validate_chat_provider_policy(
     if settings.chat_deepseek_v4_flash_openrouter_route != expected_openrouter_route:
         raise RuntimeError("DeepSeek V4 Flash must use the reviewed OpenRouter route")
     expected_provider = settings.chat_deepseek_v4_flash_provider
-    if settings.environment == "production":
-        expected_glm_route = "zai-org/GLM-5.3-Flash:fastest"
-        if settings.chat_glm_5_3_flash_route != expected_glm_route:
-            raise RuntimeError("GLM-5.3-Flash must use Hugging Face fastest routing")
-        expected_discovery = (
-            {
-                "id": "zai-org/GLM-5.3-Flash",
-                "label": "GLM-5.3-Flash",
-                "route": expected_glm_route,
-                "provider": "huggingface",
-            },
-        )
-    else:
-        expected_discovery = (
-            {
-                "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
-                "label": "DeepSeek V4 Flash",
-                "route": (
-                    expected_huggingface_route
-                    if expected_provider == "huggingface"
-                    else expected_openrouter_route
-                ),
-                "provider": expected_provider,
-            },
-        )
+    if settings.environment == "production" and not settings.chat_openai_direct_enabled:
+        raise RuntimeError("production chat requires direct OpenAI Luna")
+    expected_discovery = (
+        {
+            "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+            "label": "DeepSeek V4 Flash",
+            "route": (
+                expected_huggingface_route
+                if expected_provider == "huggingface"
+                else expected_openrouter_route
+            ),
+            "provider": expected_provider,
+        },
+    )
     if settings.chat_openai_direct_enabled:
         if not settings.openai_api_key:
             raise RuntimeError("direct OpenAI chat requires an OpenAI API key")

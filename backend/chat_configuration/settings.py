@@ -499,8 +499,6 @@ class ChatSandboxSettings(BaseModel):
 class ChatSandboxSpendSettings(BaseModel):
     """Sandbox spend caps, reconciliation, and alert routing."""
 
-    chat_blank_pool_monthly_budget_usd: float = Field(default=35, gt=0, le=1000)
-    chat_blank_pool_reported_month_to_date_usd: float = Field(default=0, ge=0, le=10000)
     chat_sandbox_warning_microusd: int = Field(default=75_000_000, ge=1)
     chat_sandbox_spend_enforcement_enabled: bool = Field(default=False)
     chat_sandbox_application_cap_microusd: int = Field(default=100_000_000, ge=1)

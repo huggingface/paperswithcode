@@ -55,8 +55,6 @@ def _settings(**overrides) -> Settings:
         "chat_blank_pool_min_remaining_seconds": 240,
         "chat_blank_pool_rotate_before_seconds": 3600,
         "chat_blank_pool_refill_concurrency": 1,
-        "chat_blank_pool_monthly_budget_usd": 35,
-        "chat_blank_pool_reported_month_to_date_usd": 0,
         "chat_sandbox_total_live_cap": 2,
         "chat_modal_image_version": "im-current",
         "chat_worker_contract_version": "14",
@@ -442,18 +440,6 @@ def test_reconcile_terminates_expired_busy_and_terminating_leases(monkeypatch):
     assert active_row.modal_sandbox_id == "sb-active-busy"
     assert terminating_row.state == "terminated"
     assert terminating_row.modal_sandbox_id is None
-
-
-def test_reported_modal_cost_is_a_floor_for_budget_enforcement():
-    factory = _database()
-    settings = _settings(chat_blank_pool_reported_month_to_date_usd=40)
-    manager = _manager(factory, settings)
-
-    status = manager.pool_budget_status()
-
-    assert status["reported_usd"] == 40
-    assert status["effective_accrued_usd"] == 40
-    assert status["within_budget"] is False
 
 
 def test_pool_miss_evicts_oldest_idle_worker_at_total_capacity():

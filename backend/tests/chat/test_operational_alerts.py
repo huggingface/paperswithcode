@@ -368,7 +368,7 @@ def test_release_change_forces_extra_reliability_and_synthetic_checks():
 
     changed_provider = Settings(
         release_id="new-release",
-        chat_glm_5_3_flash_route="zai-org/GLM-5.3-Flash:alternate",
+        chat_deepseek_v4_flash_route="deepseek-ai/DeepSeek-V4-Flash-0731:alternate",
     )
     assert monitor.release_probe_triggers(state, changed_provider) == (True, True)
 
@@ -469,7 +469,7 @@ def test_provider_health_counts_only_content_free_aggregates():
     )
 
 
-def test_production_provider_health_scopes_the_discovered_glm_route():
+def test_provider_health_scopes_the_discovered_huggingface_route():
     class FakeSession:
         statements = []
 
@@ -485,8 +485,10 @@ def test_production_provider_health_scopes_the_discovered_glm_route():
     provider_health(db, settings, datetime(2026, 8, 27, 12, tzinfo=UTC))
 
     assert len(db.statements) == 2
-    assert all("zai-org/GLM-5.3-Flash:fastest" in sql for sql in db.statements)
-    assert all("DeepSeek-V4-Flash" not in sql for sql in db.statements)
+    assert all(
+        "deepseek-ai/DeepSeek-V4-Flash-0731:baseten" in sql for sql in db.statements
+    )
+    assert all("GLM-5.3-Flash" not in sql for sql in db.statements)
 
 
 def test_provider_health_is_empty_without_a_huggingface_model():

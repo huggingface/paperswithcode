@@ -196,13 +196,7 @@ class SandboxSessionManager:
                 and spend_reconciler.reporter is not spend_reporter
             ):
                 raise ValueError("Spend reconciler reporter must be shared")
-            if (
-                pool_repository is not None
-                and spend_reconciler.pool_repository is not pool_repository
-            ):
-                raise ValueError("Spend reconciler pool repository must be shared")
             spend_reporter = spend_reconciler.reporter
-            pool_repository = spend_reconciler.pool_repository
         self._sandbox_provider = sandbox_provider
         self._sandbox_state = state_repository
         self._sandbox_capacity = capacity_repository
@@ -380,7 +374,6 @@ class SandboxSessionManager:
                 self.settings,
                 session_factory=self.session_factory,
                 reporter=self._spend_reporter(),
-                pool_repository=self._pool_repository(),
             )
             self._sandbox_spend_reconciler = reconciler
         return reconciler

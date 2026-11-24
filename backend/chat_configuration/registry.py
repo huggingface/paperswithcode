@@ -24,6 +24,8 @@ DEEPSEEK_V4_FLASH_ID = "deepseek-ai/DeepSeek-V4-Flash-0731"
 GLM_5_3_FLASH_ID = "zai-org/GLM-5.3-Flash"
 SPONSORED_DEEPSEEK_ID = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
 
+DEFAULT_FALLBACK_MODEL_IDS = (GLM_5_3_FLASH_ID, SPONSORED_DEEPSEEK_ID)
+
 LEGACY_SELECTED_MODEL_IDS = (
     "google/gemma-4-31B-it",
     "zai-org/GLM-5.2",
@@ -124,20 +126,11 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
         settings.chat_deepseek_v4_flash_provider,
         "hf_user_billed" if deepseek_huggingface else "openrouter_funded",
     )
-    glm = _anthropic_route(
-        GLM_5_3_FLASH_ID,
-        "GLM-5.3-Flash",
-        settings.chat_glm_5_3_flash_route,
-        "huggingface",
-        "hf_user_billed",
-    )
     records: tuple[ChatModelRecord, ...]
-    if environment != "production":
-        records = (deepseek,)
-    elif settings.chat_openai_direct_enabled:
+    if environment == "production" and settings.chat_openai_direct_enabled:
         records = (_direct_luna(settings, "GPT-6 Luna"),)
     else:
-        records = (glm,)
+        records = (deepseek,)
     if environment == "production" and settings.chat_sponsored_deepseek_enabled:
         records = records + (_sponsored_deepseek(settings),)
     if environment == "staging":
@@ -202,12 +195,9 @@ def discoverable_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
 
 
 def canonical_model_id(settings: Settings, model: str) -> str:
-    """Move sessions that selected a hidden GLM or sponsored model to the default."""
+    """Move sessions that selected a retired or hidden model to the default."""
 
-    hidden_in_environment = model == SPONSORED_DEEPSEEK_ID or (
-        model == GLM_5_3_FLASH_ID and settings.environment == "production"
-    )
-    if not hidden_in_environment:
+    if model not in DEFAULT_FALLBACK_MODEL_IDS:
         return model
     records = chat_model_records(settings)
     if any(record.id == model for record in records):
