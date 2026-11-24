@@ -452,9 +452,15 @@ def _pdf(title: str) -> bytes:
         return document.tobytes()
 
 
-def test_roundup_page_cards_number_arxiv_papers_as_in_the_post():
+def test_roundup_page_cards_number_every_paper_as_in_the_post():
     papers = [
-        Paper(id=1, source="external", source_url="https://x.test", title="Ext"),
+        Paper(
+            id=1,
+            source="external",
+            source_url="https://x.test/news",
+            title="Introducing Ext",
+            tldr="Ext is a release.",
+        ),
         Paper(
             id=2,
             source="arxiv",
@@ -473,6 +479,8 @@ def test_roundup_page_cards_number_arxiv_papers_as_in_the_post():
 
     def fetch(paper):
         fetched.append(paper.id)
+        if paper.id == 1:
+            return Image.new("RGB", (1200, 630), (20, 20, 20))
         if paper.id == 3:
             raise ValueError("arXiv PDF is too large")
         return _pdf(paper.title)
@@ -481,12 +489,12 @@ def test_roundup_page_cards_number_arxiv_papers_as_in_the_post():
         papers, heading="Top", span="Published", eyebrow="Top papers", fetch_pdf=fetch
     )
 
-    assert fetched == [2, 3, 4]
-    assert len(cards) == 2
+    assert fetched == [1, 2, 3, 4]
+    assert len(cards) == 3
     assert Image.open(io.BytesIO(cards[0])).size == (1600, 2400)
 
 
-def test_roundup_page_cards_stop_at_four():
+def test_roundup_page_cards_stop_at_five():
     papers = [
         Paper(id=i, source="arxiv", arxiv_id=f"2611.0000{i}", title=f"P{i}", tldr="T.")
         for i in range(1, 7)
@@ -502,9 +510,62 @@ class _NoAuthors:
         return []
 
 
-def test_paper_page_card_needs_an_arxiv_pdf():
+def test_paper_page_card_needs_a_pdf_or_page_artwork():
     external = Paper(id=1, source="external", source_url="https://x.test", title="Ext")
-    assert service.paper_page_card(_NoAuthors(), external) is None
+
+    def missing(paper):
+        raise ValueError("no page")
+
+    assert service.paper_page_card(_NoAuthors(), external, fetch_pdf=missing) is None
+    card = service.paper_page_card(
+        _NoAuthors(),
+        external,
+        fetch_pdf=lambda p: Image.new("RGB", (1200, 630), (20, 20, 20)),
+    )
+    assert Image.open(io.BytesIO(card)).size == (1600, 2400)
+
+
+def test_paper_page_source_prefers_an_archived_pdf_then_page_artwork(monkeypatch):
+    external = Paper(
+        id=7, source="external", source_url="https://x.test/news", title="Ext"
+    )
+    monkeypatch.setattr(
+        service, "stream_external_paper_pdf", lambda *a, **k: (iter([b"%PDF-1"]), 6)
+    )
+    assert service.paper_page_source(external) == b"%PDF-1"
+
+    def not_archived(*args, **kwargs):
+        raise ValueError("Paper PDF was not found")
+
+    art = Image.new("RGB", (1200, 630))
+
+    async def artwork(url):
+        return art
+
+    monkeypatch.setattr(service, "stream_external_paper_pdf", not_archived)
+    monkeypatch.setattr(service, "fetch_page_artwork", artwork)
+    assert service.paper_page_source(external) is art
+
+    async def no_artwork(url):
+        return None
+
+    monkeypatch.setattr(service, "fetch_page_artwork", no_artwork)
+    with pytest.raises(ValueError, match="no PDF or page artwork"):
+        service.paper_page_source(external)
+
+
+def test_page_card_source_line_names_the_release_host():
+    external = Paper(id=7, source="external", source_url="https://www.x.test/news")
+    arxiv = Paper(id=8, source="arxiv", arxiv_id="2611.00008")
+    assert service.page_card_source_line(external, Image.new("RGB", (2, 2))) == (
+        "x.test  ·  release post"
+    )
+    assert service.page_card_source_line(external, b"%PDF") == (
+        "x.test  ·  page 1 of the PDF"
+    )
+    assert service.page_card_source_line(arxiv, b"%PDF") == (
+        "arxiv.org/abs/2611.00008  ·  page 1 of the PDF"
+    )
 
 
 def test_paper_page_card_renders_and_tolerates_a_bad_pdf():

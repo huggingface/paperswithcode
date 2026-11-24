@@ -154,6 +154,31 @@ def _first_page_hero(pdf: bytes, width: int, height: int) -> Image.Image:
     return image
 
 
+def _artwork_hero(
+    artwork: Image.Image, title: str, width: int, height: int
+) -> Image.Image:
+    """A release page's title above its social image, filling `width` × `height`."""
+    title_font = font("serif", round(width / 17), 500)
+    pad = round(width * 0.04)
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    lines = wrap_text(probe, title, title_font, width - 2 * pad, 3) if title else []
+    line_height = round(title_font.size * 1.2)
+    text_height = pad + len(lines) * line_height + pad if lines else 0
+    art = artwork.convert("RGB")
+    art_width = width - 2 * pad
+    art_height = round(art.height * art_width / art.width)
+    room = height - text_height - pad
+    if art_height > room:
+        art_width, art_height = round(art_width * room / art_height), room
+    art = art.resize((art_width, art_height), Image.LANCZOS)
+    image = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    for index, line in enumerate(lines):
+        draw.text((pad, pad + index * line_height), line, font=title_font, fill=P.ink)
+    image.paste(art, ((width - art_width) // 2, text_height + (room - art_height) // 2))
+    return image
+
+
 def _fit_sentences(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -170,7 +195,7 @@ def _fit_sentences(
 
 
 def render_paper_page_card(
-    pdf: bytes,
+    pdf: bytes | Image.Image,
     *,
     title: str,
     subtitle: str,
@@ -178,8 +203,12 @@ def render_paper_page_card(
     counter: str,
     source: str,
     summary: str,
+    paper_title: str = "",
 ) -> bytes:
-    """A 2:3 card that shows page one of a paper's PDF with a why-read-it line."""
+    """A 2:3 card that shows page one of a paper's PDF with a why-read-it line.
+
+    A release without a PDF passes its page's social image instead, shown
+    under `paper_title`."""
     width = PAGE_CARD_SIZE[0]
     card = frame(
         PAGE_CARD_SIZE,
@@ -226,7 +255,10 @@ def render_paper_page_card(
     sheet_top = card.top
     inner_width = width - 2 * margin - 2 * pad
     inner_height = summary_top - px(64) - sheet_top - 2 * pad
-    page = _first_page_hero(pdf, inner_width, inner_height)
+    if isinstance(pdf, Image.Image):
+        page = _artwork_hero(pdf, paper_title, inner_width, inner_height)
+    else:
+        page = _first_page_hero(pdf, inner_width, inner_height)
     if page.height > inner_height:
         page = page.resize(
             (round(page.width * inner_height / page.height), inner_height),
