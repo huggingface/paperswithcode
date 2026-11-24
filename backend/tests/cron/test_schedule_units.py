@@ -99,7 +99,7 @@ def test_every_migrated_registry_job_owns_committed_unit_pairs():
             )
             source = (UNIT_DIR / service_unit).read_text()
             match = re.search(
-                r"^ExecStart=.*/pwc-cron-throttled\s+([a-z0-9_]+)", source, re.M
+                r"^ExecStart=.*/pwc-cron(?:-throttled)?\s+([a-z0-9_]+)", source, re.M
             )
             assert match and match.group(1) == job.id
 
