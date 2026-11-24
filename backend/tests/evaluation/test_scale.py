@@ -130,3 +130,10 @@ def test_board_values_load_only_for_ambiguous_scores():
 
     validate_board_scale("0-100", evidence(92.3, "0-100"), fail)
     validate_board_scale("0-1", evidence(0.5, "0-100"), fail)
+
+
+def test_rate_scale_errors_name_the_metric_and_declared_scale():
+    with pytest.raises(ValueError, match=r"'Success Rate'.*received 'native'"):
+        validate_source_score("0-100", 86.89, evidence(86.89, "native"))
+    with pytest.raises(ValueError, match=r"86\.89 for 'Success Rate'.*'0-1'"):
+        validate_source_score("0-100", 86.89, evidence(86.89, "0-1"))
