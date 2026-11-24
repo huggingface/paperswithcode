@@ -27,7 +27,7 @@ rollback target.
       backend.sock -> /run/paperswithcode/<environment>-<slot>.sock
 
 /etc/paperswithcode/{production,staging}.env
-/etc/paperswithcode/{production-cron,trending-cron}.env
+/etc/paperswithcode/{production-cron,trending-cron,repair-cron}.env
 /var/lib/paperswithcode/{shared,production,staging}
 
 /srv/paperswithcode/mcp/
@@ -866,7 +866,10 @@ Host systemd timers generated from `deploy/cron_schedules.py` (units in
 invokes `/usr/local/sbin/pwc-cron <registered-job>`; the matching
 `.github/workflows/cron-*.yml` workflows are manual-dispatch only. See
 [operations](operations.md#host-timer-scheduling). The launcher runs as
-`pwc-cron` (trending jobs as `pwc-cron-trending` with `trending-cron.env`),
+`pwc-cron` (trending jobs as `pwc-cron-trending` with `trending-cron.env`;
+source-repairable jobs in `CRON_REPAIR_JOBS` as `pwc-cron-repair`, which adds
+`repair-cron.env` and connects as the taxonomy-safe `pwc_cron_repair` database
+role, logging to `repair-cron-logs`),
 loads production plus CRON-only configuration, resolves `production/current`,
 records its release ID, and uses absolute lock/log directories.
 

@@ -46,6 +46,25 @@ RESTRICTED_TRENDING_PASSTHROUGH_KEYS = frozenset(
         "TZ",
     }
 )
+CRON_REPAIR_JOBS = frozenset(
+    {
+        "link_google_scholar_profiles",
+        "refresh_paper_embeddings",
+        "refresh_x_post_likes",
+        "update_hot_github_trending",
+    }
+)
+CRON_REPAIR_DB_USER = "pwc_cron_repair"
+CRON_REPAIR_STATE_DIR = Path("/var/lib/paperswithcode/production/repair-cron")
+CRON_REPAIR_LOG_DIR = Path("/var/lib/paperswithcode/production/repair-cron-logs")
+CRON_REPAIR_LOCK_DIR = Path("/var/lib/paperswithcode/production/repair-cron-locks")
+CRON_REPAIR_WITHHELD_KEYS = frozenset(
+    {
+        "PWC_CRON_REPAIR_DB_PASSWORD",
+        "PWC_POSTGRES_BACKUP_DB_PASSWORD",
+        "PWC_POSTGRES_BACKUP_DB_USER",
+    }
+)
 RESTRICTED_TRENDING_ENV_KEYS = RESTRICTED_TRENDING_PASSTHROUGH_KEYS | {
     "PWC_CRON_LOCK_DIR",
     "PWC_CRON_LOG_DIR",
@@ -123,6 +142,28 @@ def restricted_trending_environment(
             "PWC_ENVIRONMENT": "production",
             "PWC_RELEASE_ID": release_id,
             "PYTHONPATH": str(CURRENT / ".github" / "workflows"),
+        }
+    )
+    return env
+
+
+def cron_repair_environment(source: dict[str, str], job: str) -> dict[str, str]:
+    """Swap the application database login for the taxonomy-safe repair role."""
+    password = source.get("PWC_CRON_REPAIR_DB_PASSWORD", "")
+    if not password:
+        raise RuntimeError("PWC_CRON_REPAIR_DB_PASSWORD is required")
+    env = {
+        key: value
+        for key, value in general_environment(source, job).items()
+        if key not in CRON_REPAIR_WITHHELD_KEYS
+    }
+    env.update(
+        {
+            "HF_HOME": str(CRON_REPAIR_STATE_DIR / "hf-cache"),
+            "PWC_CRON_LOCK_DIR": str(CRON_REPAIR_LOCK_DIR),
+            "PWC_CRON_LOG_DIR": str(CRON_REPAIR_LOG_DIR),
+            "PWC_DB_PASSWORD": password,
+            "PWC_DB_USER": CRON_REPAIR_DB_USER,
         }
     )
     return env
@@ -979,9 +1020,12 @@ def main() -> int:
     if any("\n" in arg or "\x00" in arg for arg in extra):
         print("invalid argument", file=sys.stderr)
         return 2
-    log_dir = (
-        RESTRICTED_TRENDING_LOG_DIR if job in RESTRICTED_TRENDING_JOBS else LOG_DIR
-    )
+    if job in RESTRICTED_TRENDING_JOBS:
+        log_dir = RESTRICTED_TRENDING_LOG_DIR
+    elif job in CRON_REPAIR_JOBS:
+        log_dir = CRON_REPAIR_LOG_DIR
+    else:
+        log_dir = LOG_DIR
     log_dir.mkdir(parents=True, exist_ok=True)
     record = {
         "at": datetime.now(timezone.utc).isoformat(),
@@ -1007,6 +1051,19 @@ def main() -> int:
         except RuntimeError as exc:
             print(str(exc), file=sys.stderr)
             return 2
+    elif job in CRON_REPAIR_JOBS:
+        if pwd.getpwuid(os.getuid()).pw_name != "pwc-cron-repair":
+            print("source-repairable job requires pwc-cron-repair", file=sys.stderr)
+            return 2
+        try:
+            env = cron_repair_environment(dict(os.environ), job)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        env["PWC_ENVIRONMENT"] = "production"
+        env["PWC_RELEASE_ID"] = manifest["release_id"]
+        env["PYTHONPATH"] = str(CURRENT / ".github" / "workflows")
+        apply_release_features(env, manifest)
     else:
         env = general_environment(dict(os.environ), job)
         env["PWC_ENVIRONMENT"] = "production"

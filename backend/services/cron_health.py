@@ -420,6 +420,19 @@ def _persistent_execution_paths(settings: Any) -> tuple[Path, Path] | None:
     )
 
 
+def _launcher_paths(settings: Any) -> tuple[Path, ...]:
+    if settings.environment not in {"production", "staging"}:
+        return ()
+    directories = [Path(settings.cron_log_dir)]
+    if settings.environment == "production":
+        directories += [
+            Path(job.log_directory) for job in list_cron_jobs() if job.log_directory
+        ]
+    return tuple(
+        dict.fromkeys(directory / "launcher.jsonl" for directory in directories)
+    )
+
+
 def fetch_persistent_execution(
     job: CronJobDefinition,
     log_status: Dict[str, Any],
@@ -430,10 +443,13 @@ def fetch_persistent_execution(
     """Pair an exact-release launcher start with a terminal file-log result."""
 
     if launcher_path is None or manifest_path is None:
-        paths = _persistent_execution_paths(get_settings())
+        settings = get_settings()
+        paths = _persistent_execution_paths(settings)
         if paths is None:
             return None
         launcher_path, manifest_path = paths
+        if job.log_directory and settings.environment == "production":
+            launcher_path = Path(job.log_directory) / "launcher.jsonl"
 
     try:
         manifest_raw = manifest_path.read_bytes()
@@ -511,10 +527,10 @@ def fetch_launcher_history(
     """
 
     if launcher_path is None:
-        paths = _persistent_execution_paths(get_settings())
-        if paths is None:
-            return {}
-        launcher_path = paths[0]
+        merged: Dict[str, Dict[str, Any]] = {}
+        for path in _launcher_paths(get_settings()):
+            merged.update(fetch_launcher_history(launcher_path=path, now=now))
+        return merged
     raw = _read_launcher_tail(launcher_path, MAX_LAUNCHER_HISTORY_BYTES)
     if raw is None:
         return {}

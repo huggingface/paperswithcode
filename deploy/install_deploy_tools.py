@@ -87,6 +87,10 @@ def cron_wrapper() -> str:
     trending_environment = (
         "--property=EnvironmentFile=/etc/paperswithcode/trending-cron.env "
     )
+    repair_environment = (
+        f"{production_environment}"
+        "--property=EnvironmentFile=/etc/paperswithcode/repair-cron.env "
+    )
     launcher = (
         '/usr/bin/python3 /usr/local/lib/paperswithcode-deploy/cron_launcher.py "$@"\n'
     )
@@ -101,6 +105,12 @@ def cron_wrapper() -> str:
         "  calculate_trending_scores|calculate_paper_trending_scores)\n"
         f"    exec {common}--uid=pwc-cron-trending --gid=pwc-cron-trending "
         f"{trending_environment}"
+        f"{launcher}"
+        "    ;;\n"
+        "  link_google_scholar_profiles|refresh_paper_embeddings|"
+        "refresh_x_post_likes|update_hot_github_trending)\n"
+        f"    exec {common}--uid=pwc-cron-repair --gid=pwc-cron-repair "
+        f"{repair_environment}"
         f"{launcher}"
         "    ;;\n"
         "esac\n"

@@ -40,7 +40,12 @@ from backend.services.autonomous_source_repair import (
     ReviewDecision,
 )
 from backend.services.cron_registry import CronJobDefinition, list_cron_jobs
-from deploy.cron_launcher import COMMANDS, Job
+from deploy.cron_launcher import (
+    COMMANDS,
+    CRON_REPAIR_JOBS,
+    RESTRICTED_TRENDING_JOBS,
+    Job,
+)
 
 
 _SAFE_RETRIES = frozenset(
@@ -70,12 +75,7 @@ _SAFE_RETRIES = frozenset(
     }
 )
 
-_SAFE_SOURCE_REPAIRS = frozenset(
-    {
-        "calculate_paper_trending_scores",
-        "calculate_trending_scores",
-    }
-)
+_SAFE_SOURCE_REPAIRS = RESTRICTED_TRENDING_JOBS | CRON_REPAIR_JOBS
 
 _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     "paper_markdown_backfill": (

@@ -159,6 +159,20 @@ END $$;
 """
 
 
+CRON_REPAIR_ROLE_MIGRATION = (
+    Path(__file__).resolve().parents[1]
+    / "backend/database/migrations/add_cron_repair_role.sql"
+)
+
+
+def cron_repair_role_sql(*, password: str) -> str:
+    """Return the taxonomy-safe repair role grants followed by its password."""
+    return (
+        CRON_REPAIR_ROLE_MIGRATION.read_text(encoding="utf-8")
+        + f"ALTER ROLE pwc_cron_repair PASSWORD {sql_literal(password)};\n"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -176,6 +190,11 @@ def main() -> int:
         type=Path,
         default=Path("/etc/paperswithcode/trending-cron.env"),
     )
+    parser.add_argument(
+        "--repair-env",
+        type=Path,
+        default=Path("/etc/paperswithcode/repair-cron.env"),
+    )
     parser.add_argument("--roles-only", action="store_true")
     args = parser.parse_args()
     if os.geteuid() != 0:
@@ -183,6 +202,7 @@ def main() -> int:
     staging = read_env(args.staging_env)
     cron = read_env(args.cron_env)
     trending = read_env(args.trending_env)
+    repair = read_env(args.repair_env)
     database = staging["PWC_DB_NAME"]
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", database):
         parser.error("invalid database name")
@@ -208,15 +228,19 @@ GRANT pg_read_all_data TO pwc_backup;
         password=trending["PWC_TRENDING_DB_PASSWORD"],
     )
     psql(database, role_sql)
+    psql(
+        database,
+        cron_repair_role_sql(password=repair["PWC_CRON_REPAIR_DB_PASSWORD"]),
+    )
     if args.roles_only:
-        print("configured staging, backup, and trending PostgreSQL roles")
+        print("configured staging, backup, trending, and repair PostgreSQL roles")
         return 0
     migration = (
         Path(__file__).resolve().parents[1]
         / "backend/database/migrations/consolidate_staging_schema.sql"
     )
     psql(database, migration.read_text(encoding="utf-8"))
-    print("configured staging, backup, and trending PostgreSQL roles")
+    print("configured staging, backup, trending, and repair PostgreSQL roles")
     return 0
 
 
