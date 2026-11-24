@@ -2473,7 +2473,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         critical=False,
         healthy_no_work_allowed=True,
         db_freshness_query="""
-            SELECT count(*) AS candidates,
+            SELECT greatest(max(s2_checked_at), max(serpapi_checked_at))
+                       AS last_write,
+                   count(*) AS candidates,
                    count(*) FILTER (WHERE serpapi_evidence IS NOT NULL)
                      AS profiles_read,
                    (SELECT count(*) FROM author_google_scholar_profiles)
@@ -2661,7 +2663,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-backfill-research-topics.timer",
         systemd_service="pwc-cron-backfill-research-topics.service",
         systemd_extra_units=(),
-        output_evaluator="generic",
+        output_evaluator="research_topics",
         display_name="Backfill Research Topics",
         category="systemd",
         schedule="every minute (systemd)",
@@ -2676,7 +2678,21 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=60,
         critical=False,
         healthy_no_work_allowed=True,
-        db_freshness_query=None,
+        db_freshness_query="""
+            SELECT greatest(max(backfill_finished_at), max(backfill_claimed_at))
+                       AS last_write,
+                   (SELECT extract(epoch FROM now() - min(t.created_at)) / 60
+                    FROM research_topics t
+                    WHERE t.backfill_status IN ('pending', 'running')
+                      AND t.id IN (SELECT topic_id FROM research_topic_follows))
+                       AS oldest_pending_backfill_minutes,
+                   count(*) FILTER (
+                     WHERE backfill_status = 'failed'
+                       AND id IN (SELECT topic_id FROM research_topic_follows)
+                   ) AS failed_backfills
+            FROM research_topics
+        """,
+        db_freshness_reports_writes=False,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
@@ -2702,7 +2718,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=1560,
         critical=False,
         healthy_no_work_allowed=True,
-        db_freshness_query=None,
+        db_freshness_query="""
+            SELECT max(created_at) AS last_write FROM paper_abstract_mentions
+        """,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(

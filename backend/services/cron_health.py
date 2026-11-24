@@ -716,6 +716,8 @@ def _sanitized_job_error(value: object, job_id: str) -> str:
         return f"{job_id} upstream provider rate limiting"
     if "endpoint" in lowered:
         return f"{job_id} endpoint configuration or request failure{variable}"
+    if "not readable by the backend" in lowered:
+        return f"{job_id} log directory is not readable by the backend"
     return f"{job_id} latest run failed"
 
 
@@ -2964,7 +2966,18 @@ def build_cron_dashboard(
     def get_recent_log_status(job: CronJobDefinition) -> Dict[str, Any]:
         max_days = max(0, min(14, job.stale_after_minutes // (24 * 60) + 1))
         log_directory = Path(job.log_directory) if job.log_directory else None
-        latest_status = get_cron_job_status(job.log_name, today, logs_dir=log_directory)
+        try:
+            latest_status = get_cron_job_status(
+                job.log_name, today, logs_dir=log_directory
+            )
+        except PermissionError:
+            return {
+                "job_name": job.log_name,
+                "exists": False,
+                "status": "failed",
+                "error": "log directory is not readable by the backend",
+                "work_metrics": {},
+            }
         if latest_status.get("exists") or max_days == 0:
             return latest_status
 
@@ -3037,7 +3050,11 @@ def build_cron_dashboard(
     ]
 
     what_to_check_next = next(
-        (job["diagnostics"] for job in jobs if job["diagnostics"]),
+        (
+            job["diagnostics"]
+            for job in sorted(jobs, key=lambda job: -_OUTPUT_RANK.get(job["status"], 0))
+            if job["diagnostics"]
+        ),
         "All monitored jobs look healthy",
     )
 
