@@ -473,7 +473,7 @@ def _v2_session() -> Session:
 
 def test_parsebench_2_reviewed_map_is_well_formed():
     board = pb.PARSEBENCH_2
-    assert len(board.identities) == 41
+    assert len(board.identities) == 42
     assert not set(board.identities) & board.excluded
     assert set(board.hf_model_ids) <= set(board.identities)
     for label, identity in board.identities.items():

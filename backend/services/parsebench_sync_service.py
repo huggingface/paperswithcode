@@ -192,6 +192,7 @@ _INFINITY_PARSER2 = arxiv("2607.07836")
 _GEMMA_4 = arxiv("2607.02770")
 _DEEPSEEK_V4_1_FLASH = arxiv("2609.19969")
 _LLAMAPARSE = arxiv("2604.08538", is_open=False)
+_OCRIA_1 = arxiv("2611.00092")
 
 _GPT_6_1_SOL = external(
     "https://openai.com/index/introducing-gpt-6-1-sol/",
@@ -306,6 +307,7 @@ _HY4 = external(
 )
 
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "OCRia-1": _OCRIA_1,
     "Tencent Hy4 (Thinking High)": _HY4,
     "HPD-Parsing": arxiv("2607.18839"),
     "HunyuanOCR 1.5": arxiv("2607.04884"),
@@ -582,6 +584,7 @@ _MUSE_EMBER = external(
 )
 
 PARSEBENCH_2_MODELS: dict[str, tuple[PaperIdentity, str | None]] = {
+    "OCRia-1": (_OCRIA_1, "llamaindex/OCRia-1"),
     "Muse Ember 1.0 (low)": (_MUSE_EMBER, None),
     "LlamaParse (Agentic Plus)": (_PARSEBENCH_2, None),
     "LlamaParse (Agentic)": (_PARSEBENCH_2, None),
