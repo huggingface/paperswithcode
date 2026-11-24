@@ -186,12 +186,18 @@ def paper_page_source(paper: Paper) -> PageSource:
     return artwork
 
 
-def page_card_source_line(paper: Paper, page: PageSource) -> str:
+def page_card_source_line(paper: Paper, page: PageSource | None) -> str:
     if paper.source == "arxiv" and paper.arxiv_id:
-        return f"arxiv.org/abs/{paper.arxiv_id}  ·  page 1 of the PDF"
-    host = urlsplit(paper.source_url or "").netloc.removeprefix("www.")
-    detail = "page 1 of the PDF" if isinstance(page, bytes) else "release post"
-    return f"{host}  ·  {detail}" if host else detail
+        where = f"arxiv.org/abs/{paper.arxiv_id}"
+    else:
+        where = urlsplit(paper.source_url or "").netloc.removeprefix("www.")
+    if page is None:
+        return where
+    if isinstance(page, bytes):
+        detail = "page 1 of the PDF"
+    else:
+        detail = "release post"
+    return f"{where}  ·  {detail}" if where else detail
 
 
 @dataclass
@@ -1069,13 +1075,13 @@ def roundup_page_cards(
 ) -> list[bytes]:
     """Page-one cards for the roundup's papers, numbered as in the post.
 
-    A release without a PDF shows its page's social image; a paper with
-    neither is left out."""
+    A release without a PDF shows its page's social image; a paper whose
+    page cannot be fetched or drawn gets a card with its title alone."""
     cards = []
     for rank, paper in enumerate(papers, 1):
-        try:
-            page = fetch_pdf(paper)
-            card = render_paper_page_card(
+
+        def render(page: PageSource | None) -> bytes:
+            return render_paper_page_card(
                 page,
                 title=heading,
                 subtitle=span,
@@ -1085,8 +1091,11 @@ def roundup_page_cards(
                 summary=paper.tldr or paper.abstract or "",
                 paper_title=paper.title,
             )
+
+        try:
+            card = render(fetch_pdf(paper))
         except CARD_ERRORS:
-            continue
+            card = render(None)
         cards.append(card)
         if len(cards) == ROUNDUP_PAGE_CARDS:
             break

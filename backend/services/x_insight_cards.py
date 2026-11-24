@@ -182,6 +182,21 @@ def _artwork_hero(
     return image
 
 
+def _title_hero(title: str, width: int, height: int) -> Image.Image:
+    """A paper's title alone, centred on a `width` × `height` sheet."""
+    title_font = font("serif", round(width / 12), 500)
+    pad = round(width * 0.06)
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    lines = wrap_text(probe, title, title_font, width - 2 * pad, 4)
+    line_height = round(title_font.size * 1.2)
+    top = max(pad, (height - len(lines) * line_height) // 2)
+    image = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(image)
+    for index, line in enumerate(lines):
+        draw.text((pad, top + index * line_height), line, font=title_font, fill=P.ink)
+    return image
+
+
 def _fit_sentences(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -198,7 +213,7 @@ def _fit_sentences(
 
 
 def render_paper_page_card(
-    pdf: bytes | Image.Image,
+    pdf: bytes | Image.Image | None,
     *,
     title: str,
     subtitle: str,
@@ -211,7 +226,7 @@ def render_paper_page_card(
     """A 2:3 card that shows page one of a paper's PDF with a why-read-it line.
 
     A release without a PDF passes its page's social image instead, shown
-    under `paper_title`."""
+    under `paper_title`; with neither, the sheet shows `paper_title` alone."""
     width = PAGE_CARD_SIZE[0]
     card = frame(
         PAGE_CARD_SIZE,
@@ -258,7 +273,9 @@ def render_paper_page_card(
     sheet_top = card.top
     inner_width = width - 2 * margin - 2 * pad
     inner_height = summary_top - px(64) - sheet_top - 2 * pad
-    if isinstance(pdf, Image.Image):
+    if pdf is None:
+        page = _title_hero(paper_title, inner_width, inner_height)
+    elif isinstance(pdf, Image.Image):
         page = _artwork_hero(pdf, paper_title, inner_width, inner_height)
     else:
         page = _first_page_hero(pdf, inner_width, inner_height)

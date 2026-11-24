@@ -490,7 +490,7 @@ def test_roundup_page_cards_number_every_paper_as_in_the_post():
     )
 
     assert fetched == [1, 2, 3, 4]
-    assert len(cards) == 3
+    assert len(cards) == 4
     assert Image.open(io.BytesIO(cards[0])).size == (1600, 2400)
 
 
@@ -585,24 +585,34 @@ def test_page_hero_stops_at_a_split_introduction_heading():
     assert hero.height > 300
 
 
-def test_roundup_page_cards_skip_a_pdf_with_no_pages(monkeypatch):
+def test_roundup_page_cards_fall_back_to_a_title_card_for_a_pdf_with_no_pages(
+    monkeypatch,
+):
     empty = fitz.open
     monkeypatch.setattr(cards_module.fitz, "open", lambda **kwargs: empty())
     paper = Paper(id=1, source="arxiv", arxiv_id="2611.00001", title="P", tldr="T.")
     cards = service.roundup_page_cards(
         [paper], heading="Top", span="", eyebrow="", fetch_pdf=lambda p: b"%PDF-"
     )
-    assert cards == []
+    assert len(cards) == 1
     with pytest.raises(ValueError, match="no pages"):
         _first_page_hero(b"%PDF-", 100, 100)
 
 
-def test_roundup_page_cards_skip_a_malformed_pdf():
+def test_roundup_page_cards_fall_back_to_a_title_card_for_a_malformed_pdf():
     paper = Paper(id=1, source="arxiv", arxiv_id="2611.00001", title="P", tldr="T.")
     cards = service.roundup_page_cards(
         [paper], heading="Top", span="", eyebrow="", fetch_pdf=lambda p: b"not a pdf"
     )
-    assert cards == []
+    assert len(cards) == 1
+    assert Image.open(io.BytesIO(cards[0])).size == (1600, 2400)
+
+
+def test_page_card_source_line_without_a_page_names_only_the_source():
+    external = Paper(id=7, source="external", source_url="https://www.x.test/news")
+    arxiv = Paper(id=8, source="arxiv", arxiv_id="2611.00008")
+    assert service.page_card_source_line(external, None) == "x.test"
+    assert service.page_card_source_line(arxiv, None) == "arxiv.org/abs/2611.00008"
 
 
 def test_artwork_hero_shows_transparent_artwork_on_white():
