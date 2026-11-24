@@ -1,3 +1,5 @@
+import type { Paper } from "./papers.types";
+
 export interface CatalogMutationEvent {
   actor_hf_subject?: string;
   editing_suspended?: boolean;
@@ -261,6 +263,25 @@ export interface TaskPage {
   children: Task[];
   benchmarks: Dataset[];
   subtask_benchmarks: TaskSubtaskBenchmarks[];
+}
+
+export type ReadingPathSource = "curated" | "automatic";
+
+export interface ReadingPathStep {
+  kind: "overview" | "foundations" | "recent";
+  title: string;
+  description: string;
+  source: ReadingPathSource;
+  papers: { paper: Paper; note: string | null }[];
+}
+
+/** "Start here" path returned by `GET /tasks/{id}/reading-path`; `steps` is
+ *  empty when the task has no curated or automatic path. */
+export interface TaskReadingPath {
+  task_id: string;
+  task_slug: string | null;
+  source: ReadingPathSource;
+  steps: ReadingPathStep[];
 }
 
 export interface TrendingTasksResponse {

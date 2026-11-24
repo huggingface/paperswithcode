@@ -118,6 +118,11 @@ export const catalogQueries = {
     queryFn: when(slug, (taskSlug) => catalogApi.taskPage(taskSlug, params)),
     staleTime: TEN_MINUTES,
   }),
+  taskReadingPath: (idOrSlug: string | undefined) => queryOptions({
+    queryKey: ["task-reading-path", idOrSlug],
+    queryFn: when(idOrSlug, (id) => catalogApi.taskReadingPath(id)),
+    staleTime: TEN_MINUTES,
+  }),
   taskBenchmarkTrends: (
     idOrSlug: string | undefined,
     params: Params<typeof catalogApi.trendingBenchmarks, 1>,

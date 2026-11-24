@@ -218,6 +218,39 @@ class TaskSisterTask(Base):
         )
 
 
+class TaskReadingPathPaper(Base):
+    """A hand-curated paper in a task's "Start here" reading path.
+
+    ``step`` is ``overview``, ``foundations`` or ``recent``; papers within a
+    step are shown in ascending ``position``. Tasks without rows fall back to
+    an automatic path computed from citations, dates and trending scores.
+    """
+
+    __tablename__ = "task_reading_path_papers"
+
+    task_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tasks.id", ondelete="CASCADE"), primary_key=True
+    )
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    step: Mapped[str] = mapped_column(String(16), nullable=False)
+    position: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "step IN ('overview', 'foundations', 'recent')",
+            name="task_reading_path_papers_step",
+        ),
+    )
+
+
 class TaskRecommendedFramework(Base):
     """Ordered repositories recommended as starting points for a task."""
 

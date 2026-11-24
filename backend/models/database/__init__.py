@@ -187,6 +187,7 @@ from backend.models.database.taxonomy import (
     Task,
     Method,
     TaskSisterTask,
+    TaskReadingPathPaper,
     TaskRecommendedFramework,
 )
 
@@ -348,6 +349,7 @@ __all__ = [
     "Task",
     "Method",
     "TaskSisterTask",
+    "TaskReadingPathPaper",
     "TaskRecommendedFramework",
 ]
 
