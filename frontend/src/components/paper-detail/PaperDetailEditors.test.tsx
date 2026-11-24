@@ -13,6 +13,7 @@ vi.mock("./EditEvaluationsDialog", () => ({ EditEvaluationsDialog: () => <div>ev
 vi.mock("./EditSourceUrlDialog", () => ({ EditSourceUrlDialog: () => <div>source_url editor</div> }));
 vi.mock("./EditHfArtifactsDialog", () => ({ EditHfArtifactsDialog: () => <div>hf_artifacts editor</div> }));
 vi.mock("./EditXThreadsDialog", () => ({ EditXThreadsDialog: () => <div>x_threads editor</div> }));
+vi.mock("./EditDocumentTypeDialog", () => ({ EditDocumentTypeDialog: () => <div>document_type editor</div> }));
 vi.mock("./EditOrganizationsDialog", () => ({ EditOrganizationsDialog: () => <div>organizations editor</div> }));
 
 const paper: Paper = {
@@ -40,6 +41,7 @@ describe("PaperDetailEditors", () => {
     "hf_artifacts",
     "x_threads",
     "organizations",
+    "document_type",
   ] satisfies PaperEditSection[])("renders the registered %s editor", (activeEditor) => {
     render(
       <PaperDetailEditors

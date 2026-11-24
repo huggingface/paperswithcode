@@ -335,6 +335,7 @@ def test_representative_excluded_boundaries_remain_admin_only():
         ("POST", "/api/v1/papers/update-citations"): "require_admin",
         ("POST", "/api/v1/papers/external"): "require_admin",
         ("POST", "/api/v1/papers/external/from-url"): "require_admin",
+        ("PUT", "/api/v1/papers/{paper_id}/document-type"): "require_admin",
     }
     for key, dependency in expected.items():
         assert dependency in routes[key]

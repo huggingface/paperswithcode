@@ -19,9 +19,6 @@ SEARCH_DESCRIPTION_CHARS = 175
 SOCIAL_DESCRIPTION_CHARS = 280
 BENCHMARK_TITLE_NAME_CHARS = 40
 BENCHMARK_TITLE_CHARS = 75
-DOCUMENT_TYPE_OVERRIDES = {
-    "2607.24653": "Technical Report",
-}
 
 
 @dataclass(frozen=True)
@@ -156,13 +153,9 @@ def _search_title(paper: Paper, title: str, document_type: Optional[str]) -> str
         benchmark_title = _benchmark_title(title, paper.evaluated_benchmarks or ())
         if benchmark_title:
             return f"{benchmark_title} | Papers with Code"
+    if document_type:
+        title = f"{title.split(':', 1)[0].strip()} {document_type}"
     if paper.source == "arxiv" and paper.arxiv_id:
-        if document_type:
-            concise_title = title.split(":", 1)[0].strip()
-            return (
-                f"{concise_title} {document_type} "
-                f"(arXiv:{paper.arxiv_id}) | Papers with Code"
-            )
         return f"{title} (arXiv:{paper.arxiv_id}) | Papers with Code"
     return f"{title} | Papers with Code"
 
@@ -170,7 +163,7 @@ def _search_title(paper: Paper, title: str, document_type: Optional[str]) -> str
 def build_paper_seo_document(paper: Paper, route_identifier: str) -> PaperSeoDocument:
     """Build the stable initial-document projection from the canonical API model."""
     title = latex_to_plain_text(_plain(paper.title)) or "Paper"
-    document_type = DOCUMENT_TYPE_OVERRIDES.get(route_identifier)
+    document_type = _plain(paper.document_type) or None
     description_source = _description_source(paper)
     return PaperSeoDocument(
         route_identifier=route_identifier,

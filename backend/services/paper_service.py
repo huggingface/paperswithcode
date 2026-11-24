@@ -362,6 +362,7 @@ class PaperService:
             "evaluated_benchmarks": relations.evaluated_benchmarks.get(db_paper.id),
             "abstract_mentions": relations.abstract_mentions.get(db_paper.id),
             "num_pages": db_paper.num_pages,
+            "document_type": db_paper.document_type,
             "hf_models": db_paper.hf_models or [],
             "hf_datasets": db_paper.hf_datasets or [],
             "hf_spaces": db_paper.hf_spaces or [],

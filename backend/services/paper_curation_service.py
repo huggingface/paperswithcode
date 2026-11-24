@@ -61,6 +61,7 @@ class PaperCurationService:
         "hf_artifacts",
         "source_url",
         "x_threads",
+        "document_type",
     }
 
     def __init__(self, db: Session):
@@ -201,6 +202,8 @@ class PaperCurationService:
             }
         elif section == "source_url":
             value = {"source": paper.source, "source_url": paper.source_url}
+        elif section == "document_type":
+            value = paper.document_type
         elif section == "x_threads":
             value = [
                 {field: getattr(row, field) for field in X_THREAD_FIELDS}
@@ -354,6 +357,9 @@ class PaperCurationService:
             "x_threads": lambda: self.paper_associations.update_x_threads(
                 paper_id, payload["x_threads"], commit=False
             ),
+            "document_type": lambda: self._set_document_type(
+                paper_id, payload["document_type"]
+            ),
         }
         CatalogMutationService(self.db).mutate(
             actor=actor,
@@ -436,7 +442,7 @@ class PaperCurationService:
                 key: (value or {}).get(key, [])
                 for key in ("hf_models", "hf_datasets", "hf_spaces")
             }
-        elif section == "x_threads":
+        elif section in {"x_threads", "document_type"}:
             payload = {}
         else:
             payload = {"source_url": (value or {}).get("source_url")}
@@ -476,6 +482,7 @@ class PaperCurationService:
                     for row in value or []
                 ],
             ),
+            "document_type": lambda: self._set_document_type(paper_id, value),
         }
         callbacks[section]()
         if section in {"tasks", "organizations"}:
@@ -570,6 +577,13 @@ class PaperCurationService:
             raise CatalogNotFoundError(f"Paper with ID {paper_id} not found")
         paper.source = value.get("source")
         paper.source_url = value.get("source_url")
+        self.db.flush()
+
+    def _set_document_type(self, paper_id: int, document_type: str | None) -> None:
+        paper = self.db.get(DBPaper, paper_id)
+        if paper is None:
+            raise CatalogNotFoundError(f"Paper with ID {paper_id} not found")
+        paper.document_type = document_type
         self.db.flush()
 
     def _restore_method_metadata(self, paper_id: int, value: dict) -> None:

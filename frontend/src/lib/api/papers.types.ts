@@ -150,6 +150,8 @@ export interface Paper {
   evaluated_benchmarks?: string[] | null;
   page_title?: string | null;
   num_pages?: number | null;
+  /** Reader-facing type such as "Technical Report"; null for an ordinary paper. */
+  document_type?: string | null;
   authors: string[];
   /** Parallel to `authors`. When present, includes hf_username so the frontend
    *  can link names to the matching huggingface.co profile. */

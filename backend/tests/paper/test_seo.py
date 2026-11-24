@@ -68,7 +68,9 @@ def _paper(**overrides) -> Paper:
 
 
 def test_initial_document_keeps_bibliography_and_resources_in_hidden_source():
-    document = build_paper_seo_document(_paper(), "2607.24653")
+    document = build_paper_seo_document(
+        _paper(document_type="Technical Report"), "2607.24653"
+    )
     rendered = render_initial_paper_document(document)
 
     assert '<main hidden class="initial-paper"' in rendered
@@ -118,12 +120,44 @@ def test_highwire_and_json_ld_are_factual_and_parseable():
 
 
 def test_search_description_prefers_tldr_and_title_has_arxiv_id():
-    document = build_paper_seo_document(_paper(), "2607.24653")
+    document = build_paper_seo_document(
+        _paper(document_type="Technical Report"), "2607.24653"
+    )
     assert document.description == "The technical report introduces Kimi K3."
     assert (
         document.search_title
         == "Kimi K3 Technical Report (arXiv:2607.24653) | Papers with Code"
     )
+
+
+def test_document_type_comes_from_the_paper_not_the_route():
+    untyped = build_paper_seo_document(_paper(), "2607.24653")
+    assert untyped.document_type is None
+    assert untyped.search_title == (
+        "Kimi K3: Open Frontier Intelligence (arXiv:2607.24653) | Papers with Code"
+    )
+    assert "Paper · arXiv:2607.24653" in render_initial_paper_document(untyped)
+
+    typed = build_paper_seo_document(
+        _paper(id="7", arxiv_id="2611.00001", document_type="  System   Card "),
+        "2611.00001",
+    )
+    assert typed.document_type == "System Card"
+    assert typed.search_title.startswith("Kimi K3 System Card (arXiv:2611.00001)")
+
+
+def test_external_paper_keeps_its_document_type_in_the_search_title():
+    document = build_paper_seo_document(
+        _paper(
+            id="124110",
+            arxiv_id=None,
+            source="external",
+            document_type="Technical Report",
+            evaluated_benchmarks=["GPQA Diamond"],
+        ),
+        "124110",
+    )
+    assert document.search_title == "Kimi K3 Technical Report | Papers with Code"
 
 
 def test_papers_with_results_get_a_benchmark_title():
@@ -172,7 +206,8 @@ def test_benchmark_title_lists_only_the_newest_benchmark_version():
 
 def test_benchmark_title_keeps_curated_type_and_skips_long_names():
     with_type = build_paper_seo_document(
-        _paper(evaluated_benchmarks=["GPQA Diamond"]), "2607.24653"
+        _paper(document_type="Technical Report", evaluated_benchmarks=["GPQA Diamond"]),
+        "2607.24653",
     )
     assert with_type.search_title.startswith("Kimi K3 Technical Report (arXiv:")
 
