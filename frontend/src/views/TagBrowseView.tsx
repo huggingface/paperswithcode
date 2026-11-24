@@ -10,6 +10,7 @@ import { AstraRoboticsFeature } from "@/components/AstraRoboticsFeature";
 import BenchmarkTrendSparkline from "@/components/BenchmarkTrendSparkline";
 import { groupBenchmarkVariants, variantLabel } from "@/lib/benchmarkVariants";
 import MarkdownText from "@/components/MarkdownText";
+import TaskReadingPath from "@/components/TaskReadingPath";
 import type {
   Area,
   Dataset,
@@ -707,6 +708,8 @@ const TagBrowseView: React.FC = () => {
         </div>
 
         <aside className="task-side">
+          <TaskReadingPath taskId={task.slug || task.id} label="00/" />
+
           {sisters.length > 0 && !presentation.featureListsRelatedTasks && (
             <div className="side-block">
               <div className="side-block-num">01/</div>

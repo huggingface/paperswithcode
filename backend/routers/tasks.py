@@ -19,7 +19,9 @@ from backend.models.taxonomy import (
     TrendingTasks,
 )
 from backend.models.papers import Papers
+from backend.models.reading_paths import TaskReadingPath
 from backend.services.benchmark_trend_service import BenchmarkTrendService
+from backend.services.reading_path_service import ReadingPathService
 from backend.services.task_service import TaskService
 from backend.database.connection import get_database_session
 from backend.routers.paper_date_range import PaperDateRange, get_paper_date_range
@@ -287,6 +289,33 @@ def get_task_page(
     - `/api/v1/tasks/5/page`
     """
     return TaskService(db).get_task_page(task_id, is_open=is_open)
+
+
+@router.get("/{task_id}/reading-path", response_model=TaskReadingPath)
+def get_task_reading_path(
+    task_id: str,
+    db: Session = Depends(get_database_session),
+):
+    """
+    Get a short, ordered "Start here" reading path for a task.
+
+    Returns up to three steps in reading order: `overview` (a survey or
+    introduction), `foundations` (papers that introduced the key ideas), and
+    `recent` (where the field is now). Each paper uses the same summary shape
+    as `/tasks/{task_id}/papers`.
+
+    Steps come from the hand-curated `task_reading_path_papers` table when the
+    task has rows for them. Other steps are chosen automatically: the most-cited
+    task paper with "survey" or "review" in its title, the most-cited task papers
+    older than three years, and the top-trending task papers from the past year.
+    `source` is `curated` when any step is hand-curated and `automatic`
+    otherwise. Empty steps are omitted; `steps` is empty when no path exists.
+
+    **Examples:**
+    - `/api/v1/tasks/object-detection/reading-path`
+    - `/api/v1/tasks/5/reading-path`
+    """
+    return ReadingPathService(db).get_reading_path(task_id)
 
 
 @router.get("/{task_id}/children", response_model=Tasks)

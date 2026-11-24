@@ -78,7 +78,7 @@ class TaskService:
         )
         return operation(identifier)
 
-    def _require_db_task(self, identifier: str) -> DBTask:
+    def require_db_task(self, identifier: str) -> DBTask:
         """Resolve a task by numeric id or slug, raising when it does not exist."""
         if str(identifier).isdigit():
             db_task = self.db.query(DBTask).filter(DBTask.id == int(identifier)).first()
@@ -494,7 +494,7 @@ class TaskService:
             PaperNotFoundError: If parent task not found
             DatabaseError: If database query fails
         """
-        parent_task = self._require_db_task(task_id)
+        parent_task = self.require_db_task(task_id)
         return self.get_tasks(
             page=page,
             page_size=page_size,
@@ -517,7 +517,7 @@ class TaskService:
             PaperNotFoundError: If task not found
             DatabaseError: If database query fails
         """
-        db_task = self._require_db_task(task_id)
+        db_task = self.require_db_task(task_id)
         try:
             parents = []
             current = db_task

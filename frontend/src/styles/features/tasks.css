@@ -350,6 +350,43 @@
   font-size: 11px;
   color: var(--ink-faint);
 }
+.task-reading-path-source {
+  float: right;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+.task-reading-path-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.task-reading-path-step { margin-top: 10px; }
+.task-reading-path-step-title {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--accent-text);
+  margin-bottom: 2px;
+}
+.task-reading-path-paper {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  font-family: var(--serif);
+  font-size: 13px;
+  line-height: 1.3;
+}
+.task-reading-path-paper:hover { color: var(--accent-text); }
+.task-reading-path-paper .count {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  flex-shrink: 0;
+}
 .side-domain-pill {
   font-family: var(--mono);
   font-size: 11px;

@@ -19,6 +19,7 @@ import type {
   RelatedMethods,
   Task,
   TaskPage,
+  TaskReadingPath,
   TrendingBenchmarksResponse,
   TrendingMethodsResponse,
   TrendingTasksResponse,
@@ -101,6 +102,10 @@ export class CatalogApi {
 
   taskPage(taskId: string, params?: { is_open?: boolean }): Promise<TaskPage> {
     return this.request(endpoint(`/tasks/${taskId}/page`, params));
+  }
+
+  taskReadingPath(taskId: string): Promise<TaskReadingPath> {
+    return this.request(`/tasks/${encodeURIComponent(taskId)}/reading-path`);
   }
 
   trendingBenchmarks(taskId: string, params?: {
