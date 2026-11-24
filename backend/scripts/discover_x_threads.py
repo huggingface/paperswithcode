@@ -127,6 +127,8 @@ def main() -> int:
     for error in summary["errors"]:
         logger.warning("x_thread_discovery_error %s", json.dumps(error))
     failed = len(summary["errors"])
+    if report.account_failure:
+        return 1
     return 1 if failed and failed == summary["papers_scanned"] else 0
 
 

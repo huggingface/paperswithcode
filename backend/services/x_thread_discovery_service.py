@@ -65,6 +65,8 @@ ACTOR = {
 }
 
 Search = Callable[[str, date | None, datetime | None], dict]
+STOP_SEARCH_STATUSES = frozenset({401, 402, 403, 429})
+ACCOUNT_FAILURE_STATUSES = frozenset({401, 402, 403})
 Review = Callable[[Paper, dict], ReviewVerdict]
 
 
@@ -83,10 +85,16 @@ class PaperScanResult:
 class DiscoveryReport:
     apply: bool
     papers: list[PaperScanResult] = field(default_factory=list)
+    stopped_status: int | None = None
+
+    @property
+    def account_failure(self) -> bool:
+        return self.stopped_status in ACCOUNT_FAILURE_STATUSES
 
     def to_dict(self) -> dict:
         return {
             "apply": self.apply,
+            "stopped_status": self.stopped_status,
             "papers_scanned": len(self.papers),
             "papers_matched": sum(bool(p.matches) for p in self.papers),
             "threads_linked": sum(len(p.linked) for p in self.papers),
@@ -457,7 +465,8 @@ def discover_x_threads(
             )
         except httpx.HTTPStatusError as error:
             result.error = f"X search HTTP {error.response.status_code}"
-            if error.response.status_code in {401, 403, 429}:
+            if error.response.status_code in STOP_SEARCH_STATUSES:
+                report.stopped_status = error.response.status_code
                 break
             continue
         except httpx.HTTPError as error:

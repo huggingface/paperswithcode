@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, date, datetime, timedelta
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
+from backend.services import x_thread_discovery_service as service
 from backend.services.x_thread_discovery_service import (
     MAX_QUERY_LENGTH,
     X_ARCHIVE_SEARCH_URL,
@@ -294,3 +296,66 @@ def test_post_text_and_urls_prefers_long_form_text_and_unwound_links():
         ["https://arxiv.org/abs/2610.00001"],
     )
     assert post_text_and_urls({"text": "Plain"}) == ("Plain", [])
+
+
+def _scan_papers(monkeypatch, count):
+    papers = [
+        SimpleNamespace(
+            id=index,
+            arxiv_id=f"2611.0000{index}",
+            title=f"Paper {index}",
+            date_published=date(2026, 11, 20),
+            authors=[],
+            organizations=[],
+        )
+        for index in range(1, count + 1)
+    ]
+    monkeypatch.setattr(service, "candidate_papers", lambda db, **_: papers)
+    monkeypatch.setattr(service, "_paper_links", lambda db, paper_id: ([], []))
+    monkeypatch.setattr(service, "PaperCurationService", lambda db: None)
+    return SimpleNamespace(get=lambda model, key: None)
+
+
+def _failing_search(status, calls):
+    def search(query, published, since):
+        calls.append(query)
+        request = httpx.Request("GET", X_SEARCH_URL)
+        raise httpx.HTTPStatusError(
+            "failed", request=request, response=httpx.Response(status, request=request)
+        )
+
+    return search
+
+
+@pytest.mark.parametrize(
+    ("status", "account_failure"), [(401, True), (402, True), (403, True), (429, False)]
+)
+def test_discovery_stops_at_first_account_or_quota_failure(
+    monkeypatch, status, account_failure
+):
+    db = _scan_papers(monkeypatch, 3)
+    calls = []
+
+    report = service.discover_x_threads(
+        db, _failing_search(status, calls), apply=False, max_papers=3
+    )
+
+    assert len(calls) == 1
+    assert report.stopped_status == status
+    assert report.account_failure is account_failure
+    assert report.to_dict()["errors"] == [
+        {"paper_id": 1, "error": f"X search HTTP {status}"}
+    ]
+
+
+def test_discovery_continues_past_other_search_errors(monkeypatch):
+    db = _scan_papers(monkeypatch, 3)
+    calls = []
+
+    report = service.discover_x_threads(
+        db, _failing_search(500, calls), apply=False, max_papers=3
+    )
+
+    assert len(calls) == 3
+    assert report.stopped_status is None
+    assert not report.account_failure
