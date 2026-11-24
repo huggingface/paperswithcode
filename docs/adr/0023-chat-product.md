@@ -112,6 +112,40 @@ The Pi harness sends the whole user prompt as a single text part, so a user-file
 
 Code: `backend/services/chat_provider_gateway/user_files.py::PLACEHOLDER_LINE`
 
+## File token estimates are fitted to production usage
+
+A turn that attaches a file reserves OpenAI budget for the file's input tokens before the provider reports usage. The reservation is capped at `MAX_BILLABLE_INPUT_TOKENS`, so the estimates are set near the 95th percentile of measured cost: underestimating risks overspending the allowance, while overestimating only holds budget until settlement.
+
+Calibration on 2026-11-24, measured read-only against production with `gpt-6-luna`. The sample was every ready file in `chat_uploaded_files` (2026-11-13 to 2026-11-23): 41 of the 43 turns that attached files natively, covering 20 high-detail-PDF turns, 4 low-detail-PDF turns, 13 image turns (18 images) and 3 text turns. A file is sent natively only on the turn whose user message attaches it; later turns carry a short text reference instead. So each turn's file cost is the first provider call's `input_tokens` minus a baseline for the same request without the file:
+
+- first turn of a session: `17382 + 0.298 × prompt_chars`, fitted on 2,898 first turns without files (residual p5/p95 −1.6k/+1.1k);
+- later turns: the previous turn's last-call `input_tokens` + `−692 + 3.688 × visible_output_tokens + 0.330 × prompt_chars`, fitted on 2,933 consecutive pairs of turns without files (residual p5/p95 −4.6k/+1.4k).
+
+```sql
+SELECT m.turn_id, f.media_type, f.page_count, f.pdf_detail, f.size_bytes
+FROM chat_uploaded_files f
+JOIN chat_messages m ON m.session_id = f.session_id AND m.role = 'user'
+ AND position(f.id::text IN m.effective_prompt) > 0
+WHERE f.state = 'ready';
+-- each turn's first and last call: DISTINCT ON (turn_id) over
+-- chat_openai_provider_calls ordered by call_sequence ASC / DESC,
+-- using input_tokens and output_tokens - reasoning_tokens;
+-- prompt_chars is the user prompt length without the <user_files> block.
+```
+
+Fitted values (p50 / p95):
+
+| Kind | Measured per unit | Previous estimate | New estimate |
+| --- | --- | --- | --- |
+| PDF, high detail (≤ 20 pages), per page | 2,816 / 3,612 | 2,100 | 3,700 (1,300 text + 2,400 image) |
+| PDF, low detail (> 20 pages), per page | 930 / 1,368 | 900 | 1,400 (1,300 text + 100 image) |
+| Image (`detail: auto`), per image | 1,042 / 19,767 | 1,600 | 20,000 |
+| Text, tokens per byte | 0.27 / 0.36 (n=3) | 0.33 | unchanged at 3 bytes per token |
+
+Image cost is bimodal. Typical images cost about 1k tokens, but the two turns with 5+ MB images cost 18k to 22k tokens per image, which sets the flat per-image estimate. Each file stores its estimate at upload, so files uploaded before a recalibration keep their old estimate. Recalibrate when the provider model or the image or PDF detail settings change.
+
+Code: `backend/services/chat_file_service.py::estimate_tokens`
+
 ## Hot GitHub trending runs on the host timer, not GitHub Actions
 
 Scheduled execution of the hot GitHub trending update runs on the production host's systemd timer (pwc-cron-update-hot-github-trending.timer). The GitHub Actions workflow keeps only workflow_dispatch for manual recovery and must not regain a schedule, which would run the job twice.
