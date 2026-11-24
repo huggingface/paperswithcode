@@ -498,6 +498,8 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
   const showIntro = (following && !auth?.isLoading && !user) || noFollows;
   const canBuildFeed = !!user || !isAuthDisabled();
   const followedTopicIds = useMemo(() => new Set(topics.data?.map(topic => topic.id)), [topics.data]);
+  const followedKeys = useMemo(
+    () => new Set(follows.data?.map(follow => `${follow.kind}:${follow.entity_id}`)), [follows.data]);
   const showFollowCard = !following && canBuildFeed && !auth?.isLoading
     && (!user || (follows.isSuccess && topics.isSuccess && !hasFeed));
   // The "New" badge on the following tab: papers added since the visit before this one. It stays
@@ -667,6 +669,7 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
             {!following && canBuildFeed && (
               <HomePopularTopics
                 followedIds={!auth?.isLoading && (!user || topics.isSuccess) ? followedTopicIds : null}
+                followedKeys={!auth?.isLoading && (!user || follows.isSuccess) ? followedKeys : null}
                 onBuild={() => setEditingTopic(null)}
               />
             )}

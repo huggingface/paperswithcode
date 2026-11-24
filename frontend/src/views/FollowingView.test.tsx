@@ -45,6 +45,7 @@ beforeEach(() => {
     reasons: ['Task'], scores: [] }]);
   vi.spyOn(researchApi, 'topics').mockResolvedValue([]);
   vi.spyOn(researchApi, 'featuredTopics').mockResolvedValue([]);
+  vi.spyOn(researchApi, 'popularFollows').mockResolvedValue([]);
   vi.spyOn(researchApi, 'topicMatches').mockResolvedValue([]);
   vi.spyOn(researchApi, 'followingNewCount').mockResolvedValue({ count: 0 });
 });
@@ -629,7 +630,7 @@ it('shows the most followed topics above the trending feed with this week\'s pap
   vi.mocked(researchApi.topics).mockResolvedValue([{ ...topic, id: 14, text: 'agent swarms', is_creator: false }]);
   vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
   renderFeed('/');
-  const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
+  const row = await screen.findByRole('region', { name: 'Most followed' });
   const cards = await within(row).findAllByRole('listitem');
   expect(cards).toHaveLength(4);
   expect(within(cards[0]).getByRole('link', { name: 'Speculative decoding' })).toHaveAttribute('href', '/topics/13-speculative-decoding');
@@ -647,7 +648,7 @@ it('paints last visit\'s popular topics at once, before follow state or the requ
   vi.mocked(researchApi.featuredTopics).mockReturnValue(new Promise(() => {}));
   vi.mocked(researchApi.topics).mockReturnValue(new Promise(() => {}));
   renderFeed('/');
-  const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
+  const row = await screen.findByRole('region', { name: 'Most followed' });
   expect(within(row).getAllByRole('listitem')).toHaveLength(4);
   // Until the account's topics load, no card offers Follow or Following.
   expect(within(row).queryByRole('button', { name: 'Follow Speculative decoding' })).not.toBeInTheDocument();
@@ -657,9 +658,9 @@ it('paints last visit\'s popular topics at once, before follow state or the requ
 it('invites guests to follow a popular topic after the sixth trending paper', async () => {
   auth.user = null;
   vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
-  // The row above the feed offers the ten most followed topics; the card offers the next ones.
-  const filler = Array.from({ length: 7 }, (_, i) => ({ id: 100 + i, text: `filler ${i}`, label: null, creator: null, followers: 1 }));
-  vi.mocked(researchApi.featuredTopics).mockResolvedValue([...featured.slice(0, 3), ...filler, featured[3]]);
+  // The row above the feed offers the four most followed topics; the card offers the next ones.
+  const filler = { id: 100, text: 'filler', label: null, creator: null, followers: 1 };
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue([...featured.slice(0, 3), filler, featured[3]]);
   const { container } = renderFeed('/');
   const card = await screen.findByRole('region', { name: 'Get a feed for your research' });
   const items = [...container.querySelectorAll('.paper-list > *')];
@@ -674,7 +675,7 @@ it('disables the row\'s Follow at the topic limit', async () => {
   vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
   vi.mocked(researchApi.topics).mockResolvedValue(Array.from({ length: 10 }, (_, i) => ({ ...topic, id: 200 + i, text: `topic ${i}` })));
   renderFeed('/');
-  const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
+  const row = await screen.findByRole('region', { name: 'Most followed' });
   const follow = await within(row).findByRole('button', { name: 'Follow Speculative decoding' });
   await waitFor(() => expect(follow).toBeDisabled());
   expect(follow).toHaveAttribute('title', expect.stringContaining('the most allowed'));
@@ -685,7 +686,7 @@ it('does not keep a refused row follow for a later retry', async () => {
   const body = JSON.stringify({ detail: 'You can follow up to 10 topics' });
   vi.spyOn(researchApi, 'followTopic').mockRejectedValue(new ApiError(new Response(body, { status: 409 }), body));
   renderFeed('/');
-  const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
+  const row = await screen.findByRole('region', { name: 'Most followed' });
   fireEvent.click(await within(row).findByRole('button', { name: 'Follow Speculative decoding' }));
   expect(await within(row).findByRole('alert')).toHaveTextContent('Could not follow');
   expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull();
@@ -699,7 +700,7 @@ it('follows a popular topic from the row above the feed and opens it on Followin
     return undefined as never;
   });
   renderFeed('/');
-  const row = await screen.findByRole('region', { name: 'Popular topics to follow' });
+  const row = await screen.findByRole('region', { name: 'Most followed' });
   fireEvent.click(await within(row).findByRole('button', { name: 'Follow Speculative decoding' }));
   await waitFor(() => expect(researchApi.followTopic).toHaveBeenCalledWith(13));
   expect(await screen.findByText('A paper')).toBeInTheDocument();
@@ -707,7 +708,54 @@ it('follows a popular topic from the row above the feed and opens it on Followin
   // The new topic's bubble stays selected, and the empty-account pop-up does not open.
   expect(screen.getByRole('link', { name: /speculative decoding/i })).toHaveAttribute('aria-current', 'true');
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  expect(screen.queryByRole('region', { name: 'Popular topics to follow' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('region', { name: 'Most followed' })).not.toBeInTheDocument();
+});
+const popularFollows = [
+  { kind: 'task' as const, entity_id: 11, name: 'Robotics', url: '/tasks/robotics', followers: 36, week_papers: 31,
+    follower_avatars: [], top_paper: { id: 6, arxiv_id: '2611.00002', title: 'Robot hands' } },
+  { kind: 'method' as const, entity_id: 7, name: 'GRPO', url: '/methods/grpo', followers: 3, week_papers: 0,
+    follower_avatars: [], top_paper: null },
+];
+it('mixes the most followed tasks, methods and topics in one row, most followed first', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([{ kind: 'method', entity_id: 7, name: 'GRPO', url: '/methods/grpo',
+    created_at: '2026-11-01T00:00:00Z' }]);
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
+  vi.mocked(researchApi.popularFollows).mockResolvedValue(popularFollows);
+  renderFeed('/');
+  const row = await screen.findByRole('region', { name: 'Most followed' });
+  await waitFor(() => expect(within(row).getAllByRole('listitem')).toHaveLength(6));
+  const cards = within(row).getAllByRole('listitem');
+  expect(cards.map(card => card.querySelector('.home-topic-title')?.textContent)).toEqual(
+    ['Robotics', 'Speculative decoding', 'GRPO', 'Agent swarms', 'Computer vision', 'Ocr releases']);
+  expect(cards.map(card => card.querySelector('.home-topic-kind')?.textContent)).toEqual(
+    ['Task', 'Topic', 'Method', 'Topic', 'Topic', 'Topic']);
+  expect(within(cards[0]).getByRole('link', { name: 'Robotics' })).toHaveAttribute('href', '/tasks/robotics');
+  expect(cards[0]).toHaveTextContent('31 new papers this week');
+  expect(await within(cards[2]).findByRole('link', { name: /Following/ })).toHaveAttribute('href', '/following?follow=method:7');
+});
+it('follows a popular task from the row and opens it on Following', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(researchApi.popularFollows).mockResolvedValue(popularFollows);
+  vi.spyOn(researchApi, 'setFollow').mockImplementation(async () => {
+    vi.mocked(researchApi.follows).mockResolvedValue([{ kind: 'task', entity_id: 11, name: 'Robotics', url: '/tasks/robotics',
+      created_at: '2026-11-24T00:00:00Z' }]);
+  });
+  renderFeed('/');
+  const row = await screen.findByRole('region', { name: 'Most followed' });
+  fireEvent.click(await within(row).findByRole('button', { name: 'Follow Robotics' }));
+  await waitFor(() => expect(researchApi.setFollow).toHaveBeenCalledWith('task', 11, true));
+  expect(await screen.findByText('A paper')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /^following/ })).toHaveClass('active');
+});
+it('sends guests to sign in with the popular task they picked', async () => {
+  auth.user = null;
+  vi.mocked(researchApi.popularFollows).mockResolvedValue(popularFollows);
+  renderFeed('/');
+  const row = await screen.findByRole('region', { name: 'Most followed' });
+  fireEvent.click(await within(row).findByRole('button', { name: 'Follow Robotics' }));
+  expect(JSON.parse(sessionStorage.getItem('pwc:following-pending-follows')!)).toEqual(
+    [{ kind: 'task', id: '11', name: 'Robotics' }]);
+  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
 });
 it('keeps the trending card dismissed', async () => {
   auth.user = null;

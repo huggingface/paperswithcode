@@ -87,6 +87,17 @@ export interface TopicBubble {
   follower_avatars?: TopicPerson[];
   top_paper?: { id: number; arxiv_id: string | null; title: string } | null;
 }
+/** One of the most followed tasks or methods, as a homepage card. */
+export interface PopularFollow {
+  kind: 'task' | 'method';
+  entity_id: number;
+  name: string;
+  url: string;
+  followers: number;
+  week_papers: number;
+  follower_avatars: TopicPerson[];
+  top_paper: { id: number; arxiv_id: string | null; title: string } | null;
+}
 export type TopicPaperOrder = 'trending' | 'newest';
 export const TOPIC_PAPERS_PAGE_SIZE = 20;
 export const TOPIC_MAX_LENGTH = 300;
@@ -169,6 +180,7 @@ export const researchApi = {
     return apiRequest<Paper[]>(`/research/topics/${id}/papers?${params}`);
   },
   featuredTopics: () => apiRequest<TopicBubble[]>('/research/topics/featured'),
+  popularFollows: () => apiRequest<PopularFollow[]>('/research/follows/popular'),
   /** Catalog tasks, methods and benchmarks a topic with this text would duplicate. */
   topicMatches: (text: string) =>
     apiRequest<ResearchTopicSuggestion[]>(`/research/topic-matches?${new URLSearchParams({ text })}`),
