@@ -30,9 +30,15 @@ def validate_source_score(
     expected = evidence.source_value
     if target in {(0.0, 1.0), (0.0, 100.0)}:
         if source is None:
-            raise ValueError("Rate metrics require explicit source_scale 0-1 or 0-100")
+            raise ValueError(
+                f"Rate metric {evidence.metric!r} requires explicit source_scale "
+                f"0-1 or 0-100; received {evidence.source_scale!r}"
+            )
         if not source[0] <= expected <= source[1]:
-            raise ValueError("Source score is outside its declared source_scale")
+            raise ValueError(
+                f"Source score {expected:g} for {evidence.metric!r} is outside its "
+                f"declared source_scale {evidence.source_scale!r}"
+            )
         expected = expected * target[1] / source[1]
     elif evidence.source_scale != "native":
         raise ValueError(
