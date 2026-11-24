@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import type { FollowKind } from '@/lib/api/research';
 import { researchQueries } from '@/lib/api/queries';
+import FollowerAvatar from '@/components/FollowerAvatar';
 
 /** Overlapping faces of the first followers who show their avatar, then "+N" and the follower count. */
 export default function FollowerStack({ kind, entityId }: { kind: FollowKind; entityId: string | number }) {
@@ -11,7 +12,7 @@ export default function FollowerStack({ kind, entityId }: { kind: FollowKind; en
     {data.follower_avatars.length > 0 && <ul className="follower-stack-faces" aria-label="Followers">
       {data.follower_avatars.map(p => <li key={p.username}>
         <a href={`https://huggingface.co/${p.username}`} target="_blank" rel="noreferrer" aria-label={`@${p.username}`}>
-          <img className="topic-avatar" src={p.avatar_url} alt="" title={`@${p.username}`} width={28} height={28} loading="lazy" />
+          <FollowerAvatar person={p} size={28} />
         </a>
       </li>)}
       {rest > 0 && <li className="follower-stack-more" aria-label={`${rest.toLocaleString()} more`}>+{rest.toLocaleString()}</li>}

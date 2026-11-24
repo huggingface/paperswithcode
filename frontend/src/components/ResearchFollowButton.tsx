@@ -31,13 +31,13 @@ export default function ResearchFollowButton({ kind, entityId, showFollowers = f
   const followed = follows.data?.some(f => f.kind === kind && String(f.entity_id) === String(entityId)) ?? false;
   // Stay disabled until the refreshed follows say which way the button points.
   const mutation = useSetFollow({ onChanged: ({ follow }) => setJustFollowed(follow ? entityKey : null), awaitRefresh: true });
-  if (!auth) return null;
-  if (!user && isAuthDisabled()) return null;
+  const stack = showFollowers && <FollowerStack kind={kind} entityId={entityId} />;
+  if (!auth || (!user && isAuthDisabled())) return stack && <div className="research-follow">{stack}</div>;
   if (!user) return <div className="research-follow">
     <a className="research-follow-btn" href={hfLoginUrl(location.pathname + location.search)}>
       <Plus aria-hidden="true" />Follow
     </a>
-    {showFollowers && <FollowerStack kind={kind} entityId={entityId} />}
+    {stack}
     <span className="research-follow-hint">Sign in to {HINTS[kind].toLowerCase()}.</span>
   </div>;
   const failed = mutation.error || follows.error;
@@ -51,7 +51,7 @@ export default function ResearchFollowButton({ kind, entityId, showFollowers = f
         <span className="research-follow-label-hover">Unfollow</span>
       </> : <><Plus aria-hidden="true" />Follow</>}
     </button>
-    {showFollowers && <FollowerStack kind={kind} entityId={entityId} />}
+    {stack}
     {failed ? <span className="research-follow-hint is-error" role="alert">Could not update follows. Please try again.</span>
       : followed ? justFollowed === entityKey && <span className="research-follow-hint" role="status">
         Added to <Link to="/following">your Following feed</Link>

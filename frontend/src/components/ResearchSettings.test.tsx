@@ -94,6 +94,7 @@ describe('research follows', () => {
     });
     render(<ResearchFollowButton kind="benchmark" entityId={5} showFollowers />, { wrapper });
     expect(await screen.findByRole('link', { name: '@bob' })).toHaveAttribute('href', 'https://huggingface.co/bob');
+    expect(screen.getByTitle('@bob')).toHaveAttribute('src', expect.stringMatching(/\/api\/v1\/research\/avatars\/bob$/));
     expect(screen.getByLabelText('5 more')).toHaveTextContent('+5');
     expect(screen.getByText('followers').textContent).toBe('7 followers');
     expect(followers).toHaveBeenCalledWith('benchmark', 5);
@@ -113,6 +114,20 @@ describe('research follows', () => {
     followers.mockClear();
     render(<ResearchFollowButton kind="author" entityId={9} />, { wrapper });
     expect(followers).not.toHaveBeenCalled();
+  });
+  it('still shows who follows when sign-in is disabled', async () => {
+    vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
+    vi.spyOn(researchApi, 'entityFollowers').mockResolvedValue({ followers: 3, follower_avatars: [] });
+    auth.user = null as unknown as typeof auth.user;
+    vi.stubEnv('VITE_DISABLE_AUTH', '1');
+    try {
+      render(<ResearchFollowButton kind="method" entityId={2} showFollowers />, { wrapper });
+      expect(await screen.findByText('3')).toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: 'Follow' })).not.toBeInTheDocument();
+    } finally {
+      vi.unstubAllEnvs();
+      auth.user = { hf_subject: 'alice', username: 'alice' };
+    }
   });
   it('confirms a new follow only for the entity that was followed', async () => {
     const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
