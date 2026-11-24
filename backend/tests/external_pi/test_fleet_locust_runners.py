@@ -19,10 +19,8 @@ from backend.loadtests.external_pi_fleet_core import (
     resolve_durable_profile,
 )
 from backend.tests.external_pi.fleet_harness import (
-    _FUNCTIONAL_MODAL,
-    _LifecycleSource,
+    _EvidenceSource,
     _MODAL_RATE,
-    _NO_MODAL,
 )
 
 
@@ -188,6 +186,7 @@ def test_executable_durable_locust_runner_releases_exact_simultaneous_profile(
     pytest.importorskip("locust")
     adapter = importlib.import_module("backend.loadtests.external_pi_fleet_locustfile")
     calls = []
+    evidence_source = _EvidenceSource(profile_name)
 
     class Transport:
         def open_durable_stream(self, spec):
@@ -208,6 +207,8 @@ def test_executable_durable_locust_runner_releases_exact_simultaneous_profile(
             return {
                 "workload": spec.workload,
                 "outcome": "completed",
+                "admission_ms": 20,
+                "reconnect_ready_ms": 40,
                 "ttft_ms": 100,
                 "completion_ms": 1_000,
                 "reconnects": 0,
@@ -232,9 +233,7 @@ def test_executable_durable_locust_runner_releases_exact_simultaneous_profile(
             peak_active_external_workers=4,
             peak_active_sandboxes=sandboxes,
         ),
-        lifecycle_source=_LifecycleSource(
-            _FUNCTIONAL_MODAL if profile_name == "32-functional-turns" else _NO_MODAL
-        ),
+        evidence_source=evidence_source,
         modal_rate=_MODAL_RATE,
         timeout_seconds=10.0,
     )
@@ -244,7 +243,10 @@ def test_executable_durable_locust_runner_releases_exact_simultaneous_profile(
     assert Counter(workload for _, workload, *_ in calls) == expected_mix
     assert {arrivals for _, _, arrivals, _, _ in calls} == {expected_users}
     assert all(delay == 0 and queued is False for *_, delay, queued in calls)
-    assert report.operation_start_count == (24 if expected_users == 32 else 0)
+    assert report.qualification_evidence_source == "durable_qualification_records"
+    assert len(evidence_source.scopes) == 1
+    assert isinstance(evidence_source.scopes[0], uuid.UUID)
+    assert report.operation_start_count == (16 if expected_users == 32 else 0)
     assert report.duplicate_operation_start_count == 0
 
 
