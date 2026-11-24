@@ -125,6 +125,9 @@ class PaperVersionRefreshService:
                     else None,
                     tldr=previous_latest.tldr if previous_latest else None,
                     num_pages=previous_latest.num_pages if previous_latest else None,
+                    document_type=previous_latest.document_type
+                    if previous_latest
+                    else None,
                     hf_models=list(previous_latest.hf_models)
                     if previous_latest and previous_latest.hf_models is not None
                     else None,

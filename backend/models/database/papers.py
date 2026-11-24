@@ -93,6 +93,7 @@ class Paper(Base):
 
     tldr: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     num_pages: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    document_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
 
     hf_models: Mapped[Optional[List[str]]] = mapped_column(
         ARRAY(Text).with_variant(JSON(), "sqlite"), nullable=True

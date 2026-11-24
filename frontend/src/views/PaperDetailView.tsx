@@ -599,6 +599,17 @@ const PaperDetailView: React.FC = () => {
             )}
             <SavePaperButton paperId={paper.id} />
             {isAdmin && <TweetItButton paperId={Number(paper.id)} />}
+            {isAdmin && (
+              <button
+                type="button"
+                className="action-btn"
+                onClick={() => openEdit("document_type")}
+                title="Set the type shown in this paper's search title"
+              >
+                <Icon name="pencil" size={12} />
+                {paper.document_type ?? "Document type"}
+              </button>
+            )}
           </div>
 
           {paper.leaderboard_ranks && paper.leaderboard_ranks.length > 0 && (

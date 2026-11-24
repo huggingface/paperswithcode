@@ -11,6 +11,7 @@ export const PAPER_EDIT_SECTION_LABELS = {
   hf_artifacts: "Hugging Face artifacts",
   source_url: "source URL",
   x_threads: "X threads",
+  document_type: "document type",
   evaluations: "evaluation results",
 } as const;
 

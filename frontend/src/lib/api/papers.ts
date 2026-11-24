@@ -297,6 +297,16 @@ export class PapersApi {
     );
   }
 
+  updateDocumentType(paperId: string, documentType: string | null): Promise<Paper> {
+    return paperCuration.mutatePaper(
+      paperId,
+      "document_type",
+      documentType,
+      `/papers/${paperId}/document-type`,
+      { method: "PUT", body: JSON.stringify({ document_type: documentType }) },
+    );
+  }
+
   updateHfArtifacts(
     paperId: string,
     artifacts: { hf_models: string[]; hf_datasets: string[]; hf_spaces: string[] },

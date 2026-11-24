@@ -4,6 +4,7 @@ import type { Evaluation } from "@/lib/api/evaluations.types";
 import type { Paper } from "@/lib/api/papers.types";
 import type { PaperEditSection } from "@/lib/paperCuration";
 
+import { EditDocumentTypeDialog } from "./EditDocumentTypeDialog";
 import { EditEvaluationsDialog } from "./EditEvaluationsDialog";
 import { EditHfArtifactsDialog } from "./EditHfArtifactsDialog";
 import { EditOrganizationsDialog } from "./EditOrganizationsDialog";
@@ -68,6 +69,9 @@ export function PaperDetailEditors({
     ),
     source_url: () => (
       <EditSourceUrlDialog {...shared} initialUrl={paper.source_url ?? paper.url_abs ?? ""} />
+    ),
+    document_type: () => (
+      <EditDocumentTypeDialog {...shared} initialType={paper.document_type ?? ""} />
     ),
     hf_artifacts: () => (
       <EditHfArtifactsDialog

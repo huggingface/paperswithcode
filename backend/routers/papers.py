@@ -1572,3 +1572,54 @@ def update_paper_source_url(
         "source_url",
         {"source_url": request.source_url},
     )
+
+
+class UpdateDocumentTypeRequest(BaseModel):
+    """Request model for setting a paper's reader-facing document type."""
+
+    document_type: Optional[str] = Field(
+        None,
+        max_length=50,
+        description=(
+            "Document type such as 'Technical Report' or 'System Card', used "
+            "in the paper page's search title; null or blank clears it"
+        ),
+    )
+
+    @field_validator("document_type", mode="before")
+    @classmethod
+    def _normalize_document_type(cls, value):
+        if isinstance(value, str):
+            return " ".join(value.split()) or None
+        return value
+
+
+@router.put(
+    "/papers/{paper_id}/document-type",
+    response_model=Paper,
+    summary="Set the document type of a paper",
+    dependencies=[Depends(require_admin)],
+)
+def update_paper_document_type(
+    paper_id: int = Path(..., description="Database paper ID"),
+    request: UpdateDocumentTypeRequest = Body(...),
+    mutation: dict = Depends(catalog_mutation_context),
+    db: Session = Depends(get_database_session),
+):
+    """
+    Set or clear the document type shown in a paper page's search title, for
+    example ``Technical Report`` for a model release report. Admins only.
+
+    **Example:**
+    ```json
+    PUT /api/v1/papers/123/document-type
+    {"document_type": "Technical Report"}
+    ```
+    """
+    return _curated_paper_update(
+        db,
+        mutation,
+        paper_id,
+        "document_type",
+        {"document_type": request.document_type},
+    )

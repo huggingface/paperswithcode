@@ -172,6 +172,13 @@ class Paper(BaseModel):
     num_pages: Optional[int] = Field(
         None, description="Page count of the source PDF (frontend v2)"
     )
+    document_type: Optional[str] = Field(
+        None,
+        description=(
+            "Reader-facing document type such as 'Technical Report'; null for "
+            "an ordinary paper"
+        ),
+    )
     suggested_questions: Optional[List[str]] = Field(
         None,
         description=(
