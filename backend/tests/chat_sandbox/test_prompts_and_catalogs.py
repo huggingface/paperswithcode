@@ -117,7 +117,8 @@ def test_prompt_and_manifest_share_six_round_contract():
     assert "deepseek-ai/DeepSeek-V4-Flash-0731:baseten" in prompt
     assert "harness is orchestration, not the model" in prompt
     assert "never identify yourself as Pi or Claude" in prompt
-    assert "direct network clients" in prompt
+    assert "Direct network clients" in prompt
+    assert "WebFetch" not in prompt
     assert "`command -v <name>` succeeds" in prompt
     visual_instruction = (
         "When `read_me` and `create_view` are available, use them any time the "

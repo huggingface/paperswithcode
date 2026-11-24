@@ -391,7 +391,6 @@ def validate(production: str, staging: str) -> list[str]:
             "catalog",
             "hf-catalog",
             "session-store",
-            "web-fetch",
             "v1/messages",
             "v1/responses",
             *(

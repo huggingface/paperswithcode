@@ -24,7 +24,6 @@ def _import_broker(monkeypatch):
                     "gateway_url": "https://gateway.example.test/api/internal/chat-gateway",
                     "session_id": str(uuid.uuid4()),
                     "turn_id": str(uuid.uuid4()),
-                    "proxy_token": "test-proxy-token",
                 }
             ).encode(),
         )

@@ -390,7 +390,6 @@ def _import_broker(monkeypatch):
                     "gateway_url": "https://gateway.example/api/internal/chat-gateway",
                     "session_id": str(uuid.uuid4()),
                     "turn_id": str(uuid.uuid4()),
-                    "proxy_token": "proxy",
                 }
             ).encode(),
         )
@@ -444,6 +443,7 @@ def test_prompt_and_tool_policy_treat_hf_content_as_untrusted(tmp_path):
     pwc_guide.write_text("pwc")
     hf_guide.write_text("hf")
     budget = ToolBudget(12, 4, 1024, 4096)
+    budget.register_call("hf-skill")
     decision = budget.authorize(
         "hf-skill",
         "Read",

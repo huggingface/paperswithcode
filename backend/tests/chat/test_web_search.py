@@ -160,6 +160,7 @@ def test_provider_retry_is_one_visible_call_but_two_metered_attempts(monkeypatch
 
 def test_worker_policy_counts_web_and_overall_budgets_and_latches_failure():
     disabled = ToolBudget(12, 4, 1024, 4096)
+    disabled.register_call("w0")
     assert not disabled.authorize("w0", WEB_SEARCH_TOOL, {"query": "news"}).allowed
 
     budget = ToolBudget(
@@ -170,11 +171,14 @@ def test_worker_policy_counts_web_and_overall_budgets_and_latches_failure():
         maximum_web_searches=3,
         web_search_enabled=True,
     )
+    budget.register_call("w1")
     assert budget.authorize("w1", WEB_SEARCH_TOOL, {"query": "news"}).allowed
     budget.result("w1", "unavailable", status="error")
     assert budget.calls == 1
     assert budget.web_searches == 1
+    budget.register_call("w2")
     assert not budget.authorize("w2", WEB_SEARCH_TOOL, {"query": "again"}).allowed
+    budget.register_call("invalid")
     assert not budget.authorize(
         "invalid", WEB_SEARCH_TOOL, {"query": "x", "extra": True}
     ).allowed
@@ -189,11 +193,13 @@ def test_web_search_results_do_not_authorize_web_fetch():
         maximum_web_searches=3,
         web_search_enabled=True,
     )
+    budget.register_call("web")
     assert budget.authorize("web", WEB_SEARCH_TOOL, {"query": "release"}).allowed
     budget.result(
         "web", '{"results":[{"url":"https://example.com/release"}]}', status="success"
     )
 
+    budget.register_call("fetch")
     assert not budget.authorize(
         "fetch", "WebFetch", {"url": "https://example.com/release"}
     ).allowed

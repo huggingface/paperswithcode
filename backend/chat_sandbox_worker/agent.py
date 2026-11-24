@@ -48,7 +48,6 @@ from backend.chat_sandbox_worker.sdk_adapter import SDKEventAdapter, SDKEventPol
 from backend.chat_sandbox_worker.tool_policy import (
     WEB_SEARCH_TOOL,
     ToolBudget,
-    _public_url,
     bound_tool_output,
 )
 
@@ -187,46 +186,12 @@ GUIDE = Path("/opt/pwc/PWC_CLI_SKILL.md")
 WORKSPACE = Path("/workspace")
 
 
-def _load_proxy_token() -> str | None:
-    raw_fd = os.environ.pop("PWC_WEBFETCH_TOKEN_FD", None)
-    if raw_fd is None:
-        return None
-    with os.fdopen(int(raw_fd), "rb", closefd=True) as handle:
-        token = handle.read(256).decode()
-    return token or None
-
-
-WEBFETCH_PROXY_TOKEN = _load_proxy_token()
-
 WEB_SEARCH_SCHEMA = {
     "type": "object",
     "properties": {"query": {"type": "string", "minLength": 1, "maxLength": 500}},
     "required": ["query"],
     "additionalProperties": False,
 }
-
-
-def _authorize_web_fetch_proxy(url: str) -> None:
-    if WEBFETCH_PROXY_TOKEN is None:
-        raise RuntimeError("WebFetch proxy authorization is unavailable")
-    connection = http.client.HTTPConnection("127.0.0.1", 8765, timeout=2)
-    body = json.dumps({"url": url}, separators=(",", ":")).encode()
-    try:
-        connection.request(
-            "POST",
-            "/proxy-authorize",
-            body=body,
-            headers={
-                "Content-Type": "application/json",
-                "X-PWC-Proxy-Token": WEBFETCH_PROXY_TOKEN,
-            },
-        )
-        response = connection.getresponse()
-        response.read()
-    finally:
-        connection.close()
-    if response.status != 204:
-        raise RuntimeError("WebFetch proxy authorization was rejected")
 
 
 def _response_text(value: Any) -> str:
@@ -364,7 +329,6 @@ class WorkerToolHooks:
             maximum_web_searches=settings.chat_max_web_search_calls,
             web_search_enabled=web_search_enabled,
         )
-        self.budget.observe_urls(prompt)
         self.bash_timeout_ms = round(
             (
                 settings.chat_posterly_timeout_seconds
@@ -411,7 +375,6 @@ class WorkerToolHooks:
             maximum_web_searches=settings.chat_max_web_search_calls,
             web_search_enabled=web_search_enabled,
         )
-        self.budget.observe_urls(prompt)
         self.bash_timeout_ms = round(
             (
                 settings.chat_posterly_timeout_seconds
@@ -453,26 +416,6 @@ class WorkerToolHooks:
                 }
             }
         updated = dict(arguments)
-        if name == "WebFetch":
-            try:
-                normalized_url = _public_url(str(updated["url"]))
-                if normalized_url is None:
-                    raise RuntimeError
-                _authorize_web_fetch_proxy(normalized_url)
-            except (KeyError, OSError, RuntimeError):
-                reason = "WebFetch secure transport is unavailable."
-                self.budget.close(reason)
-                self.budget.denied_calls += 1
-                self.results[tool_id] = self.budget.result(
-                    tool_id, reason, status="denied"
-                )
-                return {
-                    "hookSpecificOutput": {
-                        "hookEventName": "PreToolUse",
-                        "permissionDecision": "deny",
-                        "permissionDecisionReason": reason,
-                    }
-                }
         if name == "Bash":
             command = updated.get("command")
             if isinstance(command, str):
@@ -835,7 +778,7 @@ async def stream_turn(frame: dict[str, Any], settings: WorkerSettings):
         reader_mode,
         poster_mode,
         _reasoning_effort,
-        fetchable_urls,
+        _fetchable_urls,
         hf_username,
     ) = _validate_run_frame(frame)
     paper_artifacts_enabled = frame.get("paper_artifacts_enabled", False)
@@ -846,8 +789,6 @@ async def stream_turn(frame: dict[str, Any], settings: WorkerSettings):
         web_search_enabled=web_search_enabled,
         poster_mode=poster_mode,
     )
-    hooks.budget.seed_urls(fetchable_urls)
-    hooks.budget.observe_urls(prompt)
     adapter = SDKEventAdapter(
         show_reasoning=settings.chat_show_reasoning,
         policy=_sdk_event_policy(hooks),
@@ -1200,7 +1141,7 @@ class PersistentAgent:
             reader_mode,
             poster_mode,
             _reasoning_effort,
-            fetchable_urls,
+            _fetchable_urls,
             hf_username,
         ) = _validate_run_frame(frame)
         paper_artifacts_enabled = frame.get("paper_artifacts_enabled", False)
@@ -1229,8 +1170,6 @@ class PersistentAgent:
             web_search_enabled=web_search_enabled,
             poster_mode=poster_mode,
         )
-        self.hooks.budget.seed_urls(fetchable_urls)
-        self.hooks.budget.observe_urls(prompt)
         adapter = SDKEventAdapter(
             show_reasoning=self.settings.chat_show_reasoning,
             policy=_sdk_event_policy(self.hooks),

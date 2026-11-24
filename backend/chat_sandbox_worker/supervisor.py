@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import select
 import socket
 import subprocess
@@ -123,8 +122,6 @@ def main() -> int:
     agent_harness = config.pop("agent_harness")
     if agent_harness not in {"claude", "pi"}:
         raise RuntimeError("Invalid agent harness")
-    proxy_token = secrets.token_urlsafe(32)
-    config["proxy_token"] = proxy_token
 
     read_fd, write_fd = os.pipe()
     broker_environment = _safe_environment("/var/empty/pwc-broker")
@@ -145,13 +142,7 @@ def main() -> int:
     _wait_for_broker(broker)
 
     agent_environment = _agent_environment()
-    pass_fds: tuple[int, ...] = ()
-    agent_read_fd: int | None = None
-    agent_write_fd: int | None = None
     if agent_harness == "claude":
-        agent_read_fd, agent_write_fd = os.pipe()
-        agent_environment["PWC_WEBFETCH_TOKEN_FD"] = str(agent_read_fd)
-        pass_fds = (agent_read_fd,)
         command = [sys.executable, "-m", "backend.chat_sandbox_worker.agent"]
     else:
         command = [
@@ -166,18 +157,12 @@ def main() -> int:
         stdout=subprocess.PIPE,
         stderr=sys.stderr,
         env=agent_environment,
-        pass_fds=pass_fds,
         preexec_fn=_demote(
             "pwc-chat",
             pids_max=int(os.environ.get("PWC_CHAT_SANDBOX_PIDS_MAX", "64")),
         ),
         bufsize=0,
     )
-    if agent_read_fd is not None and agent_write_fd is not None:
-        os.close(agent_read_fd)
-        os.write(agent_write_fd, proxy_token.encode())
-        os.close(agent_write_fd)
-    del proxy_token
     assert agent.stdin is not None and agent.stdout is not None
     poller = select.poll()
     poller.register(sys.stdin.buffer, select.POLLIN | select.POLLHUP)

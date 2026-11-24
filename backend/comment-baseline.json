@@ -10,6 +10,5 @@
   "backend/chat_sandbox_worker/mcp_app_registry.py": 1,
   "backend/chat_sandbox_worker/prompt.py": 2,
   "backend/chat_sandbox_worker/protocol.py": 3,
-  "backend/chat_sandbox_worker/supervisor.py": 3,
-  "backend/chat_sandbox_worker/tool_policy.py": 7
+  "backend/chat_sandbox_worker/supervisor.py": 3
 }

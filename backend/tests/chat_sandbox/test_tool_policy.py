@@ -56,12 +56,28 @@ def test_tool_budget_counts_parallel_calls_and_fifth_search_is_denied():
         maximum_turn_output_bytes=4096,
     )
     for index in range(4):
+        budget.register_call(f"tool-{index}")
         assert budget.authorize(
             f"tool-{index}", "Bash", {"command": f"pwc search query-{index}"}
         ).allowed
+    budget.register_call("tool-5")
     denied = budget.authorize("tool-5", "Bash", {"command": "pwc search fifth"})
     assert not denied.allowed
     assert budget.calls == 4
+
+
+def test_tool_budget_refuses_calls_that_skipped_round_registration():
+    budget = ToolBudget(
+        maximum_calls=12,
+        maximum_direct_searches=4,
+        maximum_result_bytes=1024,
+        maximum_turn_output_bytes=4096,
+    )
+
+    with pytest.raises(ValueError, match="was not registered"):
+        budget.authorize("unregistered", "Bash", {"command": "pwc tasks list"})
+    assert budget.calls == 0
+    assert budget.tool_rounds_started == 0
 
 
 def test_tool_budget_counts_s2_search_against_catalog_search_limit():
@@ -71,9 +87,11 @@ def test_tool_budget_counts_s2_search_against_catalog_search_limit():
         maximum_result_bytes=1024,
         maximum_turn_output_bytes=4096,
     )
+    budget.register_call("tool-1")
     assert budget.authorize(
         "tool-1", "Bash", {"command": "s2 search transformers"}
     ).allowed
+    budget.register_call("tool-2")
     assert not budget.authorize(
         "tool-2", "Bash", {"command": "pwc search transformers"}
     ).allowed
@@ -101,6 +119,7 @@ def test_successful_shell_result_with_execution_limit_is_reclassified():
         maximum_result_bytes=1024,
         maximum_turn_output_bytes=4096,
     )
+    budget.register_call("tool-1")
     assert budget.authorize("tool-1", "Bash", {"command": "pwc search test"}).allowed
 
     result = budget.result(
@@ -192,6 +211,7 @@ def test_tool_policy_rejects_traversal_and_enforces_aggregate_bytes(tmp_path):
         maximum_result_bytes=24,
         maximum_turn_output_bytes=48,
     )
+    budget.register_call("outside")
     denied = budget.authorize(
         "outside",
         "Read",
@@ -204,6 +224,7 @@ def test_tool_policy_rejects_traversal_and_enforces_aggregate_bytes(tmp_path):
         "Read and Grep may only access /workspace or the approved CLI guides. "
         "Rerun the source command with output redirected to /workspace, then try again."
     )
+    budget.register_call("inlined-skill")
     inlined_skill = budget.authorize(
         "inlined-skill",
         "Read",
@@ -217,6 +238,7 @@ def test_tool_policy_rejects_traversal_and_enforces_aggregate_bytes(tmp_path):
         "your system prompt. Read that text instead and run the CLI directly."
     )
     assert not budget.tooling_closed
+    budget.register_call("recovery")
     assert budget.authorize(
         "recovery",
         "Bash",
@@ -232,6 +254,7 @@ def test_tool_policy_rejects_traversal_and_enforces_aggregate_bytes(tmp_path):
     )
     for index in range(3):
         tool_id = f"tool-{index}"
+        budget.register_call(tool_id)
         assert budget.authorize(
             tool_id,
             "Bash",
