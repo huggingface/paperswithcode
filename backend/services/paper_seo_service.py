@@ -153,13 +153,9 @@ def _search_title(paper: Paper, title: str, document_type: Optional[str]) -> str
         benchmark_title = _benchmark_title(title, paper.evaluated_benchmarks or ())
         if benchmark_title:
             return f"{benchmark_title} | Papers with Code"
+    if document_type:
+        title = f"{title.split(':', 1)[0].strip()} {document_type}"
     if paper.source == "arxiv" and paper.arxiv_id:
-        if document_type:
-            concise_title = title.split(":", 1)[0].strip()
-            return (
-                f"{concise_title} {document_type} "
-                f"(arXiv:{paper.arxiv_id}) | Papers with Code"
-            )
         return f"{title} (arXiv:{paper.arxiv_id}) | Papers with Code"
     return f"{title} | Papers with Code"
 

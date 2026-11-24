@@ -146,6 +146,20 @@ def test_document_type_comes_from_the_paper_not_the_route():
     assert typed.search_title.startswith("Kimi K3 System Card (arXiv:2611.00001)")
 
 
+def test_external_paper_keeps_its_document_type_in_the_search_title():
+    document = build_paper_seo_document(
+        _paper(
+            id="124110",
+            arxiv_id=None,
+            source="external",
+            document_type="Technical Report",
+            evaluated_benchmarks=["GPQA Diamond"],
+        ),
+        "124110",
+    )
+    assert document.search_title == "Kimi K3 Technical Report | Papers with Code"
+
+
 def test_papers_with_results_get_a_benchmark_title():
     paper = _paper(
         id="124110",
