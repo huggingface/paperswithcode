@@ -1703,3 +1703,25 @@ def test_enrichment_thumbnail_url_change_is_applied(monkeypatch):
 
     assert result["status"] == "applied"
     assert row.applied_at == row.submitted_at
+
+
+def test_one_result_per_leaderboard_error_separates_stored_and_submitted_rows(
+    monkeypatch,
+):
+    stored = _stored_evaluation(id=77, model_name="Small Model")
+    submitted = _stored_evaluation(id=90, model_name="Large Model")
+    db = SimpleNamespace(
+        flush=lambda: None, query=lambda _model: _ListQuery([stored, submitted])
+    )
+    service = _service(db, SimpleNamespace())
+    monkeypatch.setattr(service, "_evaluation_changes", lambda *_args: {})
+    row = SimpleNamespace(kind="add-evals", paper_id=42)
+    body = ApplyMutationRequest(evaluations=[_evaluation(model_name="Large Model")])
+
+    with pytest.raises(ValueError) as error:
+        service._verify_after_state(row, body, {"evaluations": []})
+
+    message = str(error.value)
+    assert "Already stored before this proposal: [(77, 'Small Model')]" in message
+    assert "Submitted by this proposal: ['Large Model']" in message
+    assert "90" not in message
