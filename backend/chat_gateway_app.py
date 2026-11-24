@@ -19,7 +19,6 @@ from typing import Annotated, Any, Literal
 
 import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import Response
 from huggingface_hub.errors import HfHubHTTPError
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
@@ -94,10 +93,6 @@ from backend.services.chat_turn_job_repository import (
 from backend.services.chat_durable_lifecycle_observer import (
     durable_lifecycle_observer,
 )
-from backend.services.chat_web_fetch_service import (
-    ChatWebFetchError,
-    fetch_catalog_url,
-)
 from backend.services.chat_web_search_service import WebSearchError, search_web
 
 
@@ -153,11 +148,6 @@ class StoreRequest(BaseModel):
     format: Literal["claude", "pi"] = "claude"
     agent_session_id: uuid.UUID | None = None
     current_leaf_id: str | None = Field(default=None, max_length=255)
-
-
-class WebFetchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    url: str = Field(max_length=2000)
 
 
 class ArtifactPrepareRequest(BaseModel):
@@ -1021,40 +1011,6 @@ async def artifact_publish(
         "gate_status": version.gate_status,
         "total_bytes": version.byte_count,
     }
-
-
-@app.post("/web-fetch")
-async def web_fetch(
-    body: WebFetchRequest,
-    authorization: Annotated[str, Header()],
-    x_pwc_session: Annotated[str, Header()],
-    x_pwc_turn: Annotated[str, Header()],
-    turn_fence: TurnFenceDependency,
-    db: Session = Depends(get_database_session),
-):
-    token = _bearer(authorization)
-    _scope(
-        token,
-        "web_fetch",
-        x_pwc_session,
-        x_pwc_turn,
-        db,
-        turn_fence=turn_fence,
-    )
-    db.commit()
-    try:
-        result = await fetch_catalog_url(db, body.url)
-    except ChatWebFetchError as error:
-        raise HTTPException(status_code=error.status_code, detail=str(error)) from None
-    return Response(
-        content=result.body,
-        status_code=result.status_code,
-        headers={
-            "Content-Type": result.content_type,
-            "Content-Length": str(len(result.body)),
-            "Cache-Control": "no-store",
-        },
-    )
 
 
 def _provider_call_lifecycle(

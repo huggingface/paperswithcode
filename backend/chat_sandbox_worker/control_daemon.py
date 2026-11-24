@@ -5,7 +5,6 @@ from __future__ import annotations
 import hmac
 import json
 import os
-import secrets
 import select
 import socket
 import subprocess
@@ -59,8 +58,7 @@ def _broker_control(payload: dict) -> dict:
     return response
 
 
-def _start_broker() -> tuple[subprocess.Popen, str]:
-    proxy_token = secrets.token_urlsafe(32)
+def _start_broker() -> subprocess.Popen:
     read_fd, write_fd = os.pipe()
     broker_environment = _safe_environment("/var/empty/pwc-broker")
     broker_environment["PWC_BROKER_CONFIG_FD"] = str(read_fd)
@@ -77,30 +75,23 @@ def _start_broker() -> tuple[subprocess.Popen, str]:
     os.write(
         write_fd,
         json.dumps(
-            {
-                "gateway_url": os.environ["PWC_CHAT_GATEWAY_URL"],
-                "proxy_token": proxy_token,
-            },
+            {"gateway_url": os.environ["PWC_CHAT_GATEWAY_URL"]},
             separators=(",", ":"),
         ).encode(),
     )
     os.close(write_fd)
     _wait_for_broker(broker)
-    return broker, proxy_token
+    return broker
 
 
-def _start_agent(agent_harness: str, proxy_token: str) -> subprocess.Popen:
+def _start_agent(agent_harness: str) -> subprocess.Popen:
     if agent_harness not in {"claude", "pi"}:
         raise RuntimeError("Invalid persistent agent harness")
-    agent_read_fd, agent_write_fd = os.pipe()
     agent_environment = _agent_environment()
     agent_environment["PWC_CHAT_PERSISTENT_AGENT"] = "1"
     if agent_harness == "claude":
-        agent_environment["PWC_WEBFETCH_TOKEN_FD"] = str(agent_read_fd)
-        pass_fds = (agent_read_fd,)
         command = [sys.executable, "-m", "backend.chat_sandbox_worker.agent"]
     else:
-        pass_fds = ()
         command = [
             "node",
             "--import",
@@ -113,17 +104,12 @@ def _start_agent(agent_harness: str, proxy_token: str) -> subprocess.Popen:
         stdout=subprocess.PIPE,
         stderr=sys.stderr,
         env=agent_environment,
-        pass_fds=pass_fds,
         preexec_fn=_demote(  # noqa: PLW1509
             "pwc-chat",
             pids_max=int(os.environ.get("PWC_CHAT_SANDBOX_PIDS_MAX", "64")),
         ),
         bufsize=0,
     )
-    os.close(agent_read_fd)
-    if agent_harness == "claude":
-        os.write(agent_write_fd, proxy_token.encode())
-    os.close(agent_write_fd)
     assert agent.stdout is not None
     ready, _, _ = select.select([agent.stdout], [], [], 30)
     if not ready:
@@ -213,7 +199,6 @@ def _serve_turn(
     *,
     broker: subprocess.Popen,
     agent: subprocess.Popen | None,
-    proxy_token: str,
     assigned_session_id: str | None,
     assigned_agent_harness: str | None,
     startup_metrics: dict[str, int | None],
@@ -270,7 +255,7 @@ def _serve_turn(
         assigned_agent_harness=assigned_agent_harness,
     )
     if agent is None:
-        agent = _start_agent(agent_harness, proxy_token)
+        agent = _start_agent(agent_harness)
     _broker_control(
         {
             "operation": "install",
@@ -361,7 +346,6 @@ def _serve_connections(
     server: socket.socket,
     *,
     broker: subprocess.Popen,
-    proxy_token: str,
     startup_metrics: dict[str, int | None],
     daemon_started: float,
 ) -> None:
@@ -374,7 +358,7 @@ def _serve_connections(
         startup_metrics["agent_spawn_ms"] = round(
             (time.monotonic() - daemon_started) * 1000
         )
-        agent = _start_agent("pi", proxy_token)
+        agent = _start_agent("pi")
         startup_metrics["agent_startup_ready_ms"] = round(
             (time.monotonic() - daemon_started) * 1000
         )
@@ -393,7 +377,6 @@ def _serve_connections(
                     connection,
                     broker=broker,
                     agent=agent,
-                    proxy_token=proxy_token,
                     assigned_session_id=assigned_session_id,
                     assigned_agent_harness=assigned_agent_harness,
                     startup_metrics=startup_metrics,
@@ -420,7 +403,7 @@ def main() -> int:
     daemon_started = time.monotonic()
     _not_dumpable()
     _harden_proc()
-    broker, proxy_token = _start_broker()
+    broker = _start_broker()
     startup_metrics: dict[str, int | None] = {
         "broker_ready_ms": round((time.monotonic() - daemon_started) * 1000),
         "control_ready_ms": None,
@@ -441,7 +424,6 @@ def main() -> int:
         _serve_connections(
             server,
             broker=broker,
-            proxy_token=proxy_token,
             startup_metrics=startup_metrics,
             daemon_started=daemon_started,
         )

@@ -7,30 +7,20 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
-from urllib.parse import urlsplit
 
-from backend.chat_execution_policy import (
-    ANSWER_NOW_REASON,
-    normalize_public_https_url,
-)
+from backend.chat_execution_policy import ANSWER_NOW_REASON
 
 WEB_SEARCH_TOOL = "mcp__web__search_web"
 ALLOWED_TOOLS = frozenset({"Bash", "Read", WEB_SEARCH_TOOL})
 _HINT = "\n[output truncated; narrow, filter, or paginate the request and try again]\n"
 _ANSI = re.compile(rb"(?:\x1b\][^\x07]*(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~])")
 _SEARCH = re.compile(r"(?:^|[;&|()\n]\s*)(?:pwc|s2)\s+search(?:\s|$)", re.IGNORECASE)
-_URL = re.compile(r'https?://[^\s<>"\\]+', re.IGNORECASE)
 _HARD_FAILURE = re.compile(
     r"(?:\b429\b|execution limit|tool limit reached|search limit reached)",
     re.IGNORECASE,
 )
-_ALWAYS_FETCHABLE_HOSTS = frozenset({"arxiv.org"})
 _UNAVAILABLE_TOOL_REASON = "That tool is not available."
 _INVALID_WEB_SEARCH_REASON = "Web search is not available for this request."
-_INVALID_WEB_FETCH_REASON = (
-    "WebFetch requires an approved public HTTPS URL from the user or a prior "
-    "catalog tool result."
-)
 _READ_SCOPE_REASON = (
     "Read and Grep may only access /workspace or the approved CLI guides. "
     "Rerun the source command with output redirected to /workspace, then try again."
@@ -75,10 +65,6 @@ def _inside(value: Path, root: Path) -> bool:
         return False
 
 
-def _public_url(value: str) -> str | None:
-    return normalize_public_https_url(value)
-
-
 @dataclass(frozen=True)
 class Decision:
     allowed: bool
@@ -101,7 +87,6 @@ class ToolBudget:
     output_bytes: int = 0
     started: dict[str, float] = field(default_factory=dict)
     started_names: dict[str, str] = field(default_factory=dict)
-    fetchable_urls: set[str] = field(default_factory=set)
     tool_rounds_started: int = 0
     tool_rounds_denied: int = 0
     tool_rounds_executed: int = 0
@@ -112,9 +97,6 @@ class ToolBudget:
     close_reason: str | None = None
     denied_calls: int = 0
     completed_calls: int = 0
-
-    def seed_urls(self, urls: list[str]) -> None:
-        self.fetchable_urls = set(urls)
 
     def register_round(self, tool_ids: list[str]) -> None:
         pending = [
@@ -131,9 +113,6 @@ class ToolBudget:
             self.close(ANSWER_NOW_REASON)
 
     def register_call(self, tool_id: str) -> None:
-        # Pre-tool hooks run before the streamed assistant-message boundary that
-        # registers the complete batch. Starts without an intervening result are
-        # therefore parallel calls from the same assistant turn.
         if tool_id in self.round_by_tool_id:
             self.active_round_tool_ids.add(tool_id)
             return
@@ -152,11 +131,6 @@ class ToolBudget:
         self.tooling_closed = True
         self.close_reason = reason
 
-    def observe_urls(self, payload: str) -> None:
-        for match in _URL.finditer(payload):
-            if normalized := _public_url(match.group()):
-                self.fetchable_urls.add(normalized)
-
     def authorize(
         self,
         tool_id: str,
@@ -170,9 +144,7 @@ class ToolBudget:
         posterly_root: Path = Path("/opt/posterly"),
     ) -> Decision:
         if tool_id not in self.round_by_tool_id:
-            # Compatibility fallback for callers that do not expose an SDK
-            # assistant-message boundary. Normal execution registers first.
-            self.register_round([tool_id])
+            raise ValueError(f"tool call {tool_id!r} was not registered")
         if self.tooling_closed:
             self.denied_calls += 1
             return Decision(False, self.close_reason or ANSWER_NOW_REASON)
@@ -202,25 +174,10 @@ class ToolBudget:
                 self.close()
                 self.denied_calls += 1
                 return Decision(False, ANSWER_NOW_REASON)
-        if name == "WebFetch":
-            url = args.get("url")
-            normalized = _public_url(url) if isinstance(url, str) else None
-            if normalized is None:
-                self.denied_calls += 1
-                return Decision(False, _INVALID_WEB_FETCH_REASON)
-            hostname = urlsplit(normalized).hostname
-            if (
-                normalized not in self.fetchable_urls
-                and hostname not in _ALWAYS_FETCHABLE_HOSTS
-            ):
-                self.denied_calls += 1
-                return Decision(False, _INVALID_WEB_FETCH_REASON)
         if name in {"Read", "Grep"}:
             path = args.get("file_path") or args.get("path")
             if isinstance(path, str):
                 candidate = Path(path).resolve(strict=False)
-                # These three skills are rendered into the system prompt, so a
-                # read is a wasted tool round rather than a scope violation.
                 if candidate in {
                     guide.resolve(strict=False),
                     hf_guide.resolve(strict=False),
@@ -278,8 +235,6 @@ class ToolBudget:
             if status == "success":
                 status = "error"
                 exit_code = exit_code or 1
-        if name not in {"WebFetch", WEB_SEARCH_TOOL}:
-            self.observe_urls(text)
         started = self.started.pop(tool_id, None)
         if status != "denied":
             self.complete_call(tool_id)

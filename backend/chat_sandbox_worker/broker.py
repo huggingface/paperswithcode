@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hmac
 import http.client
 import json
 import os
@@ -70,7 +69,7 @@ def _load_config() -> dict:
     fd = int(os.environ["PWC_BROKER_CONFIG_FD"])
     with os.fdopen(fd, "rb", closefd=True) as handle:
         config = json.loads(handle.read(16 * 1024))
-    required = {"gateway_url", "proxy_token"}
+    required = {"gateway_url"}
     optional = {"capability", "session_id", "turn_id"}
     if not required.issubset(config) or not set(config).issubset(required | optional):
         raise RuntimeError("Invalid broker configuration")
@@ -82,8 +81,6 @@ def _load_config() -> dict:
 CONFIG = _load_config()
 UPSTREAM = urlsplit(CONFIG["gateway_url"])
 PROXY_CA_PATH = Path("/tmp/pwc-webfetch-ca.pem")
-PROXY_GRANTS: dict[str, list[float]] = {}
-PROXY_GRANTS_LOCK = Lock()
 
 
 class BrokerState:
@@ -147,8 +144,6 @@ class BrokerState:
                     )
                 )
             self._active = None
-        with PROXY_GRANTS_LOCK:
-            PROXY_GRANTS.clear()
 
     def begin_request(self) -> dict[str, str]:
         with self._condition:
@@ -178,22 +173,6 @@ class BrokerState:
 
 
 STATE = BrokerState(CONFIG)
-
-
-def _grant_proxy_url(url: str) -> None:
-    with PROXY_GRANTS_LOCK:
-        PROXY_GRANTS.setdefault(url, []).append(monotonic() + 10)
-
-
-def _consume_proxy_url(url: str) -> bool:
-    now = monotonic()
-    with PROXY_GRANTS_LOCK:
-        grants = [expiry for expiry in PROXY_GRANTS.pop(url, []) if expiry > now]
-        if not grants:
-            return False
-        if len(grants) > 1:
-            PROXY_GRANTS[url] = grants[1:]
-        return True
 
 
 def _connection():
@@ -499,26 +478,6 @@ class Handler(BaseHTTPRequestHandler):
             ).encode()
             self._forward_hf(envelope)
             return
-        if path == "/proxy-authorize":
-            if not STATE.active():
-                self.send_error(403)
-                return
-            supplied = self.headers.get("X-PWC-Proxy-Token", "")
-            if not hmac.compare_digest(supplied, CONFIG["proxy_token"]):
-                self.send_error(403)
-                return
-            try:
-                payload = json.loads(body)
-                url = payload["url"]
-                if not isinstance(url, str) or len(url) > 2000:
-                    raise ValueError
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-                self.send_error(422)
-                return
-            _grant_proxy_url(url)
-            self.send_response(204)
-            self.end_headers()
-            return
         if path == "/session-store":
             self._forward("session-store", body)
             return
@@ -761,14 +720,14 @@ class _CertificateAuthority:
 
     def __init__(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory(
-            prefix="pwc-webfetch-", dir="/var/empty/pwc-broker"
+            prefix="pwc-proxy-", dir="/var/empty/pwc-broker"
         )
         self.directory = Path(self.temporary_directory.name)
         self.key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         now = datetime.now(UTC)
         self.not_valid_after = now + self.SANDBOX_LIFETIME + self.VALIDITY_MARGIN
         name = x509.Name(
-            [x509.NameAttribute(NameOID.COMMON_NAME, "PwC WebFetch Ephemeral CA")]
+            [x509.NameAttribute(NameOID.COMMON_NAME, "PwC Sandbox Proxy Ephemeral CA")]
         )
         self.certificate = (
             x509.CertificateBuilder()
@@ -829,7 +788,7 @@ CERTIFICATES: _CertificateAuthority | None = None
 
 
 class OriginHandler(BaseHTTPRequestHandler):
-    server_version = "pwc-webfetch-proxy/1"
+    server_version = "pwc-model-proxy/1"
 
     def log_message(self, _format: str, *_args) -> None:
         return
@@ -889,56 +848,9 @@ class OriginHandler(BaseHTTPRequestHandler):
             GATEWAY_CONNECTIONS.release(connection, reusable=reusable)
             STATE.finish_request()
 
-    def do_GET(self) -> None:
-        if not STATE.active():
-            self.send_error(403)
-            return
-        host = str(getattr(self.server, "target_host", ""))
-        requested_host = (self.headers.get("Host") or "").partition(":")[0].lower()
-        if (
-            not host
-            or requested_host != host
-            or self.path.startswith(("http://", "https://"))
-        ):
-            self.send_error(403)
-            return
-        body = json.dumps(
-            {"url": f"https://{host}{self.path}"}, separators=(",", ":")
-        ).encode()
-        url = json.loads(body)["url"]
-        if not _consume_proxy_url(url):
-            self.send_error(403)
-            return
-        active = STATE.begin_request()
-        connection = GATEWAY_CONNECTIONS.acquire()
-        reusable = False
-        try:
-            prefix = UPSTREAM.path.rstrip("/")
-            connection.request(
-                "POST",
-                f"{prefix}/web-fetch",
-                body=body,
-                headers=_gateway_headers(active=active),
-            )
-            response = connection.getresponse()
-            self.send_response(response.status)
-            for header in ("Content-Type", "Content-Length"):
-                if value := response.getheader(header):
-                    self.send_header(header, value)
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            while chunk := response.read(16 * 1024):
-                self.wfile.write(chunk)
-            reusable = _response_reusable(response)
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        finally:
-            GATEWAY_CONNECTIONS.release(connection, reusable=reusable)
-            STATE.finish_request()
-
 
 class ProxyHandler(BaseHTTPRequestHandler):
-    server_version = "pwc-webfetch-connect/1"
+    server_version = "pwc-proxy-connect/1"
 
     def log_message(self, _format: str, *_args) -> None:
         return

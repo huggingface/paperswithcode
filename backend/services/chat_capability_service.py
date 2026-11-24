@@ -61,7 +61,6 @@ class ChatCapabilityService:
             "model",
             "catalog",
             "session_store",
-            "web_fetch",
             "web_search",
             "hf_catalog",
             "artifact",

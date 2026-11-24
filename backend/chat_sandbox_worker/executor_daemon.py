@@ -1467,7 +1467,7 @@ def main() -> int:
         raise RuntimeError("Sandbox executor daemon must run as root")
     _not_dumpable()
     _harden_proc()
-    broker, _proxy_token = _start_broker()
+    broker = _start_broker()
     try:
         ExecutorServer().serve_forever()
     finally:

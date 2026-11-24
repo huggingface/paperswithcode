@@ -184,7 +184,6 @@ def test_persistent_health_probe_requires_idle_children_and_empty_broker(
             daemon_side,
             broker=child,
             agent=child,
-            proxy_token="unused",
             assigned_session_id=None,
             assigned_agent_harness=None,
             startup_metrics=startup_metrics,
@@ -228,7 +227,6 @@ def test_abandoned_persistent_health_probe_does_not_kill_daemon(monkeypatch):
             daemon_side,
             broker=child,
             agent=child,
-            proxy_token="unused",
             assigned_session_id=None,
             assigned_agent_harness=None,
             startup_metrics={
@@ -271,7 +269,6 @@ def test_idle_persistent_relay_accepts_backend_replacement(monkeypatch, tmp_path
             control_daemon._serve_connections(
                 server,
                 broker=child,
-                proxy_token="unused",
                 startup_metrics=startup_metrics,
                 daemon_started=control_daemon.time.monotonic(),
             )
@@ -385,7 +382,6 @@ def test_persistent_control_reports_content_free_failure_stage(monkeypatch):
                 daemon_side,
                 broker=child,
                 agent=child,
-                proxy_token="unused",
                 assigned_session_id=None,
                 assigned_agent_harness=None,
                 startup_metrics={

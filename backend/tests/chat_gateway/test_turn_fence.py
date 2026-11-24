@@ -229,7 +229,6 @@ GATEWAY_CASES = [
         b"x",
         {"Content-Type": "application/zip"},
     ),
-    ("web_fetch", "/web-fetch", {"url": "https://example.com"}, {}),
     (
         "responses",
         "/v1/responses",
@@ -306,8 +305,6 @@ def _install_downstream_sentinel(monkeypatch, name, reached, db):
         db.on_get = hit
     elif name == "artifact_publish":
         monkeypatch.setattr(gateway.tempfile, "mkstemp", hit)
-    elif name == "web_fetch":
-        db.on_commit = hit
     else:
         monkeypatch.setattr(gateway, "_capability_owner", lambda *_args: "owner-1")
         monkeypatch.setattr(
@@ -355,7 +352,6 @@ def test_every_gateway_entry_forwards_the_exact_claim_before_downstream_work(
             "session_store",
             "artifact",
             "paper",
-            "web_fetch",
             "external_turn",
         ],
         owner_hash="a" * 64,
