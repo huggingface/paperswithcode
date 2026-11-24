@@ -14,6 +14,8 @@ from textwrap import dedent
 from types import SimpleNamespace
 from typing import BinaryIO
 
+import pytest
+
 from backend.chat_sandbox_worker.executor_daemon import (
     EXECUTOR_BOOTSTRAP_PREFIX,
     ExecutorServer,
@@ -2429,3 +2431,26 @@ def test_restart_turns_malformed_middle_output_into_execution_lost(
     assert attached[-1]["error"] == "execution_lost"
     recovered.shutdown()
     recovered_thread.join(timeout=2)
+
+
+def test_executor_daemon_stops_the_single_broker_process(monkeypatch):
+    from backend.chat_sandbox_worker import executor_daemon as daemon
+
+    broker = object()
+    stopped = []
+
+    class StoppingServer:
+        def serve_forever(self):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(daemon.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(daemon, "_not_dumpable", lambda: None)
+    monkeypatch.setattr(daemon, "_harden_proc", lambda: None)
+    monkeypatch.setattr(daemon, "_start_broker", lambda: broker)
+    monkeypatch.setattr(daemon, "ExecutorServer", StoppingServer)
+    monkeypatch.setattr(daemon, "_stop", stopped.append)
+
+    with pytest.raises(KeyboardInterrupt):
+        daemon.main()
+
+    assert stopped == [broker]
