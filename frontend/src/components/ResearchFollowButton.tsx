@@ -5,6 +5,7 @@ import type { FollowKind } from '@/lib/api/research';
 import { hfLoginUrl, isAuthDisabled } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
 import { useResearchFollows, useSetFollow } from '@/lib/researchTopic';
+import FollowerStack from '@/components/FollowerStack';
 
 const HINTS: Record<FollowKind, string> = {
   task: 'Get new papers on this task',
@@ -14,7 +15,12 @@ const HINTS: Record<FollowKind, string> = {
   organization: 'Get new papers from this organization',
 };
 
-export default function ResearchFollowButton({ kind, entityId }: { kind: FollowKind; entityId: string | number }) {
+export default function ResearchFollowButton({ kind, entityId, showFollowers = false }: {
+  kind: FollowKind;
+  entityId: string | number;
+  /** Shows who already follows it next to the button. */
+  showFollowers?: boolean;
+}) {
   const auth = useOptionalAuth();
   const user = auth?.user;
   const location = useLocation();
@@ -31,6 +37,7 @@ export default function ResearchFollowButton({ kind, entityId }: { kind: FollowK
     <a className="research-follow-btn" href={hfLoginUrl(location.pathname + location.search)}>
       <Plus aria-hidden="true" />Follow
     </a>
+    {showFollowers && <FollowerStack kind={kind} entityId={entityId} />}
     <span className="research-follow-hint">Sign in to {HINTS[kind].toLowerCase()}.</span>
   </div>;
   const failed = mutation.error || follows.error;
@@ -44,6 +51,7 @@ export default function ResearchFollowButton({ kind, entityId }: { kind: FollowK
         <span className="research-follow-label-hover">Unfollow</span>
       </> : <><Plus aria-hidden="true" />Follow</>}
     </button>
+    {showFollowers && <FollowerStack kind={kind} entityId={entityId} />}
     {failed ? <span className="research-follow-hint is-error" role="alert">Could not update follows. Please try again.</span>
       : followed ? justFollowed === entityKey && <span className="research-follow-hint" role="status">
         Added to <Link to="/following">your Following feed</Link>

@@ -57,6 +57,11 @@ export interface TopicPerson {
   username: string;
   avatar_url: string;
 }
+/** How many accounts follow a task, method, benchmark, author or organization, and the first few who show it. */
+export interface EntityFollowers {
+  followers: number;
+  follower_avatars: TopicPerson[];
+}
 /** A topic page header: what it matches, who made it, who follows it. */
 export interface PublicTopic {
   id: number;
@@ -181,6 +186,8 @@ export const researchApi = {
   },
   featuredTopics: () => apiRequest<TopicBubble[]>('/research/topics/featured'),
   popularFollows: () => apiRequest<PopularFollow[]>('/research/follows/popular'),
+  entityFollowers: (kind: FollowKind, id: string | number) =>
+    apiRequest<EntityFollowers>(`/research/follows/${kind}/${id}/followers`),
   /** Catalog tasks, methods and benchmarks a topic with this text would duplicate. */
   topicMatches: (text: string) =>
     apiRequest<ResearchTopicSuggestion[]>(`/research/topic-matches?${new URLSearchParams({ text })}`),

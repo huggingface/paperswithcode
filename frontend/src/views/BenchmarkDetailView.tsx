@@ -277,7 +277,7 @@ const BenchmarkDetailView: React.FC = () => {
           )}
         </div>
 
-        <ResearchFollowButton kind="benchmark" entityId={dataset.id} />
+        <ResearchFollowButton kind="benchmark" entityId={dataset.id} showFollowers />
 
         <div className="bm-subtitle">
           {isSummaryLoading ? (

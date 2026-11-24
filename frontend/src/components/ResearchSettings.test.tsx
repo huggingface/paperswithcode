@@ -82,6 +82,38 @@ describe('research follows', () => {
       auth.user = { hf_subject: 'alice', username: 'alice' };
     }
   });
+  it('shows follower faces, the overflow and the count, and refreshes them after a follow', async () => {
+    const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
+    vi.spyOn(researchApi, 'setFollow').mockResolvedValue();
+    const followers = vi.spyOn(researchApi, 'entityFollowers').mockResolvedValue({
+      followers: 7,
+      follower_avatars: [
+        { username: 'bob', avatar_url: '/api/v1/research/avatars/bob' },
+        { username: 'carol', avatar_url: '/api/v1/research/avatars/carol' },
+      ],
+    });
+    render(<ResearchFollowButton kind="benchmark" entityId={5} showFollowers />, { wrapper });
+    expect(await screen.findByRole('link', { name: '@bob' })).toHaveAttribute('href', 'https://huggingface.co/bob');
+    expect(screen.getByLabelText('5 more')).toHaveTextContent('+5');
+    expect(screen.getByText('followers').textContent).toBe('7 followers');
+    expect(followers).toHaveBeenCalledWith('benchmark', 5);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Follow' })).toBeEnabled());
+    list.mockResolvedValue([{ kind: 'benchmark', entity_id: 5, name: 'Bench', url: '/benchmark/bench', created_at: '' }]);
+    followers.mockResolvedValue({ followers: 8, follower_avatars: [] });
+    fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
+    expect(await screen.findByText('8')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: '@bob' })).not.toBeInTheDocument();
+  });
+  it('hides the stack until someone follows and unless asked for', async () => {
+    vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
+    const followers = vi.spyOn(researchApi, 'entityFollowers').mockResolvedValue({ followers: 0, follower_avatars: [] });
+    render(<ResearchFollowButton kind="task" entityId={9} showFollowers />, { wrapper });
+    await waitFor(() => expect(followers).toHaveBeenCalled());
+    expect(screen.queryByText(/follower/)).not.toBeInTheDocument();
+    followers.mockClear();
+    render(<ResearchFollowButton kind="author" entityId={9} />, { wrapper });
+    expect(followers).not.toHaveBeenCalled();
+  });
   it('confirms a new follow only for the entity that was followed', async () => {
     const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
     vi.spyOn(researchApi, 'setFollow').mockResolvedValue();
