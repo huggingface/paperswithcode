@@ -239,20 +239,21 @@ def test_first_run_publishes_reviewed_rows_and_signals_the_rest():
     stats = LiveLeaderboardSyncService(session, BOARD).sync(
         parse_jevbench(FIXTURE_TEXT)
     )
-    assert stats.fetched == 48 and stats.created == 6
+    assert stats.fetched == 48 and stats.created == 7 and stats.excluded == 8
     assert stats.missing_papers == [] and stats.missing_upstream == []
-    assert len(stats.unreviewed) == 41
+    assert len(stats.unreviewed) == 32
     rows = _rows(session)
     ranked = sorted(rows.values(), key=lambda row: row.best_rank)
     assert [(row.model_name, row.metrics[METRIC_NAME]) for row in ranked] == [
         ("Drex Max", 75.38),
+        ("Sage 1.3.0", 73.73),
         ("GPT-6 Luna", 40.39),
         ("GPT-5.6 Luna", 21.36),
         ("Gemini 3.1 Flash-Lite", 16.93),
         ("DeepSeek V4.1 Flash", 6.9),
         ("Qwen3.8-27B", 0.0),
     ]
-    assert [row.best_rank for row in ranked] == [1, 2, 3, 4, 5, 6]
+    assert [row.best_rank for row in ranked] == [1, 2, 3, 4, 5, 6, 7]
     drex = rows["Drex Max"]
     assert (
         drex.is_open
@@ -285,7 +286,7 @@ def test_new_release_revises_scores_in_place():
     stats = LiveLeaderboardSyncService(session, BOARD).sync(
         parse_jevbench(json.dumps(payload))
     )
-    assert stats.created == 0 and stats.changed == 6
+    assert stats.created == 0 and stats.changed == 7
     drex = _rows(session)["Drex Max"]
     assert drex.metrics == {METRIC_NAME: 75.0}
     assert "release v1.8.10" in drex.methodology

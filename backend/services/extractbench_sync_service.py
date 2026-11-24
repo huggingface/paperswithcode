@@ -149,6 +149,12 @@ _QWEN_3_5 = external(
     "2026-02-16",
     is_open=True,
 )
+_GEMINI_4_HYDROGEN = external(
+    "https://blog.google/innovation-and-ai/models-and-research/gemini-models/"
+    "introducing-gemini-4-hydrogen/",
+    "Introducing Gemini 4 Hydrogen for Agentic Workflows",
+    "2026-11-12",
+)
 _INTERNVL_3_5 = arxiv("2508.18265")
 _GEMMA_4 = arxiv("2607.02770")
 _LLAMAEXTRACT = arxiv("2607.29677", is_open=False)
@@ -157,6 +163,8 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "LlamaExtract Agentic Plus": _LLAMAEXTRACT,
     "LlamaExtract Agentic": _LLAMAEXTRACT,
     "LlamaExtract Cost-Effective": _LLAMAEXTRACT,
+    "Antigravity CLI (Gemini 4 Hydrogen)": _GEMINI_4_HYDROGEN,
+    "Gemini CLI (Gemini 4 Hydrogen)": _GEMINI_4_HYDROGEN,
     "Claude Code (Sonnet 5.5 Evidence)": _SONNET_5_5,
     "Claude Code (Opus 5.5 Evidence)": _OPUS_5_5,
     "Claude Code (Opus 4.8 Evidence)": _OPUS_4_8,
@@ -288,6 +296,8 @@ EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
         "Extend (Max Context)",
         "Datalab (Accurate + Balanced)",
         "Datalab Balanced",
+        "Datalab Accurate",
+        "Datalab Fast",
         "Extend Max Context + Review Agent",
         "Extend Performance + Review Agent",
         "Parseur",

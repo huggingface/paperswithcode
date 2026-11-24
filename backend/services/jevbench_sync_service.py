@@ -108,6 +108,27 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
             "gemini-decisions-api/"
         ),
     ),
+    "Sage 1.3.0": ModelIdentity(
+        "Sage 1.3.0", source_url="https://levanto.ai/benchmarks"
+    ),
+}
+
+MODEL_EXCLUSIONS: dict[str, str] = {
+    "SD-JEV-4B-v12.1.0 (Kego, author-hosted API)": (
+        "author-hosted research checkpoint without a release"
+    ),
+    "Instinct (ZooWork, Qwen3.8-27B)": (
+        "hosted readout over frozen Qwen3.8-27B, already on the board"
+    ),
+    "Instinct Dual 4B": "hosted readout over frozen Qwen3.5-4B",
+    "Autoloops – Gemma 4 31B IT": "third-party hosted service over Gemma 4 31B IT",
+    "SimpleJev Qwen3.6-35B-A3B": "third-party harness over a frozen open model",
+    "SimpleJev Qwen3.8-27B": "third-party harness over a frozen open model",
+    "openjev-sglang (Qwen3.6-35B-A3B on SGLang)": (
+        "third-party harness over a frozen open model"
+    ),
+    "system-one-open (Gemma 4 E2B LoRA on an L4)": "community hobby replica",
+    "JevAct (einptein, jev1-2b-v2)": "community hobby API without a release",
 }
 
 
@@ -230,6 +251,7 @@ BOARD = LiveLeaderboard(
     dataset_slug=DATASET_SLUG,
     metric=METRIC_NAME,
     identities=MODEL_IDENTITIES,
+    excluded=MODEL_EXCLUSIONS,
     min_selected=MIN_SELECTED_ENTRIES,
     protocol=(
         f"JevBench method {METHOD}, official API board (hosted offerings): "
