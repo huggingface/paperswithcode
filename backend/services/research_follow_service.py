@@ -30,13 +30,20 @@ from backend.models.database.research import (
 from backend.models.research import (
     FollowSuggestion,
     FollowSuggestions,
+    FeaturedTopicPaper,
     FollowView,
+    PopularFollow,
     ResearchEntry,
     ResearchFeedEntry,
 )
 from backend.models.database.research import ResearchTopic, ResearchTopicFollow
 from backend.services.benchmark_trend_service import BenchmarkTrendService
 from backend.services.organization_service import OrganizationService
+from backend.services.public_topic_service import (
+    FEATURED_AVATARS,
+    FEATURED_DAYS,
+    person,
+)
 from backend.services.research_topic_service import THRESHOLD as TOPIC_THRESHOLD
 from backend.services.research_topic_service import capitalized
 from backend.utils.author_photos import author_image_url
@@ -55,6 +62,43 @@ POPULAR_BENCHMARK_TASKS = ("coding-agents", "image-understanding", "robotics")
 POPULAR_BENCHMARKS_PER_TASK = 4
 POPULAR_BENCHMARK_SECONDS = 3600
 _popular_benchmarks: tuple[float, list[int]] = (0.0, [])
+POPULAR_FOLLOWS_PER_KIND = 4
+
+POPULAR_FOLLOWS_SQL = """
+WITH RECURSIVE picked AS (
+ SELECT * FROM (
+  SELECT kind, entity_id, count(*) followers,
+   row_number() OVER (PARTITION BY kind ORDER BY count(*) DESC, entity_id) rank
+  FROM research_follows WHERE kind IN ('task', 'method') GROUP BY kind, entity_id
+ ) ranked WHERE rank <= :limit
+), descendants(root, id) AS (
+ SELECT entity_id, entity_id FROM picked WHERE kind='task'
+ UNION SELECT d.root, t.id FROM tasks t JOIN descendants d ON t.parent_id=d.id
+), hits AS (
+ SELECT 'task'::text kind, d.root entity_id, pt.paper_id
+ FROM descendants d JOIN paper_tasks pt ON pt.task_id=d.id
+ UNION
+ SELECT 'method', pk.entity_id, pm.paper_id
+ FROM picked pk JOIN paper_methods pm ON pm.method_id=pk.entity_id WHERE pk.kind='method'
+), week AS (
+ SELECT DISTINCT h.kind, h.entity_id, p.id, p.trending_score
+ FROM hits h JOIN papers source ON source.id=h.paper_id
+ JOIN papers p ON (source.arxiv_id IS NOT NULL AND p.arxiv_id=source.arxiv_id AND p.is_latest_version)
+  OR (source.arxiv_id IS NULL AND p.id=source.id)
+ WHERE p.date_published >= :week
+)
+SELECT pk.kind, pk.entity_id, pk.followers, count(w.id) week_papers,
+ (array_agg(w.id ORDER BY w.trending_score DESC NULLS LAST, w.id DESC)
+  FILTER (WHERE w.id IS NOT NULL))[1] top_paper_id,
+ ARRAY(SELECT u.current_username FROM research_follows f
+  JOIN user_profiles u ON u.hf_subject=f.hf_subject
+  LEFT JOIN research_subscriptions s ON s.hf_subject=f.hf_subject
+  WHERE f.kind=pk.kind AND f.entity_id=pk.entity_id AND coalesce(s.show_as_follower, true)
+  ORDER BY f.created_at, f.hf_subject LIMIT :avatars) avatars
+FROM picked pk LEFT JOIN week w USING (kind, entity_id)
+GROUP BY pk.kind, pk.entity_id, pk.followers
+ORDER BY pk.followers DESC, pk.kind DESC, pk.entity_id
+"""
 
 
 def _image_urls(db: Session, kind: str, entities: list) -> dict[int, str | None]:
@@ -140,6 +184,64 @@ def rank_popular_benchmarks(db: Session) -> list[Dataset]:
     return [
         dataset for row in zip_longest(*picks) for dataset in row if dataset is not None
     ]
+
+
+def popular(db: Session, now: datetime) -> list[PopularFollow]:
+    """The most followed tasks and methods, most followed first, with this week's papers and the top one."""
+    rows = (
+        db.execute(
+            text(POPULAR_FOLLOWS_SQL),
+            {
+                "limit": POPULAR_FOLLOWS_PER_KIND,
+                "week": (now - timedelta(days=FEATURED_DAYS)).date(),
+                "avatars": FEATURED_AVATARS,
+            },
+        )
+        .mappings()
+        .all()
+    )
+    entities = {
+        (kind, entity.id): entity
+        for kind in ("task", "method")
+        for entity in db.scalars(
+            select(ENTITIES[kind][0]).where(
+                ENTITIES[kind][0].id.in_(
+                    [row["entity_id"] for row in rows if row["kind"] == kind]
+                )
+            )
+        )
+    }
+    papers = {
+        paper.id: paper
+        for paper in db.execute(
+            select(DBPaper.id, DBPaper.arxiv_id, DBPaper.title).where(
+                DBPaper.id.in_([row["top_paper_id"] for row in rows])
+            )
+        )
+    }
+    result = []
+    for row in rows:
+        entity = entities.get((row["kind"], row["entity_id"]))
+        if entity is None:
+            continue
+        paper = papers.get(row["top_paper_id"])
+        result.append(
+            PopularFollow(
+                kind=row["kind"],
+                entity_id=entity.id,
+                name=entity.name,
+                url=_entity_url(row["kind"], entity),
+                followers=row["followers"],
+                week_papers=row["week_papers"],
+                follower_avatars=[person(name) for name in row["avatars"]],
+                top_paper=FeaturedTopicPaper(
+                    id=paper.id, arxiv_id=paper.arxiv_id, title=paper.title
+                )
+                if paper
+                else None,
+            )
+        )
+    return result
 
 
 def suggestions(db: Session) -> FollowSuggestions:

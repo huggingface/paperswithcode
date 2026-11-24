@@ -7,27 +7,61 @@ import { topicPath, topicTitle } from '@/lib/researchTopic';
 /** A topic as a card: its title, followers' faces, this week's papers and the top one, then `action`.
  * `newTab` opens its links in a new tab, so a look from the feed editor keeps unsaved picks; `showCreator`
  * names who wrote the topic. `as="div"` fits it inside a list item someone else renders. */
-export default function TopicCard({ topic, action, newTab = false, showCreator = false, as: Tag = 'li', className }: {
+export default function TopicCard({ topic, action, newTab = false, showCreator = false, kindLabel, as = 'li', className }: {
   topic: TopicBubble | ResearchTopic;
   action: ReactNode;
   newTab?: boolean;
   showCreator?: boolean;
+  kindLabel?: string;
   as?: 'li' | 'div';
   className?: string;
 }) {
-  const avatars = topic.follower_avatars ?? [];
-  const paper = topic.top_paper;
+  return <FollowCard
+    title={topicTitle(topic)}
+    href={topicPath(topic)}
+    kindLabel={kindLabel}
+    creator={showCreator ? topic.creator?.username : undefined}
+    followers={topic.followers}
+    avatars={topic.follower_avatars ?? []}
+    weekPapers={topic.week_papers}
+    paper={topic.top_paper}
+    action={action}
+    newTab={newTab}
+    as={as}
+    className={className}
+  />;
+}
+
+/** Anything followable as a card: an optional kind label, its title, followers' faces, this week's papers
+ * and the top one, then `action`. */
+export function FollowCard({
+  title, href, kindLabel, creator, followers, avatars, weekPapers, paper, action, newTab = false, as: Tag = 'li', className,
+}: {
+  title: string;
+  href: string;
+  kindLabel?: string;
+  creator?: string;
+  followers?: number | null;
+  avatars: TopicPerson[];
+  weekPapers?: number | null;
+  paper?: { id: number; arxiv_id: string | null; title: string } | null;
+  action: ReactNode;
+  newTab?: boolean;
+  as?: 'li' | 'div';
+  className?: string;
+}) {
   return <Tag className={['home-topic-card', className].filter(Boolean).join(' ')}>
-    <CardLink to={topicPath(topic)} newTab={newTab} className="home-topic-title">{topicTitle(topic)}</CardLink>
-    {showCreator && topic.creator && <div className="home-topic-creator">by @{topic.creator.username}</div>}
-    {topic.followers != null && <div className="home-topic-followers">
+    {kindLabel && <span className="home-topic-kind">{kindLabel}</span>}
+    <CardLink to={href} newTab={newTab} className="home-topic-title">{title}</CardLink>
+    {creator && <div className="home-topic-creator">by @{creator}</div>}
+    {followers != null && <div className="home-topic-followers">
       {avatars.length > 0 && <span className="home-topic-avatars" aria-hidden="true">
         {avatars.map(person => <FollowerAvatar key={person.username} person={person} />)}
       </span>}
-      {topic.followers} {topic.followers === 1 ? 'follower' : 'followers'}
+      {followers} {followers === 1 ? 'follower' : 'followers'}
     </div>}
-    {!!topic.week_papers && <div className="home-topic-meta">
-      {topic.week_papers} new {topic.week_papers === 1 ? 'paper' : 'papers'} this week
+    {!!weekPapers && <div className="home-topic-meta">
+      {weekPapers} new {weekPapers === 1 ? 'paper' : 'papers'} this week
     </div>}
     {paper && <CardLink to={`/paper/${paper.arxiv_id || paper.id}`} newTab={newTab} className="home-topic-paper"
       title={paper.title}>

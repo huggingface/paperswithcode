@@ -141,8 +141,8 @@ export function useFollowTopics() {
   });
 }
 
-/** How many of the most followed topics the homepage shows as cards above the feed. */
-export const FEATURED_TOPIC_COUNT = 10;
+/** How many of the most followed topics the homepage shows as cards above the feed, beside as many tasks and methods. */
+export const FEATURED_TOPIC_COUNT = 4;
 
 /** Follows one popular topic from the homepage and opens Following filtered to it.
  * Guests sign in first; Following saves the stashed pick after sign-in. */

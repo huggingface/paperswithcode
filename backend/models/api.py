@@ -204,6 +204,7 @@ from backend.models.research import (
     FeaturedTopicPaper as FeaturedTopicPaper,
     FollowView as FollowView,
     FollowerVisibilityUpdate as FollowerVisibilityUpdate,
+    PopularFollow as PopularFollow,
     PublicTopicView as PublicTopicView,
     ResearchEntry as ResearchEntry,
     ResearchFeedEntry as ResearchFeedEntry,

@@ -121,9 +121,10 @@ const queryClient = new QueryClient({
   },
 });
 
-// The homepage's popular topic cards sit above the feed: fetch them while the route chunk loads.
+// The homepage's most followed cards sit above the feed: fetch them while the route chunk loads.
 if (typeof window !== "undefined" && window.location.pathname === "/") {
   void queryClient.prefetchQuery(researchQueries.featuredTopics());
+  void queryClient.prefetchQuery(researchQueries.popularFollows());
 }
 
 const LegacyPaperRedirect: React.FC = () => {

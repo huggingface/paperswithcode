@@ -270,6 +270,48 @@ def test_follows_carry_a_subtasks_parent_slug(db, now):
     assert listed == {"Parent": None, "Child": "parent-task"}
 
 
+def test_popular_ranks_tasks_and_methods_with_this_weeks_papers(db, now, monkeypatch):
+    monkeypatch.setattr(follows, "POPULAR_FOLLOWS_PER_KIND", 1)
+    parent = Task(name="Robotics", slug="robotics-popular")
+    quiet = Task(name="Quiet", slug="quiet-popular")
+    method = Method(name="GRPO popular", slug="grpo-popular")
+    db.add_all([parent, quiet, method])
+    db.flush()
+    child = Task(name="Grasping", slug="grasping-popular", parent_id=parent.id)
+    db.add(child)
+    db.add_all(
+        UserProfile(hf_subject=name, current_username=name)
+        for name in ("alice", "bob", "carol")
+    )
+    db.flush()
+    db.add(
+        ResearchSubscription(
+            hf_subject="bob", unsubscribe_token="bob-token", show_as_follower=False
+        )
+    )
+    for subject in ("alice", "bob", "carol"):
+        follow(db, "task", parent, now, subject)
+    follow(db, "task", quiet, now, "alice")
+    follow(db, "method", method, now, "alice")
+    old = paper(db, now, "71", days=30, trending_score=9.0)
+    low = paper(db, now, "72", trending_score=1.0)
+    top = paper(db, now, "73", trending_score=5.0)
+    tagged(db, old, parent)
+    tagged(db, low, parent)
+    tagged(db, top, child)
+    db.flush()
+    cards = follows.popular(db, now)
+    assert [(c.kind, c.name, c.followers) for c in cards] == [
+        ("task", "Robotics", 3),
+        ("method", "GRPO popular", 1),
+    ]
+    assert cards[0].url == "/tasks/robotics-popular"
+    assert cards[0].week_papers == 2
+    assert cards[0].top_paper.id == top.id
+    assert [a.username for a in cards[0].follower_avatars] == ["alice", "carol"]
+    assert cards[1].week_papers == 0 and cards[1].top_paper is None
+
+
 def test_all_entity_types_and_feed_backfill_not_email(db, now):
     p = paper(db, now)
     author = Author(name="Author")
