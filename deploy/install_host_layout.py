@@ -330,6 +330,21 @@ def main() -> int:
         "pwc-cron",
         0o755,
     )
+    ensure_dir(
+        STATE_ROOT / "shared" / "enrichment-dashboard",
+        "pwc-cron",
+        "pwc-cron",
+        0o750,
+    )
+    subprocess.run(
+        [
+            "setfacl",
+            "--modify",
+            "group:pwc-production:r-x",
+            str(STATE_ROOT / "shared" / "enrichment-dashboard"),
+        ],
+        check=True,
+    )
     ensure_dir(LOG_ROOT / "deploy", "root", "root", 0o750)
     for path in (
         STATE_ROOT / "production" / "cron-logs",

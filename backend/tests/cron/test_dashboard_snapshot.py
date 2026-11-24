@@ -181,6 +181,47 @@ def test_full_collection_uses_each_bounded_probe_once(monkeypatch):
     assert calls == {"process": 1, "database": 1, "workflow": 1, "thumbnail": 1}
 
 
+def test_unreadable_log_directory_breaks_only_that_job(monkeypatch):
+    import sys
+
+    workflows = cron_health.WORKFLOWS_DIR
+    if str(workflows) not in sys.path:
+        sys.path.insert(0, str(workflows))
+    from scripts.utils import cron_helpers
+
+    unreadable = "calculate_trending_scores"
+
+    def log_status(name, _date, **_kwargs):
+        if name == unreadable:
+            raise PermissionError(13, "Permission denied")
+        return {"exists": False, "status": "unknown"}
+
+    monkeypatch.setattr(cron_health, "_capture_processes", lambda: ([], set()))
+    monkeypatch.setattr(cron_health, "fetch_db_freshness_batch", lambda _jobs: {})
+    monkeypatch.setattr(
+        cron_health,
+        "fetch_workflow_statuses",
+        lambda _jobs, *, previous_dashboard=None: {},
+    )
+    monkeypatch.setattr(
+        cron_health,
+        "fetch_thumbnail_cache_freshness",
+        lambda: {"file_count": 0, "last_write": None, "recent_writes": 0},
+    )
+    monkeypatch.setattr(cron_helpers, "get_cron_job_status", log_status)
+
+    payload = cron_health.build_cron_dashboard(previous_dashboard={"jobs": []})
+
+    assert len(payload["jobs"]) == len(list_cron_jobs())
+    jobs = {job["job_name"]: job for job in payload["jobs"]}
+    trending = jobs[unreadable]
+    assert trending["status"] == "broken"
+    assert "log directory is not readable by the backend" in trending["status_reason"]
+    assert payload["summary"]["what_to_check_next"] != (
+        "latest manual invocation status"
+    )
+
+
 def test_database_freshness_batch_reuses_one_connection(monkeypatch):
     jobs = [job for job in list_cron_jobs() if job.db_freshness_query][:2]
     executed = []
