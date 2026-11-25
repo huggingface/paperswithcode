@@ -45,7 +45,7 @@ REVIEWED = {
 
 def _contestant(slug, name, score, kind="decisionModel", lab="Example Lab"):
     return {
-        "slug": slug,
+        "contestantSlug": slug,
         "kind": kind,
         "isDefault": True,
         "name": name,
@@ -134,7 +134,7 @@ def test_parse_refuses_conflicting_versions():
 
 
 def test_parse_refuses_missing_reviewed_model():
-    contestants = [c for c in _contestants() if c["slug"] != "lab_model-a"]
+    contestants = [c for c in _contestants() if c["contestantSlug"] != "lab_model-a"]
     contestants.append(_contestant("lab_spare", "Spare", 50.0))
     with pytest.raises(ValueError, match="missing reviewed models: lab_model-a"):
         decision.parse_decision_index_leaderboard(_page(contestants))

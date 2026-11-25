@@ -141,9 +141,8 @@ def _contestants(payload: str) -> list[Any]:
 def _entry(raw: Any) -> DecisionIndexEntry:
     if not isinstance(raw, dict):
         raise TypeError("Artificial Analysis Decision Index contestant is malformed")
-    slug, name, kind, lab = (
-        raw.get(k) for k in ("slug", "name", "kind", "creatorName")
-    )
+    slug = raw.get("contestantSlug")
+    name, kind, lab = (raw.get(k) for k in ("name", "kind", "creatorName"))
     if not isinstance(slug, str) or not re.fullmatch(r"[a-z0-9-]+_[a-z0-9.-]+", slug):
         raise ValueError(f"Artificial Analysis Decision Index slug is invalid: {slug}")
     if kind not in KIND_SOURCE_PREFIXES:
