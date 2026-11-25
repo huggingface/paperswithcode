@@ -110,14 +110,13 @@ def render_list_card(
 
 
 PAGE_CARD_SIZE = (1600, 2400)
-_INTRODUCTION = re.compile(r"^\s*(1\.?\s*)?Introduction\b", re.IGNORECASE)
 _MARGINALIA = re.compile(r"^\s*(\d+|[∗*†].*)\s*$")
 
 
 def _first_page_hero(pdf: bytes, width: int, height: int) -> Image.Image:
-    """Page one from the title down to the introduction, `width` pixels wide.
+    """Page one from the title down, `width` pixels wide and at most `height` tall.
 
-    A short hero runs on into the page, up to `height`, and fades out."""
+    The page always fills the width; where it goes on below `height`, it fades out."""
     with fitz.open(stream=pdf, filetype="pdf") as document:
         if document.page_count == 0:
             raise ValueError("PDF has no pages")
@@ -131,21 +130,17 @@ def _first_page_hero(pdf: bytes, width: int, height: int) -> Image.Image:
         ]
         if not body:
             raise ValueError("PDF page one has no text")
-        intro = [b for b in blocks if _INTRODUCTION.match(b[4])]
         left = max(min(b[0] for b in body) - 10, 0)
         top = max(min(b[1] for b in body) - 10, 0)
         bottom = max(b[3] for b in body) + 8
-        end = intro[0][1] - 8 if intro else bottom
-        fill = top + (page.rect.width - 2 * left) * height / width
-        faded = fill > end and bottom > end
-        if faded:
-            end = min(fill, bottom)
+        end = min(bottom, top + (page.rect.width - 2 * left) * height / width)
+        faded = bottom > end
         clip = fitz.Rect(left, top, page.rect.width - left, end)
         zoom = width * 2 / clip.width
         pixmap = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), clip=clip)
         image = Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
     image = image.resize((width, round(image.height / 2)), Image.LANCZOS)
-    if faded and bottom > end:
+    if faded:
         fade = round(width * 0.12)
         mask = Image.linear_gradient("L").resize((width, fade))
         image.paste(

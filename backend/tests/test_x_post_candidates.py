@@ -580,9 +580,16 @@ def test_paper_page_card_renders_and_tolerates_a_bad_pdf():
     assert broken is None
 
 
-def test_page_hero_stops_at_a_split_introduction_heading():
-    hero = _first_page_hero(_pdf("Title"), 1000, 1)
-    assert hero.height > 300
+def test_page_hero_fills_the_width_and_cuts_a_long_page_at_the_height():
+    hero = _first_page_hero(_pdf("Title"), 1000, 150)
+    assert hero.size == (1000, 150)
+    assert hero.getpixel((500, 149)) == (255, 255, 255)
+
+
+def test_page_hero_ends_with_a_short_page():
+    hero = _first_page_hero(_pdf("Title"), 1000, 5000)
+    assert hero.width == 1000
+    assert 200 < hero.height < 400
 
 
 def test_roundup_page_cards_fall_back_to_a_title_card_for_a_pdf_with_no_pages(
