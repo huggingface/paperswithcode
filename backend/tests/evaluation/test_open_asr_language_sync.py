@@ -97,7 +97,7 @@ def test_fetch_requests_each_language_average_view():
     assert calls[0] == {
         "version_id": "latest",
         "search_query": "",
-        "show_proprietary": True,
+        "show_proprietary": ["Show proprietary (API) models", "Show ensemble models"],
         "selected": ["🇩🇪 German", "RTFx ⬆️️"],
         "zoom": "Language averages",
         "api_name": "/_render_multilingual_combined",

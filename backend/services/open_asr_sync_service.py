@@ -50,6 +50,7 @@ MIN_EXPECTED_ENTRIES = 40
 MAX_EXPECTED_ENTRIES = 150
 
 MAIN_TABLE_API = "/_main_table_update"
+SHOWN_MODEL_GROUPS = ["Show proprietary (API) models", "Show ensemble models"]
 LICENSE_COLUMN = "License"
 
 
@@ -425,7 +426,7 @@ def fetch_open_asr_leaderboard(
     payload = client.predict(
         version_id="latest",
         search_query="",
-        show_proprietary=True,
+        show_proprietary=SHOWN_MODEL_GROUPS,
         show_llm=False,
         selected_columns=default_table_columns(client),
         api_name=MAIN_TABLE_API,

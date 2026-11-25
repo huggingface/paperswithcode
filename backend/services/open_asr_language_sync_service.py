@@ -36,6 +36,7 @@ from backend.services.open_asr_sync_service import (
     MANAGED_METHODOLOGY_PREFIX,
     MODEL_PAPER_ARXIV_IDS,
     RTFX_METRIC,
+    SHOWN_MODEL_GROUPS,
     SPACE_APP_URL,
     SPACE_SOURCE_URL,
     TASK_SLUG,
@@ -168,7 +169,7 @@ def fetch_open_asr_language_leaderboards(
         payload = client.predict(
             version_id="latest",
             search_query="",
-            show_proprietary=True,
+            show_proprietary=SHOWN_MODEL_GROUPS,
             selected=[label, RTFX_COLUMN],
             zoom=AVERAGE_VIEW,
             api_name=MULTILINGUAL_TABLE_API,

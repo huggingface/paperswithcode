@@ -183,7 +183,11 @@ def test_parse_and_fetch_public_leaderboard_contract():
             api_name,
         ):
             assert version_id == "latest"
-            assert (search_query, show_proprietary, show_llm) == ("", True, False)
+            assert (search_query, show_proprietary, show_llm) == (
+                "",
+                ["Show proprietary (API) models", "Show ensemble models"],
+                False,
+            )
             assert selected_columns == [*SPACE_DEFAULT_COLUMNS, "License"]
             assert api_name == "/_main_table_update"
             return {
