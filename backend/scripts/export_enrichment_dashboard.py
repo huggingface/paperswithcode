@@ -61,6 +61,11 @@ def main() -> int:
         )
         space_repo_id = os.environ.get("PWC_ENRICHMENT_DASHBOARD_SPACE_REPO_ID")
         if space_repo_id:
+            HfApi(token=token).super_squash_history(
+                repo_id=space_repo_id,
+                repo_type="space",
+                commit_message="Squash bundled dashboard data history",
+            )
             HfApi(token=token).upload_file(
                 path_or_fileobj=str(args.output),
                 path_in_repo="data/snapshot.json",

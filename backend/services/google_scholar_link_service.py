@@ -160,19 +160,31 @@ def _fetch_wikidata_shard(client: httpx.Client, first_char: str, attempts: int) 
             },
             timeout=120,
         )
-        if response.status_code != 429 and response.status_code < 500:
+        complete = response.is_success and _is_complete_tsv(response.text)
+        if complete or (
+            response.status_code != 429
+            and response.status_code < 500
+            and not response.is_success
+        ):
             break
         if attempt + 1 < attempts:
             wait = 30 * 2**attempt
             logger.warning(
-                "Wikidata HTTP %d for shard %r; retrying in %d s",
+                "Wikidata HTTP %d for shard %r (complete=%s); retrying in %d s",
                 response.status_code,
                 first_char,
+                complete,
                 wait,
             )
             time.sleep(wait)
     response.raise_for_status()
+    if not _is_complete_tsv(response.text):
+        raise ValueError(f"Wikidata returned a truncated TSV for shard {first_char!r}")
     return response.text
+
+
+def _is_complete_tsv(tsv: str) -> bool:
+    return all(line.count("\t") == 4 for line in tsv.splitlines() if line)
 
 
 def parse_wikidata_tsv(tsv: str) -> list[WikidataPerson]:

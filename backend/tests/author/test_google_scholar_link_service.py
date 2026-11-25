@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from backend.services.google_scholar_link_service import (
     AuthorPaper,
@@ -155,3 +156,45 @@ def test_fetch_wikidata_tsv_merges_shards_under_one_header():
     client = httpx.Client(transport=httpx.MockTransport(handler))
     (person,) = parse_wikidata_tsv(fetch_wikidata_tsv(client))
     assert person.scholar_id == "VoxU11IAAAAJ"
+
+
+def test_fetch_wikidata_tsv_retries_a_truncated_shard(monkeypatch):
+    header = "?p\t?g\t?s2\t?orcid\t?names"
+    row = '<http://www.wikidata.org/entity/Q1>\t"VoxU11IAAAAJ"\t\t\t"Ada Lovelace"'
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        query = request.url.params["query"]
+        if 'STRSTARTS(?g, "V")' in query:
+            calls.append(query)
+            if len(calls) == 1:
+                return httpx.Response(
+                    200,
+                    text=f"{header}\n{row}\n<http://www.wikidata.org/en\njava.util.concurrent.TimeoutException\n",
+                )
+            return httpx.Response(200, text=f"{header}\n{row}\n")
+        return httpx.Response(200, text=f"{header}\n")
+
+    monkeypatch.setattr(
+        "backend.services.google_scholar_link_service.time.sleep", lambda _: None
+    )
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    (person,) = parse_wikidata_tsv(fetch_wikidata_tsv(client))
+    assert person.scholar_id == "VoxU11IAAAAJ"
+    assert len(calls) == 2
+
+
+def test_fetch_wikidata_tsv_refuses_a_shard_that_stays_truncated(monkeypatch):
+    header = "?p\t?g\t?s2\t?orcid\t?names"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, text=f"{header}\njava.util.concurrent.TimeoutException\n"
+        )
+
+    monkeypatch.setattr(
+        "backend.services.google_scholar_link_service.time.sleep", lambda _: None
+    )
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(ValueError, match="truncated TSV for shard 'A'"):
+        fetch_wikidata_tsv(client, attempts=2)
