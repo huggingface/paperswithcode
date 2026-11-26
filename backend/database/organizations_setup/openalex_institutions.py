@@ -381,6 +381,7 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     OpenAlexInstitution("I4210161460", "openai", "OpenAI"),
     OpenAlexInstitution("I4405260255", "stepfun-ai", "StepFun"),
     OpenAlexInstitution("I4210143797", "sony", "Sony"),
+    OpenAlexInstitution("I4387154989", "huggingface", "Hugging Face"),
 )
 
 BY_OPENALEX_ID = {item.openalex_id: item for item in OPENALEX_INSTITUTIONS}

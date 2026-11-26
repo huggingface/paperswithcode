@@ -21,6 +21,10 @@ def test_lookup_accepts_ids_and_urls():
     assert organization_slug_for("https://openalex.org/I1") is None
 
 
+def test_hugging_face_maps_to_its_canonical_organization():
+    assert organization_slug_for("I4387154989") == "huggingface"
+
+
 def test_parent_and_child_institutions_stay_separate():
     assert organization_slug_for("I1291425158") == "google"
     assert organization_slug_for("I4210090411") == "deepmind"

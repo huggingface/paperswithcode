@@ -69,6 +69,28 @@ def test_page_markdown_uses_the_canonical_paper_format():
     )
 
 
+def test_page_markdown_drops_navigation_above_the_title_heading():
+    navigation = (
+        "![logo](https://example.com/logo.png)\n\nQwen\n\nResearch\n\n"
+        "API Platform\n\nEN\n\nDownloadTry Qwen\n\n"
+        f"{TITLE} \\| Liquid\n\n"
+    )
+    markdown = service.page_paper_markdown(
+        TITLE, URL, ScrapedPage(TITLE, navigation + ARTICLE)
+    )
+
+    assert markdown.startswith(
+        f"Title: {TITLE}\n\nURL Source: {URL}\n\nMarkdown Content:\n\n# LFM"
+    )
+    assert "API Platform" not in markdown
+
+
+def test_page_markdown_keeps_pages_without_a_title_heading():
+    body = "Intro paragraph.\n\n" + ARTICLE.replace("# ", "")
+
+    assert service.from_title_heading(body, TITLE) == body
+
+
 @pytest.mark.parametrize(
     ("page", "code"),
     [
