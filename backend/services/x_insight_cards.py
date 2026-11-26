@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 
 import fitz
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 from backend.services.brand import (
     LIGHT,
@@ -162,31 +162,108 @@ def _first_page_hero(pdf: bytes, width: int, height: int) -> Image.Image:
     return image
 
 
+def _flatten(artwork: Image.Image) -> Image.Image:
+    rgba = artwork.convert("RGBA")
+    white = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    return Image.alpha_composite(white, rgba).convert("RGB")
+
+
+def _border_colour(art: Image.Image) -> tuple[tuple[int, int, int], bool]:
+    """The mean colour of the artwork's outer frame, and whether the frame is flat."""
+    w, h = art.size
+    edge = max(1, round(min(w, h) * 0.02))
+    strips = [
+        art.crop((0, 0, w, edge)),
+        art.crop((0, h - edge, w, h)),
+        art.crop((0, 0, edge, h)),
+        art.crop((w - edge, 0, w, h)),
+    ]
+    pixels = [pixel for strip in strips for pixel in strip.getdata()]
+    colour = tuple(round(sum(p[i] for p in pixels) / len(pixels)) for i in range(3))
+    spread = sum(max(abs(p[i] - colour[i]) for i in range(3)) for p in pixels) / len(
+        pixels
+    )
+    return colour, spread < 12
+
+
+def _content_box(art: Image.Image, colour: tuple[int, int, int]) -> tuple | None:
+    diff = ImageChops.difference(art, Image.new("RGB", art.size, colour))
+    red, green, blue = diff.split()
+    strongest = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+    mask = strongest.point(lambda value: 255 if value > 32 else 0)
+    box = mask.getbbox()
+    if box is None:
+        return None
+    margin = round(max(box[2] - box[0], box[3] - box[1]) * 0.15)
+    return (
+        max(0, box[0] - margin),
+        max(0, box[1] - margin),
+        min(art.width, box[2] + margin),
+        min(art.height, box[3] + margin),
+    )
+
+
+def _feather(size: tuple[int, int]) -> Image.Image:
+    w, h = size
+    ramp = max(2, round(min(w, h) * 0.1))
+    mask = Image.new("L", size, 0)
+    inset = ramp // 2
+    ImageDraw.Draw(mask).rectangle(
+        (inset, inset, w - 1 - inset, h - 1 - inset), fill=255
+    )
+    return mask.filter(ImageFilter.GaussianBlur(ramp / 4))
+
+
 def _artwork_hero(
     artwork: Image.Image, title: str, width: int, height: int
 ) -> Image.Image:
-    """A release page's title above its social image, filling `width` × `height`."""
-    title_font = font("serif", round(width / 17), 500)
-    pad = round(width * 0.04)
-    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    lines = wrap_text(probe, title, title_font, width - 2 * pad, 3) if title else []
-    line_height = round(title_font.size * 1.2)
-    text_height = pad + len(lines) * line_height + pad if lines else 0
-    rgba = artwork.convert("RGBA")
-    art = Image.alpha_composite(
-        Image.new("RGBA", rgba.size, (255, 255, 255, 255)), rgba
-    ).convert("RGB")
-    art_width = width - 2 * pad
-    art_height = round(art.height * art_width / art.width)
-    room = height - text_height - pad
-    if art_height > room:
-        art_width, art_height = round(art_width * room / art_height), room
-    art = art.resize((art_width, art_height), Image.LANCZOS)
-    image = Image.new("RGB", (width, height), (255, 255, 255))
-    draw = ImageDraw.Draw(image)
+    """A release page's title above its social image, filling `width` × `height`.
+
+    Artwork on a flat backdrop is cropped to its content and set on that
+    backdrop's colour; a photo is set on a dimmed, blurred copy of itself."""
+    art = _flatten(artwork)
+    colour, flat = _border_colour(art)
+    pad = round(width * 0.06)
+    if flat:
+        box = _content_box(art, colour)
+        art = art.crop(box) if box else art
+        image = Image.new("RGB", (width, height), colour)
+        dark = sum(colour) / 3 < 128
+    else:
+        scale = max(width / art.width, height / art.height)
+        cover = art.resize(
+            (
+                max(width, round(art.width * scale)),
+                max(height, round(art.height * scale)),
+            ),
+            Image.LANCZOS,
+        )
+        left = (cover.width - width) // 2
+        top = (cover.height - height) // 2
+        cover = cover.crop((left, top, left + width, top + height))
+        cover = cover.filter(ImageFilter.GaussianBlur(round(width / 20)))
+        image = Image.blend(cover, Image.new("RGB", (width, height), (0, 0, 0)), 0.45)
+        dark = True
+    title_font = font("serif", round(width / 11), 500)
+    probe = ImageDraw.Draw(image)
+    lines = wrap_text(probe, title, title_font, width - 2 * pad, 4) if title else []
+    line_height = round(title_font.size * 1.15)
+    text_height = pad + len(lines) * line_height if lines else 0
     for index, line in enumerate(lines):
-        draw.text((pad, pad + index * line_height), line, font=title_font, fill=P.ink)
-    image.paste(art, ((width - art_width) // 2, text_height + (room - art_height) // 2))
+        probe.text(
+            (pad, pad + index * line_height),
+            line,
+            font=title_font,
+            fill=(255, 255, 255) if dark else P.ink,
+        )
+    room_top = text_height + pad
+    room = height - room_top - pad
+    limit = 1.5 if flat else 4.0
+    scale = min((width - 2 * pad) / art.width, room / art.height, limit)
+    size = (max(1, round(art.width * scale)), max(1, round(art.height * scale)))
+    art = art.resize(size, Image.LANCZOS)
+    position = ((width - size[0]) // 2, room_top + (room - size[1]) // 2)
+    image.paste(art, position, _feather(size) if flat else None)
     return image
 
 
