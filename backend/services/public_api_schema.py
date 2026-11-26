@@ -9,7 +9,7 @@ from fastapi.routing import APIRoute
 PUBLIC_SCHEMA_PATH = "/api/v1/openapi.json"
 PUBLIC_ENDPOINTS = {
     "/api/v1/papers/": {"page_size": 5, "include_resources": True},
-    "/api/v1/papers/search": {"q": "attention", "mode": "keyword", "page_size": 5},
+    "/api/v1/papers/search": {"q": "attention", "page_size": 5},
     "/api/v1/papers/recent": {"limit": 5},
     "/api/v1/papers/trending": {"limit": 5},
     "/api/v1/papers/{paper_id}": {
@@ -19,6 +19,15 @@ PUBLIC_ENDPOINTS = {
     "/api/v1/papers/arxiv/{arxiv_id}": {
         "arxiv_id": "1706.03762",
         "include_resources": True,
+    },
+    "/api/v1/papers/{identifier:path}/public-metadata": {
+        "identifier": "1706.03762",
+    },
+    "/api/v1/papers/public-metadata/search": {"title": "Deep learning"},
+    "/api/v1/research/papers/{paper_id}/read": {
+        "paper_id": "1706.03762",
+        "offset": 0,
+        "limit": 65536,
     },
     "/api/v1/tasks/": {"q": "image classification", "page_size": 5},
     "/api/v1/tasks/{task_id}": {"task_id": "image-classification"},
@@ -34,6 +43,10 @@ PUBLIC_ENDPOINTS = {
 }
 
 
+def schema_path(route_path: str) -> str:
+    return route_path.replace(":path}", "}")
+
+
 def public_openapi(app: FastAPI) -> dict:
     routes = [
         route
@@ -46,17 +59,23 @@ def public_openapi(app: FastAPI) -> dict:
         title="Papers With Code public API",
         version="1.0.0-beta",
         description=(
-            "Anonymous, read-only experimental beta. Keyword search and bounded "
-            "lookups; not a bulk export service. Planned breaking changes are "
-            "announced at least 14 days ahead at /docs/api#changelog."
+            "Anonymous, read-only experimental beta for paper search, bounded "
+            "catalog lookups and paper full text. List papers past page 100 "
+            "with `cursor`. Planned breaking changes are announced at least 14 "
+            "days ahead at /docs/api#changelog. A Markdown guide is at "
+            "/docs/api.md."
         ),
         routes=routes,
         servers=[{"url": "https://paperswithcode.co"}],
     )
+    examples = {
+        schema_path(path): example for path, example in PUBLIC_ENDPOINTS.items()
+    }
     for path, item in schema["paths"].items():
         operation = deepcopy(item["get"])
+        operation["tags"] = list(dict.fromkeys(operation.get("tags", [])))
         operation["security"] = []
-        operation["x-example-parameters"] = PUBLIC_ENDPOINTS[path]
+        operation["x-example-parameters"] = examples[path]
         operation["responses"]["429"] = {
             "description": "IP traffic limit exceeded. Wait at least Retry-After seconds and retry with backoff.",
             "headers": {
@@ -77,13 +96,13 @@ def public_openapi(app: FastAPI) -> dict:
                 }
             },
         }
-        if path.endswith("/papers/search"):
-            for parameter in operation.get("parameters", []):
-                if parameter["name"] == "mode":
-                    parameter["description"] = (
-                        "Send keyword explicitly. Semantic and hybrid search are outside the public beta."
-                    )
-                    parameter["schema"] = {"type": "string", "enum": ["keyword"]}
-                    parameter["required"] = True
         schema["paths"][path] = {"get": operation}
+    return schema
+
+
+def cached_public_openapi(app: FastAPI) -> dict:
+    schema = getattr(app.state, "public_api_schema", None)
+    if schema is None:
+        schema = public_openapi(app)
+        app.state.public_api_schema = schema
     return schema

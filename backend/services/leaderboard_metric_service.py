@@ -401,6 +401,10 @@ class LeaderboardMetricService:
                 )
                 .all()
             )
+            if task_dataset is None and not links:
+                raise CatalogNotFoundError(
+                    f"Task {task_id} has no leaderboard on dataset {dataset_id}"
+                )
 
             metric_list = []
             for link, metric in links:

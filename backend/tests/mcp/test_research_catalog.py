@@ -215,7 +215,10 @@ def test_paper_chunk_rejects_invalid_paper_id_without_leaking_details():
 
     assert response.status_code == 404
     assert response.headers["cache-control"] == "no-store"
-    assert response.json() == {"detail": "Paper Markdown was not found"}
+    assert response.json() == {
+        "detail": "Paper Markdown was not found",
+        "code": "not_found",
+    }
 
 
 @pytest.mark.parametrize(

@@ -1,5 +1,7 @@
 """Schema delivery and anonymous browser access for the selected public reads."""
 
+import re
+
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.datastructures import MutableHeaders
@@ -8,19 +10,33 @@ from starlette.routing import Match
 from backend.services.public_api_schema import (
     PUBLIC_ENDPOINTS,
     PUBLIC_SCHEMA_PATH,
-    public_openapi,
+    cached_public_openapi,
 )
 
 router = APIRouter()
 
+_CATALOG_POLICY = '"catalog";q=120;w=60'
+_LIST_POLICY = '"list";q=60;w=60'
+_LIST_PATH = re.compile(
+    r"/api/v1/(?:(?:papers|tasks|datasets|evaluations)|papers/search(?:/feed)?)/?"
+)
+_CATALOG_PATH = re.compile(r"/api/v1/(?:papers|tasks|datasets|evaluations)(?:/.*)?")
+
+
+def rate_limit_policy(path: str) -> str | None:
+    if _LIST_PATH.fullmatch(path):
+        return f"{_CATALOG_POLICY}, {_LIST_POLICY}"
+    if _CATALOG_PATH.fullmatch(path):
+        return _CATALOG_POLICY
+    return None
+
 
 @router.get(PUBLIC_SCHEMA_PATH, include_in_schema=False)
 def get_public_schema(request: Request):
-    schema = getattr(request.app.state, "public_api_schema", None)
-    if schema is None:
-        schema = public_openapi(request.app)
-        request.app.state.public_api_schema = schema
-    return JSONResponse(schema, headers={"Cache-Control": "public, max-age=300"})
+    return JSONResponse(
+        cached_public_openapi(request.app),
+        headers={"Cache-Control": "public, max-age=300"},
+    )
 
 
 class PublicReadCorsMiddleware:
@@ -79,9 +95,13 @@ class PublicReadCorsMiddleware:
             await response(scope, receive, send)
             return
 
+        policy = rate_limit_policy(scope["path"])
+
         async def cors_send(message):
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
+                if policy and message["status"] < 400:
+                    headers["RateLimit-Policy"] = policy
                 vary = {
                     value.strip().lower()
                     for value in headers.get("Vary", "").split(",")
@@ -99,8 +119,12 @@ class PublicReadCorsMiddleware:
                     if "Access-Control-Allow-Credentials" in headers:
                         del headers["Access-Control-Allow-Credentials"]
                 exposed = headers.get("Access-Control-Expose-Headers", "")
+                public_headers = (
+                    "Retry-After, RateLimit-Policy, X-PwC-Truncated, "
+                    "X-PwC-Content-Version, X-PwC-Next-Offset"
+                )
                 headers["Access-Control-Expose-Headers"] = (
-                    f"{exposed}, Retry-After" if exposed else "Retry-After"
+                    f"{exposed}, {public_headers}" if exposed else public_headers
                 )
             await send(message)
 

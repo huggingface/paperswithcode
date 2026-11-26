@@ -16,6 +16,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
+from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 
 from backend.config import get_settings
@@ -25,9 +26,11 @@ from backend.services.deployment_lifecycle import (
     deployment_lifecycle,
     operator_socket_allowed,
 )
+from backend.routers.public_error_handlers import register_public_error_handlers
 from backend.routers.catalog_error_handlers import register_catalog_error_handlers
 from backend.services.runtime_validation import validate_runtime
 from backend.utils.cors import install_cors
+from backend.utils.forwarded_scheme import UnixSocketForwardedSchemeMiddleware
 from backend.utils.csrf import cookie_request_passes_csrf
 
 _SLOW_REQUEST_MS = float(os.getenv("PWC_SLOW_REQUEST_MS", "1000"))
@@ -392,14 +395,19 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title="PapersWithCode API",
-        description="Re-implementation of the deprecated PapersWithCode API",
+        title="Papers With Code API",
+        description=(
+            "Full application API for local development. The public API is "
+            "described at /api/v1/openapi.json."
+        ),
         version="1.0.0",
         docs_url="/docs" if settings.environment == "development" else None,
         redoc_url="/redoc" if settings.environment == "development" else None,
+        openapi_url="/openapi.json" if settings.environment == "development" else None,
         lifespan=lifespan,
     )
     register_catalog_error_handlers(app)
+    register_public_error_handlers(app)
     app.add_middleware(DeploymentAccountingMiddleware)
 
     install_cors(app, settings)
@@ -686,6 +694,11 @@ def create_app() -> FastAPI:
         public_api.PublicReadCorsMiddleware,
         allowed_origins=settings.cors_allowed_origins,
     )
+    app.add_middleware(UnixSocketForwardedSchemeMiddleware)
+
+    for route in app.routes:
+        if isinstance(route, APIRoute):
+            route.tags = list(dict.fromkeys(route.tags))
 
     return app
 

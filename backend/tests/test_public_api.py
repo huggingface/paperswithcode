@@ -6,14 +6,20 @@ from starlette.middleware.cors import CORSMiddleware
 
 from backend.main import create_app
 from backend.routers.public_api import PublicReadCorsMiddleware
-from backend.services.public_api_schema import PUBLIC_ENDPOINTS, public_openapi
+from backend.services.public_api_schema import (
+    PUBLIC_ENDPOINTS,
+    public_openapi,
+    schema_path,
+)
+
+PUBLIC_SCHEMA_PATHS = {schema_path(path) for path in PUBLIC_ENDPOINTS}
 
 
 def test_public_schema_contains_only_selected_gets_and_resolves_all_references():
     app = create_app()
     full = app.openapi()
     public = public_openapi(app)
-    assert set(public["paths"]) == set(PUBLIC_ENDPOINTS)
+    assert set(public["paths"]) == PUBLIC_SCHEMA_PATHS
     assert all(set(item) == {"get"} for item in public["paths"].values())
     assert "Admin" not in str(public["components"])
     assert app.openapi() == full
@@ -35,20 +41,17 @@ def test_public_schema_contains_only_selected_gets_and_resolves_all_references()
         operation = item["get"]
         assert not full["paths"][path]["get"].get("security")
         assert operation["security"] == []
-        assert operation["responses"]["200"]["content"]["application/json"]["schema"]
+        media_type = "text/plain" if path.endswith("/read") else "application/json"
+        assert operation["responses"]["200"]["content"][media_type]["schema"]
+        assert len(operation["tags"]) == len(set(operation["tags"]))
         params = {p["name"] for p in operation.get("parameters", [])}
         assert set(operation["x-example-parameters"]) <= params
         assert "429" in operation["responses"]
     search = public["paths"]["/api/v1/papers/search"]["get"]
     mode = next(p for p in search["parameters"] if p["name"] == "mode")
-    assert mode["schema"] == {"type": "string", "enum": ["keyword"]}
-    assert mode["required"]
-    full_mode = next(
-        p
-        for p in full["paths"]["/api/v1/papers/search"]["get"]["parameters"]
-        if p["name"] == "mode"
-    )
-    assert full_mode != mode
+    assert not mode["required"]
+    assert "experimental" in mode["description"]
+    assert "PWC_PAPER_SEARCH_MODE" not in str(search)
 
 
 def cors_client():
@@ -135,7 +138,7 @@ def test_schema_endpoint_is_public_and_cacheable():
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "*"
     assert "max-age=300" in response.headers["cache-control"]
-    assert set(response.json()["paths"]) == set(PUBLIC_ENDPOINTS)
+    assert set(response.json()["paths"]) == PUBLIC_SCHEMA_PATHS
 
 
 def test_existing_credentialed_origins_keep_their_get_and_preflight_contract():
@@ -244,7 +247,9 @@ def test_deployed_admission_rejections_are_readable_by_browser_clients(monkeypat
         response = client.get("/api/v1/papers/", headers={"Origin": origin})
         assert response.status_code == 503
         assert response.headers["retry-after"] == "1"
-        assert response.headers["access-control-expose-headers"] == "Retry-After"
+        assert response.headers["access-control-expose-headers"].startswith(
+            "Retry-After"
+        )
         if origin == "https://paperswithcode.co":
             assert response.headers["access-control-allow-origin"] == origin
             assert response.headers["access-control-allow-credentials"] == "true"

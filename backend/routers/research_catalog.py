@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from backend.config import Settings, get_settings
 from backend.database.connection import get_database_session
 from backend.services.paper_lineage_service import get_paper_lineage
+from backend.services.paper_markdown_identity import resolve_markdown_paper_id
 from backend.services.paper_markdown_service import (
     PaperMarkdownNotFoundError,
     PaperMarkdownRangeError,
@@ -59,10 +60,49 @@ def _integer_query_value(
     return parsed
 
 
-@router.get("/papers/{paper_id}/read", response_class=PlainTextResponse)
+@router.get(
+    "/papers/{paper_id}/read",
+    response_class=PlainTextResponse,
+    summary="Read a paper's full text as Markdown",
+    responses={
+        200: {
+            "description": (
+                "Markdown full text. Without offset, limit or content_version the "
+                "first 256 KiB is returned and X-PwC-Truncated says whether it was "
+                "cut. Any of those parameters switches to chunk mode: pass "
+                "X-PwC-Next-Offset as offset and X-PwC-Content-Version as "
+                "content_version to read the next chunk."
+            ),
+            "content": {"text/plain": {"schema": {"type": "string"}}},
+            "headers": {
+                "X-PwC-Truncated": {
+                    "schema": {"type": "string", "enum": ["0", "1"]},
+                    "description": "1 when more text follows this response.",
+                },
+                "X-PwC-Content-Version": {
+                    "schema": {"type": "string"},
+                    "description": "Chunk mode: opaque version of the document.",
+                },
+                "X-PwC-Next-Offset": {
+                    "schema": {"type": "integer"},
+                    "description": "Chunk mode: byte offset of the next chunk.",
+                },
+            },
+        },
+        404: {"description": "No Markdown full text exists for this paper"},
+        409: {"description": "content_version no longer matches the document"},
+        416: {"description": "offset is past the end of the document"},
+        422: {"description": "Invalid or repeated query parameter"},
+        503: {"description": "Full-text storage is unavailable"},
+    },
+)
 def read_paper(
     request: Request,
-    paper_id: str = Path(min_length=1, max_length=64),
+    paper_id: str = Path(
+        min_length=1,
+        max_length=64,
+        description="arXiv ID (with or without version) or catalog paper ID",
+    ),
     offset: str | None = Query(
         default=None, description="UTF-8 byte offset for versioned chunk mode"
     ),
@@ -73,7 +113,9 @@ def read_paper(
         default=None, description="Opaque version returned by an earlier chunk"
     ),
     settings: Settings = Depends(get_settings),
+    db: Session = Depends(get_database_session),
 ) -> PlainTextResponse:
+    paper_id = resolve_markdown_paper_id(db, paper_id)
     raw_offset = _single_query_value(request, "offset")
     raw_limit = _single_query_value(request, "limit")
     raw_version = _single_query_value(request, "content_version")

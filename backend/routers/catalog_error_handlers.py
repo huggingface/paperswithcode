@@ -6,6 +6,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.types import ExceptionHandler
 
+from backend.routers.public_error_handlers import (
+    is_public_request,
+    public_error_response,
+)
 from backend.services.catalog_errors import (
     CatalogConflictError,
     CatalogPermissionError,
@@ -20,19 +24,21 @@ logger = logging.getLogger(__name__)
 
 
 def _catalog_error_response(status_code: int) -> ExceptionHandler:
-    async def handler(_request: Request, error: Exception) -> JSONResponse:
-        return JSONResponse(
-            status_code=status_code,
-            content={"detail": getattr(error, "detail", str(error))},
-        )
+    async def handler(request: Request, error: Exception) -> JSONResponse:
+        detail = getattr(error, "detail", str(error))
+        if is_public_request(request):
+            return public_error_response(status_code, detail)
+        return JSONResponse(status_code=status_code, content={"detail": detail})
 
     return handler
 
 
 async def _catalog_persistence_error_response(
-    _request: Request, error: Exception
+    request: Request, error: Exception
 ) -> JSONResponse:
     logger.error("Catalog persistence operation failed", exc_info=error)
+    if is_public_request(request):
+        return public_error_response(500, "Internal server error")
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal server error"},

@@ -5,7 +5,7 @@ Provides endpoints for accessing benchmark dataset data, including filtering by 
 paper associations, and evaluation data.
 """
 
-from typing import Optional
+from typing import Optional, Literal
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -72,7 +72,16 @@ def list_datasets(
             "membership or paper_count."
         ),
     ),
-    ordering: Optional[str] = Query(
+    ordering: Literal[
+        "name",
+        "-name",
+        "full_name",
+        "-full_name",
+        "created_at",
+        "-created_at",
+        "paper_count",
+        "-paper_count",
+    ] = Query(
         "name",
         description="Order by field: name, full_name, created_at, paper_count (prefix with '-' for descending)",
     ),
@@ -92,15 +101,8 @@ def list_datasets(
     - `/api/v1/datasets/?name=COCO` - Filter datasets by name containing "COCO"
     - `/api/v1/datasets/?ordering=-name` - Order by name descending
     """
-    order_dir = "asc"
-    order_by = ordering
-    if ordering and ordering.startswith("-"):
-        order_dir = "desc"
-        order_by = ordering[1:]
-
-    valid_fields = ["name", "full_name", "created_at", "paper_count"]
-    if order_by not in valid_fields:
-        order_by = "name"
+    order_dir = "desc" if ordering.startswith("-") else "asc"
+    order_by = ordering.removeprefix("-")
 
     service = DatasetService(db)
 

@@ -173,7 +173,10 @@ def test_paper_persistence_errors_are_logged_without_exposing_details(
         response = client.get("/api/v1/papers/recent")
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "Internal server error"}
+    assert response.json() == {
+        "detail": "Internal server error",
+        "code": "internal_error",
+    }
     assert "database password leaked" in caplog.text
 
 
@@ -256,8 +259,11 @@ def test_migrated_taxonomy_lookups_keep_typed_not_found_contracts(
     with _catalog_client(monkeypatch) as client:
         response = client.get(path)
 
+    expected = {"detail": "entity not found"}
+    if path == "/api/v1/tasks/404":
+        expected["code"] = "not_found"
     assert response.status_code == 404
-    assert response.json() == {"detail": "entity not found"}
+    assert response.json() == expected
 
 
 def test_create_task_requires_catalog_mutator_before_service_is_called(monkeypatch):

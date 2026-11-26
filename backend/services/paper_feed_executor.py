@@ -23,6 +23,7 @@ from backend.models.database import (
     PaperTask,
 )
 from backend.models.papers import Papers
+from backend.services.paper_cursor import CURSOR_ORDER_FIELDS, PaperCursor
 from backend.services.paper_implementation_service import (
     family_repository_exists_clause,
 )
@@ -38,7 +39,7 @@ class FeedOrdering:
     fallback_to_date: bool = False
 
 
-GENERAL_ORDERING = FeedOrdering(nulls_last=True)
+GENERAL_ORDERING = FeedOrdering(nulls_last=True, id_tiebreaker=True)
 SCOPED_ORDERING = FeedOrdering(id_tiebreaker=True, fallback_to_date=True)
 
 
@@ -101,6 +102,8 @@ class PaperFeedExecutor:
         deduplicate_task_id: int | None = None,
         include_resources: bool = False,
         repository_limit: int | None = None,
+        cursor: PaperCursor | None = None,
+        issue_cursors: bool = False,
     ) -> Papers:
         if latest_only:
             query = query.filter(DBPaper.is_latest_version)
@@ -147,15 +150,41 @@ class PaperFeedExecutor:
             query = query.order_by(*terms)
 
         count = cached_count(query.order_by(None), bind)
-        rows = query.offset((page - 1) * page_size).limit(page_size).all()
-        return self.page(
-            rows,
-            count=count,
-            page=page,
-            page_size=page_size,
-            include_resources=include_resources,
-            repository_limit=repository_limit,
-        )
+        if cursor is not None:
+            rows = cursor.apply(query).limit(page_size + 1).all()
+            has_more = len(rows) > page_size
+            rows = rows[:page_size]
+            response = self.page(
+                rows,
+                count=count,
+                page=1,
+                page_size=page_size,
+                include_resources=include_resources,
+                repository_limit=repository_limit,
+            )
+            response.next_page = None
+        else:
+            rows = query.offset((page - 1) * page_size).limit(page_size).all()
+            has_more = page * page_size < count
+            response = self.page(
+                rows,
+                count=count,
+                page=page,
+                page_size=page_size,
+                include_resources=include_resources,
+                repository_limit=repository_limit,
+            )
+        if (
+            issue_cursors
+            and has_more
+            and rows
+            and order_override is None
+            and order_by in CURSOR_ORDER_FIELDS
+        ):
+            response.next_cursor = PaperCursor.after(
+                rows[-1], order_by, order_dir.lower()
+            ).encode()
+        return response
 
     def page(
         self,

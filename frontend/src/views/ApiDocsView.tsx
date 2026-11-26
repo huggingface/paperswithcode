@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import {
   codeExample,
+  returnsText,
   exampleUrl,
   groupByTag,
   publicSpecQuery,
@@ -309,7 +310,13 @@ function Endpoint({ path, operation }: { path: string; operation: Operation }) {
           </button>
         ))}
       </div>
-      <Code value={codeExample(exampleUrl(path, operation), language)} />
+      <Code
+        value={codeExample(
+          exampleUrl(path, operation),
+          language,
+          returnsText(operation),
+        )}
+      />
       <h3>Responses</h3>
       {Object.entries(operation.responses).map(([status, response]) => (
         <div className="api-response" key={status}>
@@ -482,14 +489,15 @@ export default function ApiDocsView() {
             </div>
           </div>
           <p>
-            No account or API key required. The public beta covers keyword
-            search and core catalog lookups.
+            No account or API key required. The public beta covers paper
+            search, core catalog lookups, and paper full text.
           </p>
           <p>
             <a href="https://paperswithcode.co/api/v1/openapi.json">
               Download the public OpenAPI specification
             </a>{" "}
-            · <a href={FEEDBACK}>Report a bug or request a feature</a>
+            · <a href="/docs/api.md">Read this guide as Markdown</a> ·{" "}
+            <a href={FEEDBACK}>Report a bug or request a feature</a>
           </p>
           <h2>Your first request</h2>
           <div className="api-terminal">
@@ -498,7 +506,7 @@ export default function ApiDocsView() {
             </div>
             <Code
               value={
-                'curl --fail-with-body "https://paperswithcode.co/api/v1/papers/search?q=attention&mode=keyword&page_size=5"'
+                'curl --fail-with-body "https://paperswithcode.co/api/v1/papers/search?q=attention&page_size=5"'
               }
             />
           </div>
@@ -545,6 +553,13 @@ export default function ApiDocsView() {
             to 60 and 20 excess requests respectively, not fixed-minute quotas.
           </p>
           <p>
+            Successful responses carry a <code>RateLimit-Policy</code> header
+            naming the allowances that apply, for example{" "}
+            <code>"catalog";q=120;w=60, "list";q=60;w=60</code>. Remaining
+            counts are not reported, because the limits are enforced at the
+            edge.
+          </p>
+          <p>
             Website browsing and scripts on the same network share these limits.
             Send requests sequentially, cache results, and avoid parallel
             crawls. On HTTP 429, wait at least the <code>Retry-After</code>{" "}
@@ -563,13 +578,26 @@ export default function ApiDocsView() {
             instead return arrays bounded by <code>limit</code>.
           </p>
           <p>
-            Paper listing and search stop at page 100. Other bounds are shown
-            per endpoint. Counts and page contents may change as the catalog
-            updates; pagination is not a snapshot or a bulk export interface.
+            Paper listing and search stop at page 100, where{" "}
+            <code>next_page</code> is null. To go further, list{" "}
+            <code>/papers/</code> with <code>order_by=date_published</code> or{" "}
+            <code>citation_count</code> and pass each response&apos;s{" "}
+            <code>next_cursor</code> back as <code>cursor</code> with the same
+            filters; cursors have no page limit. Counts and page contents may
+            change as the catalog updates; a listing is not a snapshot.
           </p>
           <p>
-            Use identifiers returned by lookups. Paper detail accepts an arXiv
-            ID or numeric catalog ID; the arXiv endpoint takes an arXiv ID. Task
+            The default <code>order_by=trending</code> lists only papers with a
+            recent trending score when no search, date, or catalog filter is
+            set. With a filter it covers the whole catalog and unscored papers
+            sort last.
+          </p>
+          <p>
+            Use identifiers returned by lookups. Paper endpoints, including full
+            text, accept an arXiv ID or numeric catalog ID; the arXiv endpoint
+            takes an arXiv ID. A version suffix on paper detail is ignored and
+            the latest version is returned: request an exact version from the
+            arXiv endpoint with <code>?version=</code>. Task
             and dataset detail accept their catalog IDs or slugs. Leaderboard
             metrics require numeric task and dataset IDs. Evaluation filters
             such as <code>dataset_id</code> and <code>task_id</code> require
@@ -609,18 +637,24 @@ export default function ApiDocsView() {
           </p>
           <p>
             Use <code>include_resources=true</code> on paper list/detail
-            requests for linked repositories and project pages. Missing fields
-            or null values mean data is unavailable; they are not zero scores.
-            Keyword search examples explicitly send <code>mode=keyword</code>;
-            semantic and hybrid search are outside this beta.
+            requests for linked repositories and project pages; without it
+            those fields are always null, so null means not requested. Missing
+            fields or null values mean data is unavailable; they are not zero
+            scores. Evaluation <code>metrics</code> are strings as reported;{" "}
+            <code>metric_values</code> holds the same values as numbers. A task
+            with no leaderboard on a dataset returns 404 from the metrics
+            endpoint, and unsupported <code>ordering</code> values return 422.
           </p>
         </section>
         <section id="errors">
           <h2>Errors</h2>
           <p>
-            Check the HTTP status before parsing a successful result. Errors
-            usually contain a <code>detail</code> field, which can be a string,
-            object, or validation-error array.
+            Check the HTTP status before parsing a successful result. Every
+            error from these endpoints has a stable, machine-readable{" "}
+            <code>code</code> string, such as <code>not_found</code>,{" "}
+            <code>validation_error</code>, or <code>rate_limited</code>, and a
+            human-readable <code>detail</code>. For validation errors{" "}
+            <code>detail</code> lists the invalid parameters.
           </p>
           <ul className="api-errors">
             {ERRORS.map(({ status, tone, text }) => (
@@ -632,12 +666,24 @@ export default function ApiDocsView() {
           </ul>
           <Code
             value={
-              '{ "detail": "API traffic limit exceeded. Retry with backoff." }'
+              '{ "detail": "API traffic limit exceeded. Retry with backoff.", "code": "rate_limited" }'
             }
           />
         </section>
         <section id="changelog">
           <h2>Changelog</h2>
+          <h3>November 26, 2026</h3>
+          <p>
+            Errors gain a top-level <code>code</code>. <code>/papers/</code>{" "}
+            gains <code>cursor</code> and <code>next_cursor</code>. Trending
+            papers gain <code>id</code> and <code>published</code>, evaluations
+            gain <code>metric_values</code>, and datasets gain{" "}
+            <code>catalog_url</code>. Paper full text and public metadata join
+            the reference. Unsupported <code>ordering</code> values and
+            unlinked leaderboard metrics now return 422 and 404. Search and date
+            filters on <code>/papers/</code> cover the whole catalog with the
+            default trending order.
+          </p>
           <h3>Initial experimental beta</h3>
           <p>
             Core catalog reads, keyword search, public schemas, and anonymous

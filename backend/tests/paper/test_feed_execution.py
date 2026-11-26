@@ -182,9 +182,9 @@ def test_nontrending_endpoint_ties_and_direction_contract(feeds):
     statements.clear()
     PaperService(db).get_papers(task="1", order_by="citation_count", order_dir="DESC")
     assert any(
-        "ORDER BY papers.citation_count DESC NULLS LAST" in sql for sql in statements
+        "ORDER BY papers.citation_count DESC NULLS LAST, papers.id DESC" in sql
+        for sql in statements
     )
-    assert not any("papers.id DESC" in sql for sql in statements)
     assert ids(
         TaskService(db).get_task_papers("1", order_by="unknown", order_dir="DESC")
     ) == ["3", "2", "1"]
@@ -415,3 +415,60 @@ def test_cvpr_finalists_use_curated_order_other_conferences_use_title(entity_fee
             "other", presentation="best_paper_finalist", order_by="trending"
         )
     ) == ["1", "2", "3"]
+
+
+@pytest.mark.parametrize("order_dir", ["desc", "asc"])
+def test_cursor_walks_every_paper_once_including_undated(feeds, order_dir):
+    from backend.services.paper_cursor import PaperCursor
+
+    db, _ = feeds
+    db.add(
+        Paper(
+            id=5,
+            title="Robot 5",
+            abstract="Robotics",
+            source="arxiv",
+            arxiv_id="2601.00005",
+            version="v1",
+            date_published=None,
+            is_latest_version=True,
+            citation_count=10,
+        )
+    )
+    db.commit()
+    seen, cursor = [], None
+    for _ in range(10):
+        page = PaperService(db).get_papers(
+            order_by="date_published",
+            order_dir=order_dir,
+            page_size=1,
+            cursor=cursor,
+            issue_cursors=True,
+        )
+        seen += ids(page)
+        assert page.count == 4
+        if page.next_cursor is None:
+            break
+        cursor = PaperCursor.decode(page.next_cursor, "date_published", order_dir)
+    expected = ["3", "2", "1", "5"] if order_dir == "desc" else ["1", "2", "3", "5"]
+    assert seen == expected
+
+
+def test_cursor_rejects_a_token_for_another_order(feeds):
+    from backend.services.paper_cursor import InvalidPaperCursorError, PaperCursor
+
+    token = PaperCursor("date_published", "desc", "2026-01-02", 3).encode()
+    with pytest.raises(InvalidPaperCursorError):
+        PaperCursor.decode(token, "citation_count", "desc")
+    with pytest.raises(InvalidPaperCursorError):
+        PaperCursor.decode("not-a-cursor", "date_published", "desc")
+
+
+def test_trending_order_with_search_or_dates_covers_the_whole_catalog(feeds):
+    db, _ = feeds
+    searched = PaperService(db).get_papers(order_by="trending", search="Robot")
+    dated = PaperService(db).get_papers(
+        order_by="trending", start_date=date(2026, 1, 1), end_date=date(2026, 1, 2)
+    )
+    assert searched.count == 3 and set(ids(searched)) == {"1", "2", "3"}
+    assert dated.count == 3

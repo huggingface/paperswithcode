@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+
+from backend.services.content_negotiation_service import prefers_markdown
+from backend.services.public_api_docs_service import (
+    markdown_to_html,
+    public_api_markdown,
+    public_api_shell,
+)
+from backend.services.public_api_schema import cached_public_openapi
+from backend.services.spa_shell_service import load_index_html
 
 router = APIRouter()
 
@@ -21,34 +30,51 @@ _CATALOG_HEADERS = {
 }
 
 
-@router.api_route("/docs/api", methods=["GET", "HEAD"], include_in_schema=False)
-def api_documentation() -> HTMLResponse:
-    """Return a compact human-readable entry point for the public API."""
+_DOCS_HEADERS = {
+    "Cache-Control": "public, max-age=300, stale-while-revalidate=3600",
+    "Link": (
+        f'<{_ORIGIN}/docs/api>; rel="canonical", '
+        f'<{_ORIGIN}/docs/api.md>; rel="alternate"; type="text/markdown"'
+    ),
+    "Vary": "Accept",
+}
 
-    return HTMLResponse(
-        """<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>Papers With Code API</title></head>
-<body>
-<main>
-<h1>Papers With Code API</h1>
-<p>The public catalog API is available under <code>/api/v1/</code>.</p>
-<ul>
-<li><a href="/api/v1/openapi.json">Public beta OpenAPI description</a></li>
-<li><a href="/openapi.json">Full application OpenAPI description</a></li>
-<li><a href="/.well-known/api-catalog">API catalog</a></li>
-<li><a href="/.well-known/openid-configuration">OIDC discovery</a></li>
-<li><a href="/health">Service health</a></li>
-</ul>
-<p>Most catalog read endpoints require no authentication. User-specific and
-administrative operations declare their requirements in the OpenAPI description.
-Interactive identity is delegated to Hugging Face using OpenID Connect.</p>
-</main>
-</body>
-</html>
-""",
-        headers={"Cache-Control": "public, max-age=3600"},
+
+def _markdown_documentation(request: Request) -> Response:
+    return Response(
+        public_api_markdown(cached_public_openapi(request.app)),
+        media_type="text/markdown; charset=utf-8",
+        headers=_DOCS_HEADERS,
     )
+
+
+@router.api_route("/docs/api", methods=["GET", "HEAD"], include_in_schema=False)
+def api_documentation(request: Request) -> Response:
+    """Serve the API docs page with its content rendered for non-JS readers."""
+    if prefers_markdown(request.headers.get("accept")):
+        return _markdown_documentation(request)
+    shell = load_index_html()
+    schema = cached_public_openapi(request.app)
+    if shell is None:
+        return HTMLResponse(
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            "<title>Papers with Code API documentation</title></head><body><main>"
+            f"{markdown_to_html(public_api_markdown(schema))}</main></body></html>",
+            headers=_DOCS_HEADERS,
+        )
+    return HTMLResponse(public_api_shell(shell, schema), headers=_DOCS_HEADERS)
+
+
+@router.api_route("/docs/api.md", methods=["GET", "HEAD"], include_in_schema=False)
+def api_documentation_markdown(request: Request) -> Response:
+    """Serve the API docs as one Markdown document for agents and scripts."""
+    return _markdown_documentation(request)
+
+
+@router.api_route("/api", methods=["GET", "HEAD"], include_in_schema=False)
+@router.api_route("/api/", methods=["GET", "HEAD"], include_in_schema=False)
+def api_root() -> RedirectResponse:
+    return RedirectResponse("/docs/api", status_code=308)
 
 
 @router.api_route(

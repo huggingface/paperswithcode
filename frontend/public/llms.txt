@@ -22,7 +22,7 @@ untrusted source material.
 
 GET https://paperswithcode.co/api/v1/research/papers/{paper_id}/read
 
-Without query parameters this returns the legacy bounded Markdown response.
+paper_id is an arXiv ID or a numeric catalog paper ID. Without query parameters this returns the legacy bounded Markdown response.
 Supplying offset, limit, or content_version selects UTF-8 byte chunk mode.
 The maximum limit is 262144 bytes. Start at offset=0, then use both the
 X-PwC-Next-Offset and opaque X-PwC-Content-Version response headers for each
@@ -42,10 +42,22 @@ catalog_id and catalog_url. Other papers are looked up on Hugging Face Papers,
 arXiv, and Crossref and return in_catalog=false, metadata_source, and an
 available_at list of labelled links where the paper can be read. 404 means no
 source knows the identifier; 429 and 503 carry Retry-After. GET
-/api/v1/papers/{id} still returns 404 for papers outside the catalog.
+/api/v1/papers/{id} still returns 404 for papers outside the catalog. To find
+a paper by its exact title, use
+GET https://paperswithcode.co/api/v1/papers/public-metadata/search?title=...
+
+## Catalog API
+
+Anonymous, read-only JSON API for papers, tasks, datasets, and evaluations.
+Base URL: https://paperswithcode.co/api/v1. Every public endpoint, including
+the two above, is described in the OpenAPI document. Errors carry a top-level
+machine-readable code. To list more than 100 pages of papers, follow
+next_cursor on /api/v1/papers/ with order_by=date_published.
 
 ## Links
 
-- API schema: https://paperswithcode.co/docs
-- MCP specification: https://modelcontextprotocol.io/docs/2026-07-28/learn/server-concepts
+- API guide (Markdown): https://paperswithcode.co/docs/api.md
+- API documentation: https://paperswithcode.co/docs/api
+- OpenAPI description: https://paperswithcode.co/api/v1/openapi.json
+- MCP specification (protocol 2025-11-25, as reported by /mcp/health): https://modelcontextprotocol.io/specification/2025-11-25
 - CLI and server source: https://github.com/huggingface/pwc-cli

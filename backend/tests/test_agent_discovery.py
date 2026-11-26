@@ -96,13 +96,24 @@ def test_openid_configuration_supports_head_discovery():
     assert 'rel="openid-configuration"' in response.headers["link"]
 
 
-def test_api_documentation_links_the_machine_readable_resources():
-    with _client() as client:
+def test_api_documentation_is_readable_without_javascript():
+    from backend.main import create_app
+
+    with TestClient(create_app()) as client:
         response = client.get("/docs/api")
+        markdown = client.get("/docs/api.md")
+        negotiated = client.get("/docs/api", headers={"Accept": "text/markdown"})
+        root = client.get("/api/", follow_redirects=False)
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    assert 'href="/openapi.json"' in response.text
-    assert 'href="/.well-known/api-catalog"' in response.text
-    assert 'href="/.well-known/openid-configuration"' in response.text
-    assert 'href="/health"' in response.text
+    assert "<h2>Traffic limits</h2>" in response.text
+    assert "/api/v1/research/papers/{paper_id}/read" in response.text
+    assert 'href="https://paperswithcode.co/api/v1/openapi.json"' in response.text
+    assert markdown.headers["content-type"].startswith("text/markdown")
+    assert markdown.text.startswith("# Papers with Code API")
+    assert "## Endpoints" in markdown.text
+    assert "### Get papers with pagination and filtering" in markdown.text
+    assert negotiated.text == markdown.text
+    assert root.status_code == 308
+    assert root.headers["location"] == "/docs/api"

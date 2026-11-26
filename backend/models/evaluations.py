@@ -1,9 +1,11 @@
 """Dataset, benchmark, evaluation, and metric API contracts."""
 
 from datetime import date, datetime
+import math
 from typing import List, Literal, Optional, Union
+from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from backend.utils.public_urls import normalize_optional_public_url
 
@@ -160,17 +162,37 @@ class Dataset(BaseModel):
             return None
         return [str(item) for item in value if item is not None]
 
+    @computed_field(
+        description="Absolute URL of this dataset's benchmark page on paperswithcode.co"
+    )
+    @property
+    def catalog_url(self) -> Optional[str]:
+        if not self.slug:
+            return None
+        return f"https://paperswithcode.co/benchmark/{quote(self.slug, safe='')}"
+
     num_papers: Optional[int] = Field(
-        None, description="Number of papers using this dataset"
+        None,
+        description=(
+            "Legacy paper count imported from the original PapersWithCode dump; "
+            "often null or 0. Use paper_count for the live count."
+        ),
     )
     warning: Optional[str] = Field(
         None, description="Warning or note about the dataset"
     )
 
-    pwc_url: Optional[str] = Field(None, description="Original PapersWithCode URL")
+    pwc_url: Optional[str] = Field(
+        None,
+        description=(
+            "Legacy paperswithcode.com URL, when one was imported. Use "
+            "catalog_url for the dataset's page on paperswithcode.co."
+        ),
+    )
 
     paper_count: Optional[int] = Field(
-        None, description="Number of papers using this dataset (alias for num_papers)"
+        None,
+        description="Live number of evaluation rows reported on this dataset",
     )
     task_count: Optional[int] = Field(
         None, description="Number of tasks associated with this dataset"
@@ -357,6 +379,16 @@ class DatasetUpdateRequest(BaseModel):
     )(normalize_optional_public_url)
 
 
+def _metric_number(value: object) -> Optional[float]:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(str(value).strip())
+    except ValueError:
+        return None
+    return number if math.isfinite(number) else None
+
+
 class Evaluation(BaseModel):
     """
     Benchmark evaluation result.
@@ -442,6 +474,16 @@ class Evaluation(BaseModel):
     updated_at: datetime = Field(
         ..., description="Timestamp when record was last updated"
     )
+
+    @computed_field(
+        description=(
+            "The same metrics as numbers, for sorting and comparison; null "
+            "where a reported value is not a plain number"
+        )
+    )
+    @property
+    def metric_values(self) -> dict[str, Optional[float]]:
+        return {name: _metric_number(value) for name, value in self.metrics.items()}
 
     paper_title: Optional[str] = Field(None, description="Title of the paper")
     paper_arxiv_id: Optional[str] = Field(None, description="ArXiv ID of the paper")
