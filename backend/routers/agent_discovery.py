@@ -73,6 +73,8 @@ def api_documentation_markdown(request: Request) -> Response:
 
 @router.api_route("/api", methods=["GET", "HEAD"], include_in_schema=False)
 @router.api_route("/api/", methods=["GET", "HEAD"], include_in_schema=False)
+@router.api_route("/api/v1", methods=["GET", "HEAD"], include_in_schema=False)
+@router.api_route("/api/v1/", methods=["GET", "HEAD"], include_in_schema=False)
 def api_root() -> RedirectResponse:
     return RedirectResponse("/docs/api", status_code=308)
 
