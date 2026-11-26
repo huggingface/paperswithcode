@@ -85,6 +85,33 @@ def test_page_markdown_drops_navigation_above_the_title_heading():
     assert "API Platform" not in markdown
 
 
+def test_title_heading_ignores_titles_inside_link_targets():
+    body = (
+        "_Today we release a sparse reasoning model._\n\n"
+        "## [Jump to section](https://www.liquid.ai/blog/lfm2-5-24b-a2b-built-for-"
+        "fast-on-device-agents#motivation) Motivation\n\n" + ARTICLE.replace("# ", "")
+    )
+
+    assert service.from_title_heading(body, TITLE) == body
+
+
+def test_title_heading_keeps_an_introduction_above_the_heading():
+    introduction = (
+        "LFM2.5-24B-A2B is a sparse model with 2B active parameters, built for "
+        "agents that run on a phone or laptop and need fast, private tool use "
+        "without a round trip to the cloud.\n\n"
+    )
+    body = introduction + ARTICLE
+
+    assert service.from_title_heading(body, TITLE) == body
+
+
+def test_title_heading_ignores_deeper_headings():
+    body = "Intro.\n\n### LFM2.5-24B-A2B: Built for Fast On-Device Agents\n\nText."
+
+    assert service.from_title_heading(body, TITLE) == body
+
+
 def test_page_markdown_keeps_pages_without_a_title_heading():
     body = "Intro paragraph.\n\n" + ARTICLE.replace("# ", "")
 
