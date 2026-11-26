@@ -101,7 +101,7 @@ def main() -> int:
             output = {"generated_at": now.isoformat(), "candidates": candidates}
         elif args.command == "card":
             papers = db.scalars(select(Paper).where(Paper.id.in_(args.paper_id)))
-            cards = {str(paper.id): paper_page_card(db, paper) for paper in papers}
+            cards = {str(paper.id): paper_page_card(paper) for paper in papers}
             output = {
                 "cards": {
                     paper_id: base64.b64encode(card).decode() if card else None

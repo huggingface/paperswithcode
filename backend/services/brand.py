@@ -274,8 +274,25 @@ def frame(
     else:
         y += px(12)
     draw.line((margin, y, width - margin, y), fill=palette.hairline, width=1)
+    footer_y = footer(draw, size, palette=palette)
+    return Frame(image, draw, scale, margin, y + px(28), footer_y - px(24))
+
+
+def footer(
+    draw: ImageDraw.ImageDraw, size: tuple[int, int], *, palette: Palette = LIGHT
+) -> int:
+    """The standard footer on a paper band: hairline, wordmark left, domain right.
+
+    Returns the hairline's y, where the canvas content above it ends."""
+    width, height = size
+    scale = (width * height / (1200 * 675)) ** 0.5
+    margin = round(72 * scale)
+
+    def px(value: float) -> int:
+        return round(value * scale)
 
     footer_y = height - px(84)
+    draw.rectangle((0, footer_y, width, height), fill=palette.bg)
     draw.line(
         (margin, footer_y, width - margin, footer_y), fill=palette.hairline, width=1
     )
@@ -290,4 +307,4 @@ def frame(
         fill=palette.ink_faint,
         tracking=0.02,
     )
-    return Frame(image, draw, scale, margin, y + px(28), footer_y - px(24))
+    return footer_y
