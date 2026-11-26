@@ -208,6 +208,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `formal-verification` — Formal Verification
 - `full-duplex-spoken-dialogue` — Full-Duplex Spoken Dialogue
 - `gaze-estimation` — Gaze Estimation
+- `gaze-following` — Gaze Following
 - `generative-recommendation` — Generative Recommendation
 - `gesture-recognition` — Gesture Recognition
 - `graph-classification` — Graph Classification
