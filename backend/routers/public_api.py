@@ -1,7 +1,5 @@
 """Schema delivery and anonymous browser access for the selected public reads."""
 
-import re
-
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.datastructures import MutableHeaders
@@ -12,23 +10,15 @@ from backend.services.public_api_schema import (
     PUBLIC_SCHEMA_PATH,
     cached_public_openapi,
 )
+from backend.services.public_rate_limit import PublicRateLimiter, zones_for
+from backend.utils.client_ip import get_proxied_client_ip
 
 router = APIRouter()
 
-_CATALOG_POLICY = '"catalog";q=120;w=60'
-_LIST_POLICY = '"list";q=60;w=60'
-_LIST_PATH = re.compile(
-    r"/api/v1/(?:(?:papers|tasks|datasets|evaluations)|papers/search(?:/feed)?)/?"
-)
-_CATALOG_PATH = re.compile(r"/api/v1/(?:papers|tasks|datasets|evaluations)(?:/.*)?")
-
 
 def rate_limit_policy(path: str) -> str | None:
-    if _LIST_PATH.fullmatch(path):
-        return f"{_CATALOG_POLICY}, {_LIST_POLICY}"
-    if _CATALOG_PATH.fullmatch(path):
-        return _CATALOG_POLICY
-    return None
+    zones = zones_for("GET", path)
+    return ", ".join(zone.policy for zone in zones) or None
 
 
 @router.get(PUBLIC_SCHEMA_PATH, include_in_schema=False)
@@ -120,7 +110,7 @@ class PublicReadCorsMiddleware:
                         del headers["Access-Control-Allow-Credentials"]
                 exposed = headers.get("Access-Control-Expose-Headers", "")
                 public_headers = (
-                    "Retry-After, RateLimit-Policy, X-PwC-Truncated, "
+                    "Retry-After, RateLimit-Policy, RateLimit, X-PwC-Truncated, "
                     "X-PwC-Content-Version, X-PwC-Next-Offset"
                 )
                 headers["Access-Control-Expose-Headers"] = (
@@ -148,3 +138,31 @@ class PublicReadCorsMiddleware:
                 )
             partial_match |= match == Match.PARTIAL
         return False if partial_match else None
+
+
+class PublicRateLimitMiddleware:
+    """Report the quota nginx will still grant beside each ``RateLimit-Policy``."""
+
+    def __init__(self, app, limiter: PublicRateLimiter | None = None):
+        self.app = app
+        self.limiter = limiter or PublicRateLimiter()
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        zones = zones_for(scope["method"], scope["path"])
+        client = get_proxied_client_ip(Request(scope)) if zones else None
+        if client is None:
+            await self.app(scope, receive, send)
+            return
+        field = self.limiter.take(client, zones)
+
+        async def send_with_field(message):
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                if "RateLimit-Policy" in headers:
+                    headers["RateLimit"] = field
+            await send(message)
+
+        await self.app(scope, receive, send_with_field)

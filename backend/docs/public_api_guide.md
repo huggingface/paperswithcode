@@ -40,8 +40,11 @@ score a paper reports on a dataset for a task.
 
 These are sustained rates with short bursts, not fixed-minute quotas. Successful
 responses carry a `RateLimit-Policy` header naming the allowances that apply to
-the request, for example `"catalog";q=120;w=60, "list";q=60;w=60`. Remaining
-counts are not reported, because the limits are enforced at the edge.
+the request, for example `"catalog";q=120;w=60, "list";q=60;w=60`, and a
+`RateLimit` header with the state of each allowance after the request, for
+example `"catalog";r=58;t=2, "list";r=18;t=3`. `r` is how many more requests
+you can send right away, and `t` is the number of seconds until the full burst
+is available again. Both headers are readable from browser scripts.
 
 Website browsing and scripts on the same network share these limits. Send
 requests sequentially, cache results, and avoid parallel crawls. On HTTP 429,
@@ -143,6 +146,9 @@ Planned breaking changes will be announced here at least 14 days before they
 take effect. Urgent security and service-restoration fixes may take effect
 immediately. This beta has no uptime or support-response guarantee.
 
+- 2026-11-26: Successful responses gain a `RateLimit` header with the remaining
+  burst and seconds until it refills. Unknown `/api/v1/` paths return errors
+  with a top-level `code`, and `/api/v1` redirects to this guide.
 - 2026-11-26: Errors gain a top-level `code`. `/papers/` gains `cursor` and
   `next_cursor`. Trending papers gain `id` and `published`, evaluations gain
   `metric_values`, and datasets gain `catalog_url`. Paper full text and public

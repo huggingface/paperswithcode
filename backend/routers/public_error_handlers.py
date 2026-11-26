@@ -58,8 +58,15 @@ def public_error_response(
     )
 
 
+def is_unrouted_api_request(request: Request) -> bool:
+    return request.scope.get("route") is None and request.scope["path"].startswith(
+        "/api/v1/"
+    )
+
+
 async def _http_error(request: Request, error: StarletteHTTPException):
-    if not is_public_request(request) or error.status_code < 400:
+    public = is_public_request(request) or is_unrouted_api_request(request)
+    if not public or error.status_code < 400:
         return await http_exception_handler(request, error)
     return public_error_response(error.status_code, error.detail, error.headers)
 

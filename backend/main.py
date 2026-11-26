@@ -694,6 +694,7 @@ def create_app() -> FastAPI:
         public_api.PublicReadCorsMiddleware,
         allowed_origins=settings.cors_allowed_origins,
     )
+    app.add_middleware(public_api.PublicRateLimitMiddleware)
     app.add_middleware(UnixSocketForwardedSchemeMiddleware)
 
     for route in app.routes:
