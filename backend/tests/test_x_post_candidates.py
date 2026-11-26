@@ -605,6 +605,25 @@ def test_artwork_hero_keeps_dark_blue_artwork_on_black():
     assert any(b > 80 for _, _, b in hero.getdata())
 
 
+def test_fitted_title_shrinks_a_long_title_instead_of_cutting_it():
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    title = (
+        "An updated Clairic and Clairic-flash are now open-weight, "
+        "from the new Workers AI Superintelligence team"
+    )
+    title_font, lines = cards_module._fitted_title(probe, title, 1324, 137, 4)
+    assert title_font.size < 137
+    assert len(lines) <= 4
+    assert " ".join(lines) == title
+
+
+def test_fitted_title_keeps_a_short_title_at_full_size():
+    probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    title_font, lines = cards_module._fitted_title(probe, "Gemini 4 Neon", 1324, 137, 4)
+    assert title_font.size == 137
+    assert lines == ["Gemini 4 Neon"]
+
+
 def test_artwork_hero_enlarges_a_small_logo_on_white():
     art = Image.new("RGB", (1200, 630), (255, 255, 255))
     ImageDraw.Draw(art).rectangle((580, 295, 620, 335), fill=(0, 0, 0))

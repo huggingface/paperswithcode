@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 
 import fitz
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 from backend.services.brand import (
     LIGHT,
@@ -214,6 +214,22 @@ def _feather(size: tuple[int, int]) -> Image.Image:
     return mask.filter(ImageFilter.GaussianBlur(ramp / 4))
 
 
+def _fitted_title(
+    draw: ImageDraw.ImageDraw, title: str, width: int, largest: int, lines: int
+) -> tuple[ImageFont.FreeTypeFont, list[str]]:
+    """The largest serif size, down to half of `largest`, that sets `title` whole in `lines`."""
+    size = largest
+    while True:
+        title_font = font("serif", size, 500)
+        wrapped = wrap_text(draw, title, title_font, width, lines + 1)
+        whole = len(wrapped) <= lines and not any(
+            line.endswith("…") for line in wrapped
+        )
+        if whole or size <= largest // 2:
+            return title_font, wrap_text(draw, title, title_font, width, lines)
+        size = round(size * 0.92)
+
+
 def _artwork_hero(
     artwork: Image.Image, title: str, width: int, height: int
 ) -> Image.Image:
@@ -244,9 +260,11 @@ def _artwork_hero(
         cover = cover.filter(ImageFilter.GaussianBlur(round(width / 20)))
         image = Image.blend(cover, Image.new("RGB", (width, height), (0, 0, 0)), 0.45)
         dark = True
-    title_font = font("serif", round(width / 11), 500)
     probe = ImageDraw.Draw(image)
-    lines = wrap_text(probe, title, title_font, width - 2 * pad, 4) if title else []
+    title_font, lines = _fitted_title(
+        probe, title, width - 2 * pad, round(width / 11), 4
+    )
+    lines = lines if title else []
     line_height = round(title_font.size * 1.15)
     text_height = pad + len(lines) * line_height if lines else 0
     for index, line in enumerate(lines):
@@ -269,10 +287,11 @@ def _artwork_hero(
 
 def _title_hero(title: str, width: int, height: int) -> Image.Image:
     """A paper's title alone, centred on a `width` × `height` sheet."""
-    title_font = font("serif", round(width / 12), 500)
     pad = round(width * 0.06)
     probe = ImageDraw.Draw(Image.new("RGB", (1, 1)))
-    lines = wrap_text(probe, title, title_font, width - 2 * pad, 4)
+    title_font, lines = _fitted_title(
+        probe, title, width - 2 * pad, round(width / 12), 4
+    )
     line_height = round(title_font.size * 1.2)
     top = max(pad, (height - len(lines) * line_height) // 2)
     image = Image.new("RGB", (width, height), (255, 255, 255))
