@@ -148,6 +148,13 @@ def draw_mark(
     )
 
 
+def _letter_centre(
+    draw: ImageDraw.ImageDraw, font_: ImageFont.FreeTypeFont, letter: str
+) -> float:
+    """Midway between the top of `letter` and the baseline, from the text's y."""
+    return (draw.textbbox((0, 0), letter, font=font_)[1] + font_.getmetrics()[0]) / 2
+
+
 def draw_wordmark(
     draw: ImageDraw.ImageDraw,
     xy: tuple[int, int],
@@ -166,9 +173,8 @@ def draw_wordmark(
     italic = font("serif-italic", size, 400)
     if with_mark:
         mark = round(size * 1.1)
-        cap_top = draw.textbbox((x, y), "P", font=upright)[1]
-        baseline = y + upright.getmetrics()[0]
-        draw_mark(draw, (x, round((cap_top + baseline - mark) / 2)), mark, palette)
+        centre = y + _letter_centre(draw, upright, "P")
+        draw_mark(draw, (x, round(centre - mark / 2)), mark, palette)
         x += mark + round(size * 0.5)
     draw.text((x, y), "Papers", font=upright, fill=palette.ink)
     x += draw.textlength("Papers ", font=upright)
@@ -298,12 +304,20 @@ def footer(
     draw.line(
         (margin, footer_y, width - margin, footer_y), fill=palette.hairline, width=1
     )
-    draw_wordmark(draw, (margin, footer_y + px(24)), px(26), palette)
+    centre = (footer_y + height) / 2
+    wordmark_size = px(26)
+    wordmark_y = round(
+        centre - _letter_centre(draw, font("serif", wordmark_size, 600), "P")
+    )
+    draw_wordmark(draw, (margin, wordmark_y), wordmark_size, palette)
     domain_font = font("mono", px(18), 400)
     domain_width = tracked_length(draw, DOMAIN, font=domain_font, tracking=0.02)
     draw_tracked(
         draw,
-        (width - margin - domain_width, footer_y + px(32)),
+        (
+            width - margin - domain_width,
+            round(centre - _letter_centre(draw, domain_font, "h")),
+        ),
         DOMAIN,
         font=domain_font,
         fill=palette.ink_faint,
