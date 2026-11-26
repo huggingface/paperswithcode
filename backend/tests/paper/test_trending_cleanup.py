@@ -216,6 +216,8 @@ def test_repository_trending_service_owns_query_policy_and_returns_models(monkey
         "paper_age_days": 1.0,
         "has_official_implementation": True,
         "code_repository_count": 3,
+        "id": "501",
+        "published": "2026-08-09",
     }
 
     assert len(db.executions) == 3
@@ -274,6 +276,8 @@ def test_trending_router_delegates_filters_and_serializes_typed_result(
     assert calls == [(7, 42, 1.25)]
     expected = _response_row()
     expected["date_published"] = "2026-08-10"
+    expected["id"] = expected["paper_id"]
+    expected["published"] = expected["date_published"]
     assert response.json() == [expected]
 
 
@@ -293,4 +297,7 @@ def test_trending_router_translates_database_error(trending_client, monkeypatch)
     response = client.get("/api/v1/papers/trending")
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "Internal server error"}
+    assert response.json() == {
+        "detail": "Internal server error",
+        "code": "internal_error",
+    }

@@ -77,11 +77,14 @@ export function exampleUrl(path: string, operation: Operation): string {
   }
   return `https://paperswithcode.co${path}${query.size ? `?${query}` : ""}`;
 }
-export function codeExample(url: string, language: string): string {
+export function returnsText(operation: Operation): boolean {
+  return Boolean(operation.responses["200"]?.content?.["text/plain"]);
+}
+export function codeExample(url: string, language: string, text = false): string {
   if (language === "Python")
-    return `import requests\n\nresponse = requests.get(${JSON.stringify(url)}, timeout=30)\nresponse.raise_for_status()\nprint(response.json())`;
+    return `import requests\n\nresponse = requests.get(${JSON.stringify(url)}, timeout=30)\nresponse.raise_for_status()\nprint(response.${text ? "text" : "json()"})`;
   if (language === "JavaScript")
-    return `const response = await fetch(${JSON.stringify(url)}, {\n  credentials: "omit",\n});\nif (!response.ok) throw new Error(\`HTTP \${response.status}\`);\nconsole.log(await response.json());`;
+    return `const response = await fetch(${JSON.stringify(url)}, {\n  credentials: "omit",\n});\nif (!response.ok) throw new Error(\`HTTP \${response.status}\`);\nconsole.log(await response.${text ? "text" : "json"}());`;
   return `curl --fail-with-body ${JSON.stringify(url)}`;
 }
 export function schemaLabel(schema: Schema): string {

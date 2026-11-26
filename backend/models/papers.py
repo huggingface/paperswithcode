@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from backend.models.evaluations import BenchmarkSummary, LeaderboardRankSummary
 
@@ -84,7 +84,11 @@ class Paper(BaseModel):
         description="URL to the paper PDF (NULL when no PDF is known, e.g. external blog posts)",
     )
     thumbnail_url: Optional[str] = Field(
-        None, description="URL to the paper thumbnail image"
+        None,
+        description=(
+            "Paper thumbnail image. A path such as /api/thumbnails/… is "
+            "relative to https://paperswithcode.co."
+        ),
     )
 
     title: str = Field(..., description="Paper title")
@@ -254,10 +258,19 @@ class Paper(BaseModel):
     )
 
     repositories: Optional[List["Repository"]] = Field(
-        None, description="GitHub repositories associated with this paper"
+        None,
+        description=(
+            "GitHub repositories associated with this paper. Always null unless "
+            "include_resources=true (not requested); with it, null means none. "
+            "code_repository_count is filled either way."
+        ),
     )
     project_pages: Optional[List["ProjectPage"]] = Field(
-        None, description="Project pages associated with this paper"
+        None,
+        description=(
+            "Project pages associated with this paper. Always null unless "
+            "include_resources=true (not requested); with it, null means none."
+        ),
     )
     x_threads: Optional[List["XThread"]] = Field(
         None, description="X (formerly Twitter) posts introducing this paper"
@@ -287,14 +300,16 @@ class Paper(BaseModel):
         None,
         description=(
             "Earlier papers that this paper is a follow-up to "
-            "(e.g. DINOv2 for the DINOv3 paper)."
+            "(e.g. DINOv2 for the DINOv3 paper). Loaded on paper detail only: "
+            "null in lists, and null on detail when there are none."
         ),
     )
     successor_papers: Optional[List["RelatedPaperSummary"]] = Field(
         None,
         description=(
             "Later papers that follow up on this paper "
-            "(e.g. DINOv3 for the DINOv2 paper)."
+            "(e.g. DINOv3 for the DINOv2 paper). Loaded on paper detail only: "
+            "null in lists, and null on detail when there are none."
         ),
     )
     organizations: Optional[List["OrganizationSummary"]] = Field(
@@ -379,6 +394,14 @@ class Papers(BaseModel):
         None, description="Number of the previous page"
     )
     results: List[Paper] = Field(..., description="List of papers on this page")
+    next_cursor: Optional[str] = Field(
+        None,
+        description=(
+            "Opaque keyset cursor for the next page. Returned when order_by is "
+            "date_published or citation_count; pass it as `cursor` to continue "
+            "past the page limit. null when there are no more papers."
+        ),
+    )
     scope: Optional[PaperFeedScope] = Field(
         None, description="Resolved repository or framework feed context"
     )
@@ -415,7 +438,11 @@ class PaperSummary(BaseModel):
         default=0, description="Number of citations from Semantic Scholar"
     )
     thumbnail_url: Optional[str] = Field(
-        None, description="URL to the paper thumbnail image"
+        None,
+        description=(
+            "Paper thumbnail image. A path such as /api/thumbnails/… is "
+            "relative to https://paperswithcode.co."
+        ),
     )
     has_official_implementation: bool = Field(
         default=False,
@@ -753,6 +780,18 @@ class RepositoryTrendingPaper(BaseModel):
     paper_age_days: float
     has_official_implementation: bool
     code_repository_count: int
+
+    @computed_field(description="Same as paper_id; the name other paper objects use")
+    @property
+    def id(self) -> str:
+        return self.paper_id
+
+    @computed_field(
+        description="Same as date_published; the name other paper objects use"
+    )
+    @property
+    def published(self) -> Optional[date]:
+        return self.date_published
 
 
 class HfArtifactSummary(BaseModel):

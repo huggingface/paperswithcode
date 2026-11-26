@@ -160,7 +160,18 @@ def list_evaluations(
             "count strictly below this bound."
         ),
     ),
-    ordering: Optional[str] = Query(
+    ordering: Optional[
+        Literal[
+            "created_at",
+            "-created_at",
+            "best_rank",
+            "-best_rank",
+            "evaluated_on",
+            "-evaluated_on",
+            "benchmark_popularity",
+            "-benchmark_popularity",
+        ]
+    ] = Query(
         None,
         description=(
             "Order by field: created_at, best_rank, evaluated_on, "

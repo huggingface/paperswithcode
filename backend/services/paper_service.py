@@ -76,6 +76,7 @@ from backend.services.paper_implementation_service import (
     hf_artifacts_exist_clause,
 )
 from backend.services.paper_feed_executor import PaperFeedExecutor, GENERAL_ORDERING
+from backend.services.paper_cursor import PaperCursor
 from backend.services.paper_citation_refresh_service import PaperCitationRefreshService
 from backend.services.paper_seo_service import build_paper_seo_document
 from backend.services.paper_relation_loader import PaperRelationLoader, PaperRelations
@@ -576,6 +577,8 @@ class PaperService:
         has_hf_artifacts: bool = False,
         framework: Optional[str] = None,
         repository: Optional[str] = None,
+        cursor: Optional[PaperCursor] = None,
+        issue_cursors: bool = False,
     ) -> Papers:
         """
         Get paginated list of papers with optional filtering.
@@ -689,6 +692,10 @@ class PaperService:
                 order_by == "trending"
                 and not is_repository_feed
                 and not has_catalog_filter
+                and not search
+                and not conference
+                and start_date is None
+                and end_date is None
             ):
                 response = self._get_trending_papers(
                     page=page,
@@ -765,6 +772,8 @@ class PaperService:
                 order_dir=order_dir,
                 ordering=GENERAL_ORDERING,
                 include_resources=include_resources,
+                cursor=cursor,
+                issue_cursors=issue_cursors,
             )
             response.scope = scope
             response.applied_filters = applied_filters

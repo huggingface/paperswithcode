@@ -22,6 +22,11 @@ ROOT = Path(__file__).resolve().parents[2]
 class Upstream(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
+        if self.path == "/docs/api":
+            self.send_header("Cache-Control", "public, max-age=300")
+            self.end_headers()
+            self.wfile.write(b"API documentation app")
+            return
         self.end_headers()
         self.wfile.write(b'{"ok":true}')
 
@@ -67,6 +72,10 @@ def test_nginx_catalog_limits_and_docs_routing(environment):
                 probe.bind(("127.0.0.1", 0))
                 port = probe.getsockname()[1]
             api = api.replace(
+                f"http://pwc_{environment}_backend",
+                f"http://127.0.0.1:{upstream.server_port}",
+            ).replace("include proxy_params;", "")
+            docs = docs.replace(
                 f"http://pwc_{environment}_backend",
                 f"http://127.0.0.1:{upstream.server_port}",
             ).replace("include proxy_params;", "")
@@ -123,7 +132,7 @@ location = /_staging_access_check {{ return 204; }}
                     else:
                         pytest.fail("isolated nginx did not start")
                     assert ready.text == "API documentation app"
-                    assert ready.headers["cache-control"] == "no-store"
+                    assert ready.headers["cache-control"] == "public, max-age=300"
                     responses = [
                         client.get(
                             "/api/v1/papers/search?q=test&mode=keyword",
@@ -141,6 +150,7 @@ location = /_staging_access_check {{ return 204; }}
                         .json()["detail"]
                         .startswith("API traffic limit exceeded")
                     )
+                    assert rejected[0].json()["code"] == "rate_limited"
                     assert rejected[0].headers["retry-after"] == "2"
                     assert rejected[0].headers["access-control-allow-origin"] == "*"
                     for origin in (

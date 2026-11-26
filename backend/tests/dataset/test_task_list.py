@@ -231,7 +231,8 @@ def test_missing_slug_and_numeric_id_preserve_distinct_behavior(client):
 
     assert missing_slug.status_code == 404
     assert missing_slug.json() == {
-        "detail": "Dataset with slug 'not-a-dataset' not found"
+        "detail": "Dataset with slug 'not-a-dataset' not found",
+        "code": "not_found",
     }
     assert missing_numeric.status_code == 200
     assert missing_numeric.json() == {"count": 0, "results": []}
@@ -262,9 +263,15 @@ def test_leaderboard_metric_route_preserves_success_validation_and_not_found_con
     assert success.status_code == 200
     assert success.json()["metrics"][0]["metric_name"] == "Accuracy"
     assert invalid.status_code == 400
-    assert invalid.json() == {"detail": "Invalid dataset or task ID. Must be integers."}
+    assert invalid.json() == {
+        "detail": "Invalid dataset or task ID. Must be integers.",
+        "code": "bad_request",
+    }
     assert missing.status_code == 404
-    assert missing.json() == {"detail": "Task with ID 999 not found"}
+    assert missing.json() == {
+        "detail": "Task with ID 999 not found",
+        "code": "not_found",
+    }
 
 
 def test_leaderboard_metric_duplicate_preserves_conflict_contract(client):
@@ -287,7 +294,10 @@ def test_dataset_persistence_error_uses_central_error_translation(client, monkey
     response = client.get("/api/v1/datasets/10")
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "Internal server error"}
+    assert response.json() == {
+        "detail": "Internal server error",
+        "code": "internal_error",
+    }
 
 
 def test_dataset_evaluation_persistence_error_preserves_detail_only_contract(

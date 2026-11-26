@@ -7,7 +7,7 @@ filtering by area, and paper associations.
 
 from fastapi import APIRouter, Depends, Query, HTTPException, Response
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Optional, List, Literal
 
 from backend.models.tasks import Task
 from backend.models.taxonomy import (
@@ -48,7 +48,16 @@ def list_tasks(
     area_id: Optional[int] = Query(None, description="Filter by research area ID"),
     parent_id: Optional[int] = Query(None, description="Filter by parent task ID"),
     level: Optional[int] = Query(None, ge=0, description="Filter by hierarchy level"),
-    ordering: Optional[str] = Query(
+    ordering: Literal[
+        "name",
+        "-name",
+        "created_at",
+        "-created_at",
+        "level",
+        "-level",
+        "paper_count",
+        "-paper_count",
+    ] = Query(
         "name",
         description="Order by field: name, created_at, level, paper_count (prefix with '-' for descending)",
     ),
@@ -68,10 +77,8 @@ def list_tasks(
     - `/api/v1/tasks/?parent_id=5` - Get subtasks of task 5
     - `/api/v1/tasks/?q=classification` - Search displayed task names
     """
-    order_dir = "desc" if ordering and ordering.startswith("-") else "asc"
-    order_by = ordering[1:] if order_dir == "desc" else ordering
-    if order_by not in {"name", "created_at", "level", "paper_count"}:
-        order_by = "name"
+    order_dir = "desc" if ordering.startswith("-") else "asc"
+    order_by = ordering.removeprefix("-")
 
     service = TaskService(db)
     if q:

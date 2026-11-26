@@ -97,6 +97,11 @@ from backend.services.paper_bucket_service import (
     copy_paper_to_bucket,
 )
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
+from backend.services.paper_cursor import (
+    CURSOR_ORDER_FIELDS,
+    InvalidPaperCursorError,
+    PaperCursor,
+)
 from backend.utils.client_ip import get_proxied_client_ip
 from backend.utils.public_urls import normalize_public_url
 from backend.utils.urls import (
@@ -108,6 +113,8 @@ from backend.utils.urls import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+MAX_PAGE = 100
 
 BADGE_CACHE_HEADERS = {
     "Cache-Control": "no-store, max-age=0",
@@ -322,7 +329,7 @@ def get_paper_leaderboard_badge_link(
     summary="Get papers with pagination and filtering",
 )
 def get_papers(
-    page: int = Query(1, ge=1, le=100, description="Page number (1-based)"),
+    page: int = Query(1, ge=1, le=MAX_PAGE, description="Page number (1-based)"),
     page_size: Optional[int] = Query(
         None, ge=1, le=500, description="Number of papers per page"
     ),
@@ -348,11 +355,32 @@ def get_papers(
         True, description="Whether to only include latest versions of papers"
     ),
     order_by: Literal["trending", "date_published", "citation_count"] = Query(
-        "trending", description="Field to order by"
+        "trending",
+        description=(
+            "Field to order by. Only changes the order, except that the "
+            "unfiltered trending feed (no search, date, conference, task, "
+            "method, organization, author, framework or repository filter) "
+            "lists only papers with a trending score from the last 24 hours. "
+            "Use date_published to list the whole catalog."
+        ),
     ),
     order_dir: Literal["asc", "desc"] = Query("desc", description="Order direction"),
+    cursor: Optional[str] = Query(
+        None,
+        max_length=200,
+        description=(
+            "Opaque `next_cursor` from a previous response with the same filters, "
+            "order_by and order_dir. Cursors continue past page 100, so they can "
+            "walk the whole catalog; use them only with page=1. Requires "
+            "order_by=date_published or citation_count."
+        ),
+    ),
     include_resources: bool = Query(
-        False, description="Include repositories and project pages"
+        False,
+        description=(
+            "Include repositories, project pages and Hugging Face artifacts. "
+            "Without it those relation fields are null (not requested), not []."
+        ),
     ),
     has_code: bool = Query(
         False, description="Only include papers with a linked GitHub repository"
@@ -396,9 +424,24 @@ def get_papers(
             status_code=422,
             detail=f"At most {MAX_AUTHOR_FILTERS} author filters are allowed",
         )
+    decoded_cursor = None
+    if cursor is not None:
+        if order_by not in CURSOR_ORDER_FIELDS:
+            raise HTTPException(
+                status_code=422,
+                detail="cursor requires order_by=date_published or citation_count",
+            )
+        if page != 1:
+            raise HTTPException(
+                status_code=422, detail="cursor cannot be combined with page"
+            )
+        try:
+            decoded_cursor = PaperCursor.decode(cursor, order_by, order_dir)
+        except InvalidPaperCursorError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
     try:
         service = PaperService(db)
-        return service.get_papers(
+        response = service.get_papers(
             page=page,
             page_size=page_size,
             search=search,
@@ -418,6 +461,8 @@ def get_papers(
             has_hf_artifacts=has_hf_artifacts,
             framework=framework,
             repository=repository,
+            cursor=decoded_cursor,
+            issue_cursors=True,
         )
     except AmbiguousAuthorError as error:
         raise HTTPException(
@@ -437,6 +482,13 @@ def get_papers(
         ) from error
     except InvalidAuthorFilterError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    return _cap_next_page(response)
+
+
+def _cap_next_page(response):
+    if response.next_page is not None and response.next_page > MAX_PAGE:
+        response.next_page = None
+    return response
 
 
 @router.get(
@@ -446,10 +498,16 @@ def get_papers(
 )
 def search_papers(
     q: str = Query(..., min_length=1, max_length=300, description="Search query"),
-    page: int = Query(1, ge=1, le=100, description="Page number (1-based)"),
+    page: int = Query(1, ge=1, le=MAX_PAGE, description="Page number (1-based)"),
     page_size: int = Query(10, ge=1, le=100, description="Papers per page"),
     mode: Optional[Literal["keyword", "semantic", "hybrid"]] = Query(
-        None, description="Override the configured search mode for this request"
+        None,
+        description=(
+            "Optional retrieval mode: keyword (title, abstract and arXiv ID "
+            "matches), semantic (embedding similarity) or hybrid (both rankings "
+            "combined). Omit it to use the site default. semantic and hybrid "
+            "are experimental and fall back to keyword when unavailable."
+        ),
     ),
     has_official_implementation: bool = Query(
         False,
@@ -461,23 +519,22 @@ def search_papers(
     db: Session = Depends(get_database_session),
 ):
     """
-    Search latest paper versions and return one relevance-ranked page.
+    Search the latest paper versions and return one relevance-ranked page.
 
-    ``PWC_PAPER_SEARCH_MODE`` sets the default to keyword, semantic, or hybrid.
-    The optional ``mode`` parameter provides an explicit per-request override.
-    Keyword search uses weighted PostgreSQL FTS; semantic search uses pgvector;
-    hybrid search fuses both rankings with RRF. Endpoint cold starts, timeouts,
-    and malformed vectors fall back immediately to keyword search.
+    Results stop at page 100 and the response has no `count`; follow
+    `next_page` until it is null.
     """
     service = PaperService(db)
-    return service.search_papers_page(
-        q,
-        page,
-        page_size,
-        mode=mode,
-        start_date=date_range.start_date,
-        end_date=date_range.end_date,
-        has_official_implementation=has_official_implementation,
+    return _cap_next_page(
+        service.search_papers_page(
+            q,
+            page,
+            page_size,
+            mode=mode,
+            start_date=date_range.start_date,
+            end_date=date_range.end_date,
+            has_official_implementation=has_official_implementation,
+        )
     )
 
 
@@ -654,7 +711,10 @@ def _public_metadata_error_response(error: PublicMetadataError) -> JSONResponse:
         headers["Cache-Control"] = "no-store"
     return JSONResponse(
         status_code=error.status_code,
-        content={"detail": {"code": error.code, "message": error.message}},
+        content={
+            "detail": {"code": error.code, "message": error.message},
+            "code": error.code,
+        },
         headers=headers,
     )
 
@@ -761,24 +821,27 @@ def get_paper_by_id(
     paper_id: str = Path(
         ...,
         description=(
-            "Identifier: ArXiv ID (e.g. '2504.12516') for ArXiv rows, or "
-            "internal database ID (e.g. '12345') for external rows."
+            "arXiv ID (e.g. '2504.12516') or catalog paper ID (e.g. '12345'). "
+            "A version suffix such as 'v5' is ignored: the latest version is "
+            "returned."
         ),
     ),
     include_resources: bool = Query(
-        False, description="Include repositories and project pages"
+        False,
+        description=(
+            "Include repositories, project pages and Hugging Face artifacts. "
+            "Without it those relation fields are null (not requested), not []."
+        ),
     ),
     db: Session = Depends(get_database_session),
 ):
     """
-    Get a specific paper by ArXiv ID or internal database ID.
+    Get the latest version of a paper by arXiv ID or catalog paper ID.
 
-    Resolution rules (per the external-resources design):
-    - If the identifier looks like an ArXiv ID, return the latest version of
-      that ArXiv paper.
-    - Otherwise, treat the identifier as an internal database ID. This is the
-      canonical addressing scheme for `source='external'` rows that do not
-      have an ArXiv identifier.
+    An arXiv ID with a version suffix (`1706.03762v5`) still returns the latest
+    version; its `version` field says which one. Request an exact version with
+    `GET /api/v1/papers/arxiv/{arxiv_id}?version=v5`, which returns 404 when the
+    catalog does not hold that version.
     """
     try:
         service = PaperService(db)

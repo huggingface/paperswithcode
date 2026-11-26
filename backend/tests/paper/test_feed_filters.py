@@ -566,8 +566,8 @@ def test_date_published_feed_places_undated_papers_last(order_dir, expected_orde
         def filter(self, *args):
             return self
 
-        def order_by(self, clause):
-            return FakeQuery(clause)
+        def order_by(self, *clauses):
+            return FakeQuery(clauses[0] if clauses else None)
 
         def count(self):
             observed["count_order"] = self.order_clause
@@ -740,3 +740,64 @@ def test_trending_feed_filters_to_linked_hf_artifacts_when_requested():
     assert "pha.paper_id = p.id" in captured["sql"]
     assert "cardinality(p.hf_models) > 0" in captured["sql"]
     assert captured["params"]["has_hf_artifacts"] is True
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "cursor=abc",
+        "order_by=date_published&cursor=abc&page=2",
+        "order_by=date_published&cursor=not-a-cursor",
+    ],
+)
+def test_papers_endpoint_rejects_unusable_cursors(client, monkeypatch, query):
+    monkeypatch.setattr(
+        PaperService,
+        "get_papers",
+        lambda self, **kwargs: Papers(
+            count=0, next_page=None, previous_page=None, results=[]
+        ),
+    )
+    response = client.get(f"/api/v1/papers/?{query}")
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_request"
+
+
+def test_paper_list_and_search_stop_offering_pages_past_the_cap(client, monkeypatch):
+    monkeypatch.setattr(
+        PaperService,
+        "get_papers",
+        lambda self, **kwargs: Papers(
+            count=50_000, next_page=101, previous_page=99, results=[]
+        ),
+    )
+    monkeypatch.setattr(
+        PaperService,
+        "search_papers_page",
+        lambda self, *args, **kwargs: PaperSearchResults(
+            next_page=101, previous_page=99, results=[]
+        ),
+    )
+    listed = client.get("/api/v1/papers/?page=100&order_by=date_published")
+    searched = client.get("/api/v1/papers/search?q=bert&page=100")
+    assert listed.json()["next_page"] is None
+    assert searched.json()["next_page"] is None
+    assert (
+        listed.headers["ratelimit-policy"] == '"catalog";q=120;w=60, "list";q=60;w=60'
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/v1/tasks/?ordering=bogus",
+        "/api/v1/datasets/?ordering=-best_metric",
+        "/api/v1/evaluations/?ordering=bogus_field",
+        "/api/v1/papers/?page=0",
+    ],
+)
+def test_public_lists_reject_invalid_parameters_with_a_code(client, path):
+    response = client.get(path)
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+    assert isinstance(response.json()["detail"], list)

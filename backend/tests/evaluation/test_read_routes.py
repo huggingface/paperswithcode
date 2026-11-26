@@ -88,7 +88,10 @@ def test_lookup_route_preserves_typed_error_envelope(monkeypatch, error, status)
     assert response.json() == {
         "detail": "Internal server error"
         if isinstance(error, CatalogPersistenceError)
-        else error.detail
+        else error.detail,
+        "code": "internal_error"
+        if isinstance(error, CatalogPersistenceError)
+        else "not_found",
     }
 
 

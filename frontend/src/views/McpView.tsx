@@ -275,7 +275,7 @@ const McpView: React.FC = () => {
           </p>
           <nav className="mcp-links" aria-label="MCP documentation links">
             <a href="https://github.com/huggingface/pwc-cli" target="_blank" rel="noreferrer">CLI repository <ExternalLink size={13} /></a>
-            <a href="https://modelcontextprotocol.io/docs/2026-07-28/learn/server-concepts" target="_blank" rel="noreferrer">MCP specification <ExternalLink size={13} /></a>
+            <a href="https://modelcontextprotocol.io/specification/2025-11-25" target="_blank" rel="noreferrer">MCP specification <ExternalLink size={13} /></a>
             <a href="/docs" target="_blank" rel="noreferrer">Public API <ExternalLink size={13} /></a>
             <a href="/mcp/schema" target="_blank" rel="noreferrer">MCP tool schema <ExternalLink size={13} /></a>
             <a href="/llms.txt" target="_blank" rel="noreferrer">llms.txt <ExternalLink size={13} /></a>
