@@ -188,7 +188,9 @@ def _border_colour(art: Image.Image) -> tuple[tuple[int, int, int], bool]:
 
 def _content_box(art: Image.Image, colour: tuple[int, int, int]) -> tuple | None:
     diff = ImageChops.difference(art, Image.new("RGB", art.size, colour))
-    mask = diff.convert("L").point(lambda value: 255 if value > 32 else 0)
+    red, green, blue = diff.split()
+    strongest = ImageChops.lighter(ImageChops.lighter(red, green), blue)
+    mask = strongest.point(lambda value: 255 if value > 32 else 0)
     box = mask.getbbox()
     if box is None:
         return None
@@ -224,7 +226,7 @@ def _artwork_hero(
     pad = round(width * 0.06)
     if flat:
         box = _content_box(art, colour)
-        art = art.crop(box) if box else None
+        art = art.crop(box) if box else art
         image = Image.new("RGB", (width, height), colour)
         dark = sum(colour) / 3 < 128
     else:
@@ -254,8 +256,6 @@ def _artwork_hero(
             font=title_font,
             fill=(255, 255, 255) if dark else P.ink,
         )
-    if art is None:
-        return image
     room_top = text_height + pad
     room = height - room_top - pad
     limit = 1.5 if flat else 4.0

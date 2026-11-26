@@ -598,6 +598,13 @@ def test_artwork_hero_sets_flat_artwork_on_its_backdrop_colour():
     assert any(r > 200 and b < 50 for r, _, b in hero.getdata())
 
 
+def test_artwork_hero_keeps_dark_blue_artwork_on_black():
+    art = Image.new("RGB", (600, 300), (0, 0, 0))
+    ImageDraw.Draw(art).rectangle((200, 100, 400, 200), fill=(0, 0, 90))
+    hero = cards_module._artwork_hero(art, "", 500, 800)
+    assert any(b > 80 for _, _, b in hero.getdata())
+
+
 def test_artwork_hero_enlarges_a_small_logo_on_white():
     art = Image.new("RGB", (1200, 630), (255, 255, 255))
     ImageDraw.Draw(art).rectangle((580, 295, 620, 335), fill=(0, 0, 0))
