@@ -41,6 +41,9 @@ PAGE_MARKDOWN_MAX_BYTES = 2 * 1024 * 1024
 PAGE_MARKDOWN_MIN_CHARS = 2000
 TITLE_WINDOW_CHARS = 4000
 TITLE_MATCH_RATIO = 0.6
+TITLE_HEADING = re.compile(r"#{1,2}\s+(.+)")
+LINK_TARGET = re.compile(r"\]\([^)]*\)|https?://\S+")
+PREAMBLE_PROSE_CHARS = 160
 MAX_ATTEMPTS = 3
 LANDING_PAGE_HOSTS = frozenset(
     {
@@ -174,16 +177,27 @@ def _title_tokens(value: str) -> set[str]:
 
 
 def from_title_heading(body: str, title: str) -> str:
-    """Drop site navigation scraped above the heading that names the paper."""
+    """Drop site navigation scraped above the heading that names the paper.
+
+    Text above the heading is kept when any line of it reads as prose, since
+    some pages open with an introduction before a heading that repeats the
+    title.
+    """
     expected = _title_tokens(title)
     if not expected:
         return body
     offset = 0
     for line in body[:TITLE_WINDOW_CHARS].splitlines(keepends=True):
-        text = line.strip()
-        if text.startswith("#") and len(
-            expected & _title_tokens(text.lstrip("#"))
+        heading = TITLE_HEADING.fullmatch(line.strip())
+        if heading and len(
+            expected & _title_tokens(LINK_TARGET.sub("]", heading.group(1)))
         ) >= TITLE_MATCH_RATIO * len(expected):
+            preamble = body[:offset].splitlines()
+            if any(
+                len(LINK_TARGET.sub("]", text).strip()) >= PREAMBLE_PROSE_CHARS
+                for text in preamble
+            ):
+                return body
             return body[offset:]
         offset += len(line)
     return body
