@@ -173,9 +173,25 @@ def _title_tokens(value: str) -> set[str]:
     return set(re.findall(r"[^\W_]+", normalized, flags=re.UNICODE)) - TITLE_STOP_WORDS
 
 
+def from_title_heading(body: str, title: str) -> str:
+    """Drop site navigation scraped above the heading that names the paper."""
+    expected = _title_tokens(title)
+    if not expected:
+        return body
+    offset = 0
+    for line in body[:TITLE_WINDOW_CHARS].splitlines(keepends=True):
+        text = line.strip()
+        if text.startswith("#") and len(
+            expected & _title_tokens(text.lstrip("#"))
+        ) >= TITLE_MATCH_RATIO * len(expected):
+            return body[offset:]
+        offset += len(line)
+    return body
+
+
 def page_paper_markdown(title: str, source_url: str, page: ScrapedPage) -> str:
     """Build canonical paper Markdown, rejecting pages that are not the paper."""
-    body = page.markdown.replace("\x00", " ").strip()
+    body = from_title_heading(page.markdown.replace("\x00", " ").strip(), title)
     if len(body) < PAGE_MARKDOWN_MIN_CHARS:
         raise ExternalPageMarkdownError("page_too_short")
     expected = _title_tokens(title)
