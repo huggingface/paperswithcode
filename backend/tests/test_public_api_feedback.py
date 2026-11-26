@@ -99,6 +99,28 @@ def test_read_resolves_catalog_ids_to_their_markdown_key(db, monkeypatch):
     assert resolve(db, "800") == "800"
     assert resolve(db, "9") == "1706.03762"
     assert resolve(db, "1706.03762v7") == "1706.03762v7"
+    assert resolve(db, "9" * 30) == "9" * 30
+    assert resolve(db, "²") == "²"
+
+
+@pytest.mark.parametrize(
+    ("order_by", "value", "paper_id"),
+    [
+        ("date_published", 5, 1),
+        ("date_published", True, 1),
+        ("date_published", "not-a-date", 1),
+        ("citation_count", "12", 1),
+        ("citation_count", True, 1),
+        ("citation_count", 5, 2**70),
+        ("citation_count", 5, "1"),
+    ],
+)
+def test_cursor_rejects_values_of_the_wrong_type(order_by, value, paper_id):
+    from backend.services.paper_cursor import InvalidPaperCursorError, PaperCursor
+
+    token = PaperCursor(order_by, "desc", value, paper_id).encode()
+    with pytest.raises(InvalidPaperCursorError):
+        PaperCursor.decode(token, order_by, "desc")
 
 
 @pytest.mark.parametrize(

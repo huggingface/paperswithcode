@@ -7,7 +7,7 @@ from backend.models.database import Paper as DBPaper
 
 
 def resolve_markdown_paper_id(db: Session, paper_id: str) -> str:
-    if not paper_id.isdigit():
+    if not (paper_id.isascii() and paper_id.isdigit()) or int(paper_id) >= 2**63:
         return paper_id
     catalog_id = int(paper_id)
     redirect = lookup_paper_merge_redirect(db, catalog_id)

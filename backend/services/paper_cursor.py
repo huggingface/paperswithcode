@@ -22,6 +22,24 @@ class InvalidPaperCursorError(ValueError):
     pass
 
 
+def _is_bigint(value: object) -> bool:
+    return type(value) is int and -(2**63) <= value < 2**63
+
+
+def _valid_value(order_by: str, value: object) -> bool:
+    if value is None:
+        return True
+    if order_by == "citation_count":
+        return _is_bigint(value)
+    if type(value) is not str:
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 @dataclass(frozen=True)
 class PaperCursor:
     order_by: str
@@ -48,15 +66,8 @@ class PaperCursor:
             raise InvalidPaperCursorError(
                 "cursor was issued for a different order_by or order_dir"
             )
-        if not isinstance(paper_id, int) or not (
-            value is None or isinstance(value, (str, int))
-        ):
+        if not _is_bigint(paper_id) or not _valid_value(order_by, value):
             raise InvalidPaperCursorError("cursor is malformed")
-        if order_by == "date_published" and isinstance(value, str):
-            try:
-                date.fromisoformat(value)
-            except ValueError as error:
-                raise InvalidPaperCursorError("cursor is malformed") from error
         return cls(order_by, order_dir, value, paper_id)
 
     @classmethod
