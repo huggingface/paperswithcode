@@ -162,12 +162,14 @@ def draw_wordmark(
     """
     x, y = xy
     start = x
-    if with_mark:
-        mark = round(size * 1.1)
-        draw_mark(draw, (x, y + round(size * 0.12)), mark, palette)
-        x += mark + round(size * 0.5)
     upright = font("serif", size, 600)
     italic = font("serif-italic", size, 400)
+    if with_mark:
+        mark = round(size * 1.1)
+        cap_top = draw.textbbox((x, y), "P", font=upright)[1]
+        baseline = y + upright.getmetrics()[0]
+        draw_mark(draw, (x, round((cap_top + baseline - mark) / 2)), mark, palette)
+        x += mark + round(size * 0.5)
     draw.text((x, y), "Papers", font=upright, fill=palette.ink)
     x += draw.textlength("Papers ", font=upright)
     draw.text((x, y), "with Code", font=italic, fill=palette.ink_soft)
