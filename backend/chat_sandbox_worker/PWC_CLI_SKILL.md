@@ -3,7 +3,7 @@ name: pwc-cli
 description: "Papers With Code CLI (`pwc`) for searching and reading AI/ML papers, discovering recent and trending research, finding related work and paper lineage, browsing tasks, methods, conferences, organizations, frameworks, and benchmark leaderboards, and submitting authenticated paper edits through the public Papers With Code catalog. Use whenever the user asks to find papers, survey literature, compare research, inspect an arXiv paper, explore AI/ML taxonomy or conferences, discover benchmarks or state-of-the-art models, or mentions Papers With Code, `pwc`, or `pwc-cli`."
 ---
 
-Generated with `pwc v0.4.6`. Run `pwc skills add --force` to regenerate.
+Generated with `pwc v0.4.8`. Run `pwc skills add --force` to regenerate.
 
 Research commands query the public [Papers With Code](https://paperswithcode.co) catalog anonymously.
 Paper editing requires explicit browser authorization through `pwc auth login --paper PAPER`.
@@ -40,8 +40,10 @@ exact paper title. Quote titles containing spaces. Title matching is
 case-insensitive but exact; ambiguous titles fail with their matching IDs.
 When `pwc paper info` or `pwc paper read` names a paper Papers With Code has
 not indexed, stderr shows "Not indexed on Papers With Code — available at:"
-with public links and metadata before the usual not-found error; cite those
-links, not a Papers With Code page.
+with public links and metadata before the not-found error (exit `5`); cite
+those links, not a Papers With Code page.
+Paper lineage covers explicit catalog links only; an empty list does not mean
+the paper has no predecessors or successors.
 
 ## Commands
 
@@ -95,11 +97,14 @@ links, not a Papers With Code page.
 
 ## Output and limits
 
-- Interactive output is optimized for people. Benchmark lists remain aligned
-  when captured; other captured list output uses lossless TSV. Add `--json` for
-  structured agent or script consumption.
+- Interactive output is optimized for people. Captured list output uses
+  lossless TSV; benchmark tables omit descriptions, which `--json` and
+  `pwc benchmark --name` keep. Add `--json` for structured agent or script
+  consumption.
 - Stable exit codes are `0` success, `2` invalid usage, `3` network/server
-  failure, and `4` invalid API response.
+  failure, `4` invalid API response, and `5` not found or no unique match
+  (unknown paper, ambiguous title, unknown task/method/benchmark/conference/
+  organization/framework/area name or filter value). Do not retry exit `5`.
 - `PWC_API_URL` may select another compatible v1 endpoint. The default is
   `https://paperswithcode.co/api/v1`.
 - Catalog-filtered paper lists fail closed unless the server confirms every
