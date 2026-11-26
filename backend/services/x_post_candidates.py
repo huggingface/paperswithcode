@@ -34,7 +34,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
-from urllib.parse import urlsplit
 
 import httpx
 from PIL import Image
@@ -184,20 +183,6 @@ def paper_page_source(paper: Paper) -> PageSource:
     if artwork is None:
         raise ValueError(f"Paper {paper.id} has no PDF or page artwork")
     return artwork
-
-
-def page_card_source_line(paper: Paper, page: PageSource | None) -> str:
-    if paper.source == "arxiv" and paper.arxiv_id:
-        where = f"arxiv.org/abs/{paper.arxiv_id}"
-    else:
-        where = urlsplit(paper.source_url or "").netloc.removeprefix("www.")
-    if page is None:
-        return where
-    if isinstance(page, bytes):
-        detail = "page 1 of the PDF"
-    else:
-        detail = "release post"
-    return f"{where}  ·  {detail}" if where else detail
 
 
 @dataclass
@@ -861,35 +846,13 @@ def paper_lead(organizations: list[str], authors: list[str]) -> str | None:
 
 
 def paper_page_card(
-    db: Session,
     paper: Paper,
     *,
     fetch_pdf: Callable[[Paper], PageSource] = paper_page_source,
 ) -> bytes | None:
     """The 2:3 page-one card for a single-paper post, or None without a page."""
-    authors = list(
-        db.scalars(
-            select(Author.name)
-            .join(PaperAuthor, PaperAuthor.author_id == Author.id)
-            .where(PaperAuthor.paper_id == paper.id)
-            .order_by(PaperAuthor.author_order)
-        )
-    )
-    lead = paper_lead([o.name for o in paper.organizations], authors)
     try:
-        page = fetch_pdf(paper)
-        return render_paper_page_card(
-            page,
-            title=f"New from {lead}" if lead else "New paper",
-            subtitle=f"Published {paper.date_published:%b %-d, %Y}"
-            if paper.date_published
-            else "",
-            eyebrow="New paper",
-            counter="",
-            source=page_card_source_line(paper, page),
-            summary=paper.tldr or paper.abstract or "",
-            paper_title=paper.title,
-        )
+        return render_paper_page_card(fetch_pdf(paper), paper_title=paper.title)
     except CARD_ERRORS:
         return None
 
@@ -1068,34 +1031,18 @@ def gather(
 def roundup_page_cards(
     papers: list[Paper],
     *,
-    heading: str,
-    span: str,
-    eyebrow: str,
     fetch_pdf: Callable[[Paper], PageSource] = paper_page_source,
 ) -> list[bytes]:
-    """Page-one cards for the roundup's papers, numbered as in the post.
+    """Page-one cards for the roundup's papers, in the post's order.
 
     A release without a PDF shows its page's social image; a paper whose
     page cannot be fetched or drawn gets a card with its title alone."""
     cards = []
-    for rank, paper in enumerate(papers, 1):
-
-        def render(page: PageSource | None) -> bytes:
-            return render_paper_page_card(
-                page,
-                title=heading,
-                subtitle=span,
-                eyebrow=eyebrow,
-                counter=f"{rank:02d} / {len(papers):02d}",
-                source=page_card_source_line(paper, page),
-                summary=paper.tldr or paper.abstract or "",
-                paper_title=paper.title,
-            )
-
+    for paper in papers:
         try:
-            card = render(fetch_pdf(paper))
+            card = render_paper_page_card(fetch_pdf(paper), paper_title=paper.title)
         except CARD_ERRORS:
-            card = render(None)
+            card = render_paper_page_card(None, paper_title=paper.title)
         cards.append(card)
         if len(cards) == ROUNDUP_PAGE_CARDS:
             break
@@ -1117,9 +1064,6 @@ def _roundup(
     }
     cards = roundup_page_cards(
         [found[paper_id] for paper_id in ids],
-        heading=insight.facts["heading"],
-        span=insight.facts["period"],
-        eyebrow=f"Top papers · {'weekly' if period == 'week' else 'monthly'}",
         fetch_pdf=fetch_pdf,
     )
     return Candidate(
