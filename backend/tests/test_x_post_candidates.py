@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import fitz
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from backend.models.database import Dataset, Paper
 from backend.services import x_insight_cards as cards_module
@@ -587,6 +587,29 @@ def test_artwork_hero_shows_transparent_artwork_on_white():
     art = Image.new("RGBA", (400, 200), (0, 0, 0, 0))
     hero = cards_module._artwork_hero(art, "", 500, 400)
     assert hero.getpixel((250, 200)) == (255, 255, 255)
+
+
+def test_artwork_hero_sets_flat_artwork_on_its_backdrop_colour():
+    art = Image.new("RGB", (600, 300), (10, 10, 10))
+    ImageDraw.Draw(art).rectangle((280, 130, 320, 170), fill=(255, 128, 0))
+    hero = cards_module._artwork_hero(art, "Release", 500, 800)
+    assert hero.getpixel((2, 2)) == (10, 10, 10)
+    assert hero.getpixel((2, 798)) == (10, 10, 10)
+    assert any(r > 200 and b < 50 for r, _, b in hero.getdata())
+
+
+def test_artwork_hero_enlarges_a_small_logo_on_white():
+    art = Image.new("RGB", (1200, 630), (255, 255, 255))
+    ImageDraw.Draw(art).rectangle((580, 295, 620, 335), fill=(0, 0, 0))
+    hero = cards_module._artwork_hero(art, "", 1000, 1000).convert("L")
+    dark = hero.point(lambda value: 255 if value < 128 else 0).getbbox()
+    assert dark[2] - dark[0] > 55
+
+
+def test_artwork_hero_fills_a_photo_backdrop_with_the_photo():
+    art = Image.linear_gradient("L").convert("RGB").resize((800, 400))
+    hero = cards_module._artwork_hero(art, "Release", 500, 900)
+    assert hero.getpixel((2, 898)) != (255, 255, 255)
 
 
 def test_page_hero_keeps_a_logo_drawn_above_the_title():
