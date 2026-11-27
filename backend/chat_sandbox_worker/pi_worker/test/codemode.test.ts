@@ -9,7 +9,7 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { PiEventAdapter, type PwCEvent } from "../src/events.js";
-import { PolicyController, pwcExtension } from "../src/policy.js";
+import { PolicyController, pwcExtension, SCRIPT_BUDGET_SPENT } from "../src/policy.js";
 import { createProvider } from "../src/provider.js";
 import { CODEMODE_INLINE_BUDGET, CODEMODE_TOOL, createPwcMcpToolsExtension, PWC_MCP_TOOL_NAMES, PWC_MCP_TOOLS } from "../src/pwc_mcp_tools.js";
 
@@ -207,7 +207,8 @@ test("scripts spend their own catalog budget while each script spends one call a
     assert.equal(policy.rounds, 1);
     assert.equal(policy.calls, 1, "the script itself is one call; its catalog calls are not");
     assert.equal(policy.scriptCalls, 3);
-    assert.match(policy.authorize("s/4", "pwc_get_task", { task: "c" }, true) ?? "", /Answer now/iu);
+    assert.equal(policy.authorize("s/4", "pwc_get_task", { task: "c" }, true), SCRIPT_BUDGET_SPENT);
+    assert.equal(policy.toolingClosed, false, "a spent script budget leaves the other tools open");
     for (const id of ["s/1", "s/2", "s/3"]) policy.finishNested(id, [{ type: "text", text: "x".repeat(200) }], false);
     assert.equal(policy.scriptBytes, 600);
     assert.equal(policy.outputBytes, 0, "script results never reach the model");
@@ -230,11 +231,14 @@ test("script result bytes and the search ceiling also bound scripts", () => {
     assert.equal(policy.authorize("s/1", "pwc_search_papers", { query: "a" }, true), undefined);
     assert.match(policy.authorize("s/2", "pwc_search_papers", { query: "b" }, true) ?? "", /Answer now/iu);
 
-    policy.reset(false, "prompt");
+    policy.reset(true, "prompt");
     policy.authorize("t", CODEMODE_TOOL, { code: "" });
     assert.equal(policy.authorize("t/1", "pwc_get_task", { task: "a" }, true), undefined);
     policy.finishNested("t/1", [{ type: "text", text: "x".repeat(1_000) }], false);
-    assert.match(policy.authorize("t/2", "pwc_get_task", { task: "b" }, true) ?? "", /Answer now/iu);
+    assert.equal(policy.authorize("t/2", "pwc_get_task", { task: "b" }, true), SCRIPT_BUDGET_SPENT);
+    policy.finish("t", "done");
+    assert.equal(policy.authorize("u", CODEMODE_TOOL, { code: "" }), SCRIPT_BUDGET_SPENT);
+    assert.equal(policy.authorize("v", "search_web", { query: "q" }), undefined, "other tools keep their own budgets");
   } finally {
     if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
     else process.env.PWC_CHAT_PWC_MCP_ENABLED = original;
