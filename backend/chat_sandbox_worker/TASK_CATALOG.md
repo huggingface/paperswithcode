@@ -305,6 +305,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `open-vocabulary-object-detection` — Open-Vocabulary Object Detection
 - `optical-flow` — Optical Flow
 - `oriented-object-detection` — Oriented Object Detection
+- `out-of-distribution-detection` — Out-of-Distribution Detection
 - `panoptic-segmentation` — Panoptic Segmentation
 - `part-of-speech-tagging` — Part-of-Speech Tagging
 - `path-planning` — Path Planning
