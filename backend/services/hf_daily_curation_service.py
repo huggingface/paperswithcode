@@ -28,6 +28,7 @@ from backend.scripts.generate_missing_paper_markdown import (
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.codex_add_evals_service import (
     EXTERNAL_PAPER_POLICY_VERSION,
+    PI_SHADOW_TRIGGER,
     CodexPaperJobService,
     codex_paper_job_service,
     deferred_workflows_for_release,
@@ -399,7 +400,7 @@ class HFDailyCurationService:
             self.db.query(func.min(PaperCurationJob.created_at))
             .filter(
                 PaperCurationJob.trigger != "admin",
-                PaperCurationJob.runner == "codex",
+                PaperCurationJob.trigger != PI_SHADOW_TRIGGER,
                 PaperCurationJob.status == "queued",
             )
             .scalar()
@@ -444,7 +445,7 @@ class HFDailyCurationService:
             return (
                 self.db.query(func.count(PaperCurationJob.id))
                 .filter(
-                    PaperCurationJob.runner == "pi",
+                    PaperCurationJob.trigger == PI_SHADOW_TRIGGER,
                     PaperCurationJob.created_at >= since,
                     *criteria,
                 )

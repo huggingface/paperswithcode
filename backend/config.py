@@ -265,6 +265,7 @@ class Settings(BaseSettings, ChatSettings):
     curation_pi_provider: str = Field(default="novita")
     curation_pi_thinking: str = Field(default="high")
     curation_pi_enrich_thinking: str = Field(default="medium")
+    curation_enrich_runner: Literal["codex", "pi"] = Field(default="codex")
     curation_pi_cli_version: str = Field(default="1.3.0")
     curation_judge_anthropic_api_key: str = Field(default="")
     curation_judge_model: str = Field(default="claude-opus-5-5")

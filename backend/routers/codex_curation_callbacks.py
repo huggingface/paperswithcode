@@ -38,6 +38,7 @@ from backend.services.codex_add_evals_service import (
     CodexPaperJobsResponse,
     PaperCurationHistoryResponse,
     codex_paper_job_service,
+    is_pi_shadow,
 )
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
@@ -234,7 +235,7 @@ def retry_job(
     row = db.get(PaperCurationJob, job_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    if getattr(row, "runner", "codex") == "pi":
+    if is_pi_shadow(row):
         raise HTTPException(status_code=409, detail="Pi shadow jobs are not retried")
     return codex_paper_job_service.retry(db, row, settings)
 
@@ -400,7 +401,7 @@ def apply_mutation(
     row = _callback_job(job_id, authorization, db)
     try:
         service = _service(db)
-        pi_shadow = getattr(row, "runner", "codex") == "pi"
+        pi_shadow = is_pi_shadow(row)
         context = (
             _autonomous_callback_context(db, row)
             if getattr(row, "trigger", "admin") != "admin" and not pi_shadow
@@ -485,12 +486,7 @@ def _record_trace_failure(
     state = db.get(
         PaperCurationSchedulerState, 1, with_for_update=True, populate_existing=True
     )
-    if (
-        first_failure
-        and state
-        and row.trigger != "admin"
-        and getattr(row, "runner", "codex") == "codex"
-    ):
+    if first_failure and state and row.trigger != "admin" and not is_pi_shadow(row):
         state.consecutive_trace_failures += 1
         if state.consecutive_trace_failures >= 3:
             state.paused_at = datetime.now(UTC)

@@ -256,7 +256,7 @@ class CurationTraceService:
         row.trace_sha256 = sha256(proposal_bytes + events)
         row.trace_attempt_count += 1
         state = self.db.get(PaperCurationSchedulerState, 1)
-        if state and getattr(row, "runner", "codex") == "codex":
+        if state and getattr(row, "trigger", "admin") != "pi-shadow":
             state.consecutive_trace_failures = 0
         self.db.commit()
         return result
@@ -323,7 +323,7 @@ class CurationTraceService:
         row.output_tokens = usage.get("output_tokens")
         row.duration_ms = payload.get("duration_ms")
         state = self.db.get(PaperCurationSchedulerState, 1)
-        if state and getattr(row, "runner", "codex") == "codex":
+        if state and getattr(row, "trigger", "admin") != "pi-shadow":
             state.consecutive_trace_failures = 0
         self.db.commit()
         self._recovery_path(row).unlink(missing_ok=True)
