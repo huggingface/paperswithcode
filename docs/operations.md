@@ -705,10 +705,23 @@ snapshot and stored, never applied. When both jobs are terminal, the Pi row's
 `pair_diff` records tag, link, and evaluation agreement plus status, time, and
 tokens.
 
-Pi jobs use their own pool (`PWC_CURATION_PI_SHADOW_MAX_ACTIVE`, default 2).
-A full pool skips the pair rather than queueing it, so Codex never waits on Pi.
-Pi jobs count toward no Codex slot, health breaker, trace breaker, or token
-guardrail; their weekly outcomes appear under `pi_shadow` in
+`PWC_CURATION_ENRICH_RUNNER=pi` makes Pi the live runner for daily
+(`hf-daily-cron`) `enrich-paper` jobs: the dispatcher switches the queued row
+to `runner = 'pi'` with Pi's model fields, and it applies like a Codex job,
+counts toward the normal Codex Job slots, breakers, and token guardrail, and
+gets no shadow pair. Trending, admin, external-paper, and every `add-evals`
+job stay on Codex. Production turned this on on 2026-11-27, after 146 judged
+enrich pairs passed every cutover gate (success 100% vs 99.3%, tag
+precision 0.887 vs 0.852, median time 1.15× Codex at medium thinking).
+`add-evals` missed its gates (precision 0.919 vs 0.926, 2 wrong scores vs 0)
+and keeps shadowing. To return enrich to Codex, set the variable to `codex`
+and refresh the environment; rows already queued are rebound when they
+dispatch.
+
+Shadow Pi jobs use their own pool (`PWC_CURATION_PI_SHADOW_MAX_ACTIVE`,
+default 2). A full pool skips the pair rather than queueing it, so Codex never
+waits on Pi. Shadow jobs count toward no Codex slot, health breaker, trace
+breaker, or token guardrail; their weekly outcomes appear under `pi_shadow` in
 `enqueue_hf_daily_paper_curation --status`. Filter the admin curation queue by
 trigger `pi-shadow` to read them.
 
@@ -721,7 +734,7 @@ routing when that provider fails before a proposal. The **Build Pi curator
 image** workflow publishes `jobs/Dockerfile.pi-curator` to the same container
 repository as `pi-runner-<hash>` and prints the digest to pin.
 `production_pi_shadow_values()` in `deploy/configure_host_env.py` carries the
-Pi image pin, sample rate, pool size, and billing org for scheduled production
+Pi image pin, sample rate, pool size, enrich runner, and billing org for scheduled production
 only (staging stays at rate 0). The `--production-codex-image-only` update
 below installs Codex and Pi pins together. It never writes the token, which is
 stored on its own. Apply

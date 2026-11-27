@@ -88,6 +88,7 @@ def test_production_codex_credentials_are_mapped_without_enabling_base_flags():
             "PWC_CURATION_PI_JOBS_IMAGE"
         ],
         "PWC_CURATION_PI_SHADOW_SAMPLE_RATE": "0.2",
+        "PWC_CURATION_ENRICH_RUNNER": "pi",
         "PWC_CURATION_PI_SHADOW_MAX_ACTIVE": "2",
         "PWC_CURATION_PI_BILL_TO": "huggingface",
         "PWC_CODEX_JOBS_CLI_VERSION": "0.75.0",

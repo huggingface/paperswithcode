@@ -1641,10 +1641,10 @@ def production_codex_image_values() -> dict[str, str]:
 
 
 def production_pi_shadow_values() -> dict[str, str]:
-    """Shadow-only Pi runs on a stable 20% of scheduled daily papers.
+    """Pi runs daily enrich-paper live and shadows 20% of daily add-evals.
 
-    Production only: the startup check refuses a positive sample rate without
-    scheduled curation, which staging never runs. The inference-only
+    Production only: the startup check refuses Pi curation without scheduled
+    curation, which staging never runs. The inference-only
     PWC_CURATION_PI_HF_TOKEN is stored separately and preserved.
     """
     return {
@@ -1653,6 +1653,7 @@ def production_pi_shadow_values() -> dict[str, str]:
             "@sha256:bd3a959beb9a19db5b67c3cc70a5fe3de2c1b36b2bb9e863aebc824ba9cfe4c2"
         ),
         "PWC_CURATION_PI_SHADOW_SAMPLE_RATE": "0.2",
+        "PWC_CURATION_ENRICH_RUNNER": "pi",
         "PWC_CURATION_PI_SHADOW_MAX_ACTIVE": "2",
         "PWC_CURATION_PI_BILL_TO": "huggingface",
     }

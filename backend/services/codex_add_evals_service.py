@@ -109,6 +109,7 @@ CURATOR_COMMAND = "exec python3 /runner/run_paper_curation.py"
 PI_CURATOR_COMMAND = "exec python3 /runner/run_pi_curation.py"
 PI_SHADOW_TRIGGER = "pi-shadow"
 PI_SHADOW_KINDS = frozenset({"enrich-paper", "add-evals"})
+PI_LIVE_TRIGGER = "hf-daily-cron"
 RELEASE_MERGE_ERROR_PREFIX = "External release merge failed: "
 CURATION_DISPATCH_LOCK_ID = 0x50574344
 CURATOR_BOOTSTRAP_PATHS = (
@@ -414,6 +415,21 @@ def _runner_fields(settings: Settings, runner: str, kind: str) -> dict[str, str]
         "reasoning_effort": settings.codex_jobs_reasoning_effort,
         "codex_cli_version": settings.codex_jobs_cli_version,
     }
+
+
+def is_pi_shadow(row: PaperCurationJob) -> bool:
+    return getattr(row, "trigger", "admin") == PI_SHADOW_TRIGGER
+
+
+def live_runner(settings: Settings, row: PaperCurationJob) -> str:
+    """Runner that applies a non-shadow job; Pi has replaced Codex for daily enrich."""
+    if (
+        settings.curation_enrich_runner == "pi"
+        and row.kind == "enrich-paper"
+        and getattr(row, "trigger", "admin") == PI_LIVE_TRIGGER
+    ):
+        return "pi"
+    return "codex"
 
 
 def _git_revision() -> str:
@@ -797,7 +813,7 @@ class CodexPaperJobService:
                 db.query(PaperCurationJob)
                 .filter(
                     PaperCurationJob.status.in_(ACTIVE_STATUSES),
-                    PaperCurationJob.runner == "codex",
+                    PaperCurationJob.trigger != PI_SHADOW_TRIGGER,
                 )
                 .all()
             )
@@ -902,7 +918,7 @@ class CodexPaperJobService:
             db.query(PaperCurationJob)
             .filter(
                 PaperCurationJob.status.in_(ACTIVE_STATUSES),
-                PaperCurationJob.runner == "codex",
+                PaperCurationJob.trigger != PI_SHADOW_TRIGGER,
             )
             .all()
         )
@@ -1155,6 +1171,12 @@ class CodexPaperJobService:
                     error,
                 )
                 return
+        if not is_pi_shadow(row):
+            runner = live_runner(settings, row)
+            if getattr(row, "runner", "codex") != runner:
+                row.runner = runner
+                for field, value in _runner_fields(settings, runner, row.kind).items():
+                    setattr(row, field, value)
         pi = getattr(row, "runner", "codex") == "pi"
         if (
             not settings.codex_jobs_namespace
@@ -1253,7 +1275,7 @@ class CodexPaperJobService:
         active = (
             db.query(func.count(PaperCurationJob.id))
             .filter(
-                PaperCurationJob.runner == "pi",
+                PaperCurationJob.trigger == PI_SHADOW_TRIGGER,
                 PaperCurationJob.status.in_(ACTIVE_STATUSES),
             )
             .scalar()
@@ -1312,7 +1334,7 @@ class CodexPaperJobService:
         Sessions do not autoflush, so pending terminal states (a reconcile
         batch may end both halves) are flushed before the locked re-read.
         """
-        pi = getattr(row, "runner", "codex") == "pi"
+        pi = is_pi_shadow(row)
         if not pi and (
             getattr(row, "trigger", "admin") != "hf-daily-cron"
             or row.kind not in PI_SHADOW_KINDS

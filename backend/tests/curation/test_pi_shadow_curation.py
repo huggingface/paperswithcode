@@ -26,11 +26,13 @@ from backend.models.database import (
     PaperMethod,
     PaperTask,
 )
+from backend.services import codex_add_evals_service as jobs_module
 from backend.services import codex_curation_callback_service as callback_module
 from backend.services.codex_add_evals_service import (
     PI_CURATOR_COMMAND,
     PI_SHADOW_TRIGGER,
     CodexPaperJobService,
+    live_runner,
 )
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
@@ -556,6 +558,7 @@ def test_pair_diff_is_stored_on_the_pi_job_once_both_are_terminal():
     codex = _job(proposal={"enrich": {"task_ids": [1]}})
     pi = _job(
         runner="pi",
+        trigger=PI_SHADOW_TRIGGER,
         status="running",
         paired_job_id=codex.id,
         pair_diff=None,
@@ -823,6 +826,7 @@ def test_production_pi_image_pins_the_current_runner_pair():
         values["PWC_CURATION_PI_JOBS_IMAGE"],
     )
     assert float(values["PWC_CURATION_PI_SHADOW_SAMPLE_RATE"]) == 0.2
+    assert values["PWC_CURATION_ENRICH_RUNNER"] == "pi"
     assert "PWC_CURATION_PI_HF_TOKEN" not in values
 
 
@@ -928,3 +932,152 @@ def test_oversized_or_missing_sessions_are_left_out_of_the_trace(
     assert codex._session_field(None) == {}
     monkeypatch.setattr(codex, "EVENTS", tmp_path / "missing.jsonl")
     assert codex.codex_session_file() is None
+
+
+@pytest.mark.parametrize(
+    ("runner_setting", "overrides", "expected"),
+    [
+        ("pi", {}, "pi"),
+        ("pi", {"retry_of_id": uuid.uuid4()}, "pi"),
+        ("pi", {"kind": "add-evals"}, "codex"),
+        ("pi", {"trigger": "hf-trending-cron"}, "codex"),
+        ("pi", {"trigger": "admin"}, "codex"),
+        ("codex", {}, "codex"),
+    ],
+)
+def test_only_daily_enrich_runs_live_on_pi(runner_setting, overrides, expected):
+    settings = _pi_settings(curation_enrich_runner=runner_setting)
+    assert live_runner(settings, _codex_row(**overrides)) == expected
+
+
+class _DispatchDatabase:
+    def commit(self):
+        pass
+
+
+def _dispatch(monkeypatch, settings, row):
+    service = CodexPaperJobService()
+    launched = []
+    paired = []
+    monkeypatch.setattr(jobs_module, "authorize_curation_launch", lambda *_a: None)
+    monkeypatch.setattr(service, "_bind_active_release", lambda *_a: None)
+    monkeypatch.setattr(service, "_release_signal", lambda *_a: None)
+    monkeypatch.setattr(
+        service, "_pair_pi_shadow", lambda _db, _settings, row: paired.append(row)
+    )
+
+    def run(*, settings, row, callback_token, image):
+        launched.append((row.runner, image))
+        return SimpleNamespace(id="hf-job")
+
+    monkeypatch.setattr(service, "_run_job_with_retry", run)
+    service._dispatch_row(_DispatchDatabase(), settings, row)
+    return launched, paired
+
+
+def _queued_row(**overrides):
+    return _codex_row(
+        **{
+            "status": "queued",
+            "attempt_count": 0,
+            "candidate_id": None,
+            "model": "gpt-6-luna",
+            "reasoning_effort": "medium",
+            "codex_cli_version": "0.75.0",
+            **overrides,
+        }
+    )
+
+
+def test_live_daily_enrich_dispatches_on_pi_without_a_shadow(monkeypatch):
+    row = _queued_row()
+
+    launched, paired = _dispatch(
+        monkeypatch, _pi_settings(curation_enrich_runner="pi"), row
+    )
+
+    assert launched == [("pi", PI_IMAGE)]
+    assert paired == []
+    assert row.status == "running"
+    assert row.model == "deepseek-ai/DeepSeek-V4.1-Flash-1017"
+    assert row.reasoning_effort == "medium"
+    assert row.codex_cli_version == "pi@1.3.0"
+
+
+def test_switching_back_to_codex_rebinds_a_requeued_pi_row(monkeypatch):
+    settings = _pi_settings(
+        curation_enrich_runner="codex",
+        curation_pi_shadow_sample_rate=0.0,
+        codex_jobs_image="cr.hf.co/example/codex@sha256:" + "e" * 64,
+    )
+    row = _queued_row(runner="pi", model="deepseek-ai/DeepSeek-V4.1-Flash-1017")
+
+    launched, paired = _dispatch(monkeypatch, settings, row)
+
+    assert launched == [("codex", settings.codex_jobs_image)]
+    assert paired == [row]
+    assert row.model == settings.codex_jobs_model
+
+
+def test_live_pi_enrich_requires_a_separate_token_and_pinned_image():
+    base = _pi_settings(
+        environment="production",
+        codex_jobs_enabled=True,
+        codex_jobs_api_url="https://paperswithcode.co/api/v1",
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_image="cr.hf.co/example/codex@sha256:" + "e" * 64,
+        curation_pi_shadow_sample_rate=0.0,
+        curation_enrich_runner="pi",
+    )
+    validate_codex_jobs_configuration(base)
+    for overrides, message in (
+        ({"curation_pi_jobs_image": "cr.hf.co/example/pi:latest"}, "immutable Pi"),
+        ({"curation_pi_hf_token": "jobs-token"}, "inference-only"),
+    ):
+        with pytest.raises(RuntimeError, match=message):
+            validate_codex_jobs_configuration(base.model_copy(update=overrides))
+
+
+def test_live_pi_enrich_applies_like_codex(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from backend.database.connection import get_database_session
+    from backend.main import create_app
+    from backend.routers import codex_curation_callbacks
+
+    settings = get_settings().model_copy(
+        update={
+            "codex_jobs_enabled": True,
+            "codex_curation_direct_apply_enabled": True,
+        }
+    )
+    row = _codex_row(runner="pi", proposal=None, submitted_at=None)
+    applied = []
+
+    class Service:
+        def shadow_validation_body(self, *_args):
+            pytest.fail("a live Pi job is not validated as a shadow")
+
+        def apply(self, job, body, *, autonomous_context):
+            applied.append((job, autonomous_context))
+            return {"status": "applied"}
+
+    monkeypatch.setattr(codex_curation_callbacks, "_callback_job", lambda *_a: row)
+    monkeypatch.setattr(codex_curation_callbacks, "_service", lambda _db: Service())
+    monkeypatch.setattr(
+        codex_curation_callbacks, "_autonomous_callback_context", lambda *_a: "run"
+    )
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_database_session] = lambda: _DispatchDatabase()
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/admin/codex-curation/jobs/{row.id}/apply",
+            headers={"Authorization": "Bearer scoped-token"},
+            json={"enrich": {"task_ids": [3], "method_ids": []}},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "applied"}
+    assert applied == [(row, "run")]
