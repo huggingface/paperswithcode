@@ -467,8 +467,14 @@ def test_dispatch_acknowledgement_starts_a_fresh_failure_window():
         def filter(self, *_args):
             return self
 
+        def group_by(self, *_args):
+            return self
+
         def scalar(self):
             return None
+
+        def all(self):
+            return []
 
     class Database:
         def get(self, *_args):

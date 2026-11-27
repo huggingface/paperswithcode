@@ -31,6 +31,7 @@ from backend.services.codex_add_evals_service import (
     PI_SHADOW_TRIGGER,
     CodexPaperJobService,
     codex_paper_job_service,
+    daily_runner_outcomes,
     deferred_workflows_for_release,
     operator_retryable,
 )
@@ -435,6 +436,10 @@ class HFDailyCurationService:
                 "canary_limit": self.settings.codex_curation_canary_limit,
             },
             "pi_shadow": self._pi_shadow_status(),
+            "enrich_runner": self.settings.curation_enrich_runner,
+            "daily_runner_outcomes_last_7_days": daily_runner_outcomes(
+                self.db, datetime.now(UTC) - timedelta(days=7)
+            ),
         }
 
     def _pi_shadow_status(self) -> dict:
@@ -463,6 +468,10 @@ class HFDailyCurationService:
             "completed_last_7_days": count(PaperCurationJob.status == "completed"),
             "failed_last_7_days": count(PaperCurationJob.status == "failed"),
             "pairs_compared_last_7_days": count(PaperCurationJob.pair_diff.isnot(None)),
+            "pairs_unjudged_last_7_days": count(
+                PaperCurationJob.pair_diff.isnot(None),
+                PaperCurationJob.pair_judgment.is_(None),
+            ),
         }
 
     def _enqueue_workflow(

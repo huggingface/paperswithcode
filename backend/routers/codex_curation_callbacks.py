@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, date, datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from huggingface_hub.errors import HfHubHTTPError
@@ -149,13 +150,14 @@ def list_jobs(
     policy_version: str | None = Query(default=None),
     cohort_date: date | None = Query(default=None),
     review_status: str | None = Query(default=None),
+    runner: Literal["codex", "pi"] | None = Query(default=None),
     _admin: dict = Depends(require_hf_admin),
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
     """List the durable paper-curation queue and recent execution history."""
     _require_enabled(settings)
-    if not any((trigger, status, policy_version, cohort_date, review_status)):
+    if not any((trigger, status, policy_version, cohort_date, review_status, runner)):
         return codex_paper_job_service.list_jobs(db, settings, limit=limit)
     return codex_paper_job_service.list_jobs(
         db,
@@ -166,6 +168,7 @@ def list_jobs(
         policy_version=policy_version,
         cohort_date=cohort_date,
         review_status=review_status,
+        runner=runner,
     )
 
 

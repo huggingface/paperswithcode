@@ -21,6 +21,7 @@ import {
   codexApi,
   type CodexPaperJob,
   type CodexPaperJobStatus,
+  type CodexRunnerSummary,
 } from "@/lib/api/codex";
 import { ApiError } from "@/lib/apiTransport";
 import { formatCronDate, type Tone } from "@/lib/cronStatus";
@@ -63,6 +64,43 @@ const statusIcons: Record<CodexPaperJobStatus, typeof Clock3> = {
   canceled: CircleSlash2,
   awaiting_markdown: FileClock,
 };
+
+export function RunnerBadge({ job }: { job: Pick<CodexPaperJob, "runner" | "trigger"> }) {
+  const runner = job.runner ?? "codex";
+  const label = job.trigger === "pi-shadow" ? "Pi shadow" : runner === "pi" ? "Pi" : "Codex";
+  return (
+    <span
+      className={`ml-2 rounded border px-1.5 py-0.5 text-[11px] font-medium ${runner === "pi" ? "border-sky-500 text-sky-700" : "cron-muted"}`}
+      title={job.trigger === "pi-shadow" ? "Shadow-only: stored for comparison, never applied" : undefined}
+    >
+      {label}
+    </span>
+  );
+}
+
+export function RunnerSummary({ summary }: { summary: CodexRunnerSummary }) {
+  const enrichModel = summary.enrich_runner === "pi" ? summary.pi_model : summary.codex_model;
+  return (
+    <>
+      <div className="mt-1 text-xs cron-muted">
+        Daily enrich runs on {summary.enrich_runner === "pi" ? "Pi" : "Codex"} ({enrichModel}) · add-evals on Codex ({summary.codex_model})
+      </div>
+      {summary.daily_last_7_days.length > 0 && (
+        <div className="mt-1 text-xs cron-muted">
+          Daily jobs, last 7 days:{" "}
+          {summary.daily_last_7_days
+            .map((item) => `${item.runner === "pi" ? "Pi" : "Codex"} ${kindLabels[item.kind] ?? item.kind} ${item.completed} completed, ${item.failed} failed`)
+            .join(" · ")}
+        </div>
+      )}
+      {summary.shadow.sample_rate > 0 && (
+        <div className="mt-1 text-xs cron-muted">
+          Pi shadow ({Math.round(summary.shadow.sample_rate * 100)}% of daily papers), last 7 days: {summary.shadow.completed_last_7_days} completed, {summary.shadow.failed_last_7_days} failed · {summary.shadow.pairs_unjudged} pairs await <code>pwc curation judge-pairs</code>
+        </div>
+      )}
+    </>
+  );
+}
 
 function JobStatus({ status }: { status: CodexPaperJobStatus }) {
   const Icon = statusIcons[status];
@@ -120,8 +158,9 @@ export function CodexJobQueue({ autoRefresh }: { autoRefresh: boolean }) {
   const [policyVersion, setPolicyVersion] = useState("");
   const [cohortDate, setCohortDate] = useState("");
   const [reviewStatus, setReviewStatus] = useState("");
+  const [runner, setRunner] = useState("");
   const [promotionInputs, setPromotionInputs] = useState<Record<string, { dataset: string; task: string; metric: string }>>({});
-  const filters = { trigger, status, policy_version: policyVersion, cohort_date: cohortDate, review_status: reviewStatus };
+  const filters = { trigger, status, policy_version: policyVersion, cohort_date: cohortDate, review_status: reviewStatus, runner };
   const { data, isLoading, isFetching, error } = useQuery({
     ...adminQueries.codexPaperJobs(filters),
     refetchInterval: autoRefresh ? 10_000 : false,
@@ -196,6 +235,7 @@ export function CodexJobQueue({ autoRefresh }: { autoRefresh: boolean }) {
                       ? `pause threshold ${data.scheduler.usage.pause_threshold_tokens?.toLocaleString() ?? "not established"}`
                       : "first-week alert-only baseline"} · trailing median {data.scheduler.usage.trailing_seven_day_median_tokens.toLocaleString()}
                   </div>
+                  {data.scheduler.runners && <RunnerSummary summary={data.scheduler.runners} />}
                 </div>
                 <Button
                   size="sm"
@@ -221,9 +261,12 @@ export function CodexJobQueue({ autoRefresh }: { autoRefresh: boolean }) {
                 <div className="mt-1 text-xl font-semibold">{data.summary.total}</div>
               </div>
             </div>
-            <div className="mb-5 grid gap-3 sm:grid-cols-5">
+            <div className="mb-5 grid gap-3 sm:grid-cols-6">
               <select aria-label="Trigger" className="rounded border px-2 py-1 text-sm" value={trigger} onChange={(event) => setTrigger(event.target.value)}>
-                <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option><option value="hf-trending-cron">HF trending cron</option><option value="benchmark-gap-cron">Benchmark gap cron</option><option value="model-release-radar">Release radar</option>
+                <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option><option value="hf-trending-cron">HF trending cron</option><option value="benchmark-gap-cron">Benchmark gap cron</option><option value="model-release-radar">Release radar</option><option value="pi-shadow">Pi shadow</option>
+              </select>
+              <select aria-label="Runner" className="rounded border px-2 py-1 text-sm" value={runner} onChange={(event) => setRunner(event.target.value)}>
+                <option value="">All runners</option><option value="codex">Codex</option><option value="pi">Pi</option>
               </select>
               <select aria-label="Status" className="rounded border px-2 py-1 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}>
                 <option value="">All statuses</option>{Object.keys(statusTones).map((value) => <option key={value}>{value}</option>)}
@@ -286,6 +329,7 @@ export function CodexJobQueue({ autoRefresh }: { autoRefresh: boolean }) {
                         </TableCell>
                         <TableCell className="whitespace-nowrap align-top">
                           {kindLabels[job.kind]}
+                          <RunnerBadge job={job} />
                           {job.applied_at && (
                             <div className="mt-1 flex items-center gap-1 text-xs cron-status--healthy">
                               <CheckCircle2 className="h-3.5 w-3.5" /> Applied
@@ -348,7 +392,7 @@ export function CodexJobQueue({ autoRefresh }: { autoRefresh: boolean }) {
                       {workflow.error && <div className="text-red-700">{workflow.error}</div>}
                       {workflow.stages.map((stage) => (
                         <div key={stage.id} className="rounded border p-3">
-                          <div className="font-medium">{kindLabels[stage.kind]} · {stage.status} · trace {stage.trace_status} · review {stage.audit_status}</div>
+                          <div className="font-medium">{kindLabels[stage.kind]}<RunnerBadge job={stage} /> · {stage.status} · trace {stage.trace_status} · review {stage.audit_status}</div>
                           <div className="mt-1 cron-muted">
                             model {stage.model ?? "—"} · reasoning {stage.reasoning_effort ?? "—"} · tokens {(stage.input_tokens ?? 0) + (stage.output_tokens ?? 0)} · duration {stage.duration_ms ?? 0} ms · attempts {stage.attempt_count}
                           </div>

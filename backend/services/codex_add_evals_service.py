@@ -432,6 +432,69 @@ def live_runner(settings: Settings, row: PaperCurationJob) -> str:
     return "codex"
 
 
+def daily_runner_outcomes(db: Session, since: datetime) -> list[dict]:
+    """Finished daily-curation jobs per runner and stage, shadow jobs excluded."""
+    outcomes: dict[tuple[str, str], dict] = {}
+    for runner, kind, status, count in (
+        db.query(
+            PaperCurationJob.runner,
+            PaperCurationJob.kind,
+            PaperCurationJob.status,
+            func.count(PaperCurationJob.id),
+        )
+        .filter(
+            PaperCurationJob.trigger == PI_LIVE_TRIGGER,
+            PaperCurationJob.created_at >= since,
+            PaperCurationJob.status.in_(("completed", "failed")),
+        )
+        .group_by(
+            PaperCurationJob.runner, PaperCurationJob.kind, PaperCurationJob.status
+        )
+        .all()
+    ):
+        entry = outcomes.setdefault(
+            (runner, kind),
+            {"runner": runner, "kind": kind, "completed": 0, "failed": 0},
+        )
+        entry[status] = int(count)
+    return [outcomes[key] for key in sorted(outcomes)]
+
+
+def runner_summary(db: Session, settings: Settings) -> dict:
+    """Which runner does daily curation, how each fared this week, and Pi shadow state."""
+    since = _now() - timedelta(days=7)
+    shadow = dict(
+        db.query(PaperCurationJob.status, func.count(PaperCurationJob.id))
+        .filter(
+            PaperCurationJob.trigger == PI_SHADOW_TRIGGER,
+            PaperCurationJob.created_at >= since,
+        )
+        .group_by(PaperCurationJob.status)
+        .all()
+    )
+    unjudged = (
+        db.query(func.count(PaperCurationJob.id))
+        .filter(
+            PaperCurationJob.trigger == PI_SHADOW_TRIGGER,
+            PaperCurationJob.pair_diff.isnot(None),
+            PaperCurationJob.pair_judgment.is_(None),
+        )
+        .scalar()
+    )
+    return {
+        "enrich_runner": settings.curation_enrich_runner,
+        "codex_model": settings.codex_jobs_model,
+        "pi_model": settings.curation_pi_model,
+        "daily_last_7_days": daily_runner_outcomes(db, since),
+        "shadow": {
+            "sample_rate": settings.curation_pi_shadow_sample_rate,
+            "completed_last_7_days": int(shadow.get("completed", 0)),
+            "failed_last_7_days": int(shadow.get("failed", 0)),
+            "pairs_unjudged": int(unjudged or 0),
+        },
+    }
+
+
 def _git_revision() -> str:
     configured_revision = os.getenv("PWC_CODEX_JOBS_GIT_SHA", "").strip()
     if configured_revision:
@@ -1530,12 +1593,15 @@ class CodexPaperJobService:
         policy_version: str | None = None,
         cohort_date: date | None = None,
         review_status: str | None = None,
+        runner: str | None = None,
     ) -> CodexPaperJobsResponse:
         """Return recent curation history plus counts for the full durable queue."""
         self.reconcile_if_due(db, settings)
         query = db.query(PaperCurationJob)
         if trigger:
             query = query.filter(PaperCurationJob.trigger == trigger)
+        if runner:
+            query = query.filter(PaperCurationJob.runner == runner)
         if status:
             query = query.filter(PaperCurationJob.status == status)
         if policy_version:
@@ -1711,6 +1777,7 @@ class CodexPaperJobService:
                     else "healthy"
                 ),
                 "usage": scheduled_usage,
+                "runners": runner_summary(db, settings),
             },
         )
 
