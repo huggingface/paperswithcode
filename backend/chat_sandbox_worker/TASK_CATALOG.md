@@ -68,7 +68,7 @@ The goal is to split up those tasks in the future.
 - `finance` — Finance
 - `motion-sensing` — Motion Sensing
 - `computer-aided-design` — Computer-Aided Design
-- `quantum-machine-learning` — Quantum Machine Learning
+- `time-series-classification` — Time-series classification
 
 ### Video
 
