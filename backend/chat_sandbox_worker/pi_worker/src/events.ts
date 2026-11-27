@@ -277,13 +277,18 @@ export class PiEventAdapter {
         ];
       }
       const output: PwCEvent[] = [];
+      const parentProviderId = typeof event.parentToolCallId === "string" ? event.parentToolCallId : "";
+      const parentId = parentProviderId ? this.providerToolIds.get(parentProviderId) || parentProviderId : "";
       if (!this.toolIds.has(id)) {
         this.toolIds.add(id);
         this.toolNames.set(id, name);
         this.onSemantic?.("tool");
         output.push(
           ...this.closeReasoning(),
-          { type: "tool_call_start", id, name: publicToolName(name), content_index: -1 },
+          {
+            type: "tool_call_start", id, name: publicToolName(name), content_index: -1,
+            ...(parentId && this.toolIds.has(parentId) ? { parent_id: parentId } : {}),
+          },
           { type: "tool_call_arguments_done", id, name: publicToolName(name), args },
         );
       }

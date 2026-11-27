@@ -275,6 +275,7 @@ function reduceEvent(
               argumentText: "",
               argumentState: "streaming",
               arguments_redacted: event.redacted,
+              ...(event.parent_id ? { parent_id: event.parent_id } : {}),
               status: "running",
               open: false,
             }],

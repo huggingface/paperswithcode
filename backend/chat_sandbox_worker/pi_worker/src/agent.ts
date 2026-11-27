@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
   createAgentSession,
+  createCodemodeExtension,
   DefaultResourceLoader,
   type AgentSession,
   SessionManager,
@@ -25,7 +26,7 @@ import { PolicyController, pwcExtension } from "./policy.js";
 import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider.js";
 import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
-import { PWC_MCP_TOOL_NAMES, createPwcMcpToolsExtension, pwcMcpEnabled } from "./pwc_mcp_tools.js";
+import { CODEMODE_INLINE_BUDGET, CODEMODE_TOOL, PWC_MCP_TOOL_NAMES, createPwcMcpToolsExtension, pwcMcpEnabled } from "./pwc_mcp_tools.js";
 import { USER_FILE_TOOL, createUserFileToolExtension } from "./user_file_tools.js";
 import { CATALOG_TOOL_NAMES, createCatalogToolsExtension } from "./catalog_tools.js";
 import { loadPromptAsset, renderPrompt, taskCatalogForPrompt } from "./prompt.js";
@@ -65,6 +66,7 @@ export interface RunTurn {
   paper_artifacts_enabled: boolean;
   paper_descriptor?: Record<string, unknown>;
   user_files_enabled?: boolean;
+  codemode_enabled?: boolean;
   reasoning_effort: "low" | "medium" | "high" | "max";
   hf_username: string;
 }
@@ -340,6 +342,12 @@ export class PiWorker {
     return { manager, initialCount: 0, created: true };
   }
 
+  /** Codemode serves sandbox-free catalog research turns only. */
+  private codemodeTurn(run: RunTurn): boolean {
+    return run.codemode_enabled === true && Boolean(this.gateway && this.remoteTools) && pwcMcpEnabled()
+      && !run.poster_mode && run.paper_artifacts_enabled !== true;
+  }
+
   private async open(run: RunTurn, gateway = this.gateway): Promise<void> {
     await this.initialize();
     const phaseStarted = performance.now();
@@ -378,6 +386,7 @@ export class PiWorker {
       posterlyEnabled: run.poster_mode,
       paperArtifactsEnabled: run.paper_artifacts_enabled,
       catalogToolsEnabled: Boolean(this.gateway && this.remoteTools),
+      codemode: this.codemodeTurn(run),
       ...(run.paper_descriptor === undefined ? {} : { paperDescriptor: run.paper_descriptor }),
       ...(taskCatalog === undefined ? {} : { taskCatalog }),
       source: this.promptAsset!,
@@ -399,6 +408,7 @@ export class PiWorker {
       hfUsername: run.hf_username,
       promptProfile: "compact-pi-v1",
       catalogToolsEnabled: Boolean(this.gateway && this.remoteTools),
+      codemode: this.codemodeTurn(run),
     });
     let mirrorInitialization: Promise<void> = Promise.resolve();
     if (!this.mirror) {
@@ -471,7 +481,14 @@ export class PiWorker {
         }] : []),
         ...(this.gateway && this.remoteTools ? [{
           name: "pwc-catalog",
-          factory: pwcMcpEnabled() ? createPwcMcpToolsExtension(this.gateway) : createCatalogToolsExtension(this.gateway),
+          factory: pwcMcpEnabled()
+            ? createPwcMcpToolsExtension(this.gateway, fetch, undefined, { codemode: this.codemodeTurn(run) })
+            : createCatalogToolsExtension(this.gateway),
+          hidden: true,
+        }] : []),
+        ...(this.codemodeTurn(run) ? [{
+          name: "pwc-codemode",
+          factory: createCodemodeExtension({ mode: "on", models: false, inlineBudget: CODEMODE_INLINE_BUDGET }),
           hidden: true,
         }] : []),
       ],
@@ -488,7 +505,11 @@ export class PiWorker {
       tools: [
         ...(this.gateway && this.remoteTools && pwcMcpEnabled() && !run.poster_mode && run.paper_artifacts_enabled !== true ? [] : ["read", "bash"]),
         ...(run.web_search_enabled ? [WEB_SEARCH_TOOL] : []),
-        ...(this.gateway && this.remoteTools ? (pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : CATALOG_TOOL_NAMES) : []),
+        // Codemode turns register the catalog tools but deactivate them below, so
+        // scripts reach them while the model sees only their codemode declarations.
+        ...(this.codemodeTurn(run)
+          ? [CODEMODE_TOOL, ...PWC_MCP_TOOL_NAMES]
+          : this.gateway && this.remoteTools ? (pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : CATALOG_TOOL_NAMES) : []),
         ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : []),
         ...(run.user_files_enabled ? [USER_FILE_TOOL] : []),
       ],
@@ -499,13 +520,20 @@ export class PiWorker {
     });
     await created.session.bindExtensions({ mode: "print" });
     created.extensionsResult.runtime.refreshTools();
+    if (this.codemodeTurn(run)) {
+      const catalog = new Set(PWC_MCP_TOOL_NAMES);
+      created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => !catalog.has(name)));
+    }
     if (this.gateway && this.remoteTools && pwcMcpEnabled()) {
       // Catalog research depends on these tools alone; never continue without them.
       const active = new Set(created.session.getActiveToolNames());
-      const missing = PWC_MCP_TOOL_NAMES.filter((name) => !active.has(name));
+      const codemode = this.codemodeTurn(run);
+      const missing = codemode
+        ? [CODEMODE_TOOL, ...PWC_MCP_TOOL_NAMES].filter((name) => name === CODEMODE_TOOL ? !active.has(name) : !created.session.getToolDefinition(name))
+        : PWC_MCP_TOOL_NAMES.filter((name) => !active.has(name));
       if (missing.length) {
         const reasons = created.extensionsResult.errors.map((item) => item.error).join("; ");
-        throw new Error(`PwC MCP tools are unavailable (${missing.length} of ${PWC_MCP_TOOL_NAMES.length} missing)${reasons ? `: ${reasons}` : ""}`);
+        throw new Error(`PwC MCP tools are unavailable (${missing.length} missing: ${missing.join(", ")})${reasons ? `: ${reasons}` : ""}`);
       }
     }
     this.mcpReadiness = assessExcalidrawReadiness({
