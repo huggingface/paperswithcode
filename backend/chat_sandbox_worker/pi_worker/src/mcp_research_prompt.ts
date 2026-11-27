@@ -1,6 +1,6 @@
 // PWC_MCP_SKILL.md is vendored unchanged from huggingface/pwc-cli
 // mcp_server/SKILL.md at a2fc9d0c0a21 (main, squash of PR #28, pwc-mcp 0.2.7).
-import { PWC_MCP_TOOLS } from "./pwc_mcp_tools.js";
+import { PWC_MCP_TOOLS, SCRIPT_MAXIMUM_CATALOG_BYTES, SCRIPT_MAXIMUM_CATALOG_CALLS } from "./pwc_mcp_tools.js";
 
 export interface McpResearchPromptOptions {
   /** Poster and paper authoring turns keep Bash, Read, and the sandbox CLIs. */
@@ -41,7 +41,7 @@ text({ task: task.slug, boards: boards.map((board) => board.slug), leaders,
 \`\`\`
 Adapt the fields to each tool's declaration; use describeTool("pwc_<name>") if unsure. Scripts have no network, file system, or timers.
 
-Every catalog call inside a script counts against the same tool-call and search budgets as a direct call, and the whole turn allows about a dozen catalog calls: fan out to at most four or five papers per script. When a call is denied because the budget is spent, stop calling tools and answer from the evidence you have.
+Scripts have their own budget: up to ${SCRIPT_MAXIMUM_CATALOG_CALLS} catalog calls and about ${SCRIPT_MAXIMUM_CATALOG_BYTES / (1024 * 1024)} MB of catalog results per turn, shared by all scripts. Each codemode call also counts as one tool call, and pwc_search_papers and searched pwc_list_papers calls still count against the search ceiling. Fan out to at most six papers per script. When a call is denied because a budget is spent, stop calling tools and answer from the evidence you have.
 </codemode_usage>`;
 
 /** Render the research workflow for MCP without the conflicting PwC CLI guide. */

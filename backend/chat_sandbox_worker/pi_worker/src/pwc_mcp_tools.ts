@@ -18,6 +18,13 @@ export const PWC_MCP_TOOL_NAMES = PWC_MCP_TOOLS.map(name => `pwc_${name}`);
 export const CODEMODE_TOOL = "codemode";
 /** Estimated tokens for the catalog tool declarations in the codemode description; all 21 must fit. */
 export const CODEMODE_INLINE_BUDGET = 16_000;
+/**
+ * Catalog calls that codemode scripts may make per turn, apart from the model's own tool calls.
+ * The hosted MCP server admits 60 requests per minute per chat session.
+ */
+export const SCRIPT_MAXIMUM_CATALOG_CALLS = 24;
+/** Catalog result bytes that codemode scripts may read per turn; only script output reaches the model. */
+export const SCRIPT_MAXIMUM_CATALOG_BYTES = 1024 * 1024;
 export const pwcMcpEnabled = () => process.env.PWC_CHAT_PWC_MCP_ENABLED === "true";
 export interface PwcMcpToolsOptions {
   /** Reach the catalog tools only from codemode scripts, which receive structured results. */

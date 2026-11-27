@@ -1,7 +1,9 @@
 import { chatToolName } from "./mcp.js";
 import path from "node:path";
 import { MAX_USER_FILE_READS, USER_FILE_TOOL } from "./user_file_tools.js";
-import { CODEMODE_TOOL, PWC_MCP_TOOL_NAMES, pwcMcpEnabled } from "./pwc_mcp_tools.js";
+import {
+  CODEMODE_TOOL, PWC_MCP_TOOL_NAMES, SCRIPT_MAXIMUM_CATALOG_BYTES, SCRIPT_MAXIMUM_CATALOG_CALLS, pwcMcpEnabled,
+} from "./pwc_mcp_tools.js";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import {
   EXCALIDRAW_ELEMENTS_TOO_LARGE,
@@ -102,11 +104,25 @@ export interface PolicyOptions {
   paperMaximumRounds?: number;
   paperMaximumDirectSearches?: number;
   paperTimeoutSeconds?: number;
+  scriptMaximumCatalogCalls?: number;
+  scriptMaximumCatalogBytes?: number;
+}
+
+function textOf(content: unknown): string {
+  return Array.isArray(content)
+    ? content
+        .map((part) =>
+          part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "",
+        )
+        .join("")
+    : String(content ?? "");
 }
 
 export class PolicyController {
   webSearchEnabled = false;
   calls = 0;
+  scriptCalls = 0;
+  scriptBytes = 0;
   rounds = 0;
   searches = 0;
   webSearches = 0;
@@ -133,6 +149,8 @@ export class PolicyController {
     this.posterMode = posterMode;
     this.paperActivated = false;
     this.calls = 0;
+    this.scriptCalls = 0;
+    this.scriptBytes = 0;
     this.rounds = 0;
     this.searches = 0;
     this.webSearches = 0;
@@ -173,7 +191,17 @@ export class PolicyController {
     return reason;
   }
 
-  authorize(id: string, name: string, input: Record<string, unknown>): string | undefined {
+  /** Whether the catalog calls of this turn's codemode scripts have used up their own budget. */
+  private scriptBudgetSpent(): boolean {
+    return this.scriptCalls >= (this.options.scriptMaximumCatalogCalls ?? SCRIPT_MAXIMUM_CATALOG_CALLS)
+      || this.scriptBytes >= (this.options.scriptMaximumCatalogBytes ?? SCRIPT_MAXIMUM_CATALOG_BYTES);
+  }
+
+  /**
+   * Script calls (`nested`) spend the script budget; every model-issued call, including each
+   * codemode script, spends the call and round budgets.
+   */
+  authorize(id: string, name: string, input: Record<string, unknown>, nested = false): string | undefined {
     if (!this.active.size) this.rounds += 1;
     this.active.add(id);
     // Research before `pwc-paper create` must not starve the command that
@@ -182,7 +210,8 @@ export class PolicyController {
       || (name === "bash" && typeof input.command === "string" && Boolean(parsePwcPaperCommand(input.command)));
     const maximumRounds = this.posterMode ? (this.options.posterlyMaximumRounds ?? 20) : paperBudget ? (this.options.paperMaximumRounds ?? 12) : this.options.maximumRounds;
     const maximumCalls = this.posterMode ? (this.options.posterlyMaximumCalls ?? 40) : paperBudget ? (this.options.paperMaximumCalls ?? 30) : this.options.maximumCalls;
-    if (this.toolingClosed || this.rounds > maximumRounds || this.calls >= maximumCalls) {
+    const spent = nested ? this.scriptBudgetSpent() : this.rounds > maximumRounds || this.calls >= maximumCalls;
+    if (this.toolingClosed || spent) {
       this.toolingClosed = true;
       return this.deny(id, ANSWER_NOW);
     }
@@ -280,17 +309,21 @@ export class PolicyController {
       }
       this.webSearches += 1;
     }
-    // A script's own catalog calls are what count against the call budget.
-    if (name !== CODEMODE_TOOL) this.calls += 1;
+    if (nested) this.scriptCalls += 1;
+    else this.calls += 1;
     return undefined;
   }
 
-  /** Script calls never enter model context, so only the script's own output is bounded. */
-  finishNested(id: string, isError: boolean): void {
+  /**
+   * Script calls never enter model context, so only the script's own output is bounded here;
+   * their result bytes count against the script budget instead.
+   */
+  finishNested(id: string, content: unknown, isError: boolean): void {
     this.active.delete(id);
     const key = this.callKeys.get(id);
     this.callKeys.delete(id);
     if (isError && key) this.failedCalls.add(key);
+    this.scriptBytes += Buffer.byteLength(textOf(content));
   }
 
   finish(
@@ -302,13 +335,7 @@ export class PolicyController {
     const key = this.callKeys.get(id);
     this.callKeys.delete(id);
     if (isError && key) this.failedCalls.add(key);
-    const raw = Array.isArray(content)
-      ? content
-          .map((part) =>
-            part && typeof part === "object" && "text" in part ? String((part as { text: unknown }).text) : "",
-          )
-          .join("")
-      : String(content ?? "");
+    const raw = textOf(content);
     const maximumTurnOutputBytes = this.posterMode
       ? (this.options.posterlyMaximumTurnOutputBytes ?? 1024 * 1024)
       : this.options.maximumTurnOutputBytes;
@@ -334,12 +361,14 @@ export function pwcExtension(policy: PolicyController): ExtensionFactory {
   return (pi) => {
     pi.on("before_agent_start", () => ({ systemPrompt: policy.systemPrompt }));
     pi.on("tool_call", (event) => {
-      const reason = policy.authorize(event.toolCallId, chatToolName(event.toolName), event.input as Record<string, unknown>);
+      const reason = policy.authorize(
+        event.toolCallId, chatToolName(event.toolName), event.input as Record<string, unknown>, Boolean(event.parentToolCallId),
+      );
       return reason ? { block: true, reason } : undefined;
     });
     pi.on("tool_result", (event) => {
       if (!event.parentToolCallId) return policy.finish(event.toolCallId, event.content, event.isError);
-      policy.finishNested(event.toolCallId, event.isError);
+      policy.finishNested(event.toolCallId, event.content, event.isError);
       return undefined;
     });
   };

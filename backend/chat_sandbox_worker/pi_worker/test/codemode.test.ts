@@ -146,7 +146,9 @@ test("codemode scripts call the catalog tools, receive structured results, and r
     assert.match(scriptOutput, /\\"task\\":\\"image-classification\\"/u);
     assert.match(scriptOutput, /imagenet/u);
     assert.doesNotMatch(scriptOutput, /xxxxxxxxxx/u, "only the script's output reaches the model");
-    assert.equal(policy.calls, 2, "each catalog call inside the script counts; the script itself does not");
+    assert.equal(policy.calls, 1, "the script is one model-issued call");
+    assert.equal(policy.scriptCalls, 2, "its catalog calls spend the script budget");
+    assert.ok(policy.scriptBytes > 5_000, "script result bytes are counted from the full results");
 
     const starts = events.filter((event) => event.type === "tool_call_start");
     const script = starts.find((event) => event.name === CODEMODE_TOOL);
@@ -190,24 +192,49 @@ test("codemode research prompts route the catalog tools through scripts", async 
   assert.doesNotMatch(authoring, /codemode/u);
 });
 
-test("the script counts a round, its catalog calls count against the budgets, and nested results stay untouched", () => {
+test("scripts spend their own catalog budget while each script spends one call and round", () => {
   const original = process.env.PWC_CHAT_PWC_MCP_ENABLED;
   process.env.PWC_CHAT_PWC_MCP_ENABLED = "true";
   try {
     const policy = new PolicyController({ catalogEnabled: true, maximumCalls: 2, maximumRounds: 4,
       maximumDirectSearches: 1, maximumWebSearches: 1, maximumResultBytes: 50,
-      maximumTurnOutputBytes: 100, bashTimeoutSeconds: 5 });
+      maximumTurnOutputBytes: 100, bashTimeoutSeconds: 5, scriptMaximumCatalogCalls: 3, scriptMaximumCatalogBytes: 1_000 });
     policy.reset(false, "prompt");
     assert.equal(policy.authorize("s", CODEMODE_TOOL, { code: "" }), undefined);
-    assert.equal(policy.authorize("s/1", "pwc_search_papers", { query: "a" }), undefined);
-    assert.equal(policy.authorize("s/3", "pwc_get_task", { name: "t" }), undefined);
-    assert.match(policy.authorize("s/4", "pwc_get_task", { name: "u" }) ?? "", /Answer now/iu);
+    assert.equal(policy.authorize("s/1", "pwc_get_task", { task: "a" }, true), undefined);
+    assert.equal(policy.authorize("s/2", "pwc_get_task", { task: "b" }, true), undefined);
+    assert.equal(policy.authorize("s/3", "pwc_search_papers", { query: "a" }, true), undefined);
     assert.equal(policy.rounds, 1);
-    assert.equal(policy.calls, 2);
-    policy.finishNested("s/1", false);
-    policy.finishNested("s/3", true);
-    assert.equal(policy.outputBytes, 0);
+    assert.equal(policy.calls, 1, "the script itself is one call; its catalog calls are not");
+    assert.equal(policy.scriptCalls, 3);
+    assert.match(policy.authorize("s/4", "pwc_get_task", { task: "c" }, true) ?? "", /Answer now/iu);
+    for (const id of ["s/1", "s/2", "s/3"]) policy.finishNested(id, [{ type: "text", text: "x".repeat(200) }], false);
+    assert.equal(policy.scriptBytes, 600);
+    assert.equal(policy.outputBytes, 0, "script results never reach the model");
     assert.ok(Buffer.byteLength(policy.finish("s", "x".repeat(500)).content[0]!.text) <= 50);
+  } finally {
+    if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
+    else process.env.PWC_CHAT_PWC_MCP_ENABLED = original;
+  }
+});
+
+test("script result bytes and the search ceiling also bound scripts", () => {
+  const original = process.env.PWC_CHAT_PWC_MCP_ENABLED;
+  process.env.PWC_CHAT_PWC_MCP_ENABLED = "true";
+  try {
+    const policy = new PolicyController({ catalogEnabled: true, maximumCalls: 12, maximumRounds: 6,
+      maximumDirectSearches: 1, maximumWebSearches: 1, maximumResultBytes: 50,
+      maximumTurnOutputBytes: 100, bashTimeoutSeconds: 5, scriptMaximumCatalogBytes: 1_000 });
+    policy.reset(false, "prompt");
+    policy.authorize("s", CODEMODE_TOOL, { code: "" });
+    assert.equal(policy.authorize("s/1", "pwc_search_papers", { query: "a" }, true), undefined);
+    assert.match(policy.authorize("s/2", "pwc_search_papers", { query: "b" }, true) ?? "", /Answer now/iu);
+
+    policy.reset(false, "prompt");
+    policy.authorize("t", CODEMODE_TOOL, { code: "" });
+    assert.equal(policy.authorize("t/1", "pwc_get_task", { task: "a" }, true), undefined);
+    policy.finishNested("t/1", [{ type: "text", text: "x".repeat(1_000) }], false);
+    assert.match(policy.authorize("t/2", "pwc_get_task", { task: "b" }, true) ?? "", /Answer now/iu);
   } finally {
     if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
     else process.env.PWC_CHAT_PWC_MCP_ENABLED = original;
