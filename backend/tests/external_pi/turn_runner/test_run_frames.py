@@ -196,3 +196,23 @@ def test_external_run_frame_carries_the_provider_fallback_and_revokes_it(monkeyp
     assert revoked == [capability_id]
     assert commits == [True]
     assert runner.provider_fallback_capability_id is None
+
+
+@pytest.mark.parametrize(
+    ("enabled", "effort", "expected"),
+    [
+        (False, "high", None),
+        (True, "low", None),
+        (True, "medium", None),
+        (True, "high", True),
+        (True, "max", True),
+    ],
+)
+def test_external_run_frame_carries_codemode_only_for_enabled_efforts(
+    enabled, effort, expected
+):
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    runner.settings.chat_codemode_enabled = enabled
+    runner.admission = replace(runner.admission, reasoning_effort=effort)
+
+    assert runner._run_frame().get("codemode_enabled") is expected
