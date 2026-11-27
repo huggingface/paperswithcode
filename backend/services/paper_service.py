@@ -1352,13 +1352,16 @@ class PaperService:
         return sql, params
 
     def trending_paper_ids(
-        self, limit: int, published_after: Optional[date] = None
+        self,
+        limit: int,
+        published_after: Optional[date] = None,
+        published_before: Optional[date] = None,
     ) -> List[int]:
         sql_query, query_params = self._build_trending_query(
             mode=self.settings.trending_ranking_mode,
             search=None,
             published_after=published_after,
-            published_before=None,
+            published_before=published_before,
             conference=None,
             latest_only=True,
             page=1,

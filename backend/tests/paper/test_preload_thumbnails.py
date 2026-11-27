@@ -409,7 +409,9 @@ def test_iter_trending_follows_homepage_order_and_keeps_arxiv_papers(monkeypatch
     Paper.__table__.create(engine)
     calls = []
 
-    def fake_trending_paper_ids(self, limit, published_after=None):
+    def fake_trending_paper_ids(
+        self, limit, published_after=None, published_before=None
+    ):
         calls.append((limit, published_after))
         return [3, 1, 2]
 

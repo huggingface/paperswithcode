@@ -166,6 +166,8 @@ export interface Paper {
   conference_award?: 'outstanding' | 'honorable_mention' | 'best_paper_finalist' | null;
   version: string;
   is_latest_version: boolean;
+  /** Position 1-25 in the default trending feed; set on single-paper responses for the latest version. */
+  trending_rank?: number | null;
   citation_count: number;
   semantic_scholar_id?: string;
   repositories?: Repository[];
