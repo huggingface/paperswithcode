@@ -212,12 +212,14 @@ export class PolicyController {
       || (name === "bash" && typeof input.command === "string" && Boolean(parsePwcPaperCommand(input.command)));
     const maximumRounds = this.posterMode ? (this.options.posterlyMaximumRounds ?? 20) : paperBudget ? (this.options.paperMaximumRounds ?? 12) : this.options.maximumRounds;
     const maximumCalls = this.posterMode ? (this.options.posterlyMaximumCalls ?? 40) : paperBudget ? (this.options.paperMaximumCalls ?? 30) : this.options.maximumCalls;
-    if (!this.toolingClosed && (nested || name === CODEMODE_TOOL) && this.scriptBudgetSpent()) {
-      return this.deny(id, SCRIPT_BUDGET_SPENT);
-    }
     if (this.toolingClosed || (!nested && (this.rounds > maximumRounds || this.calls >= maximumCalls))) {
       this.toolingClosed = true;
       return this.deny(id, ANSWER_NOW);
+    }
+    if ((nested || name === CODEMODE_TOOL) && this.scriptBudgetSpent()) {
+      // A refused script still spends a call, so retries reach the turn's call limit.
+      if (!nested) this.calls += 1;
+      return this.deny(id, SCRIPT_BUDGET_SPENT);
     }
     const catalogTool = new Set(pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : ["pwc_search", "pwc_paper_info", "pwc_paper_list"]).has(name);
     if (catalogTool && !this.options.catalogEnabled) {

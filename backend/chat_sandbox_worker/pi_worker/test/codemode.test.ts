@@ -239,6 +239,10 @@ test("script result bytes and the search ceiling also bound scripts", () => {
     policy.finish("t", "done");
     assert.equal(policy.authorize("u", CODEMODE_TOOL, { code: "" }), SCRIPT_BUDGET_SPENT);
     assert.equal(policy.authorize("v", "search_web", { query: "q" }), undefined, "other tools keep their own budgets");
+    policy.finish("v", "results");
+    for (let index = 0; index < 12; index += 1) policy.authorize(`retry-${index}`, CODEMODE_TOOL, { code: "" });
+    assert.equal(policy.toolingClosed, true, "refused script retries still reach the call limit");
+    assert.match(policy.authorize("w", CODEMODE_TOOL, { code: "" }) ?? "", /Answer now/iu);
   } finally {
     if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
     else process.env.PWC_CHAT_PWC_MCP_ENABLED = original;
