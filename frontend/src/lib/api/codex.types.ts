@@ -45,7 +45,7 @@ export interface CodexPaperJob {
   attempt_count: number;
   thumbnail: CodexThumbnailResult | null;
   parent_workflow_id: string | null;
-  trigger: "admin" | "hf-daily-cron" | "hf-trending-cron" | "benchmark-promotion" | "benchmark-gap-cron" | "model-release-radar";
+  trigger: "admin" | "hf-daily-cron" | "hf-trending-cron" | "benchmark-promotion" | "benchmark-gap-cron" | "model-release-radar" | "pi-shadow";
   cohort_date: string | null;
   policy_version: string;
   repository_sha: string | null;
@@ -150,6 +150,29 @@ export interface CodexPaperJobsResponse {
       trailing_seven_day_median_tokens: number;
       pause_threshold_tokens: number | null;
     };
+    runners?: CodexRunnerSummary;
+  };
+}
+
+/** Finished daily-curation jobs of one runner and stage over the last week. */
+export interface CodexRunnerOutcome {
+  runner: string;
+  kind: CodexPaperJob["kind"];
+  completed: number;
+  failed: number;
+}
+
+/** Which runner applies daily enrich-paper jobs, and the Pi shadow backlog. */
+export interface CodexRunnerSummary {
+  enrich_runner: "codex" | "pi";
+  codex_model: string;
+  pi_model: string;
+  daily_last_7_days: CodexRunnerOutcome[];
+  shadow: {
+    sample_rate: number;
+    completed_last_7_days: number;
+    failed_last_7_days: number;
+    pairs_unjudged: number;
   };
 }
 
@@ -159,4 +182,5 @@ export interface CodexJobFilters {
   policy_version?: string;
   cohort_date?: string;
   review_status?: string;
+  runner?: string;
 }

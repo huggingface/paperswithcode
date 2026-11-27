@@ -1081,3 +1081,80 @@ def test_live_pi_enrich_applies_like_codex(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"status": "applied"}
     assert applied == [(row, "run")]
+
+
+def test_runner_summary_splits_daily_outcomes_and_counts_unjudged_pairs():
+    from datetime import UTC, datetime  # noqa: PLC0415
+
+    from sqlalchemy import create_engine  # noqa: PLC0415
+    from sqlalchemy.dialects.postgresql import JSONB  # noqa: PLC0415
+    from sqlalchemy.ext.compiler import compiles  # noqa: PLC0415
+    from sqlalchemy.orm import Session  # noqa: PLC0415
+
+    from backend.models.database import PaperCurationJob  # noqa: PLC0415
+    from backend.services.codex_add_evals_service import (  # noqa: PLC0415
+        runner_summary,
+    )
+
+    @compiles(JSONB, "sqlite")
+    def _jsonb_as_json(_element, _compiler, **_kw):
+        return "JSON"
+
+    engine = create_engine("sqlite:///:memory:")
+    PaperCurationJob.__table__.create(engine)
+    now = datetime.now(UTC)
+
+    def job(kind, trigger, runner, status, **values):
+        return PaperCurationJob(
+            id=uuid.uuid4(),
+            kind=kind,
+            paper_id=42,
+            policy_version="hf-daily-v1",
+            requested_by=trigger,
+            trigger=trigger,
+            runner=runner,
+            status=status,
+            created_at=now,
+            **values,
+        )
+
+    with Session(engine) as db:
+        db.add_all(
+            [
+                job("enrich-paper", "hf-daily-cron", "pi", "completed"),
+                job("enrich-paper", "hf-daily-cron", "pi", "failed"),
+                job("add-evals", "hf-daily-cron", "codex", "completed"),
+                job("add-evals", "hf-daily-cron", "codex", "running"),
+                job("enrich-paper", "admin", "codex", "completed"),
+                job(
+                    "add-evals",
+                    PI_SHADOW_TRIGGER,
+                    "pi",
+                    "completed",
+                    pair_diff={"status": "both"},
+                ),
+                job(
+                    "add-evals",
+                    PI_SHADOW_TRIGGER,
+                    "pi",
+                    "completed",
+                    pair_diff={"status": "both"},
+                    pair_judgment={"verdicts": []},
+                ),
+            ]
+        )
+        db.flush()
+
+        summary = runner_summary(db, _pi_settings(curation_enrich_runner="pi"))
+
+    assert summary["enrich_runner"] == "pi"
+    assert summary["daily_last_7_days"] == [
+        {"runner": "codex", "kind": "add-evals", "completed": 1, "failed": 0},
+        {"runner": "pi", "kind": "enrich-paper", "completed": 1, "failed": 1},
+    ]
+    assert summary["shadow"] == {
+        "sample_rate": 1.0,
+        "completed_last_7_days": 2,
+        "failed_last_7_days": 0,
+        "pairs_unjudged": 1,
+    }
