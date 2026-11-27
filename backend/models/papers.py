@@ -142,6 +142,14 @@ class Paper(BaseModel):
     is_latest_version: bool = Field(
         default=True, description="Whether this is the latest version"
     )
+    trending_rank: Optional[int] = Field(
+        None,
+        description=(
+            "Position 1-25 in the default trending feed (latest versions "
+            "published in the last 7 UTC days). Set only by the single-paper "
+            "endpoints for a paper's latest version; null otherwise."
+        ),
+    )
 
     @field_validator("version", mode="before")
     @classmethod

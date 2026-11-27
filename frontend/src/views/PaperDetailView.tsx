@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import "./PaperDetailView.css";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { PaperTrendingPill } from "../components/PaperTrendingPill";
 
 import { Icon } from "@/components/Icon";
 import { PaperPreview } from "@/components/PaperPreview";
@@ -391,6 +392,12 @@ const PaperDetailView: React.FC = () => {
             </span>
           </h1>
           <div className="detail-meta">
+            {paper.trending_rank != null && (
+              <>
+                <PaperTrendingPill rank={paper.trending_rank} />
+                <span>·</span>
+              </>
+            )}
             <span>Submitted {formatLongDate(paper.published)}</span>
             {numPages && (
               <>

@@ -17,6 +17,17 @@
   padding-bottom: 16px;
   border-bottom: 1px solid var(--hairline);
 }
+.detail-trending-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-text);
+  white-space: nowrap;
+}
+.detail-trending-pill:hover { background: var(--accent); color: var(--bg); }
 .detail-authors {
   font-family: var(--serif);
   font-size: 15px;

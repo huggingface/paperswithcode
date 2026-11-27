@@ -55,6 +55,7 @@ from backend.services.paper_service import (
 )
 from backend.services.method_service import MethodService
 from backend.services.paper_reference_service import PaperReferenceService
+from backend.services.paper_trending_rank_service import with_trending_rank
 from backend.services.x_trending_service import XTrendingService
 from backend.models.x_trending import XTrendingDayInput, XTrendingDayResult
 from backend.models.public_paper_metadata import PublicPaperMetadata
@@ -845,7 +846,7 @@ def get_paper_by_id(
     """
     try:
         service = PaperService(db)
-        return service.get_paper_by_id_or_arxiv(
+        paper = service.get_paper_by_id_or_arxiv(
             paper_id, include_resources=include_resources
         )
     except PaperNotFoundError as e:
@@ -853,6 +854,7 @@ def get_paper_by_id(
             status_code=404,
             content={"detail": str(e), "code": "paper_not_in_catalog"},
         )
+    return with_trending_rank(db, paper)
 
 
 @router.get(
@@ -891,7 +893,8 @@ def get_paper_by_arxiv_id(
         )
 
     service = PaperService(db)
-    return service.get_paper_by_arxiv_id(arxiv_id, version, include_resources)
+    paper = service.get_paper_by_arxiv_id(arxiv_id, version, include_resources)
+    return with_trending_rank(db, paper)
 
 
 @router.get(
