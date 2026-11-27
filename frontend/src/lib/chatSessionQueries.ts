@@ -42,6 +42,8 @@ export const chatAvailabilityQuery = () => queryOptions({
 
 /** Query keys for private chat artifacts, shared by the poster and paper panels. */
 export const chatArtifactKeys = {
+  /** Every LaTeX paper descriptor, whichever artifact it belongs to. */
+  isLatexPaper: (queryKey: readonly unknown[]) => queryKey[0] === "chatArtifact" && queryKey[2] === "latexPaper",
   posterVersions: (artifactId: string | undefined) => ["chatArtifact", artifactId, "posterVersions"] as const,
   latexPaper: (artifactId: string | undefined) => ["chatArtifact", artifactId, "latexPaper"] as const,
   history: (artifactId: string | undefined, cursor?: string | null) => (
