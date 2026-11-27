@@ -1,6 +1,8 @@
 """Validation and idempotency tests for the living 3D Arena sync."""
 
 from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -188,6 +190,37 @@ def test_fetch_raises_after_retry_budget():
 
     assert calls["n"] == 4
     assert delays == [2.0, 4.0, 8.0]
+
+
+def _arena_job(monkeypatch, error: httpx.HTTPStatusError):
+    monkeypatch.syspath_prepend(str(Path(".github/workflows").resolve()))
+    from scripts.hourly import sync_3d_arena as job
+
+    def fail():
+        raise error
+
+    monkeypatch.setattr(job, "fetch_arena_leaderboard", fail)
+    monkeypatch.setattr(
+        job,
+        "db_manager",
+        SimpleNamespace(session_local=lambda: pytest.fail("session opened")),
+    )
+    return job.SyncThreeDArenaJob(dry_run=True)
+
+
+def _status_error(status: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", ARENA_ENDPOINT)
+    return httpx.HTTPStatusError(
+        "error", request=request, response=httpx.Response(status, request=request)
+    )
+
+
+def test_cron_skips_run_when_space_stays_rate_limited(monkeypatch):
+    assert _arena_job(monkeypatch, _status_error(429)).execute() is True
+
+
+def test_cron_fails_on_other_http_errors(monkeypatch):
+    assert _arena_job(monkeypatch, _status_error(503)).execute() is False
 
 
 def test_parser_rejects_truncated_or_noncontiguous_data():
