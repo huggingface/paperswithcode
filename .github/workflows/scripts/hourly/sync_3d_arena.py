@@ -2,6 +2,8 @@
 
 import argparse
 
+import httpx
+
 from backend.database.connection import db_manager
 from backend.services.three_d_arena_sync_service import (
     ThreeDArenaSyncService,
@@ -16,7 +18,15 @@ class SyncThreeDArenaJob(CronJobBase):
         self.dry_run = dry_run
 
     def run(self):
-        entries = fetch_arena_leaderboard()
+        try:
+            entries = fetch_arena_leaderboard()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 429:
+                raise
+            self.logger.warning(
+                "3d_arena_rate_limited skipping run; existing rows are kept"
+            )
+            return
         session = db_manager.session_local()
         try:
             stats = ThreeDArenaSyncService(session).sync(
