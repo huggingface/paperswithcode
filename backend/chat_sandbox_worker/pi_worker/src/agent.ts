@@ -520,10 +520,10 @@ export class PiWorker {
     });
     await created.session.bindExtensions({ mode: "print" });
     created.extensionsResult.runtime.refreshTools();
-    if (this.codemodeTurn(run)) {
-      const catalog = new Set(PWC_MCP_TOOL_NAMES);
-      created.session.setActiveToolsByName(created.session.getActiveToolNames().filter((name) => !catalog.has(name)));
-    }
+    // refreshTools() reactivates every registered tool, so each call below re-applies this filter.
+    const scriptOnly = new Set(this.codemodeTurn(run) ? PWC_MCP_TOOL_NAMES : []);
+    const directTools = () => created.session.getActiveToolNames().filter((name) => !scriptOnly.has(name));
+    created.session.setActiveToolsByName(directTools());
     if (this.gateway && this.remoteTools && pwcMcpEnabled()) {
       // Catalog research depends on these tools alone; never continue without them.
       const active = new Set(created.session.getActiveToolNames());
@@ -544,8 +544,7 @@ export class PiWorker {
         { parameters?: unknown } | undefined,
     });
     if (this.excalidrawAvailable && !this.mcpReadiness.ready) {
-      const withoutExcalidraw = () =>
-        created.session.getActiveToolNames().filter((name) => !isExcalidrawModelTool(name));
+      const withoutExcalidraw = () => directTools().filter((name) => !isExcalidrawModelTool(name));
       created.session.setActiveToolsByName(withoutExcalidraw());
       created.extensionsResult.runtime.refreshTools();
       created.session.setActiveToolsByName(withoutExcalidraw());
