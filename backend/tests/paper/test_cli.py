@@ -250,7 +250,7 @@ def test_repair_context_refuses_an_outside_directory_before_gateway_call(
     )
 
     with pytest.raises(RuntimeError, match="workspace"):
-        paper_cli._write_context(outside)
+        paper_cli._write_context(outside, "repair-context")
 
 
 def test_repair_context_refuses_a_workspace_symlink_before_gateway_call(
@@ -273,7 +273,7 @@ def test_repair_context_refuses_a_workspace_symlink_before_gateway_call(
     )
 
     with pytest.raises(RuntimeError, match="symlink"):
-        paper_cli._write_context(symlink)
+        paper_cli._write_context(symlink, "repair-context")
 
 
 def test_repair_context_refuses_a_file_swapped_to_a_symlink(
@@ -305,7 +305,7 @@ def test_repair_context_refuses_a_file_swapped_to_a_symlink(
     monkeypatch.setattr(paper_cli, "_repair_path", swap_after_validation)
 
     with pytest.raises(RuntimeError, match="symlink"):
-        paper_cli._write_context(paper)
+        paper_cli._write_context(paper, "repair-context")
 
     assert secret.read_text(encoding="utf-8") == "private source"
 
@@ -340,7 +340,7 @@ def test_repair_context_refuses_a_regular_destination_replaced_before_open(
     )
 
     with pytest.raises(RuntimeError, match="changed"):
-        paper_cli._write_context(paper)
+        paper_cli._write_context(paper, "repair-context")
 
     assert target.read_text(encoding="utf-8") == "private source"
 
@@ -376,7 +376,7 @@ def test_repair_context_refuses_a_regular_destination_replaced_after_open(
     monkeypatch.setattr(paper_cli.os, "ftruncate", replace_after_open)
 
     with pytest.raises(RuntimeError, match="changed"):
-        paper_cli._write_context(paper)
+        paper_cli._write_context(paper, "repair-context")
 
     assert swapped
     assert target.read_text(encoding="utf-8") == "private source"
@@ -399,5 +399,33 @@ def test_repair_context_leaves_unrelated_temp_named_files_untouched(
     monkeypatch.setattr(paper_cli, "WORKSPACE", workspace)
     monkeypatch.setattr(paper_cli, "_command", command)
 
-    assert paper_cli._write_context(paper) == 0
+    assert paper_cli._write_context(paper, "repair-context") == 0
     assert temporary.read_text(encoding="utf-8") == "keep"
+
+
+def test_edit_context_checks_out_the_current_source(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    paper = workspace / "paper"
+    operations: list[str] = []
+
+    def command(operation: str, **values: object) -> dict:
+        operations.append(operation)
+        return {
+            "paper": {},
+            "files": [
+                {"path": "main.tex", "content": "current"},
+                {"path": "refs.bib", "content": "@misc{x}"},
+            ],
+        }
+
+    monkeypatch.setattr(paper_cli, "WORKSPACE", workspace)
+    monkeypatch.setattr(paper_cli, "_command", command)
+
+    assert paper_cli._write_context(paper, "edit-context") == 0
+    assert operations == ["edit-context"]
+    assert (paper / "main.tex").read_text(encoding="utf-8") == "current"
+    assert (paper / "refs.bib").read_text(encoding="utf-8") == "@misc{x}"
+    assert "current paper source for editing" in capsys.readouterr().out

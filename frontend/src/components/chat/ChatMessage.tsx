@@ -24,6 +24,7 @@ import { CHAT_PROGRESS_LABELS, formatFileSize, withoutSelection } from "@/lib/ch
 import type {
   AnswerBlock,
   AppBlock,
+  ChatBlock,
   ChatMessage as ChatMessageType,
   ChatCitation,
   ChatPaperHit,
@@ -215,7 +216,8 @@ const ToolBlockView: React.FC<{
   block: ToolBlock;
   papers: Record<string, ChatPaperHit>;
   onToggle: () => void;
-}> = ({ block, papers, onToggle }) => {
+  nested?: boolean;
+}> = ({ block, papers, onToggle, nested = false }) => {
   const running = block.status === "running";
   const streamingArguments = running && block.argumentState === "streaming";
   const generic = block.schema_version === 2 || Boolean(block.content);
@@ -241,7 +243,7 @@ const ToolBlockView: React.FC<{
       ? `${block.status} · ${block.took_ms ?? 0} ms`
       : `${block.hits} results · ${block.took_ms} ms`;
   return (
-    <div className={`chat-tool${running ? " chat-tool-running" : ""}${failed ? " chat-tool-failed" : ""}`}>
+    <div className={`chat-tool${nested ? " chat-tool-nested" : ""}${running ? " chat-tool-running" : ""}${failed ? " chat-tool-failed" : ""}`}>
       <button
         type="button"
         className="chat-tool-head"
@@ -321,6 +323,109 @@ const ToolBlockView: React.FC<{
     </div>
   );
 };
+
+const CODEMODE_TOOL = "codemode";
+
+interface NestedToolBlock {
+  block: ToolBlock;
+  index: number;
+}
+
+function codemodeTitle(block: ToolBlock, calls: NestedToolBlock[]): string {
+  if (block.status === "running" && block.argumentState === "streaming") return "Writing a research script…";
+  if (block.status === "running" && calls.length === 0) return "Running a research script…";
+  const lookups = `${calls.length} catalog ${calls.length === 1 ? "lookup" : "lookups"}`;
+  return block.status === "running" ? `Running ${lookups}…` : `Ran ${lookups}`;
+}
+
+/** One codemode script: its catalog calls stay visible; the script and its output fold away. */
+const CodemodeBlockView: React.FC<{
+  block: ToolBlock;
+  calls: NestedToolBlock[];
+  papers: Record<string, ChatPaperHit>;
+  onToggle: () => void;
+  onToggleCall: (index: number) => void;
+}> = ({ block, calls, papers, onToggle, onToggleCall }) => {
+  const running = block.status === "running";
+  const failedCalls = calls.filter(({ block: call }) => call.status === "error" || call.status === "denied").length;
+  const failed = block.status === "error" || block.status === "denied";
+  const code = typeof block.args.code === "string" ? block.args.code : block.argumentText ?? "";
+  const output = block.content?.map((item) => item.text).join("") ?? "";
+  const statusText = running
+    ? "running…"
+    : [
+      failedCalls ? `${failedCalls} failed` : "",
+      failed ? block.status : "",
+      `${block.took_ms ?? 0} ms`,
+    ].filter(Boolean).join(" · ");
+  return (
+    <div className={`chat-tool chat-codemode${running ? " chat-tool-running" : ""}${failed ? " chat-tool-failed" : ""}`}>
+      <button
+        type="button"
+        className="chat-tool-head"
+        onClick={onToggle}
+        aria-expanded={block.open}
+      >
+        <span className="chat-tool-head-left">
+          {running ? <Spinner /> : <SearchIcon />}
+          <span className="chat-codemode-title">{codemodeTitle(block, calls)}</span>
+        </span>
+        <span className="chat-tool-head-right">
+          <span className="chat-tool-status">{statusText}</span>
+          <Chevron open={block.open} />
+        </span>
+      </button>
+      {calls.length > 0 && (
+        <ol className="chat-codemode-calls" aria-label="Catalog lookups">
+          {calls.map(({ block: call, index }) => (
+            <li key={call.id}>
+              <ToolBlockView block={call} papers={papers} nested onToggle={() => onToggleCall(index)} />
+            </li>
+          ))}
+        </ol>
+      )}
+      {block.open && (
+        <div className="chat-tool-body">
+          <div className="chat-tool-args">
+            <span className="chat-tool-label">script</span>
+            <pre><code>{code}</code></pre>
+          </div>
+          {!running && (
+            <>
+              <div className="chat-tool-output-head">
+                <span className="chat-tool-label">output</span>
+                <button
+                  type="button"
+                  className="chat-tool-copy"
+                  onClick={() => void navigator.clipboard.writeText(output)}
+                >
+                  Copy
+                </button>
+              </div>
+              <pre className="chat-tool-output"><code>{output}</code></pre>
+              {block.metadata?.output_truncated && (
+                <div className="chat-tool-truncated">Output was truncated.</div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+/** Group the calls each codemode script made under that script's block. */
+function nestedToolCalls(blocks: ChatBlock[] | undefined): Map<string, NestedToolBlock[]> {
+  const parents = new Set(
+    (blocks ?? []).flatMap((block) => block.kind === "tool" && block.name === CODEMODE_TOOL ? [block.id] : []),
+  );
+  const nested = new Map<string, NestedToolBlock[]>();
+  blocks?.forEach((block, index) => {
+    if (block.kind !== "tool" || !block.parent_id || !parents.has(block.parent_id)) return;
+    nested.set(block.parent_id, [...(nested.get(block.parent_id) ?? []), { block, index }]);
+  });
+  return nested;
+}
 
 const AnswerBlockView: React.FC<{
   block: AnswerBlock;
@@ -612,6 +717,9 @@ export const AssistantMessage: React.FC<{
     && !msg.error
     && Boolean(msg.blocks?.some((block) => block.kind === "answer" && block.text.trim()));
 
+  const nestedCalls = nestedToolCalls(msg.blocks);
+  const nestedIds = new Set([...nestedCalls.values()].flat().map(({ block }) => block.id));
+
   return (
   <div className="chat-msg chat-msg-assistant">
     <div className="chat-msg-blocks">
@@ -631,6 +739,19 @@ export const AssistantMessage: React.FC<{
               citations={citations}
               webCitations={webCitations}
               onToggle={() => onToggleBlock(msg.id, i)}
+            />
+          );
+        }
+        if (b.kind === "tool" && nestedIds.has(b.id)) return null;
+        if (b.kind === "tool" && b.name === CODEMODE_TOOL) {
+          return (
+            <CodemodeBlockView
+              key={key}
+              block={b}
+              calls={nestedCalls.get(b.id) ?? []}
+              papers={papers}
+              onToggle={() => onToggleBlock(msg.id, i)}
+              onToggleCall={(index) => onToggleBlock(msg.id, index)}
             />
           );
         }

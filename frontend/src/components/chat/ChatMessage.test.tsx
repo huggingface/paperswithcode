@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AssistantMessage, UserMessage } from "@/components/chat/ChatMessage";
 import { chatApi } from "@/lib/api/chat";
-import type { ChatMessage as ChatMessageType } from "@/lib/chat";
+import type { ChatMessage as ChatMessageType, ToolBlock } from "@/lib/chat";
 
 afterEach(() => {
   delete (document as Partial<Document>).caretPositionFromPoint;
@@ -946,4 +946,68 @@ it("marks a partial failed response incomplete and offers recovery", () => {
   expect(screen.getByText(/Incomplete—response interrupted/)).toBeVisible();
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(retry).toHaveBeenCalledOnce();
+});
+
+describe("codemode scripts", () => {
+  const script: ToolBlock = {
+    kind: "tool", schema_version: 2, id: "tool-1", name: "codemode",
+    args: { code: "text(await tools.pwc_get_task({ name: 'asr' }))" },
+    status: "success", took_ms: 812,
+    content: [{ type: "text", text: "{\"task\":\"asr\"}", truncated: false }], open: false,
+  };
+  const call = (id: string, name: string, status: ToolBlock["status"]): ToolBlock => ({
+    kind: "tool", schema_version: 2, id, name, parent_id: "tool-1", args: { name: "asr" },
+    status, took_ms: 120, content: [{ type: "text", text: "{}", truncated: false }], open: false,
+  });
+
+  it("groups the script's catalog calls under one card and folds the script away", () => {
+    const toggle = vi.fn();
+    render(
+      <AssistantMessage
+        msg={{
+          id: "assistant-1", role: "assistant", streaming: false,
+          blocks: [script, call("tool-1/1", "pwc_get_task", "success"), call("tool-1/2", "pwc_list_benchmarks", "error")],
+        }}
+        papers={{}}
+        onToggleBlock={toggle}
+      />,
+    );
+
+    expect(screen.getByText("Ran 2 catalog lookups")).toBeVisible();
+    expect(screen.getByText("1 failed · 812 ms")).toBeVisible();
+    const lookups = screen.getByRole("list", { name: "Catalog lookups" });
+    expect(lookups.querySelectorAll(":scope > li")).toHaveLength(2);
+    expect(screen.getByText("pwc_list_benchmarks")).toBeVisible();
+    expect(screen.queryByText(/tools\.pwc_get_task/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("pwc_get_task"));
+    expect(toggle).toHaveBeenCalledWith("assistant-1", 1);
+  });
+
+  it("shows the script and its output when opened", () => {
+    render(
+      <AssistantMessage
+        msg={{ id: "assistant-1", role: "assistant", streaming: false, blocks: [{ ...script, open: true }] }}
+        papers={{}}
+        onToggleBlock={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText(/tools\.pwc_get_task/)).toBeVisible();
+    expect(screen.getByText("{\"task\":\"asr\"}")).toBeVisible();
+  });
+
+  it("names the running step before any lookup starts", () => {
+    render(
+      <AssistantMessage
+        msg={{
+          id: "assistant-1", role: "assistant", streaming: true,
+          blocks: [{ ...script, status: "running", argumentState: "streaming", content: undefined }],
+        }}
+        papers={{}}
+        onToggleBlock={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText("Writing a research script…")).toBeVisible();
+  });
 });
