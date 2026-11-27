@@ -17,6 +17,10 @@ BROKER = "http://127.0.0.1:8765"
 WORKSPACE = Path("/workspace")
 EVENT_PREFIX = "@@PWC_PAPER@@"
 MAX_RESPONSE = 3 * 1024 * 1024
+_RETRYABLE_STATUSES = {502, 503, 504}
+# Reads repeat safely, and the service replays a draft that it already
+# published. A repeated create or repair would not, so those are not retried.
+_RETRYABLE_OPERATIONS = {"begin-edit", "edit-context", "repair-context", "draft"}
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 )
@@ -30,12 +34,24 @@ def _command(operation: str, **values: object) -> dict:
         {"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=130) as response:
-            data = response.read(MAX_RESPONSE + 1)
-    except urllib.error.HTTPError as error:
-        detail = error.read(8 * 1024).decode(errors="replace")
-        raise RuntimeError(detail or f"Paper request failed ({error.code})") from None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(request, timeout=130) as response:
+                data = response.read(MAX_RESPONSE + 1)
+            break
+        except urllib.error.HTTPError as error:
+            # An edge proxy can drop the reply to a request the backend still
+            # completes.
+            if (
+                attempt == 0
+                and operation in _RETRYABLE_OPERATIONS
+                and error.code in _RETRYABLE_STATUSES
+            ):
+                continue
+            detail = error.read(8 * 1024).decode(errors="replace")
+            raise RuntimeError(
+                detail or f"Paper request failed ({error.code})"
+            ) from None
     if len(data) > MAX_RESPONSE:
         raise RuntimeError("Paper response exceeded its bound")
     result = json.loads(data)
@@ -395,9 +411,9 @@ def _write_repair_source(
             os.close(descriptor)
 
 
-def _write_context(directory: Path) -> int:
+def _write_context(directory: Path, operation: str) -> int:
     workspace, directory = _paper_directory(directory, create=True)
-    result = _command("repair-context")
+    result = _command(operation)
     files = result.get("files")
     if not isinstance(files, list):
         raise RuntimeError("Invalid paper repair context")
@@ -410,7 +426,11 @@ def _write_context(directory: Path) -> int:
             raise RuntimeError("Invalid paper repair source")
         path = _repair_path(directory, workspace, file["path"])
         _write_repair_source(workspace, directory, path, file["content"])
-    print("Checked out the failed paper source for repair.")
+    print(
+        "Checked out the failed paper source for repair."
+        if operation == "repair-context"
+        else "Checked out the current paper source for editing."
+    )
     return 0
 
 
@@ -448,8 +468,9 @@ def main() -> int:
     create = commands.add_parser("create")
     create.add_argument("--title", required=True)
     commands.add_parser("begin-edit")
-    checkout = commands.add_parser("repair-context")
-    checkout.add_argument("--directory", required=True)
+    for name in ("edit-context", "repair-context"):
+        checkout = commands.add_parser(name)
+        checkout.add_argument("--directory", required=True)
     repair = commands.add_parser("repair")
     repair.add_argument("--directory", required=True)
     repair.add_argument("--artifact-id", required=True)
@@ -460,8 +481,8 @@ def main() -> int:
     draft.add_argument("--expected-parent-version-id", required=True)
     args = parser.parse_args()
     try:
-        if args.command == "repair-context":
-            return _write_context(Path(args.directory))
+        if args.command in {"edit-context", "repair-context"}:
+            return _write_context(Path(args.directory), args.command)
         if args.command == "repair":
             return _repair(
                 Path(args.directory), args.expected_parent_version_id, args.artifact_id

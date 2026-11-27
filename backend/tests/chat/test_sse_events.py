@@ -583,3 +583,34 @@ def test_streamed_tool_argument_events_have_strict_public_sse_shapes():
     assert start["content_index"] == 0
     assert delta["partial_args"] == {"command": "pwc"}
     assert done["args"] == {"command": "pwc version"}
+
+
+def test_codemode_calls_keep_their_parent_in_events_and_persisted_blocks():
+    projection = ChatTurnProjection()
+    projection.apply(
+        "tool_call_start", {"id": "tool-1", "name": "codemode", "content_index": 0}
+    )
+    projection.apply(
+        "tool_call_start",
+        {
+            "id": "tool-1/1",
+            "name": "pwc_get_task",
+            "content_index": -1,
+            "parent_id": "tool-1",
+        },
+    )
+    blocks = DISPLAY_BLOCKS_ADAPTER.validate_python(projection.completed_blocks())
+    dumped = DISPLAY_BLOCKS_ADAPTER.dump_python(blocks, mode="json")
+
+    assert "parent_id" not in dumped[0]
+    assert dumped[1]["parent_id"] == "tool-1"
+    assert b'"parent_id":"tool-1"' in sse_event(
+        "tool_call_start",
+        id="tool-1/1",
+        name="pwc_get_task",
+        content_index=-1,
+        parent_id="tool-1",
+    )
+    assert b"parent_id" not in sse_event(
+        "tool_call_start", id="tool-1", name="codemode", content_index=0
+    )

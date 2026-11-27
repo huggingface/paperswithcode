@@ -1,7 +1,7 @@
 import { chatToolName } from "./mcp.js";
 import path from "node:path";
 import { MAX_USER_FILE_READS, USER_FILE_TOOL } from "./user_file_tools.js";
-import { PWC_MCP_TOOL_NAMES, pwcMcpEnabled } from "./pwc_mcp_tools.js";
+import { CODEMODE_TOOL, PWC_MCP_TOOL_NAMES, pwcMcpEnabled } from "./pwc_mcp_tools.js";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import {
   EXCALIDRAW_ELEMENTS_TOO_LARGE,
@@ -176,8 +176,12 @@ export class PolicyController {
   authorize(id: string, name: string, input: Record<string, unknown>): string | undefined {
     if (!this.active.size) this.rounds += 1;
     this.active.add(id);
-    const maximumRounds = this.posterMode ? (this.options.posterlyMaximumRounds ?? 20) : this.paperActivated ? (this.options.paperMaximumRounds ?? 12) : this.options.maximumRounds;
-    const maximumCalls = this.posterMode ? (this.options.posterlyMaximumCalls ?? 40) : this.paperActivated ? (this.options.paperMaximumCalls ?? 30) : this.options.maximumCalls;
+    // Research before `pwc-paper create` must not starve the command that
+    // activates the paper budget, so paper commands always use that budget.
+    const paperBudget = this.paperActivated
+      || (name === "bash" && typeof input.command === "string" && Boolean(parsePwcPaperCommand(input.command)));
+    const maximumRounds = this.posterMode ? (this.options.posterlyMaximumRounds ?? 20) : paperBudget ? (this.options.paperMaximumRounds ?? 12) : this.options.maximumRounds;
+    const maximumCalls = this.posterMode ? (this.options.posterlyMaximumCalls ?? 40) : paperBudget ? (this.options.paperMaximumCalls ?? 30) : this.options.maximumCalls;
     if (this.toolingClosed || this.rounds > maximumRounds || this.calls >= maximumCalls) {
       this.toolingClosed = true;
       return this.deny(id, ANSWER_NOW);
@@ -191,7 +195,7 @@ export class PolicyController {
       if (this.failedCalls.has(key)) return this.deny(id, REPEATED_FAILURE);
       this.callKeys.set(id, key);
     }
-    if (!catalogTool && !new Set(["bash", "read", "search_web", "read_me", "create_view", USER_FILE_TOOL]).has(name)) {
+    if (!catalogTool && !new Set(["bash", "read", "search_web", "read_me", "create_view", USER_FILE_TOOL, CODEMODE_TOOL]).has(name)) {
       return this.deny(id, "That tool is not available.");
     }
     if (this.mcpOnlyResearch() && (name === "bash" || name === "read")) {
@@ -276,8 +280,17 @@ export class PolicyController {
       }
       this.webSearches += 1;
     }
-    this.calls += 1;
+    // A script's own catalog calls are what count against the call budget.
+    if (name !== CODEMODE_TOOL) this.calls += 1;
     return undefined;
+  }
+
+  /** Script calls never enter model context, so only the script's own output is bounded. */
+  finishNested(id: string, isError: boolean): void {
+    this.active.delete(id);
+    const key = this.callKeys.get(id);
+    this.callKeys.delete(id);
+    if (isError && key) this.failedCalls.add(key);
   }
 
   finish(
@@ -324,7 +337,11 @@ export function pwcExtension(policy: PolicyController): ExtensionFactory {
       const reason = policy.authorize(event.toolCallId, chatToolName(event.toolName), event.input as Record<string, unknown>);
       return reason ? { block: true, reason } : undefined;
     });
-    pi.on("tool_result", (event) => policy.finish(event.toolCallId, event.content, event.isError));
+    pi.on("tool_result", (event) => {
+      if (!event.parentToolCallId) return policy.finish(event.toolCallId, event.content, event.isError);
+      policy.finishNested(event.toolCallId, event.isError);
+      return undefined;
+    });
   };
 }
 
