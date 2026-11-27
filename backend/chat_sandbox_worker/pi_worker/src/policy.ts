@@ -15,6 +15,8 @@ import { parsePwcPaperCommand, type PaperReceiptOperation } from "./paper_comman
 
 const ANSWER_NOW =
   "Execution limit reached. Do not call more tools. Answer now from the evidence already gathered.";
+export const SCRIPT_BUDGET_SPENT =
+  "The catalog budget for codemode scripts is spent for this turn. Do not run more scripts; answer from the evidence already gathered, using other tools only if the answer needs them.";
 const REPEATED_FAILURE =
   "That exact tool call already failed in this turn. Change the arguments (for example the task slug or paper ID from the indexes or a closest-match hint) or use a different tool.";
 const MCP_ONLY =
@@ -210,8 +212,10 @@ export class PolicyController {
       || (name === "bash" && typeof input.command === "string" && Boolean(parsePwcPaperCommand(input.command)));
     const maximumRounds = this.posterMode ? (this.options.posterlyMaximumRounds ?? 20) : paperBudget ? (this.options.paperMaximumRounds ?? 12) : this.options.maximumRounds;
     const maximumCalls = this.posterMode ? (this.options.posterlyMaximumCalls ?? 40) : paperBudget ? (this.options.paperMaximumCalls ?? 30) : this.options.maximumCalls;
-    const spent = nested ? this.scriptBudgetSpent() : this.rounds > maximumRounds || this.calls >= maximumCalls;
-    if (this.toolingClosed || spent) {
+    if (!this.toolingClosed && (nested || name === CODEMODE_TOOL) && this.scriptBudgetSpent()) {
+      return this.deny(id, SCRIPT_BUDGET_SPENT);
+    }
+    if (this.toolingClosed || (!nested && (this.rounds > maximumRounds || this.calls >= maximumCalls))) {
       this.toolingClosed = true;
       return this.deny(id, ANSWER_NOW);
     }
