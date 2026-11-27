@@ -33,6 +33,8 @@ extracted_data/
 
 # Environment variables
 *.env
+*.env.bak*
+keys.env*
 .venv
 
 # Pycache
