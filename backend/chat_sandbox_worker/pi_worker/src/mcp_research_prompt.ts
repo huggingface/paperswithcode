@@ -22,7 +22,7 @@ A script is a whole research step, not a wrapper around one call. Every codemode
 
 Example for "best ASR models under 2B parameters":
 \`\`\`js
-const { task } = await tools.pwc_get_task({ name: "automatic-speech-recognition" });
+const { task } = await tools.pwc_get_task({ task: "automatic-speech-recognition" });
 const boards = (await tools.pwc_list_benchmarks({ task: task.slug, limit: 5 })).items;
 const settled = await Promise.allSettled(boards.slice(0, 2).map((board) =>
   tools.pwc_get_benchmark({ benchmark: board.slug, max_parameters: "2B", limit: 5 })));
