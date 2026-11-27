@@ -196,3 +196,13 @@ def test_external_run_frame_carries_the_provider_fallback_and_revokes_it(monkeyp
     assert revoked == [capability_id]
     assert commits == [True]
     assert runner.provider_fallback_capability_id is None
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_external_run_frame_carries_codemode_only_when_enabled(enabled):
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    runner.settings.chat_codemode_enabled = enabled
+
+    frame = runner._run_frame()
+
+    assert frame.get("codemode_enabled") is (True if enabled else None)
