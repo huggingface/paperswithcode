@@ -383,3 +383,76 @@ def test_process_paper_passes_title_and_pdf_url_for_external_papers(tmp_path: Pa
     assert status == "generated"
     assert captured["title"] == "A Speech Paper"
     assert captured["pdf_url"] == "https://www.isca-archive.org/x/paper.pdf"
+
+
+def test_iter_trending_follows_homepage_order_and_keeps_arxiv_papers(monkeypatch):
+    from datetime import date, timedelta
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+    from sqlalchemy.ext.compiler import compiles
+    from sqlalchemy.orm import Session
+    from sqlalchemy.pool import StaticPool
+
+    from backend.models.database import Paper
+    from backend.services.paper_service import PaperService
+
+    @compiles(JSONB, "sqlite")
+    def _jsonb(_type, _compiler, **_kwargs):
+        return "JSON"
+
+    @compiles(ARRAY, "sqlite")
+    def _array(_type, _compiler, **_kwargs):
+        return "JSON"
+
+    engine = create_engine("sqlite://", poolclass=StaticPool)
+    Paper.__table__.create(engine)
+    calls = []
+
+    def fake_trending_paper_ids(self, limit, published_after=None):
+        calls.append((limit, published_after))
+        return [3, 1, 2]
+
+    monkeypatch.setattr(PaperService, "trending_paper_ids", fake_trending_paper_ids)
+
+    with Session(engine) as session:
+        session.add_all(
+            [
+                Paper(
+                    id=1,
+                    arxiv_id="2611.00001",
+                    source="arxiv",
+                    version="v2",
+                    is_latest_version=True,
+                    title="X-only trending paper",
+                ),
+                Paper(
+                    id=2,
+                    source="external",
+                    source_url="https://example.com/release",
+                    is_latest_version=True,
+                    title="External release",
+                ),
+                Paper(
+                    id=3,
+                    arxiv_id="2512.00003",
+                    source="arxiv",
+                    version=None,
+                    is_latest_version=True,
+                    title="GitHub trending paper",
+                ),
+            ]
+        )
+        session.commit()
+
+        job = _make_job(priority="trending")
+        job.trending_max_age_days = None
+        unlimited = list(job._iter_trending(session, limit_override=10))
+        job.trending_max_age_days = 30
+        list(job._iter_trending(session, limit_override=5))
+
+    assert [(c.paper_id, c.arxiv_id, c.version) for c in unlimited] == [
+        (3, "2512.00003", "v1"),
+        (1, "2611.00001", "v2"),
+    ]
+    assert calls == [(10, None), (5, date.today() - timedelta(days=30))]

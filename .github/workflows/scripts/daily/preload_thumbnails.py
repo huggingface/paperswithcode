@@ -12,8 +12,9 @@ Priority modes (selected via --priority):
   sort tabs (trending, newest, most cited). Yielded homepage-first
   (citation -> trending -> newest -> tasks -> methods), deduplicated by
   paper id, then capped by --limit. Used by the hourly visible preload cron.
-- `trending`: candidates ranked by the EMA-smoothed `trending_papers_24h`
-  view alone.
+- `trending`: candidates ranked like the homepage trending feed
+  (`PWC_TRENDING_RANKING_MODE`: the composite GitHub + Hugging Face + X
+  `papers.trending_score`, or official-repository star velocity) alone.
 - `task-top`: top --per-task papers per task tag across the three sort tabs
   (trending, newest, most cited). Used by the daily task-page preload cron.
 - `method-top`: top --per-method papers per method tag across the three sort
@@ -60,6 +61,7 @@ from sqlalchemy import and_, or_, text
 from backend.config import get_settings
 from backend.database.connection import db_manager
 from backend.models.database import Paper as DBPaper
+from backend.services.paper_service import PaperService
 from backend.services.thumbnail_service import (
     EXPECTED_THUMBNAIL_WIDTH,
     ThumbnailService,
@@ -74,7 +76,6 @@ from scripts.utils.cron_helpers import CronJobBase
 DEFAULT_BATCH_SIZE = 50
 DEFAULT_MAX_FAILURES = 50
 DEFAULT_REFRESH_REQUEST_DELAY_SECONDS = 6.0
-DEFAULT_TRENDING_MAX_AGE_DAYS = 180
 DEFAULT_PER_TASK = 50
 DEFAULT_PER_METHOD = 50
 DEFAULT_CITATION_TOP = 1000
@@ -123,7 +124,7 @@ class ThumbnailPreloadJob(CronJobBase):
         recent_days: Optional[int],
         per_task: int,
         per_method: int,
-        trending_max_age_days: int,
+        trending_max_age_days: Optional[int],
         citation_top: int,
         trending_top: int,
         newest_top: int,
@@ -151,7 +152,9 @@ class ThumbnailPreloadJob(CronJobBase):
         self.recent_days = recent_days
         self.per_task = max(1, per_task)
         self.per_method = max(1, per_method)
-        self.trending_max_age_days = max(1, trending_max_age_days)
+        self.trending_max_age_days = (
+            None if trending_max_age_days is None else max(1, trending_max_age_days)
+        )
         self.citation_top = max(0, citation_top)
         self.trending_top = max(0, trending_top)
         self.newest_top = max(0, newest_top)
@@ -261,37 +264,28 @@ class ThumbnailPreloadJob(CronJobBase):
         else:
             effective_limit = 1000
 
-        sql = text("""
-            WITH ranked AS (
-                SELECT DISTINCT ON (tp.paper_id)
-                    tp.paper_id,
-                    tp.arxiv_id,
-                    p.version,
-                    tp.trending_score,
-                    tp.current_stars
-                FROM trending_papers_24h tp
-                JOIN papers p ON p.id = tp.paper_id
-                WHERE tp.paper_age_days <= :max_age_days
-                  AND tp.arxiv_id IS NOT NULL
-                  AND tp.arxiv_id <> ''
-                ORDER BY tp.paper_id,
-                         tp.trending_score DESC NULLS LAST,
-                         tp.current_stars DESC
+        published_after = (
+            None
+            if self.trending_max_age_days is None
+            else datetime.now().date() - timedelta(days=self.trending_max_age_days)
+        )
+        paper_ids = PaperService(session).trending_paper_ids(
+            effective_limit, published_after=published_after
+        )
+        papers = {
+            row.id: row
+            for row in session.query(
+                DBPaper.id, DBPaper.arxiv_id, DBPaper.version
+            ).filter(
+                DBPaper.id.in_(paper_ids),
+                DBPaper.arxiv_id.isnot(None),
+                DBPaper.arxiv_id != "",
             )
-            SELECT paper_id, arxiv_id, version
-            FROM ranked
-            ORDER BY trending_score DESC NULLS LAST, current_stars DESC
-            LIMIT :limit
-            """)
-        rows = session.execute(
-            sql,
-            {
-                "max_age_days": self.trending_max_age_days,
-                "limit": effective_limit,
-            },
-        ).fetchall()
-        for row in rows:
-            yield Candidate(row[0], row[1], row[2] or "v1")
+        }
+        for paper_id in paper_ids:
+            if paper_id in papers:
+                row = papers[paper_id]
+                yield Candidate(row.id, row.arxiv_id, row.version or "v1")
 
     def _iter_citation_top(
         self, session, limit_override: Optional[int] = None
@@ -849,7 +843,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             "Which candidate set to process. 'visible' unions citation-top, "
             "trending-top, newest-top, per-task, and per-method papers (every "
             "user-visible surface) and deduplicates homepage-first. 'trending' "
-            "uses the EMA trending_papers_24h view, 'task-top' takes the top "
+            "ranks like the homepage trending feed, 'task-top' takes the top "
             "--per-task papers per task tag across the trending/newest/cited "
             "sort tabs, 'method-top' does the same per method tag, 'recent' is "
             "newest-first (optionally constrained to --recent-days), and "
@@ -905,10 +899,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--trending-max-age-days",
         type=int,
-        default=DEFAULT_TRENDING_MAX_AGE_DAYS,
+        default=None,
         help=(
-            "Maximum paper age (days) for --priority=trending candidates "
-            "(default: %(default)s)."
+            "Maximum paper age (days) for trending candidates "
+            "(default: no limit, like the homepage trending feed)."
         ),
     )
     parser.add_argument(
