@@ -1,13 +1,20 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { Plus, Sparkles, X } from 'lucide-react';
-import { researchQueries } from '@/lib/api/queries';
-import { FEATURED_TOPIC_COUNT, homeTopics, topicTitle, useFollowFeaturedTopic } from '@/lib/researchTopic';
+import { useFollowFeaturedEntity, useFollowFeaturedTopic } from '@/lib/researchTopic';
 
 const DISMISSED_KEY = 'pwc:home-follow-card:dismissed';
-const TOPIC_COUNT = 5;
-// A topic only its creator follows is too personal to invite strangers with.
-const MIN_FOLLOWERS = 2;
+
+type Pick = { kind: 'topic' | 'task' | 'method'; id: number; name: string };
+
+/** Hand-picked topics, tasks and methods that show a newcomer what a feed can follow. */
+const HOME_FOLLOW_PICKS: Pick[] = [
+  { kind: 'method', id: 1004, name: 'Recursive Self-Improvement' },
+  { kind: 'topic', id: 23, name: 'OCR releases' },
+  { kind: 'topic', id: 51, name: 'Small language models (<4B)' },
+  { kind: 'task', id: 862, name: 'Auto-Research' },
+  { kind: 'method', id: 1048, name: 'Decision Models' },
+  { kind: 'task', id: 438, name: 'Deep Research Agents' },
+];
 
 function readDismissed() {
   try {
@@ -18,10 +25,11 @@ function readDismissed() {
 }
 
 /** Invites guests and accounts without follows, inside the trending feed, to build a following feed.
- * A popular topic follows in one click (guests sign in first); `onBuild` opens the Edit feed pop-up. */
+ * A hand-picked topic, task or method follows in one click (guests sign in first); `onBuild` opens the Edit feed
+ * pop-up. */
 export default function HomeFollowCard({ onBuild }: { onBuild: () => void }) {
-  const featured = useQuery(researchQueries.featuredTopics());
-  const { follow, finishing, failed } = useFollowFeaturedTopic();
+  const topic = useFollowFeaturedTopic();
+  const entity = useFollowFeaturedEntity();
   const [dismissed, setDismissed] = useState(readDismissed);
   if (dismissed) return null;
 
@@ -33,11 +41,9 @@ export default function HomeFollowCard({ onBuild }: { onBuild: () => void }) {
     }
     setDismissed(true);
   };
-  // The popular topics row above the feed already offers the first few.
-  const topics = homeTopics(featured.data ?? [])
-    .slice(FEATURED_TOPIC_COUNT)
-    .filter(topic => topic.followers >= MIN_FOLLOWERS)
-    .slice(0, TOPIC_COUNT);
+  const follow = (pick: Pick) => pick.kind === 'topic'
+    ? topic.follow(pick.id)
+    : entity.follow(pick.kind, pick.id, pick.name);
 
   return <section className="home-follow-card" aria-labelledby="home-follow-card-title">
     <button type="button" className="home-follow-card-close" aria-label="Dismiss" onClick={dismiss}>
@@ -48,20 +54,20 @@ export default function HomeFollowCard({ onBuild }: { onBuild: () => void }) {
       Follow topics, tasks, authors and labs, and their new papers collect on your following page
       and in a weekly email.
     </p>
-    {topics.length > 0 && <div className="topic-dialog-chips home-follow-card-topics">
-      {topics.map(topic => <button
-        key={topic.id}
+    <div className="topic-dialog-chips home-follow-card-topics">
+      {HOME_FOLLOW_PICKS.map(pick => <button
+        key={`${pick.kind}:${pick.id}`}
         type="button"
         className="topic-dialog-chip"
         aria-pressed="false"
-        disabled={finishing}
-        onClick={() => follow(topic.id)}
+        disabled={topic.finishing || entity.pending}
+        onClick={() => follow(pick)}
       >
-        <Plus aria-hidden="true" />{topicTitle(topic)}
+        <Plus aria-hidden="true" />{pick.name}
       </button>)}
-    </div>}
-    {failed && <p className="home-follow-card-error" role="alert">
-      Could not follow that topic. Please try again.
+    </div>
+    {(topic.failed || entity.failed) && <p className="home-follow-card-error" role="alert">
+      Could not follow that. Please try again.
     </p>}
     <button type="button" className="research-topic-save" onClick={onBuild}>
       <Sparkles aria-hidden="true" />Build your feed

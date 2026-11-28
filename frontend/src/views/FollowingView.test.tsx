@@ -655,27 +655,32 @@ it('paints last visit\'s popular topics at once, before follow state or the requ
   expect(row.querySelectorAll('.home-topic-follow.is-pending')).toHaveLength(4);
   expect(within(row).queryByRole('link', { name: /Following/ })).not.toBeInTheDocument();
 });
-it('invites guests to follow a popular topic after the sixth trending paper', async () => {
+it('invites guests to follow a hand-picked topic after the sixth trending paper', async () => {
   auth.user = null;
   vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
-  // The row above the feed offers the four most followed topics; the card offers the next ones.
-  const filler = { id: 100, text: 'filler', label: null, creator: null, followers: 1 };
-  // The card skips topics in other scripts and topics only their creator follows.
-  const chinese = { id: 101, text: '大模型、后训练', label: null, creator: null, followers: 9 };
-  const personal = { id: 102, text: 'Crypto trading', label: null, creator: null, followers: 1 };
-  vi.mocked(researchApi.featuredTopics).mockResolvedValue(
-    [...featured.slice(0, 3), chinese, filler, { ...featured[3], followers: 2 }, personal]);
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
   const { container } = renderFeed('/');
   const card = await screen.findByRole('region', { name: 'Get a feed for your research' });
   const items = [...container.querySelectorAll('.paper-list > *')];
   expect(items.indexOf(card)).toBe(6);
-  expect(within(card).queryByRole('button', { name: /speculative decoding/i })).not.toBeInTheDocument();
-  expect(within(card).queryByRole('button', { name: /大模型/ })).not.toBeInTheDocument();
-  expect(within(card).queryByRole('button', { name: /crypto trading/i })).not.toBeInTheDocument();
-  fireEvent.click(await within(card).findByRole('button', { name: /ocr releases/i }));
-  expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBe('[16]');
+  expect([...card.querySelectorAll('.topic-dialog-chip')].map(chip => chip.textContent)).toEqual([
+    'Recursive Self-Improvement', 'OCR releases', 'Small language models (<4B)', 'Auto-Research',
+    'Decision Models', 'Deep Research Agents',
+  ]);
+  fireEvent.click(within(card).getByRole('button', { name: 'OCR releases' }));
+  expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBe('[23]');
   expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
   expect(researchApi.follows).not.toHaveBeenCalled();
+});
+it('lets guests follow a hand-picked task from the card', async () => {
+  auth.user = null;
+  vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
+  renderFeed('/');
+  const card = await screen.findByRole('region', { name: 'Get a feed for your research' });
+  fireEvent.click(within(card).getByRole('button', { name: 'Auto-Research' }));
+  expect(JSON.parse(sessionStorage.getItem('pwc:following-pending-follows') ?? '[]'))
+    .toEqual([{ kind: 'task', id: '862', name: 'Auto-Research' }]);
+  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
 });
 it('disables the row\'s Follow at the topic limit', async () => {
   vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);

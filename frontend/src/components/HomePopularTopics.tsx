@@ -1,15 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { ArrowRight, Check, ChevronLeft, ChevronRight, Plus, Users } from 'lucide-react';
 import TopicCard, { FollowCard } from '@/components/TopicCard';
 import { researchQueries } from '@/lib/api/queries';
 import { TOPIC_LIMIT, type PopularFollow, type TopicBubble } from '@/lib/api/research';
-import { hfLoginUrl } from '@/lib/apiUrl';
-import { useOptionalAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
 import {
-  FEATURED_TOPIC_COUNT, homeTopics, stashPendingFollows, topicTitle, useFollowFeaturedTopic, useSetFollow,
+  FEATURED_TOPIC_COUNT, homeTopics, topicTitle, useFollowFeaturedEntity, useFollowFeaturedTopic,
 } from '@/lib/researchTopic';
 
 type Item = { kind: 'topic'; topic: TopicBubble; followers: number }
@@ -30,28 +28,17 @@ export default function HomePopularTopics({ followedIds, followedKeys, onBuild }
   followedKeys: ReadonlySet<string> | null;
   onBuild: () => void;
 }) {
-  const user = useOptionalAuth()?.user;
-  const navigate = useNavigate();
   const featured = useQuery(researchQueries.featuredTopics());
   const popular = useQuery(researchQueries.popularFollows());
   const { follow, finishing, failed } = useFollowFeaturedTopic();
-  const setFollow = useSetFollow({ awaitRefresh: true });
+  const entity = useFollowFeaturedEntity();
   const topics = homeTopics(featured.data ?? []).slice(0, FEATURED_TOPIC_COUNT);
   const items: Item[] = [
     ...(popular.data ?? []).map(entry => ({ kind: entry.kind, follow: entry, followers: entry.followers })),
     ...topics.map(topic => ({ kind: 'topic' as const, topic, followers: topic.followers })),
   ].sort((a, b) => b.followers - a.followers || KIND_ORDER[a.kind] - KIND_ORDER[b.kind]);
-  const followEntity = (entry: PopularFollow) => {
-    const name = entry.kind === 'task' ? displayTaskName(entry.name) : entry.name;
-    if (!user) {
-      // Following saves the stashed pick after sign-in.
-      stashPendingFollows([{ kind: entry.kind, id: String(entry.entity_id), name }]);
-      window.location.href = hfLoginUrl('/following');
-      return;
-    }
-    setFollow.mutateAsync({ kind: entry.kind, entityId: entry.entity_id, follow: true })
-      .then(() => navigate(`/following?follow=${followKey(entry)}`), () => undefined);
-  };
+  const followEntity = (entry: PopularFollow) => entity.follow(
+    entry.kind, entry.entity_id, entry.kind === 'task' ? displayTaskName(entry.name) : entry.name);
   const atLimit = (followedIds?.size ?? 0) >= TOPIC_LIMIT;
   const list = useRef<HTMLUListElement>(null);
   const [edges, setEdges] = useState({ start: true, end: true });
@@ -89,7 +76,7 @@ export default function HomePopularTopics({ followedIds, followedKeys, onBuild }
     return <button
       type="button"
       className="home-topic-follow"
-      disabled={finishing || setFollow.isPending || atLimit}
+      disabled={finishing || entity.pending || atLimit}
       title={atLimit ? `You follow ${TOPIC_LIMIT} topics, the most allowed. Remove one to add another.` : undefined}
       onClick={() => follow(topic.id)}
       aria-label={`Follow ${topicTitle(topic)}`}
@@ -108,7 +95,7 @@ export default function HomePopularTopics({ followedIds, followedKeys, onBuild }
     return <button
       type="button"
       className="home-topic-follow"
-      disabled={finishing || setFollow.isPending}
+      disabled={finishing || entity.pending}
       onClick={() => followEntity(entry)}
       aria-label={`Follow ${entry.kind === 'task' ? displayTaskName(entry.name) : entry.name}`}
     >
@@ -151,7 +138,7 @@ export default function HomePopularTopics({ followedIds, followedKeys, onBuild }
           action={entityAction(item.follow)}
         />)}
     </ul>
-    {(failed || setFollow.isError) && <p className="home-topics-error" role="alert">
+    {(failed || entity.failed) && <p className="home-topics-error" role="alert">
       Could not follow that. Please try again.
     </p>}
   </section>;
