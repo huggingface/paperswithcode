@@ -592,6 +592,49 @@ it('follows the popular topics a visitor picked before signing in', async () => 
   await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull());
 });
 
+it('keeps a guest on the topic they picked while its follow saves after sign-in', async () => {
+  sessionStorage.setItem('pwc:following-pending-topic-follows', JSON.stringify([23]));
+  const ocr = { ...topic, id: 23, text: 'OCR releases' };
+  let save!: () => void;
+  vi.spyOn(researchApi, 'followTopic').mockImplementation(() => new Promise(resolve => {
+    save = () => {
+      vi.mocked(researchApi.topics).mockResolvedValue([ocr]);
+      resolve(ocr);
+    };
+  }));
+  renderFeed('/following?topic=23');
+  await waitFor(() => expect(researchApi.followTopic).toHaveBeenCalledWith(23));
+  await waitFor(() => expect(researchApi.topics).toHaveBeenCalled());
+  await waitFor(() => expect(researchApi.following).toHaveBeenCalled());
+  expect(researchApi.following).not.toHaveBeenCalledWith(0, expect.objectContaining({ topicIds: [] }));
+  save();
+  await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBeNull());
+  await waitFor(() => expect(researchApi.topics).toHaveBeenCalledTimes(2));
+  expect(researchApi.following).not.toHaveBeenCalledWith(0, expect.objectContaining({ topicIds: [] }));
+  expect(researchApi.following).toHaveBeenLastCalledWith(0, expect.objectContaining({ topicIds: [23] }));
+});
+it('keeps a guest on the task they picked while its follow saves after sign-in', async () => {
+  sessionStorage.setItem('pwc:following-pending-follows', JSON.stringify([{ kind: 'task', id: '862', name: 'Auto-Research' }]));
+  let save!: () => void;
+  vi.spyOn(researchApi, 'setFollow').mockImplementation(() => new Promise(resolve => {
+    save = () => {
+      vi.mocked(researchApi.follows).mockResolvedValue([{ kind: 'task', entity_id: 862, name: 'Auto-Research',
+        url: '/tasks/auto-research', created_at: '2026-11-28T00:00:00Z' }]);
+      resolve(undefined);
+    };
+  }));
+  renderFeed('/following?follow=task:862');
+  await waitFor(() => expect(researchApi.setFollow).toHaveBeenCalledWith('task', '862', true));
+  await waitFor(() => expect(researchApi.follows).toHaveBeenCalled());
+  await waitFor(() => expect(researchApi.following).toHaveBeenCalled());
+  expect(researchApi.following).not.toHaveBeenCalledWith(0, expect.objectContaining({ follows: [] }));
+  save();
+  await waitFor(() => expect(sessionStorage.getItem('pwc:following-pending-follows')).toBeNull());
+  await waitFor(() => expect(researchApi.follows).toHaveBeenCalledTimes(2));
+  expect(researchApi.following).not.toHaveBeenCalledWith(0, expect.objectContaining({ follows: [] }));
+  expect(researchApi.following).toHaveBeenLastCalledWith(0, expect.objectContaining({ follows: ['task:862'] }));
+});
+
 it('explains a refused popular-topic pick after sign-in instead of offering a retry', async () => {
   sessionStorage.setItem('pwc:following-pending-topic-follows', JSON.stringify([23]));
   const body = JSON.stringify({ detail: 'You can follow up to 10 topics' });
@@ -669,7 +712,7 @@ it('invites guests to follow a hand-picked topic after the sixth trending paper'
   ]);
   fireEvent.click(within(card).getByRole('button', { name: 'OCR releases' }));
   expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBe('[23]');
-  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
+  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following?topic=23');
   expect(researchApi.follows).not.toHaveBeenCalled();
 });
 it('lets guests follow a hand-picked task from the card', async () => {
@@ -680,7 +723,7 @@ it('lets guests follow a hand-picked task from the card', async () => {
   fireEvent.click(within(card).getByRole('button', { name: 'Auto-Research' }));
   expect(JSON.parse(sessionStorage.getItem('pwc:following-pending-follows') ?? '[]'))
     .toEqual([{ kind: 'task', id: '862', name: 'Auto-Research' }]);
-  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
+  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following?follow=task:862');
 });
 it('disables the row\'s Follow at the topic limit', async () => {
   vi.mocked(researchApi.featuredTopics).mockResolvedValue(featured);
@@ -766,7 +809,7 @@ it('sends guests to sign in with the popular task they picked', async () => {
   fireEvent.click(await within(row).findByRole('button', { name: 'Follow Robotics' }));
   expect(JSON.parse(sessionStorage.getItem('pwc:following-pending-follows')!)).toEqual(
     [{ kind: 'task', id: '11', name: 'Robotics' }]);
-  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
+  expect(login.hfLoginUrl).toHaveBeenCalledWith('/following?follow=task:11');
 });
 it('keeps the trending card dismissed', async () => {
   auth.user = null;
