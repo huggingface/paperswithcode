@@ -96,6 +96,10 @@ class WorkerEventValidator:
                 or not event["name"]
                 or not isinstance(event.get("content_index"), int)
                 or int(event["content_index"]) < -1
+                or (
+                    "parent_id" in event
+                    and str(event.get("parent_id") or "") not in self.tools
+                )
             ):
                 raise ProtocolError("Invalid streamed tool call")
             self.tools.add(tool_id)
