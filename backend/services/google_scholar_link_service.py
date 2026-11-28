@@ -228,6 +228,10 @@ def candidate_people(
     return list(seen.values())
 
 
+class SemanticScholarThrottled(Exception):
+    """Semantic Scholar kept answering 429 through every backoff attempt."""
+
+
 class SemanticScholarBatch:
     """Fetch S2 author slots for papers in small batches, backing off on 429.
 
@@ -275,8 +279,9 @@ class SemanticScholarBatch:
             wait = min(120, 10 * 2**attempt)
             logger.warning("Semantic Scholar 429; retrying in %d s", wait)
             time.sleep(wait)
-        response.raise_for_status()
-        return []
+        raise SemanticScholarThrottled(
+            f"Semantic Scholar still throttled after {attempt + 1} attempts"
+        )
 
 
 def s2_slot(pwc_name: str, paper: AuthorPaper, slots: list[dict]) -> dict | None:

@@ -38,6 +38,7 @@ from backend.services.google_scholar_link_service import (
     AuthorPaper,
     SemanticScholarBatch,
     SerpApiQuotaExhausted,
+    SemanticScholarThrottled,
     SerpApiScholar,
     candidate_people,
     decide,
@@ -173,7 +174,11 @@ def check_new_authors(
             if any(person.orcids or person.s2_ids for person in people)
             for paper in sample_papers(papers_by_author[author.id], args.s2_sample)
         }
-        s2_authors = s2.authors(list(s2_papers.values()))
+        try:
+            s2_authors = s2.authors(list(s2_papers.values()))
+        except SemanticScholarThrottled as exc:
+            logger.warning("%s; leaving the remaining authors for the next run", exc)
+            return
         evidence = [
             (
                 author,
