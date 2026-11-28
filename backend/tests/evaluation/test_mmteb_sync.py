@@ -216,21 +216,32 @@ def test_parser_fails_closed_on_wrong_benchmark_or_truncated_payload():
         parse_mmteb_leaderboard(_payload(5))
 
 
-def test_parser_keeps_one_row_for_a_model_listed_twice():
+def test_parser_skips_experiments():
     payload = _payload()
-    unscored = {**_api_row(3), "meanTask": None}
-    payload["rows"].insert(3, unscored)
-    payload["rows"].append({**_api_row(7), "meanTask": None})
+    payload["rows"][0]["experiments"] = None
+    payload["rows"][1]["experiments"] = {}
+    experiment = {
+        **_api_row(0),
+        "meanTask": 0.99,
+        "experiments": {"vector_type": "single_vector", "embed_dim": 1024},
+    }
+    payload["rows"].insert(0, experiment)
+    payload["rows"].append({**_api_row(100), "experiments": {"normalize": False}})
 
     entries = parse_mmteb_leaderboard(payload)
 
     assert len(entries) == 100
     by_name = {entry.model_name: entry for entry in entries}
-    assert by_name["model-3"].mean_task is not None
-    assert by_name["model-7"].mean_task is not None
+    assert by_name["model-0"].mean_task == 0.7
+    assert "model-1" in by_name
+    assert "model-100" not in by_name
 
-    payload["rows"].append(_api_row(9))
-    with pytest.raises(ValueError, match="model-9 twice with scores"):
+
+@pytest.mark.parametrize("score", [None, 0.7])
+def test_parser_rejects_duplicate_default_models(score):
+    payload = _payload()
+    payload["rows"].append({**_api_row(9), "meanTask": score})
+    with pytest.raises(ValueError, match="model-9 twice"):
         parse_mmteb_leaderboard(payload)
 
 

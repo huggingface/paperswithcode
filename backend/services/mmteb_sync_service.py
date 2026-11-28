@@ -182,6 +182,8 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
     for row in rows:
         if not isinstance(row, dict) or not isinstance(row.get("model"), dict):
             raise TypeError("MMTEB API rows must contain model objects")
+        if row.get("experiments"):
+            continue
         model = row["model"]
         canonical_name = model.get("name")
         if not isinstance(canonical_name, str) or not canonical_name.strip():
@@ -189,6 +191,8 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
         organization, _, model_name = canonical_name.rstrip("/").rpartition("/")
         if len(model_name) > 255:
             raise ValueError("MMTEB model names must be at most 255 chars")
+        if model_name in entries:
+            raise ValueError(f"MMTEB lists {model_name} twice")
 
         try:
             api_rank = int(row["rank"])
@@ -218,7 +222,7 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
         if not isinstance(open_weights, bool):
             raise TypeError(f"MMTEB openWeights is invalid for {model_name}")
         model_url = model.get("url") if isinstance(model.get("url"), str) else ""
-        entry = MmtebEntry(
+        entries[model_name] = MmtebEntry(
             model_name=model_name,
             model_url=model_url,
             api_rank=api_rank,
@@ -233,13 +237,6 @@ def parse_mmteb_leaderboard(payload: Any) -> list[MmtebEntry]:
             hf_model_url=_official_hf_model_url(canonical_name, model_url),
             organization=organization,
         )
-        previous = entries.get(model_name)
-        if previous is not None and entry.mean_task is not None:
-            if previous.mean_task is not None:
-                raise ValueError(f"MMTEB lists {model_name} twice with scores")
-            entries[model_name] = entry
-        elif previous is None:
-            entries[model_name] = entry
     return list(entries.values())
 
 
