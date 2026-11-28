@@ -530,6 +530,8 @@ class ChatTurnProjection:
             "content": [],
             "metadata": {"exit_code": None, "output_truncated": False},
         }
+        if event.get("parent_id"):
+            tool["parent_id"] = event["parent_id"]
         self.blocks.append(tool)
         self.tools[event["id"]] = tool
 
