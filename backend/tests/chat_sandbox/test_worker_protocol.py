@@ -364,3 +364,29 @@ def test_worker_protocol_allows_terminal_less_correlated_cancellation():
         validator.accept({"type": "worker_done", "status": "stopped"})
     with pytest.raises(ProtocolError, match="followed worker completion"):
         validator.accept({"type": "done"})
+
+
+def test_worker_protocol_accepts_codemode_calls_only_under_a_known_parent():
+    validator = WorkerEventValidator()
+    validator.accept(
+        {"type": "tool_call_start", "id": "s", "name": "codemode", "content_index": 0}
+    )
+    validator.accept(
+        {
+            "type": "tool_call_start",
+            "id": "s/1",
+            "name": "pwc_get_task",
+            "content_index": -1,
+            "parent_id": "s",
+        }
+    )
+    with pytest.raises(ProtocolError, match="Invalid streamed tool call"):
+        validator.accept(
+            {
+                "type": "tool_call_start",
+                "id": "x/1",
+                "name": "pwc_get_task",
+                "content_index": -1,
+                "parent_id": "x",
+            }
+        )
