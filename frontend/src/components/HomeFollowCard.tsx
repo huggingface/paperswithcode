@@ -2,10 +2,12 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, Sparkles, X } from 'lucide-react';
 import { researchQueries } from '@/lib/api/queries';
-import { FEATURED_TOPIC_COUNT, topicTitle, useFollowFeaturedTopic } from '@/lib/researchTopic';
+import { FEATURED_TOPIC_COUNT, homeTopics, topicTitle, useFollowFeaturedTopic } from '@/lib/researchTopic';
 
 const DISMISSED_KEY = 'pwc:home-follow-card:dismissed';
 const TOPIC_COUNT = 5;
+// A topic only its creator follows is too personal to invite strangers with.
+const MIN_FOLLOWERS = 2;
 
 function readDismissed() {
   try {
@@ -32,7 +34,10 @@ export default function HomeFollowCard({ onBuild }: { onBuild: () => void }) {
     setDismissed(true);
   };
   // The popular topics row above the feed already offers the first few.
-  const topics = (featured.data ?? []).slice(FEATURED_TOPIC_COUNT, FEATURED_TOPIC_COUNT + TOPIC_COUNT);
+  const topics = homeTopics(featured.data ?? [])
+    .slice(FEATURED_TOPIC_COUNT)
+    .filter(topic => topic.followers >= MIN_FOLLOWERS)
+    .slice(0, TOPIC_COUNT);
 
   return <section className="home-follow-card" aria-labelledby="home-follow-card-title">
     <button type="button" className="home-follow-card-close" aria-label="Dismiss" onClick={dismiss}>

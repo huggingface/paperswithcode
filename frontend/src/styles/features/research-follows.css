@@ -591,6 +591,18 @@
 .home-follow-card h2 { margin: 0; padding-right: 28px; color: var(--ink); font-size: 18px; font-weight: 600; }
 .home-follow-card p { margin: 0; color: var(--ink-soft); font-size: 14px; line-height: 1.5; }
 .home-follow-card .home-follow-card-error { color: hsl(var(--destructive)); }
+.home-follow-card .topic-dialog-chip[aria-pressed="false"] {
+  padding: 5px 13px 5px 10px;
+  border-color: color-mix(in srgb, var(--accent-text) 25%, transparent);
+  color: var(--ink);
+  background: var(--bg-elevated);
+  font-size: 14px;
+  font-weight: 500;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  cursor: pointer;
+}
+.home-follow-card .topic-dialog-chip[aria-pressed="false"]:hover:not(:disabled) { border-color: var(--accent-text); color: var(--accent-text); }
+.home-follow-card .topic-dialog-chip svg { color: var(--accent-text); }
 .home-follow-card-close {
   position: absolute;
   top: 12px;

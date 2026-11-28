@@ -9,7 +9,7 @@ import { hfLoginUrl } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
 import { displayTaskName } from '@/lib/transform';
 import {
-  FEATURED_TOPIC_COUNT, stashPendingFollows, topicTitle, useFollowFeaturedTopic, useSetFollow,
+  FEATURED_TOPIC_COUNT, homeTopics, stashPendingFollows, topicTitle, useFollowFeaturedTopic, useSetFollow,
 } from '@/lib/researchTopic';
 
 type Item = { kind: 'topic'; topic: TopicBubble; followers: number }
@@ -36,7 +36,7 @@ export default function HomePopularTopics({ followedIds, followedKeys, onBuild }
   const popular = useQuery(researchQueries.popularFollows());
   const { follow, finishing, failed } = useFollowFeaturedTopic();
   const setFollow = useSetFollow({ awaitRefresh: true });
-  const topics = (featured.data ?? []).slice(0, FEATURED_TOPIC_COUNT);
+  const topics = homeTopics(featured.data ?? []).slice(0, FEATURED_TOPIC_COUNT);
   const items: Item[] = [
     ...(popular.data ?? []).map(entry => ({ kind: entry.kind, follow: entry, followers: entry.followers })),
     ...topics.map(topic => ({ kind: 'topic' as const, topic, followers: topic.followers })),

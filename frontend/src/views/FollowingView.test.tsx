@@ -660,12 +660,18 @@ it('invites guests to follow a popular topic after the sixth trending paper', as
   vi.mocked(papersApi.list).mockResolvedValue({ count: 8, results: trendingPapers, next_page: null, previous_page: null });
   // The row above the feed offers the four most followed topics; the card offers the next ones.
   const filler = { id: 100, text: 'filler', label: null, creator: null, followers: 1 };
-  vi.mocked(researchApi.featuredTopics).mockResolvedValue([...featured.slice(0, 3), filler, featured[3]]);
+  // The card skips topics in other scripts and topics only their creator follows.
+  const chinese = { id: 101, text: '大模型、后训练', label: null, creator: null, followers: 9 };
+  const personal = { id: 102, text: 'Crypto trading', label: null, creator: null, followers: 1 };
+  vi.mocked(researchApi.featuredTopics).mockResolvedValue(
+    [...featured.slice(0, 3), chinese, filler, { ...featured[3], followers: 2 }, personal]);
   const { container } = renderFeed('/');
   const card = await screen.findByRole('region', { name: 'Get a feed for your research' });
   const items = [...container.querySelectorAll('.paper-list > *')];
   expect(items.indexOf(card)).toBe(6);
   expect(within(card).queryByRole('button', { name: /speculative decoding/i })).not.toBeInTheDocument();
+  expect(within(card).queryByRole('button', { name: /大模型/ })).not.toBeInTheDocument();
+  expect(within(card).queryByRole('button', { name: /crypto trading/i })).not.toBeInTheDocument();
   fireEvent.click(await within(card).findByRole('button', { name: /ocr releases/i }));
   expect(sessionStorage.getItem('pwc:following-pending-topic-follows')).toBe('[16]');
   expect(login.hfLoginUrl).toHaveBeenCalledWith('/following');
