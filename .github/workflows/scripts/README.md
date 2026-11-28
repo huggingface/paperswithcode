@@ -53,6 +53,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-swe-marathon.timer` | `*-*-* *:26:00` | `sync_swe_marathon` | `.github/workflows/scripts/hourly/sync_swe_marathon.py` |
 | `pwc-cron-sync-jevbench.timer` | `*-*-* *:37:00` | `sync_jevbench` | `.github/workflows/scripts/hourly/sync_jevbench.py` |
 | `pwc-cron-sync-sle.timer` | `*-*-* *:41:00` | `sync_sle` | `.github/workflows/scripts/hourly/sync_sle.py` |
+| `pwc-cron-sync-hfe.timer` | `*-*-* *:57:00` | `sync_hfe` | `.github/workflows/scripts/hourly/sync_hfe.py` |
 | `pwc-cron-sync-rsi-exam.timer` | `*-*-* *:49:00` | `sync_rsi_exam` | `.github/workflows/scripts/hourly/sync_rsi_exam.py` |
 | `pwc-cron-sync-frontier-rsi.timer` | `*-*-* *:19:00` | `sync_frontier_rsi` | `.github/workflows/scripts/hourly/sync_frontier_rsi.py` |
 | `pwc-cron-sync-rsi-inference.timer` | `*-*-* *:29:00` | `sync_rsi_inference` | `.github/workflows/scripts/hourly/sync_rsi_inference.py` |
@@ -575,6 +576,19 @@ site marks with a status ("in progress") is skipped, and so is that model's
 composite. The job fails when an assessment metric changes, the composite stops
 averaging exactly the six current assessments, or the board lists fewer than 3
 or more than 60 models. End-to-end research (0 for every model) has no board.
+
+`sync_hfe.py` keeps the Family Pass^4 board of the `humanitys-first-exam-hfe`
+benchmark on task `reasoning` equal to the official Kaggle HFE leaderboard
+(https://www.kaggle.com/benchmarks/deepmind/hfe/leaderboard). The page renders
+in the browser, so the job calls Kaggle's documented
+`benchmarks.BenchmarksApiService/GetBenchmarkLeaderboard` API with the
+cron-only `KAGGLE_API_TOKEN`. Each model configuration's family pass^4 (0–1)
+is stored as a percentage with one decimal; the configuration (reasoning
+effort) and 95% CI go in the methodology. The Pass@1 board stays the paper's
+Table 4 and is not touched. The job fails when a row leaves task version 1,
+reports other tasks than `(Overall)` and `Family pass^4`, is not a model
+configuration, lists a model twice, or the board falls outside 10–100 rows.
+Models without a catalog paper become release-radar signals.
 
 `sync_rsi_exam.py` keeps the `rsi-exam` benchmark on task `auto-research`
 equal to the Full board on https://rsi-exam.ai/ (all 88 tasks): every model's

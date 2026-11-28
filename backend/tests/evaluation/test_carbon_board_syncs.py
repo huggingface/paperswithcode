@@ -384,6 +384,7 @@ def test_every_board_has_identities_and_a_configured_fetcher():
         "sync_rsi_exam",
         "sync_frontier_rsi",
         "sync_rsi_infra",
+        "sync_hfe",
     }
     for job, sync in boards.BOARD_SYNCS.items():
         assert len(sync.board.identities) >= sync.board.min_selected
@@ -395,6 +396,7 @@ def test_every_board_has_identities_and_a_configured_fetcher():
             "sync_rsi_exam",
             "sync_frontier_rsi",
             "sync_rsi_infra",
+            "sync_hfe",
         ):
             assert sync.board.identities is IDENTITIES[sync.board.dataset_slug]
 
