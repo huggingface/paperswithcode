@@ -79,6 +79,8 @@ export type ChatEvent =
       id: string;
       name: string;
       content_index: number;
+      /** Set for calls a codemode script made; the id of that script's tool block. */
+      parent_id?: string;
       redacted?: boolean;
     }
   | {
@@ -230,6 +232,8 @@ export interface ToolBlock {
   argumentText?: string;
   argumentState?: "streaming" | "done";
   arguments_redacted?: boolean;
+  /** The codemode tool block whose script made this call. */
+  parent_id?: string;
   status: "running" | "done" | "success" | "error" | "denied";
   content?: { type: "text"; text: string; truncated: boolean }[];
   metadata?: { exit_code: number | null; output_truncated: boolean };

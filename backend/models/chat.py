@@ -379,6 +379,12 @@ class ToolDisplayBlock(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     args: dict[str, object]
     arguments_redacted: bool = False
+    parent_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        exclude_if=lambda value: value is None,
+    )
     status: Literal["running", "done", "success", "error", "denied"]
     took_ms: int = Field(default=0, ge=0, le=600_000)
     content: list[ToolTextContent] = Field(default_factory=list, max_length=1)
@@ -1162,6 +1168,12 @@ class ToolCallStartEvent(_StrictEvent):
     id: str = Field(min_length=1, max_length=200)
     name: str = Field(min_length=1, max_length=64)
     content_index: int = Field(ge=-1, le=10_000)
+    parent_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        exclude_if=lambda value: value is None,
+    )
     redacted: bool = False
 
 
