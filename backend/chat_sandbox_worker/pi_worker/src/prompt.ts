@@ -71,6 +71,7 @@ export async function renderPrompt(options: {
   posterlyEnabled?: boolean;
   paperArtifactsEnabled?: boolean;
   catalogToolsEnabled?: boolean;
+  codemode?: boolean;
   paperDescriptor?: Record<string, unknown>;
   paperGuide?: string;
   taskCatalog?: string;
@@ -95,7 +96,10 @@ export async function renderPrompt(options: {
     ? renderMcpResearchPrompt(
       toolSource,
       options.mcpSkill ?? await readFile(join(dirname(assetPath), "PWC_MCP_SKILL.md"), "utf8"),
-      { sandboxTools: options.posterlyEnabled === true || options.paperArtifactsEnabled === true },
+      {
+        sandboxTools: options.posterlyEnabled === true || options.paperArtifactsEnabled === true,
+        codemode: options.codemode === true,
+      },
     )
     : toolSource;
   const rendered = researchSource
