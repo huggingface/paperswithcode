@@ -529,6 +529,8 @@ def test_sync_refreshes_old_managed_rows_and_retires_withdrawn_scores(monkeypatc
         ("withdrawn", True),
         ("manual", False),
         ("absent", True),
+        ("unscored", True),
+        ("unscored-manual", False),
     ]:
         session.add(
             Evaluation(
@@ -553,18 +555,19 @@ def test_sync_refreshes_old_managed_rows_and_retires_withdrawn_scores(monkeypatc
             aa.ArtificialAnalysisEntry("withdrawn", "Withdrawn", {}, date(2026, 8, 1)),
             aa.ArtificialAnalysisEntry("manual", "Manual", {}, date(2026, 8, 1)),
         ],
+        unscored=["unscored", "unscored-manual"],
     )
     stats = aa.ArtificialAnalysisSyncService(session).sync(
         leaderboard, discovery=aa.ArtificialAnalysisDiscovery()
     )
     rows = {row.model_name: row for row in session.query(Evaluation).all()}
-    assert set(rows) == {"Old Model", "manual", "absent"}
+    assert set(rows) == {"Old Model", "manual", "absent", "unscored-manual"}
     assert rows["Old Model"].metrics == {aa.METRIC_NAME: 39.9}
     assert rows["Old Model"].paper_id == 7
     assert rows["Old Model"].is_open is True
     assert rows["manual"].metrics == {aa.METRIC_NAME: 1.0}
     assert stats.updated == 1
-    assert stats.retired == 1
+    assert stats.retired == 2
 
 
 @pytest.mark.parametrize("old_slug,new_slug", aa.MODEL_SLUG_RENAMES.items())
@@ -842,6 +845,7 @@ def test_fetch_counts_listed_unscored_models_and_withdrawn_index(monkeypatch):
     assert leaderboard.missing_reviewed == []
     assert leaderboard.withdrawn_indexes == ["agentic"]
     assert len(leaderboard.entries) == 4
+    assert leaderboard.unscored == [f"reviewed-{index}" for index in range(4, 8)]
 
 
 def test_sync_keeps_rows_of_withdrawn_index(monkeypatch):

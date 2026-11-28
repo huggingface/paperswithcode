@@ -282,6 +282,7 @@ class ArtificialAnalysisLeaderboard:
     quota_limit: str | None = None
     missing_reviewed: list[str] = field(default_factory=list)
     withdrawn_indexes: list[str] = field(default_factory=list)
+    unscored: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -495,6 +496,7 @@ def fetch_artificial_analysis_leaderboard(
         quota_limit=quota_limit,
         missing_reviewed=missing,
         withdrawn_indexes=withdrawn,
+        unscored=sorted(listed_slugs - unique_entries.keys()),
     )
 
 
@@ -658,6 +660,7 @@ class ArtificialAnalysisSyncService:
             if (row.source_url or "").startswith(SOURCE_URL_PREFIX)
         }
         entries_by_slug = {entry.slug: entry for entry in leaderboard.entries}
+        unscored = set(leaderboard.unscored)
         papers = dict(discovery.papers)
         for row in candidate_rows:
             if not (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX):
@@ -683,8 +686,11 @@ class ArtificialAnalysisSyncService:
                     rows_by_slug[renamed_slug] = row
                     slug = renamed_slug
             if entry is None:
-                if index is INTELLIGENCE_INDEX and _stale_index_version(
-                    row.methodology, index, leaderboard.index_version
+                if slug in unscored or (
+                    index is INTELLIGENCE_INDEX
+                    and _stale_index_version(
+                        row.methodology, index, leaderboard.index_version
+                    )
                 ):
                     self.db.delete(row)
                     stats.retired += 1
