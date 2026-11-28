@@ -134,6 +134,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `swe-marathon` on task `long-horizon-agents`; Resolution Rate (%) 0–100 = trials with reward 1 / all trials of a complete v1.1 run (20 tasks x 8 trials), best reasoning effort per model and agent, from the `{version:`v1.1`,tasks:JSON.parse(...)}` block in the `/assets/index-*.js` bundle that https://www.swe-marathon.org/ loads; typically 10–300 complete runs (29 on 2026-11-10).
 - **Proof:** Recompute a few rows from the bundle (the tweet/site rounds to one decimal: 53.75 shows as 53.8); confirm `sync_swe_marathon_unreviewed` names become radar signals or get an identity in `swe_marathon_sync_service.py`, `missing_papers` is empty, every `deleted` row really left the upstream board, and annotated `missing_upstream` rows were investigated; a failure naming result versions means Abundant published a new benchmark version, which needs a reviewer decision (new benchmark row), not a parser patch.
 
+## `sync_hfe`
+
+- **Contract:** `humanitys-first-exam-hfe` on task `reasoning`, Family Pass^4 board only; family pass^4 (0–100, one decimal) of every model configuration on https://www.kaggle.com/benchmarks/deepmind/hfe/leaderboard, read from Kaggle's `GetBenchmarkLeaderboard` API with `KAGGLE_API_TOKEN` (cron-only, in `production-cron.env`); task version 1; typically 10–100 rows (16 on 2026-11-28, all on catalog papers). The Pass@1 board is the paper's Table 4 and is unmanaged.
+- **Proof:** Compare managed rows with the Kaggle page; confirm `sync_hfe_unreviewed` names become radar signals or get an identity in `hfe_sync_service.py`, `missing_papers` is empty, and `missing_upstream` rows were investigated. A 401/403 means the Kaggle token expired or was revoked; a failure naming the task version means Kaggle rescored HFE, which needs a reviewer decision, not a parser patch.
+
 ## `sync_rsi_exam`
 
 - **Contract:** `rsi-exam` on task `auto-research`; Normalized Score (0–1, four decimals) of every row on the Full board (release RSI-Exam 0.1, 88 tasks) at https://rsi-exam.ai/, harness per row (Claude Code, Codex, Antigravity, Grok, Kimi Code, Qwen Code, Muse Code); typically 10–100 rows (21 on 2026-11-16, 20 on catalog papers).

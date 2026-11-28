@@ -362,6 +362,7 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_jevbench"]["timeout"] == "30m"
     assert status["jobs"]["sync_sle"]["timeout"] == "30m"
     assert status["jobs"]["sync_rsi_exam"]["timeout"] == "30m"
+    assert status["jobs"]["sync_hfe"]["timeout"] == "30m"
     assert status["jobs"]["sync_frontier_rsi"]["timeout"] == "30m"
     assert status["jobs"]["sync_rsi_inference"]["timeout"] == "30m"
     assert status["jobs"]["sync_rsi_infra"]["timeout"] == "30m"

@@ -27,8 +27,8 @@ def test_registry_covers_workflows_systemd_and_allowlist_exactly():
     summary = _dashboard_job_summary(
         [{"category": job.category, "status": "healthy"} for job in jobs]
     )
-    assert summary["total_jobs"] == 82
-    assert summary["scheduled_jobs"] == 81
+    assert summary["total_jobs"] == 83
+    assert summary["scheduled_jobs"] == 82
     assert summary["manual_jobs"] == 1
     assert len(by_id) == len(jobs), "duplicate dashboard job IDs"
 
@@ -126,6 +126,7 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "sync_jevbench" in job_ids
     assert "sync_sle" in job_ids
     assert "sync_rsi_exam" in job_ids
+    assert "sync_hfe" in job_ids
     assert "sync_frontier_rsi" in job_ids
     assert "sync_rsi_inference" in job_ids
     assert "sync_rsi_infra" in job_ids
@@ -207,6 +208,7 @@ def test_registry_classifies_only_recurring_leaderboard_syncs():
         "sync_jevbench",
         "sync_sle",
         "sync_rsi_exam",
+        "sync_hfe",
         "sync_frontier_rsi",
         "sync_rsi_inference",
         "sync_rsi_infra",

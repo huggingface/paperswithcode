@@ -1,0 +1,532 @@
+{
+ "rows": [
+  {
+   "modelVersionName": "GPT-6.2 Astra",
+   "modelVersionSlug": "gpt-6.2-astra",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.9068627450980392
+      },
+      "evaluationDate": "2026-11-24T01:43:55Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.9068627450980392,
+       "confidenceInterval": 0.04656862745098039,
+       "standardDeviation": 0.27708104742412143
+      },
+      "evaluationDate": "2026-11-24T01:43:55Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "GPT-6.2 Astra Xhigh Reasoning",
+   "modelVersionConfigSlug": "gpt-6.2-astra-xhigh-reasoning"
+  },
+  {
+   "modelVersionName": "GPT-6.2 Sol",
+   "modelVersionSlug": "gpt-6.2-sol",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.8751633986928105
+      },
+      "evaluationDate": "2026-11-24T01:43:55Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.8751633986928105,
+       "confidenceInterval": 0.05138888888888893,
+       "standardDeviation": 0.3057613663680219
+      },
+      "evaluationDate": "2026-11-24T01:43:55Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "GPT-6.2 Sol Xhigh Reasoning",
+   "modelVersionConfigSlug": "gpt-6.2-sol-xhigh-reasoning"
+  },
+  {
+   "modelVersionName": "Gemini 4 Neon",
+   "modelVersionSlug": "gemini-4-neon",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.8563725490196079
+      },
+      "evaluationDate": "2026-11-21T07:55:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.8563725490196079,
+       "confidenceInterval": 0.057107843137254866,
+       "standardDeviation": 0.3397888634201066
+      },
+      "evaluationDate": "2026-11-21T07:55:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Gemini 4 Neon High Reasoning",
+   "modelVersionConfigSlug": "gemini-4-neon-high-reasoning"
+  },
+  {
+   "modelVersionName": "GPT-6 Astra",
+   "modelVersionSlug": "gpt-6-astra",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.8400326797385621
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.8400326797385621,
+       "confidenceInterval": 0.05947712418300649,
+       "standardDeviation": 0.35388596934168465
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "GPT-6 Astra Xhigh Reasoning",
+   "modelVersionConfigSlug": "gpt-6-astra-xhigh-reasoning"
+  },
+  {
+   "modelVersionName": "GPT-6.1 Sol",
+   "modelVersionSlug": "gpt-6.1-sol",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.8173202614379085
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.8173202614379085,
+       "confidenceInterval": 0.0607843137254902,
+       "standardDeviation": 0.3616636829535901
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "GPT-6.1 Sol Xhigh Reasoning",
+   "modelVersionConfigSlug": "gpt-6.1-sol-xhigh-reasoning"
+  },
+  {
+   "modelVersionName": "Gemini 4 Carbon",
+   "modelVersionSlug": "gemini-4-carbon",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7918300653594771
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7918300653594771,
+       "confidenceInterval": 0.06609477124183005,
+       "standardDeviation": 0.39326064450195475
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Gemini 4 Carbon High Reasoning",
+   "modelVersionConfigSlug": "gemini-4-carbon-high-reasoning"
+  },
+  {
+   "modelVersionName": "GPT-6.1 Terra",
+   "modelVersionSlug": "gpt-6.1-terra",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7806100217864924
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7806100217864924,
+       "confidenceInterval": 0.06715686274509802,
+       "standardDeviation": 0.3995800368116277
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "GPT-6.1 Terra Xhigh Reasoning",
+   "modelVersionConfigSlug": "gpt-6.1-terra-xhigh-reasoning"
+  },
+  {
+   "modelVersionName": "Gemini 4 Argon",
+   "modelVersionSlug": "gemini-4-argon",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7663398692810458
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7663398692810458,
+       "confidenceInterval": 0.06764705882352945,
+       "standardDeviation": 0.4024966794160924
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Gemini 4 Argon High Reasoning",
+   "modelVersionConfigSlug": "gemini-4-argon-high-reasoning"
+  },
+  {
+   "modelVersionName": "Gemini 4 Hydrogen",
+   "modelVersionSlug": "gemini-4-hydrogen",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7051742919389978
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7051742919389978,
+       "confidenceInterval": 0.0731209150326797,
+       "standardDeviation": 0.4350658551659448
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Hydrogen High Reasoning",
+   "modelVersionConfigSlug": "gemini-4-hydrogen-high-reasoning"
+  },
+  {
+   "modelVersionName": "Claude Opus 5.5",
+   "modelVersionSlug": "claude-opus-5-5-default",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7003267973856208
+      },
+      "evaluationDate": "2026-11-24T03:35:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.7003267973856209,
+       "confidenceInterval": 0.07434640522875813,
+       "standardDeviation": 0.44235746167710593
+      },
+      "evaluationDate": "2026-11-24T03:35:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Claude Opus 5.5 Max Reasoning",
+   "modelVersionConfigSlug": "claude-opus-5.5-max-reasoning"
+  },
+  {
+   "modelVersionName": "Claude Sonnet 5.5",
+   "modelVersionSlug": "claude-sonnet-5-5-default",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.6564814814814813
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.6564814814814814,
+       "confidenceInterval": 0.07679738562091504,
+       "standardDeviation": 0.4569406746994284
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Claude Sonnet 5.5 Max Reasoning",
+   "modelVersionConfigSlug": "claude-sonnet-5.5-max-reasoning"
+  },
+  {
+   "modelVersionName": "GPT-5.6 Sol",
+   "modelVersionSlug": "gpt-5.6-sol",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.5650871459694988
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.5650871459694988,
+       "confidenceInterval": 0.07886710239651418,
+       "standardDeviation": 0.4692553879182783
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "GPT-5.6 Sol Max Reasoning",
+   "modelVersionConfigSlug": "gpt-5.6-sol-max-reasoning"
+  },
+  {
+   "modelVersionName": "Gemini 3.8 Flash",
+   "modelVersionSlug": "gemini-3.8-flash",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.5607843137254902
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.5607843137254902,
+       "confidenceInterval": 0.0811274509803922,
+       "standardDeviation": 0.48270435103886444
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Gemini 3.8 Flash High Reasoning",
+   "modelVersionConfigSlug": "gemini-3.8-flash-high-reasoning"
+  },
+  {
+   "modelVersionName": "Claude Haiku 5.5",
+   "modelVersionSlug": "claude-haiku-5-5",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.42506535947712415
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.42506535947712415,
+       "confidenceInterval": 0.07918300653594776,
+       "standardDeviation": 0.47113500204115555
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Claude Haiku 5.5 Max Reasoning",
+   "modelVersionConfigSlug": "claude-haiku-5.5-max-reasoning"
+  },
+  {
+   "modelVersionName": "Gemini 3 Flash Preview",
+   "modelVersionSlug": "gemini-3-flash-preview",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.3338344226579521
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.3338344226579521,
+       "confidenceInterval": 0.07547385620915031,
+       "standardDeviation": 0.4490657396673743
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Gemini 3 Flash High Reasoning",
+   "modelVersionConfigSlug": "gemini-3-flash-preview-high-reasoning"
+  },
+  {
+   "modelVersionName": "Gemini 3.1 Flash-Lite Preview",
+   "modelVersionSlug": "gemini-3.1-flash-lite-preview",
+   "taskResults": [
+    {
+     "benchmarkTaskName": "(Overall)",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.1848583877995643
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    },
+    {
+     "benchmarkTaskName": "Family pass^4",
+     "taskVersion": 1,
+     "result": {
+      "numericResult": {
+       "value": 0.18485838779956426,
+       "confidenceInterval": 0.061710239651416116,
+       "standardDeviation": 0.36717289676202286
+      },
+      "evaluationDate": "2026-11-16T06:00:00Z"
+     },
+     "displayType": "PERCENTAGES"
+    }
+   ],
+   "candidateClass": "BENCHMARK_CANDIDATE_CLASS_MODEL_VERSION_CONFIG",
+   "modelVersionConfigName": "Gemini 3.1 Flash-Lite High Reasoning",
+   "modelVersionConfigSlug": "gemini-3.1-flash-lite-high-reasoning"
+  }
+ ]
+}

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync HFE leaderboard from Kaggle hourly
+
+[Timer]
+OnCalendar=*-*-* *:57:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-hfe.service
+
+[Install]
+WantedBy=timers.target

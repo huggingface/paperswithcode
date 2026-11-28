@@ -21,6 +21,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from backend.services import frontier_rsi_sync_service as frontier_rsi
+from backend.services import hfe_sync_service as hfe
 from backend.services import jevbench_sync_service as jevbench
 from backend.services import rsi_exam_sync_service as rsi_exam
 from backend.services import rsi_infra_sync_service as rsi_infra
@@ -798,4 +799,5 @@ BOARD_SYNCS: dict[str, BoardSync] = {
     "sync_rsi_exam": BoardSync(rsi_exam.BOARD, rsi_exam.fetch_rsi_exam),
     "sync_frontier_rsi": BoardSync(frontier_rsi.BOARD, frontier_rsi.fetch_frontier_rsi),
     "sync_rsi_infra": BoardSync(rsi_infra.BOARD, rsi_infra.fetch_rsi_infra),
+    "sync_hfe": BoardSync(hfe.BOARD, hfe.fetch_hfe),
 }

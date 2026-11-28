@@ -503,6 +503,15 @@ COMMANDS: dict[str, Job] = {
             "bundle; never creates papers"
         ),
     ),
+    "sync_hfe": job(
+        "-m",
+        "scripts.hourly.sync_hfe",
+        timeout="30m",
+        idempotency=(
+            "create, revise, or retire reviewed HFE Family Pass^4 evaluation rows "
+            "from the validated Kaggle leaderboard API; never creates papers"
+        ),
+    ),
     "sync_rsi_exam": job(
         "-m",
         "scripts.hourly.sync_rsi_exam",
