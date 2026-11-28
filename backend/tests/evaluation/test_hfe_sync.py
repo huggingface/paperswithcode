@@ -232,6 +232,11 @@ def test_parser_fails_loudly_on_shape_changes(payload, message):
         parse_hfe(payload)
 
 
+def test_percentages_round_half_up():
+    entry = parse_hfe(_payload(value=0.91250))[0]
+    assert entry.value == Decimal("91.3")
+
+
 def test_parser_enforces_entry_bounds(monkeypatch):
     monkeypatch.setattr(service, "MIN_EXPECTED_ENTRIES", 17)
     with pytest.raises(ValueError, match="has 16 entries"):

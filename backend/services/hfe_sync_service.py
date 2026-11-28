@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import os
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import httpx
@@ -110,6 +110,10 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
 }
 
 
+def _percent(fraction: Decimal) -> Decimal:
+    return (fraction * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+
+
 def _score(task: dict[str, Any], name: str) -> tuple[Decimal, Decimal | None, date]:
     if task.get("taskVersion") != TASK_VERSION:
         raise ValueError(
@@ -155,12 +159,8 @@ def parse_hfe(payload: dict[str, Any]) -> list[LeaderboardEntry]:
         overall, _, _ = _score(tasks[OVERALL_TASK], config)
         if abs(overall - value) > Decimal("0.0005"):
             raise ValueError(f"HFE overall score differs from family pass^4: {config}")
-        percent = (value * 100).quantize(Decimal("0.1"))
-        margin = (
-            ""
-            if interval is None
-            else f" (95% CI ±{(interval * 100).quantize(Decimal('0.1'))})"
-        )
+        percent = _percent(value)
+        margin = "" if interval is None else f" (95% CI ±{_percent(interval)})"
         entries.append(
             LeaderboardEntry(
                 name,
