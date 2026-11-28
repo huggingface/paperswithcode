@@ -558,16 +558,6 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     pendingFollowsStarted.current = true;
     savePendingFollows(picks);
   }, [user, savePendingFollows]);
-  // Drop selected bubbles whose topic or follow is gone, e.g. after unfollowing it in the pop-up.
-  const kept: FeedFilter | undefined = filtering && topics.isSuccess && follows.isSuccess ? {
-    topicIds: activeFilter.topicIds.filter(id => topics.data.some(topic => topic.id === id)),
-    follows: activeFilter.follows.filter(key => follows.data.some(follow => `${follow.kind}:${follow.entity_id}` === key)),
-  } : undefined;
-  const filterGone = !!kept && (kept.topicIds.length < activeFilter.topicIds.length
-    || kept.follows.length < activeFilter.follows.length);
-  useEffect(() => {
-    if (filterGone && kept) navigate(filterHref(kept), { replace: true });
-  });
   // And the popular topics a guest picked there; failed ones stay stashed until a retry succeeds.
   const pendingTopicFollows = useFollowTopics();
   const { mutate: followPendingTopics } = pendingTopicFollows;
@@ -578,6 +568,20 @@ export const HomeFeed: React.FC<{ mode: FeedMode }> = ({ mode }) => {
     pendingTopicFollowsStarted.current = true;
     followPendingTopics(ids);
   }, [user, followPendingTopics]);
+  // A guest who followed a pick before signing in arrives filtered to it while the follow is still saving.
+  const savingPicks = topics.isFetching || follows.isFetching
+    || (readPendingFollows().length > 0 && !pendingFollows.isError)
+    || (readPendingTopicFollows().length > 0 && !pendingTopicFollows.isError);
+  // Drop selected bubbles whose topic or follow is gone, e.g. after unfollowing it in the pop-up.
+  const kept: FeedFilter | undefined = filtering && topics.isSuccess && follows.isSuccess ? {
+    topicIds: activeFilter.topicIds.filter(id => topics.data.some(topic => topic.id === id)),
+    follows: activeFilter.follows.filter(key => follows.data.some(follow => `${follow.kind}:${follow.entity_id}` === key)),
+  } : undefined;
+  const filterGone = !!kept && !savingPicks && (kept.topicIds.length < activeFilter.topicIds.length
+    || kept.follows.length < activeFilter.follows.length);
+  useEffect(() => {
+    if (filterGone && kept) navigate(filterHref(kept), { replace: true });
+  });
   const cards = useMemo<PaperFeedCard[]>(() => {
     const toCard = (entry: FeedPage["results"][number]) => ({
       ...transformPaperForCard(entry.paper),

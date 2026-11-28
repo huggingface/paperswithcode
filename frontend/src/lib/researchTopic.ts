@@ -156,7 +156,7 @@ export function useFollowTopics() {
 export const FEATURED_TOPIC_COUNT = 4;
 
 /** Follows one popular topic from the homepage and opens Following filtered to it.
- * Guests sign in first; Following saves the stashed pick after sign-in. */
+ * Guests sign in first and return to the same filter; Following saves the stashed pick after sign-in. */
 export function useFollowFeaturedTopic() {
   const user = useOptionalAuth()?.user;
   const navigate = useNavigate();
@@ -166,9 +166,9 @@ export function useFollowFeaturedTopic() {
   const [finishing, setFinishing] = useState(false);
   const follow = (id: number) => {
     if (!user) {
-      // Following saves the stashed pick after sign-in, so it cannot filter to the topic on arrival.
+      // Following saves the stashed pick after sign-in and keeps the filter while it saves.
       stashPendingTopicFollows([id]);
-      window.location.href = hfLoginUrl('/following');
+      window.location.href = hfLoginUrl(`/following?topic=${id}`);
       return;
     }
     setFinishing(true);
@@ -185,7 +185,7 @@ export function useFollowFeaturedTopic() {
 }
 
 /** Follows one task or method from the homepage and opens Following filtered to it.
- * Guests sign in first; Following saves the stashed pick after sign-in. */
+ * Guests sign in first and return to the same filter; Following saves the stashed pick after sign-in. */
 export function useFollowFeaturedEntity() {
   const user = useOptionalAuth()?.user;
   const navigate = useNavigate();
@@ -193,7 +193,7 @@ export function useFollowFeaturedEntity() {
   const follow = (kind: 'task' | 'method', id: number, name: string) => {
     if (!user) {
       stashPendingFollows([{ kind, id: String(id), name }]);
-      window.location.href = hfLoginUrl('/following');
+      window.location.href = hfLoginUrl(`/following?follow=${kind}:${id}`);
       return;
     }
     setFollow.mutateAsync({ kind, entityId: id, follow: true })
