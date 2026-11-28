@@ -2395,6 +2395,12 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                     WHERE job.parent_workflow_id = workflow.id
                       AND job.trigger = 'hf-trending-cron'
                 )
+                  AND NOT EXISTS (
+                    SELECT 1 FROM paper_curation_workflows AS later
+                    WHERE later.paper_id = workflow.paper_id
+                      AND later.created_at > workflow.created_at
+                      AND later.status IN ('completed', 'satisfied')
+                )
             )
             SELECT candidate_metrics.*, workflow_metrics.*
             FROM candidate_metrics CROSS JOIN workflow_metrics
