@@ -395,6 +395,10 @@ class ChatArtifactSettings(BaseModel):
         default=20_000_000, ge=1_000_000, le=20_000_000
     )
     chat_file_uploads_enabled: bool = Field(default=False)
+    chat_codemode_enabled: bool = Field(default=False)
+    chat_codemode_reasoning_efforts: tuple[
+        Literal["low", "medium", "high", "max"], ...
+    ] = Field(default=("high", "max"))
     chat_file_storage_backend: Literal["local", "hf_bucket"] = Field(default="local")
     chat_file_hf_bucket_id: str = Field(default="", max_length=255)
     chat_file_local_dir: str = Field(default="/var/lib/paperswithcode/chat-files")

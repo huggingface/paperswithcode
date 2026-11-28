@@ -646,6 +646,12 @@ class ExternalPiChatTurnRunner:
             "capability": self.capability.token,
             "gateway_url": self.settings.chat_gateway_url,
         }
+        if (
+            self.settings.chat_codemode_enabled
+            and self.admission.reasoning_effort
+            in self.settings.chat_codemode_reasoning_efforts
+        ):
+            frame["codemode_enabled"] = True
         if self.admission.paper_descriptor is not None:
             frame["paper_descriptor"] = self.admission.paper_descriptor
         if prebound_agent_session_id is not None:
