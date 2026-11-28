@@ -4,6 +4,8 @@ import pytest
 from backend.services.google_scholar_link_service import (
     AuthorPaper,
     Evidence,
+    SemanticScholarBatch,
+    SemanticScholarThrottled,
     WikidataPerson,
     candidate_people,
     decide,
@@ -198,3 +200,21 @@ def test_fetch_wikidata_tsv_refuses_a_shard_that_stays_truncated(monkeypatch):
     client = httpx.Client(transport=httpx.MockTransport(handler))
     with pytest.raises(ValueError, match="truncated TSV for shard 'A'"):
         fetch_wikidata_tsv(client, attempts=2)
+
+
+def test_semantic_scholar_batch_raises_throttled_after_every_429(monkeypatch):
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(429)
+
+    monkeypatch.setattr(
+        "backend.services.google_scholar_link_service.time.sleep", lambda _: None
+    )
+    batch = SemanticScholarBatch(
+        "key", httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(SemanticScholarThrottled, match="after 12 attempts"):
+        batch.authors([paper(1)])
+    assert len(calls) == 12
