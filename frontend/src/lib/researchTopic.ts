@@ -53,6 +53,16 @@ export function topicTitle(topic: { text: string; label: string | null }): strin
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
 
+/** Whether a topic's title is written in Latin script, so homepage visitors can read it. */
+export function hasLatinTitle(topic: { text: string; label: string | null }): boolean {
+  return !/[^\p{Script=Latin}\p{Script=Common}\p{Script=Inherited}]/u.test(topicTitle(topic));
+}
+
+/** The popular topics the homepage offers, in Latin script only, as the strip and the follow card share them. */
+export function homeTopics<T extends { text: string; label: string | null }>(topics: readonly T[]): T[] {
+  return topics.filter(hasLatinTitle);
+}
+
 /** The shareable topic page, e.g. /topics/23-ocr-releases; only the id is read back. */
 export function topicPath(topic: { id: number; text: string; label: string | null }): string {
   const slug = topicTitle(topic).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
