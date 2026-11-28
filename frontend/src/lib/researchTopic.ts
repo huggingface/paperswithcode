@@ -184,6 +184,24 @@ export function useFollowFeaturedTopic() {
   return { follow, finishing, failed: followTopics.isError };
 }
 
+/** Follows one task or method from the homepage and opens Following filtered to it.
+ * Guests sign in first; Following saves the stashed pick after sign-in. */
+export function useFollowFeaturedEntity() {
+  const user = useOptionalAuth()?.user;
+  const navigate = useNavigate();
+  const setFollow = useSetFollow({ awaitRefresh: true });
+  const follow = (kind: 'task' | 'method', id: number, name: string) => {
+    if (!user) {
+      stashPendingFollows([{ kind, id: String(id), name }]);
+      window.location.href = hfLoginUrl('/following');
+      return;
+    }
+    setFollow.mutateAsync({ kind, entityId: id, follow: true })
+      .then(() => navigate(`/following?follow=${kind}:${id}`), () => undefined);
+  };
+  return { follow, pending: setFollow.isPending, failed: setFollow.isError };
+}
+
 // Popular topics a guest picked in the feed pop-up wait here while they sign in.
 const PENDING_TOPIC_FOLLOWS_KEY = 'pwc:following-pending-topic-follows';
 
